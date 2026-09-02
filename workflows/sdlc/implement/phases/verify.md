@@ -85,7 +85,10 @@ build them:
 - Duplicates and replays. An event store can deliver the same row twice.
 
 Where the real conversion is reachable, drive the fixture THROUGH it rather than
-constructing the object directly. State in your report which shapes you added and
+constructing the object directly. If you describe a fixture as real or verbatim,
+it must be byte-for-byte from a recording or a live response. A string derived
+from a recording with fields trimmed is NOT verbatim, and saying so overstates
+what the test proves. Cite the recording and the line. State in your report which shapes you added and
 which you decided were out of scope, with the reason.
 
 ### Prefer an invariant to a case list
@@ -104,6 +107,31 @@ can. Find the invariant first; fall back to cases only where no invariant exists
 If you find yourself writing an assertion that documents surprising behaviour
 rather than requiring correct behaviour, stop and say so in your report. That is
 a finding, not a test.
+
+### An invariant can be vacuous too, and here is how to check
+
+Asking for an invariant produces things SHAPED like one. A loop over inputs whose
+assertion never mentions the loop variable is a constant assertion wearing a
+`for`, and it passes the moment the first item passes.
+
+Seen here on a run that had been asked for exactly this: a test looped over every
+content block in a transcript line and then asserted on the LINE's own
+`tool_name`, not the block's. One valid block made every later block pass, so the
+test could not catch a function that returns after the first block and discards
+the rest, which was the actual defect.
+
+Two mechanical checks on any invariant you write:
+
+1. Does the assertion reference the loop variable? If the body would be identical
+   with the loop removed, it is not testing each item.
+2. Break the property deliberately for the SECOND item only, and confirm the test
+   fails. A property that only ever inspects the first item passes this way and
+   nothing else will reveal it.
+
+And say what the property IS in words before writing it. "Every raw tool_use
+block has a non-null tool name" is checkable. `assert a or b` is not that
+property, and the gap between the sentence and the assertion is where these
+hide.
 
 ### Test the transition, not the end state
 
