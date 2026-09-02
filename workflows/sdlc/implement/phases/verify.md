@@ -88,6 +88,23 @@ Where the real conversion is reachable, drive the fixture THROUGH it rather than
 constructing the object directly. State in your report which shapes you added and
 which you decided were out of scope, with the reason.
 
+### Prefer an invariant to a case list
+
+A test per case can be satisfied by encoding the wrong answer for that case. It
+has happened here: a fix was asked to handle a missing identifier, considered it,
+chose behaviour that produces an impossible result, and then wrote a test
+asserting that result was correct. The case was covered and the defect was
+pinned in place by the assertion defending it.
+
+So where the change has a property that must hold for EVERY input, assert the
+property, not the examples. `call_count >= success_count + error_count` cannot be
+satisfied by blessing one wrong output, while a test named for the empty-id case
+can. Find the invariant first; fall back to cases only where no invariant exists.
+
+If you find yourself writing an assertion that documents surprising behaviour
+rather than requiring correct behaviour, stop and say so in your report. That is
+a finding, not a test.
+
 ## Attack the change
 
 Ask what the implementation phase assumed. Trace the value it added or fixed all
