@@ -105,6 +105,32 @@ If you find yourself writing an assertion that documents surprising behaviour
 rather than requiring correct behaviour, stop and say so in your report. That is
 a finding, not a test.
 
+### Test the transition, not the end state
+
+The commonest way a required case gets skipped is a test NAMED for it that
+starts where the case has already finished. It reads as coverage in the file
+listing and proves nothing.
+
+Seen here, on a run that was explicitly asked for these shapes:
+
+- a test called "stops when terminal" that MOUNTS already-terminal. It never
+  ran, never polled, never received the terminal response, so it cannot show
+  that anything stopped.
+- a test for tab visibility that set the tab hidden and never dispatched
+  `visibilitychange`, and never returned to visible, so neither the pause nor
+  the resume path executed.
+
+Both would pass against code that handles the transition wrongly.
+
+So when a case is a CHANGE of state, the test must start before the change,
+cause it, and assert on what happens after. If your test's setup already
+contains the condition you were asked to verify, you are testing the aftermath.
+Name that in your report rather than counting it as covered.
+
+The check to run on your own test list: for each required shape, can you point
+at the line where the state CHANGES? If not, that shape is not covered, however
+the test is named.
+
 ## Attack the change
 
 Ask what the implementation phase assumed. Trace the value it added or fixed all
