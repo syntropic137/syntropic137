@@ -9,6 +9,12 @@
 # - Recipes are the public API; scripts are implementation details.
 
 set dotenv-load := true
+# just writes shebang recipes to a temp file and execs it. The workspace
+# sandbox mounts /tmp noexec (#1042), which fails every shebang recipe;
+# .just-tmp/ lives under the repo checkout, which the sandbox leaves
+# exec-capable. (Named .just-tmp, not .tmp, so it doesn't collide with the
+# generic `*.tmp` ignore rule below.)
+set tempdir := ".just-tmp"
 
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"

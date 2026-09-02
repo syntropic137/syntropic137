@@ -141,6 +141,11 @@ id_ed25519.*
 *.temp
 *.log
 
+# just's shebang-recipe tempdir (set tempdir := ".just-tmp" in justfile) -
+# keep the directory (.gitkeep) so a fresh clone has it, ignore its contents
+.just-tmp/*
+!.just-tmp/.gitkeep
+
 # Artifacts directory (if storing locally)
 artifacts/
 # But not the domain artifacts bounded context
