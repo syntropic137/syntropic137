@@ -81,7 +81,9 @@ class ToolOperation:
     success: bool | None  # Only for tool_execution_completed
     input_preview: str | None  # Truncated input for display
     output_preview: str | None  # Truncated output for display
-    duration_ms: int | None  # Only for tool_execution_completed
+    duration_ms: int | None  # Derived by pairing start+completed rows on
+    # tool_use_id (see session_tools_duration.py); None when no matching
+    # start row exists (e.g. a truncated Codex stream) rather than 0.
     # Git-specific fields (populated for git_* event types)
     git_sha: str | None = None
     git_message: str | None = None

@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.projections.session_tools_dispatch import row_to_operation as row_to_operation
+from syn_adapters.projections.session_tools_duration import pair_tool_durations
 
 if TYPE_CHECKING:
     from syn_adapters.projections.session_tools import SessionToolsProjection
@@ -84,11 +85,17 @@ async def query_session_tools(
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql_query, *params)
-            return [
+            operations = [
                 op
                 for row in rows
                 if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
             ]
+            # No single session_duration_ms bound here: this query can span
+            # multiple sessions (filtered by execution_id/phase_id instead),
+            # so only the non-negative invariant applies. See get_session_tools
+            # in session_tools_helpers.py for the session-scoped bound.
+            pair_tool_durations(operations)
+            return operations
     except Exception as e:
         _logger.error("Failed to query tool operations: %s", e)
         return []

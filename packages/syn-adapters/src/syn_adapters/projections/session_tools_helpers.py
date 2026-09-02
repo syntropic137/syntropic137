@@ -15,8 +15,10 @@ if TYPE_CHECKING:
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
 from syn_adapters.projections.session_tools_dispatch import row_to_operation
+from syn_adapters.projections.session_tools_duration import pair_tool_durations
 from syn_adapters.projections.session_tools_queries import query_session_tools
 from syn_shared.events import (
+    SESSION_SUMMARY,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
 )
@@ -49,6 +51,25 @@ def get_pool(proj: SessionToolsProjection) -> asyncpg.Pool | None:
 
     logger.debug("No pool available for SessionToolsProjection")
     return None
+
+
+async def _fetch_session_duration_ms(
+    conn: asyncpg.pool.PoolConnectionProxy, session_id: str
+) -> float | None:
+    """Fetch the session's own authoritative duration, for the duration-pairing bound.
+
+    Recorded once at session end (ObservabilityCollector.record_session_summary);
+    used to reject a derived tool duration that couldn't plausibly fit inside it.
+    """
+    row = await conn.fetchrow(
+        "SELECT data->>'duration_ms' AS duration_ms FROM agent_events "
+        "WHERE session_id = $1 AND event_type = $2 LIMIT 1",
+        session_id,
+        SESSION_SUMMARY,
+    )
+    if row is None or row["duration_ms"] is None:
+        return None
+    return float(row["duration_ms"])
 
 
 async def get_session_tools(
@@ -120,13 +141,16 @@ async def get_session_tools(
                 tool_execution_completed,
                 list(timeline_exclude),
             )
+            session_duration_ms = await _fetch_session_duration_ms(conn, session_id)
 
             logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
-            return [
+            operations = [
                 op
                 for row in rows
                 if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
             ]
+            pair_tool_durations(operations, session_duration_ms=session_duration_ms)
+            return operations
     except Exception as e:
         logger.error("Failed to query tool operations for %s: %s", session_id, e)
         return []

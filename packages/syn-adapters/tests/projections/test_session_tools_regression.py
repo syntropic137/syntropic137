@@ -46,11 +46,13 @@ class TestToolNameEnrichment:
                 "event_type": "tool_execution_completed",
                 "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=UTC),
                 "data": {
-                    # After JOIN, this should have tool_name from started
+                    # After JOIN, this should have tool_name from started.
+                    # No duration_ms here — no producer ever writes one
+                    # (issue #1064); it must be derived from the timestamp
+                    # gap against the started row above.
                     "tool_name": "Bash",  # Simulating the JOIN result
                     "tool_use_id": "toolu_123",
                     "success": True,
-                    "duration_ms": 500,
                 },
             },
         ]
@@ -58,6 +60,7 @@ class TestToolNameEnrichment:
         # Create mock pool and connection
         mock_conn = MagicMock()
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.fetchrow = AsyncMock(return_value=None)  # no session_summary row
 
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=AsyncMock())
@@ -85,6 +88,8 @@ class TestToolNameEnrichment:
         assert completed.tool_use_id == "toolu_123"
         assert completed.is_completed
         assert completed.success is True
+        # issue #1064: duration must be derived (1s gap), not left at 0/None
+        assert completed.duration_ms == 1000
 
     @pytest.mark.asyncio
     async def test_completed_without_started_shows_empty_string(self) -> None:
@@ -114,6 +119,7 @@ class TestToolNameEnrichment:
 
         mock_conn = MagicMock()
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.fetchrow = AsyncMock(return_value=None)  # no session_summary row
 
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=AsyncMock())
@@ -126,6 +132,8 @@ class TestToolNameEnrichment:
         assert len(operations) == 1
         # Should default to "" (empty, suppresses UI wrench row) rather than crashing
         assert operations[0].tool_name == ""
+        # Orphaned completed row, no started row to pair against: missing, not 0.
+        assert operations[0].duration_ms is None
 
 
 @pytest.mark.unit
