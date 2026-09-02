@@ -168,7 +168,16 @@ async def get_session_timeline(
 def _accumulate_tool_stats(
     operations: list[AdapterToolOperation],
 ) -> dict[str, dict[str, int | float]]:
-    """Aggregate tool operation stats by tool name."""
+    """Aggregate tool operation stats by tool name.
+
+    total_duration_ms sums only operations with a known duration_ms (issue
+    #1064 — a completed row with no matching started row, e.g. a truncated
+    Codex stream, has no derivable duration and must not be folded in as a
+    0). duration_count tracks how many operations actually contributed a
+    duration, so the average divides by what's known rather than by
+    call_count — otherwise unpaired completions silently drag the average
+    toward zero instead of being excluded from it.
+    """
     tool_stats: dict[str, dict[str, int | float]] = {}
     for op in operations:
         name = op.tool_name or "unknown"
@@ -178,13 +187,16 @@ def _accumulate_tool_stats(
                 "success_count": 0,
                 "error_count": 0,
                 "total_duration_ms": 0.0,
+                "duration_count": 0,
             }
         tool_stats[name]["call_count"] += 1
         if op.success is True:
             tool_stats[name]["success_count"] += 1
         elif op.success is False:
             tool_stats[name]["error_count"] += 1
-        tool_stats[name]["total_duration_ms"] += op.duration_ms or 0
+        if op.duration_ms is not None:
+            tool_stats[name]["total_duration_ms"] += op.duration_ms
+            tool_stats[name]["duration_count"] += 1
     return tool_stats
 
 
@@ -210,6 +222,7 @@ async def get_session_tool_summary(
                     success_count=int(stats["success_count"]),
                     error_count=int(stats["error_count"]),
                     total_duration_ms=stats["total_duration_ms"],
+                    duration_count=int(stats["duration_count"]),
                 )
                 for name, stats in tool_stats.items()
             ]
@@ -440,6 +453,29 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
     )
 
 
+def _build_tool_summaries(summaries: list[ToolUsageSummary]) -> list[ToolSummary]:
+    """Convert internal per-tool stats into the API wire type.
+
+    avg_duration_ms divides by duration_count, not call_count (issue #1064):
+    a tool with unpaired completions (no matching started row) would
+    otherwise have its average silently dragged toward zero by calls that
+    never contributed a duration in the first place.
+    """
+    return [
+        ToolSummary(
+            tool_name=t.tool_name,
+            call_count=t.call_count,
+            success_count=t.success_count,
+            error_count=t.error_count,
+            total_duration_ms=int(t.total_duration_ms),
+            avg_duration_ms=(
+                t.total_duration_ms / t.duration_count if t.duration_count > 0 else 0.0
+            ),
+        )
+        for t in summaries
+    ]
+
+
 @router.get("/sessions/{session_id}/tools", response_model=list[ToolSummary])
 async def get_session_tools_endpoint(session_id: str) -> list[ToolSummary]:
     """Get tool usage summary for a session."""
@@ -452,14 +488,4 @@ async def get_session_tools_endpoint(session_id: str) -> list[ToolSummary]:
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=f"Failed to get tools: {result.message}")
 
-    return [
-        ToolSummary(
-            tool_name=t.tool_name,
-            call_count=t.call_count,
-            success_count=t.success_count,
-            error_count=t.error_count,
-            total_duration_ms=int(t.total_duration_ms),
-            avg_duration_ms=(t.total_duration_ms / t.call_count if t.call_count > 0 else 0.0),
-        )
-        for t in result.value
-    ]
+    return _build_tool_summaries(result.value)

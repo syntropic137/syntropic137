@@ -81,16 +81,23 @@ async def get_session_tools(
 
     try:
         async with pool.acquire() as conn:
-            # Query with LEFT JOIN to get tool_name from started events
-            # for completed events that don't have it (Claude PostToolUse
-            # hook doesn't receive tool_name, only tool_use_id)
+            # Query with LEFT JOIN to a started-events CTE, used for two
+            # independent purposes on completed rows:
+            #   1. backfill tool_name (Claude PostToolUse hook doesn't
+            #      receive tool_name, only tool_use_id)
+            #   2. pair started.time with completed.time to derive
+            #      duration_ms, since no writer populates it directly
+            #      (issue #1064). A completed row with no matching started
+            #      row (e.g. a truncated Codex stream, see
+            #      CodexStreamProcessor.py:579) or with an out-of-order
+            #      timestamp yields NULL, never a fabricated 0.
             rows = await conn.fetch(
                 """
-                WITH tool_names AS (
-                    -- Get tool_name -> tool_use_id mapping from started events
+                WITH tool_starts AS (
                     SELECT
                         data->>'tool_use_id' as tool_use_id,
-                        data->>'tool_name' as tool_name
+                        data->>'tool_name' as tool_name,
+                        time as started_time
                     FROM agent_events
                     WHERE session_id = $1
                       AND event_type = $2
@@ -99,18 +106,32 @@ async def get_session_tools(
                 SELECT
                     e.event_type,
                     e.time,
-                    -- Merge tool_name from started event into data for completed
                     CASE
-                        WHEN e.event_type = $3 AND e.data->>'tool_name' IS NULL
-                        THEN jsonb_set(
-                            e.data::jsonb,
-                            '{tool_name}',
-                            to_jsonb(COALESCE(tn.tool_name, 'unknown'))
-                        )
+                        WHEN e.event_type = $3 THEN
+                            jsonb_set(
+                                CASE
+                                    WHEN e.data->>'tool_name' IS NULL
+                                    THEN jsonb_set(
+                                        e.data::jsonb,
+                                        '{tool_name}',
+                                        to_jsonb(COALESCE(ts.tool_name, 'unknown'))
+                                    )
+                                    ELSE e.data::jsonb
+                                END,
+                                '{duration_ms}',
+                                CASE
+                                    WHEN ts.started_time IS NOT NULL
+                                         AND e.time >= ts.started_time
+                                    THEN to_jsonb(round((
+                                        EXTRACT(EPOCH FROM (e.time - ts.started_time)) * 1000
+                                    )::numeric)::bigint)
+                                    ELSE 'null'::jsonb
+                                END
+                            )
                         ELSE e.data::jsonb
                     END as data
                 FROM agent_events e
-                LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
+                LEFT JOIN tool_starts ts ON ts.tool_use_id = e.data->>'tool_use_id'
                 WHERE e.session_id = $1
                   AND e.event_type != ALL($4)
                 ORDER BY e.time ASC

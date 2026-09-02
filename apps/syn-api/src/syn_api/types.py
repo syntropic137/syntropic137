@@ -1019,13 +1019,22 @@ class TimelineEntry(BaseModel):
 
 
 class ToolUsageSummary(BaseModel):
-    """Summary of tool usage across a session."""
+    """Summary of tool usage across a session.
+
+    Internal service-layer type (not a FastAPI response_model — see
+    ToolSummary in routes/events.py for the wire type). duration_count is
+    the number of operations that had a derivable duration_ms, which is not
+    always call_count: a completed row with no matching started row (e.g. a
+    truncated Codex stream) contributes to call_count but not to
+    duration_count or total_duration_ms (issue #1064).
+    """
 
     tool_name: str
     call_count: int = 0
     success_count: int = 0
     error_count: int = 0
     total_duration_ms: float = 0.0
+    duration_count: int = 0
 
 
 # ---------------------------------------------------------------------------
