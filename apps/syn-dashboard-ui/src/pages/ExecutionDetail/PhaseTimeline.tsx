@@ -175,7 +175,13 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
   // apparently complete total for a mixed one - the #890 defect surviving one
   // level up from the per-phase fix directly below.
   const totalUnpriced = phases.reduce((s, p) => s + (p.unpriced_observation_count ?? 0), 0)
-  const totalDuration = phases.reduce((s, p) => s + (p.duration_seconds ?? 0), 0)
+  // Same shape as the unpriced-cost handling above: `?? 0` would turn an
+  // UNKNOWN duration into a measured zero, so an execution whose phases all
+  // report null would render a confident "0.0s" and a partly-known one would
+  // read as complete. Count what is missing and say so instead.
+  const knownDurations = phases.filter((p) => p.duration_seconds != null)
+  const totalDuration = knownDurations.reduce((s, p) => s + (p.duration_seconds ?? 0), 0)
+  const unknownDurations = phases.length - knownDurations.length
 
   return (
     <Card>
@@ -199,7 +205,11 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">
             <Clock className="h-4 w-4 text-[var(--color-text-muted)]" />
-            <span>{totalDuration.toFixed(1)}s</span>
+            <span>
+              {knownDurations.length === 0
+                ? '—'
+                : `${totalDuration.toFixed(1)}s${unknownDurations > 0 ? ` (+${unknownDurations} unknown)` : ''}`}
+            </span>
           </div>
         </div>
         <div className="flex items-stretch gap-2 overflow-x-auto pb-2">

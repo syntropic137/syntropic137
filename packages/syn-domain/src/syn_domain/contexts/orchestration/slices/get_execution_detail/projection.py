@@ -55,6 +55,12 @@ _OPTIONAL_FIELD_NAMES = (
 _ZERO_IS_SUSPECT = "total_duration_seconds"
 
 
+#: Phase statuses that mean "this phase had not finished". Only these are
+#: closed out when a run is cancelled or interrupted; anything else already
+#: recorded its own outcome and must not be rewritten.
+_IN_FLIGHT_PHASE_STATUSES = frozenset({"running", "pending"})
+
+
 class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """Builds workflow execution detail read model from events.
 
@@ -68,7 +74,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 8  # Bumped: #1036 fixes failed-phase duration_seconds, needs a rebuild to apply
+    VERSION = 9  # Bumped: cancelled/interrupted phases now record their real duration
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -384,14 +390,24 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not found:
             return
         _, phase = found
+
+        # Only an IN-FLIGHT phase is closed out here. Guarding on lifecycle
+        # status rather than on duration truthiness: a completed phase whose
+        # measured duration is legitimately 0.0 would otherwise be recomputed
+        # as the whole elapsed time and added to the execution total a second
+        # time. Using `if not duration_seconds` to mean "still running" makes a
+        # real measurement of zero indistinguishable from an absent one, which
+        # is the same conflation this whole change exists to remove.
+        if phase.get("status") not in _IN_FLIGHT_PHASE_STATUSES:
+            return
+
         phase["status"] = status
         if phase.get("completed_at") is None:
             phase["completed_at"] = ended_at
-        if not phase.get("duration_seconds"):
-            elapsed = compute_duration_seconds(phase.get("started_at"), now=ended_at)
-            if elapsed is not None:
-                phase["duration_seconds"] = elapsed
-                self._aggregate_totals(existing, 0, 0, 0, 0, elapsed)
+        elapsed = compute_duration_seconds(phase.get("started_at"), now=ended_at)
+        if elapsed is not None:
+            phase["duration_seconds"] = elapsed
+            self._aggregate_totals(existing, 0, 0, 0, 0, elapsed)
 
     async def on_execution_cancelled(self, event_data: dict) -> None:
         """Handle ExecutionCancelled event.

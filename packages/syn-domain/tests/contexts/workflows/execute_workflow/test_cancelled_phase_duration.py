@@ -137,16 +137,23 @@ class TestCancelledPhaseReportsItsRealDuration:
         assert row is not None
         assert row.get("total_duration_seconds") == pytest.approx(RAN_FOR_SECONDS, abs=1.0)
 
-    async def test_an_already_completed_phase_is_not_overwritten(self) -> None:
-        """Cancelling an execution must not rewrite a phase that already
-        finished honestly."""
+    async def test_an_already_completed_phase_is_not_touched_at_all(self) -> None:
+        """Cancelling an execution must not rewrite a phase that already finished.
+
+        Asserts STATUS and completed_at too, not just duration. The first
+        version of this test checked duration alone and passed against an
+        implementation that still relabelled a completed phase `cancelled` -
+        a review found the gap, which is the test being wrong rather than the
+        code.
+        """
         detail = await _projection_with_running_phase()
+        finished_at = (STARTED + timedelta(seconds=12.5)).isoformat()
         await detail.on_phase_completed(
             {
                 "execution_id": "exec-1",
                 "phase_id": "p-1",
                 "duration_seconds": 12.5,
-                "completed_at": (STARTED + timedelta(seconds=12.5)).isoformat(),
+                "completed_at": finished_at,
             }
         )
 
@@ -154,4 +161,47 @@ class TestCancelledPhaseReportsItsRealDuration:
             {"execution_id": "exec-1", "phase_id": "p-1", "cancelled_at": ENDED.isoformat()}
         )
 
-        assert (await _phase_after(detail))["duration_seconds"] == pytest.approx(12.5, abs=0.1)
+        phase = await _phase_after(detail)
+        assert phase["duration_seconds"] == pytest.approx(12.5, abs=0.1)
+        assert phase["status"] == "completed"
+        assert phase["completed_at"] == finished_at
+
+    async def test_a_completed_phase_measured_at_zero_is_still_a_measurement(self) -> None:
+        """The case a truthiness guard gets wrong.
+
+        `if not phase["duration_seconds"]` treats a real measurement of 0.0 as
+        "no duration recorded", so cancelling would recompute this phase as 400
+        seconds and add 400 seconds to the execution total. Zero is a value.
+        """
+        detail = await _projection_with_running_phase()
+        await detail.on_phase_completed(
+            {
+                "execution_id": "exec-1",
+                "phase_id": "p-1",
+                "duration_seconds": 0.0,
+                "completed_at": STARTED.isoformat(),
+            }
+        )
+
+        await detail.on_execution_cancelled(
+            {"execution_id": "exec-1", "phase_id": "p-1", "cancelled_at": ENDED.isoformat()}
+        )
+
+        phase = await _phase_after(detail)
+        assert phase["duration_seconds"] == 0.0
+        assert phase["status"] == "completed"
+        row = await detail._store.get(detail.PROJECTION_NAME, "exec-1")
+        assert row is not None
+        assert not row.get("total_duration_seconds")
+
+    async def test_a_repeated_cancellation_does_not_double_count(self) -> None:
+        """Projections are replayed. The second application must be a no-op."""
+        detail = await _projection_with_running_phase()
+        event = {"execution_id": "exec-1", "phase_id": "p-1", "cancelled_at": ENDED.isoformat()}
+
+        await detail.on_execution_cancelled(event)
+        await detail.on_execution_cancelled(event)
+
+        row = await detail._store.get(detail.PROJECTION_NAME, "exec-1")
+        assert row is not None
+        assert row.get("total_duration_seconds") == pytest.approx(RAN_FOR_SECONDS, abs=1.0)
