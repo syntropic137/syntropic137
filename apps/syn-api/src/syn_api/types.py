@@ -143,6 +143,10 @@ class ObservabilityError(StrEnum):
     NOT_FOUND = "not_found"
     QUERY_FAILED = "query_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    #: A session never started an agent, so no conversation log ever existed
+    #: for it. Distinct from NOT_FOUND, which means a log should exist but
+    #: could not be located (issue #1047).
+    NEVER_STARTED = "never_started"
 
 
 class TriggerError(StrEnum):

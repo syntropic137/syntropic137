@@ -16,7 +16,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-from syn_api._wiring import ensure_connected, get_conversation_store
+from syn_api._wiring import ensure_connected, get_conversation_store, get_projection_mgr
 from syn_api.types import (
     ConversationLine,
     ConversationLog,
@@ -304,6 +304,32 @@ def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
     )
 
 
+# Terminal statuses a session can settle into without its agent ever having
+# produced a token (see SessionLifecycleManager.complete_failure/cancelled).
+_NEVER_STARTED_STATUSES = frozenset({"failed", "cancelled"})
+
+
+async def _session_never_started(session_id: str) -> bool:
+    """True if the session summary shows the agent never produced any output.
+
+    A ``session_summaries`` row exists once ``StartSessionCommand`` succeeds
+    (SessionListProjection.on_session_started), so its absence here doesn't
+    itself mean "never started" - the caller already resolved this session_id
+    against that same projection to get this far. What distinguishes "no
+    agent ever ran" from "a conversation should exist but the store lost it"
+    is a *terminal* status with zero tokens: a session_error is recorded on
+    every failure/cancellation path, including one whose agent ran and
+    exited non-zero after streaming real tokens, so status alone doesn't
+    discriminate the two cases - zero tokens on a terminal status does
+    (issue #1047).
+    """
+    mgr = get_projection_mgr()
+    data = await mgr.store.get("session_summaries", session_id)
+    if data is None:
+        return False
+    return data.get("status") in _NEVER_STARTED_STATUSES and not data.get("total_tokens")
+
+
 async def get_conversation_log(
     session_id: str,
     offset: int = 0,
@@ -325,6 +351,14 @@ async def get_conversation_log(
         raw_lines = await storage.retrieve_session(session_id)
 
         if raw_lines is None:
+            if await _session_never_started(session_id):
+                return Err(
+                    ObservabilityError.NEVER_STARTED,
+                    message=(
+                        f"Session {session_id} never started an agent, so no "
+                        "conversation was ever recorded."
+                    ),
+                )
             return Err(
                 ObservabilityError.NOT_FOUND,
                 message=f"Conversation log not found for session {session_id}",
@@ -416,7 +450,9 @@ async def get_conversation_log_endpoint(
     )
 
     if isinstance(result, Err):
-        if "not found" in (result.message or "").lower():
+        if result.error == ObservabilityError.NEVER_STARTED:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.NOT_FOUND:
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation log not found for session: {session_id}",

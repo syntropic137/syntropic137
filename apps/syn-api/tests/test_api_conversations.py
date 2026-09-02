@@ -76,6 +76,73 @@ async def test_get_conversation_log_not_found(mock_conversation_store):
     assert result.error == ObservabilityError.NOT_FOUND
 
 
+async def _seed_session_summary(session_id: str, *, status: str, total_tokens: int) -> None:
+    """Write a minimal session_summaries row directly, bypassing event replay.
+
+    Mirrors the shape ``SessionListProjection.on_session_started``/
+    ``on_session_completed`` produce in production - only the two fields the
+    never-started detection reads (``status``, ``total_tokens``) matter here.
+    """
+    from syn_api._wiring import get_projection_mgr
+
+    mgr = get_projection_mgr()
+    await mgr.store.save(
+        "session_summaries",
+        session_id,
+        {
+            "id": session_id,
+            "workflow_id": "wf-1",
+            "agent_type": "claude",
+            "status": status,
+            "total_tokens": total_tokens,
+            "started_at": None,
+            "completed_at": None,
+        },
+    )
+
+
+async def test_conversation_log_endpoint_reports_honest_message_when_never_started(
+    mock_conversation_store,
+):
+    """A session that failed before the agent produced any tokens gets an honest
+    'never started' message instead of the misleading 'not found' text (#1047).
+    """
+    from fastapi import HTTPException
+
+    await _seed_session_summary("never-started-1", status="failed", total_tokens=0)
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_conversation_log_endpoint("never-started-1")
+
+    detail = exc_info.value.detail
+    assert "never started" in detail.lower()
+    assert "not found" not in detail.lower()
+
+
+async def test_conversation_log_endpoint_keeps_not_found_when_agent_ran(
+    mock_conversation_store,
+):
+    """A session that ran (has tokens) and then failed keeps the real NOT_FOUND
+    message when its log is genuinely missing from storage - the fix must not
+    mask an actual data-loss case as 'never started'.
+    """
+    from fastapi import HTTPException
+
+    await _seed_session_summary("ran-then-failed-1", status="failed", total_tokens=500)
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_conversation_log_endpoint("ran-then-failed-1")
+
+    detail = exc_info.value.detail
+    assert "not found" in detail.lower()
+
+
 async def test_get_conversation_log_pagination(mock_conversation_store):
     """Paginate with offset=2 limit=2 over 5 lines."""
     mock_conversation_store.retrieve_session.return_value = [
