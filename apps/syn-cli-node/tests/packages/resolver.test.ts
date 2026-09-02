@@ -58,7 +58,13 @@ describe("requires_repos inference (ADR-058)", () => {
   });
 
   describe("resolveStandaloneYaml (via resolvePackage)", () => {
-    it("defaults to false when requires_repos is absent (standalone has no repository field)", () => {
+    // #1050: this used to assert `false` here (inferred from the absent
+    // `repository` field), while the Python server's
+    // `infer_requires_repos` asserted `true` for the identical unset case
+    // (test_yaml_to_command.py::test_default_true_when_no_repository_and_no_explicit_value).
+    // Both were green - that contradiction was the bug. Default is opt-out
+    // (True) on both sides now.
+    it("defaults to true when requires_repos is absent, agreeing with the server's infer_requires_repos (standalone has no repository field)", () => {
       tmpDir = makeTmpDir();
       fs.writeFileSync(
         path.join(tmpDir, "my-workflow.yaml"),
@@ -67,7 +73,7 @@ describe("requires_repos inference (ADR-058)", () => {
       );
       const { workflows } = resolvePackage(tmpDir);
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]!.requires_repos).toBe(false);
+      expect(workflows[0]!.requires_repos).toBe(true);
     });
 
     it("returns true when requires_repos: true is explicit in standalone YAML", () => {

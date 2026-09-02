@@ -70,10 +70,15 @@ export function recordInstallation(opts: {
 // ADR-058: requires_repos default inference
 // ---------------------------------------------------------------------------
 
+/**
+ * Mirrors `infer_requires_repos` in `yaml_to_command.py` (#1050): explicit
+ * value wins; otherwise default to True (opt-out), never inferred from
+ * `repository` presence. This used to return `data["repository"] != null`
+ * for the unset case, which disagreed with the server for every workflow
+ * that declares neither field.
+ */
 function inferRequiresRepos(data: Record<string, unknown>): boolean {
-  if (data["requires_repos"] === true) return true;
-  if (data["requires_repos"] === false) return false;
-  return data["repository"] != null;
+  return data["requires_repos"] !== false;
 }
 
 // ---------------------------------------------------------------------------

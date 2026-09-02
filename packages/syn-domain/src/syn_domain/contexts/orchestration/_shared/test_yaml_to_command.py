@@ -150,7 +150,13 @@ class TestInferRequiresRepos:
         assert infer_requires_repos(definition) is False
 
     def test_default_true_when_no_repository_and_no_explicit_value(self) -> None:
-        """v0.25.2: default is opt-out - workflows require -R unless they say otherwise."""
+        """v0.25.2: default is opt-out - workflows require -R unless they say otherwise.
+
+        #1050: the CLI's `inferRequiresRepos` (apps/syn-cli-node/src/packages/resolver.ts)
+        must agree with this for the same unset-field case - see
+        resolver.test.ts's "defaults to true when requires_repos is absent"
+        test. They used to assert opposite defaults; both were green.
+        """
         definition = _minimal_definition()
         assert infer_requires_repos(definition) is True
 

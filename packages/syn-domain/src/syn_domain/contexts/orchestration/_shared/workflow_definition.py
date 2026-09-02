@@ -553,7 +553,10 @@ class WorkflowDefinition(BaseModel):
     # added here rather than deleting the documented capability.
     repos: list[str] = Field(default_factory=list)
 
-    # Execution gate (ADR-058 #666): None = infer from repository presence
+    # Execution gate (ADR-058 #666, #1050): explicit value wins; None defaults
+    # to True (opt-out), not inference from `repository` presence -- see
+    # `infer_requires_repos` in yaml_to_command.py, the single source of truth
+    # for this rule. A workflow with neither field set still requires -R.
     requires_repos: bool | None = None
 
     # Project association
