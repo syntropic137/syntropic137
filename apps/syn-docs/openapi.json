@@ -10228,17 +10228,6 @@
             "title": "Duration Display",
             "default": "\u2014"
           },
-          "last_event_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Event At"
-          },
           "error_message": {
             "anyOf": [
               {
@@ -10490,17 +10479,6 @@
               }
             ],
             "title": "Completed At"
-          },
-          "last_event_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Event At"
           }
         },
         "type": "object",

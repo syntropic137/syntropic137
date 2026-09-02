@@ -74,10 +74,13 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
     phase.output_tokens +
     (phase.cache_creation_tokens ?? 0) +
     (phase.cache_read_tokens ?? 0)
+  // `duration_seconds` is nullable in the generated API types: the server now
+  // returns null for a genuinely unknown duration rather than a 0.0 that looks
+  // like a real measurement. Without the guard this card throws on that null.
   const duration =
     phase.status === 'running' && phase.started_at
       ? ((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)
-      : phase.duration_seconds.toFixed(1)
+      : (phase.duration_seconds?.toFixed(1) ?? '—')
 
   return (
     <>
@@ -172,7 +175,7 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
   // apparently complete total for a mixed one - the #890 defect surviving one
   // level up from the per-phase fix directly below.
   const totalUnpriced = phases.reduce((s, p) => s + (p.unpriced_observation_count ?? 0), 0)
-  const totalDuration = phases.reduce((s, p) => s + p.duration_seconds, 0)
+  const totalDuration = phases.reduce((s, p) => s + (p.duration_seconds ?? 0), 0)
 
   return (
     <Card>

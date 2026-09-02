@@ -122,7 +122,7 @@ def _parse_timestamp(value: datetime | str | None) -> datetime | None:
 def compute_duration_seconds(
     started_at: datetime | str | None,
     *,
-    now: datetime | None = None,
+    now: datetime | str | None = None,
 ) -> float | None:
     """Elapsed time for something that is still running: ``now - started_at``.
 
@@ -146,7 +146,13 @@ def compute_duration_seconds(
     started = _parse_timestamp(started_at)
     if started is None:
         return None
-    reference = now if now is not None else datetime.now(UTC)
+    # `now` is parsed the same way as `started_at` so a caller closing out a
+    # cancelled phase can pass the event's timestamp directly. Without this the
+    # elapsed time of a cancelled phase would be measured against the wall
+    # clock and keep growing forever after the run ended.
+    reference = _parse_timestamp(now) if now is not None else datetime.now(UTC)
+    if reference is None:
+        return None
     if reference.tzinfo is None:
         reference = reference.replace(tzinfo=UTC)
     if started.tzinfo is None:

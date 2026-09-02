@@ -119,12 +119,6 @@ class SessionSummaryResponse(BaseModel):
     duration_display: str = "\u2014"
     started_at: str | None = None
     completed_at: str | None = None
-    last_event_at: str | None = None
-    """Timestamp of the most recent observability event -- the field that
-    answers "is this session alive" (issue reported 2026-09-01: a frozen
-    duration reading was misread as a hang and six healthy runs were
-    cancelled). ``None`` if no operation has been recorded yet.
-    """
 
 
 class SessionListResponse(BaseModel):
@@ -217,12 +211,6 @@ class SessionResponse(BaseModel):
     completed_at: str | None = None
     duration_seconds: float | None = None
     duration_display: str = "\u2014"
-    last_event_at: str | None = None
-    """Timestamp of the most recent observability event -- the field that
-    answers "is this session alive" (issue reported 2026-09-01: a frozen
-    duration reading was misread as a hang and six healthy runs were
-    cancelled). ``None`` if no operation has been recorded yet.
-    """
     error_message: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -393,7 +381,6 @@ async def list_sessions(
                 total_cost_usd=Decimal("0"),
                 started_at=s.started_at,
                 completed_at=s.completed_at,
-                last_event_at=s.last_event_at,
             )
             for s in domain_sessions
         ]
@@ -549,8 +536,8 @@ async def get_session(
     operations = await _load_tool_operations(manager, session_id)
     # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
     cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
-    # A running session has no completed_at yet, so Lane 2's duration_ms is
-    # still unset (None) -- read-time computed against the wall clock
+    # A running session has no completed_at, so Lane 2's duration_ms is unset
+    # and this reported None for the whole run. Computed against the wall clock
     # instead. Terminal sessions keep whatever Lane 2 recorded.
     duration_seconds = (
         compute_duration_seconds(session.started_at)
@@ -595,7 +582,6 @@ async def get_session(
             started_at=session.started_at,
             completed_at=session.completed_at,
             duration_seconds=duration_seconds,
-            last_event_at=session.last_event_at,
             error_message=session.error_message,
         )
     )
@@ -627,9 +613,8 @@ def _build_session_summary_response(
         info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
     )
     total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
-    # A running session has no completed_at yet, so Lane 2's duration_ms is
-    # still unset (None) -- read-time computed against the wall clock
-    # instead. Terminal sessions keep whatever Lane 2 recorded.
+    # Same rule as get_session above. Applied here too because the LIST and the
+    # DETAIL of one running session previously disagreed with each other.
     duration_seconds = (
         compute_duration_seconds(s.started_at) if s.status == "running" else info.duration_seconds
     )
@@ -661,7 +646,6 @@ def _build_session_summary_response(
         duration_display=format_duration_seconds(duration_seconds),
         started_at=str(s.started_at) if s.started_at else None,
         completed_at=str(s.completed_at) if s.completed_at else None,
-        last_event_at=str(s.last_event_at) if s.last_event_at else None,
     )
 
 
@@ -796,7 +780,6 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         duration_seconds=detail.duration_seconds,
         duration_display=format_duration_seconds(detail.duration_seconds),
-        last_event_at=str(detail.last_event_at) if detail.last_event_at else None,
         error_message=detail.error_message,
         metadata={},
     )

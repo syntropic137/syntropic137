@@ -4229,8 +4229,6 @@ export interface components {
              * @default —
              */
             duration_display: string;
-            /** Last Event At */
-            last_event_at?: string | null;
             /** Error Message */
             error_message?: string | null;
             /** Metadata */
@@ -4337,8 +4335,6 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
-            /** Last Event At */
-            last_event_at?: string | null;
         };
         /**
          * SessionTokenMetrics

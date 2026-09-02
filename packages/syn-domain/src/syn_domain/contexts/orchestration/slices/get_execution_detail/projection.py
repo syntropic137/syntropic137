@@ -13,6 +13,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -23,6 +25,7 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_det
 from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
     PhaseDetail,
 )
+from syn_shared.display import compute_duration_seconds
 
 #: Totals a completion event MAY restate. Accumulated from PhaseCompleted
 #: otherwise; see the zero-guard where these are applied.
@@ -354,6 +357,42 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    def _stamp_terminal_phase(
+        self,
+        existing: dict,
+        phase_id: str | None,
+        status: str,
+        ended_at: datetime | str | None,
+    ) -> None:
+        """Close out the in-flight phase when a run ends without completing it.
+
+        Cancellation and interruption set the phase's status and nothing else,
+        so its duration_seconds stayed at the 0.0 that ``PhaseDetail.running()``
+        seeded. A phase cancelled after 400 seconds reported 0.0 - the same
+        "reported value that is not a measurement" defect as the frozen running
+        duration this change exists to fix, and it is not hypothetical: six runs
+        were cancelled mid-flight on 2026-09-01 and every one of them reports
+        0.0.
+
+        Same treatment the failed-phase path already gets (#1036), except the
+        duration is computed here because cancel and interrupt events carry a
+        timestamp rather than an elapsed time.
+        """
+        if not phase_id:
+            return
+        found = self._find_phase(existing.get("phases", []), phase_id)
+        if not found:
+            return
+        _, phase = found
+        phase["status"] = status
+        if phase.get("completed_at") is None:
+            phase["completed_at"] = ended_at
+        if not phase.get("duration_seconds"):
+            elapsed = compute_duration_seconds(phase.get("started_at"), now=ended_at)
+            if elapsed is not None:
+                phase["duration_seconds"] = elapsed
+                self._aggregate_totals(existing, 0, 0, 0, 0, elapsed)
+
     async def on_execution_cancelled(self, event_data: dict) -> None:
         """Handle ExecutionCancelled event.
 
@@ -371,13 +410,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["completed_at"] = event_data.get("cancelled_at")
         existing["error_message"] = event_data.get("reason") or "Cancelled by user"
 
-        # Mark current phase as cancelled
-        phase_id = event_data.get("phase_id")
-        if phase_id:
-            found = self._find_phase(existing.get("phases", []), phase_id)
-            if found:
-                _, phase = found
-                phase["status"] = "cancelled"
+        self._stamp_terminal_phase(
+            existing, event_data.get("phase_id"), "cancelled", event_data.get("cancelled_at")
+        )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -400,13 +435,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         existing["error_message"] = event_data.get("reason") or "Interrupted by user"
         existing["git_sha"] = event_data.get("git_sha")
 
-        # Mark interrupted phase
-        phase_id = event_data.get("phase_id")
-        if phase_id:
-            found = self._find_phase(existing.get("phases", []), phase_id)
-            if found:
-                _, phase = found
-                phase["status"] = "interrupted"
+        self._stamp_terminal_phase(
+            existing, event_data.get("phase_id"), "interrupted", event_data.get("interrupted_at")
+        )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

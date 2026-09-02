@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, MutableMapping
+    from collections.abc import Mapping
 
     from event_sourcing import ProjectionStore
 
@@ -109,18 +109,6 @@ def _apply_post_filters(
     return data[offset : offset + limit] if limit else data[offset:]
 
 
-def _stamp_last_event_at(existing: MutableMapping[str, Any], timestamp: object) -> None:
-    """Advance ``last_event_at`` to ``timestamp`` if one was carried on the event.
-
-    This is what makes "is this session alive" answerable at all: unlike
-    ``duration_seconds`` (which only moves at start and completion),
-    ``last_event_at`` advances on every observability tick, so a session that
-    is quietly working still looks alive rather than frozen.
-    """
-    if timestamp:
-        existing["last_event_at"] = timestamp
-
-
 def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
     """Accumulate token counts from an operation event."""
     op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
@@ -174,7 +162,6 @@ def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None
     completed_at = event_data.get("completed_at")
     if started_at and completed_at:
         existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
-    _stamp_last_event_at(existing, completed_at)
     if event_data.get("error_message"):
         existing["error_message"] = event_data["error_message"]
     if "num_turns" in event_data:
@@ -219,7 +206,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 4  # Bumped: last_event_at liveness field, backfilled via rebuild
+    VERSION = 3  # Bumped: unified token counting - cache tokens (#695)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -256,7 +243,6 @@ class SessionListProjection(AutoDispatchProjection):
             input_tokens=0,
             output_tokens=0,
             duration_seconds=None,
-            last_event_at=event_data.get("started_at"),
             phase_id=event_data.get("phase_id"),
             execution_id=event_data.get("execution_id"),
             parent_session_id=event_data.get("parent_session_id"),
@@ -275,7 +261,6 @@ class SessionListProjection(AutoDispatchProjection):
         if existing:
             _accumulate_tokens(existing, event_data)
             _append_operation(existing, event_data)
-            _stamp_last_event_at(existing, event_data.get("timestamp"))
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_session_completed(self, event_data: dict) -> None:
@@ -317,7 +302,6 @@ class SessionListProjection(AutoDispatchProjection):
             subagents.append(subagent_record)
             existing["subagents"] = subagents
             existing["subagent_count"] = subagent_count + 1
-            _stamp_last_event_at(existing, event_data.get("timestamp"))
 
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
@@ -339,7 +323,6 @@ class SessionListProjection(AutoDispatchProjection):
                 tools_by_subagent[event_data.get("agent_name", "unknown")] = tools_used
                 existing["tools_by_subagent"] = tools_by_subagent
 
-            _stamp_last_event_at(existing, event_data.get("timestamp"))
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def get_all(self) -> list[SessionSummary]:
