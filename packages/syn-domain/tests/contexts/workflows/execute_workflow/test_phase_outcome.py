@@ -199,7 +199,11 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
     )
 
     duration, result = failed_phase_outcome(
-        "implement", {"implement": _START}, {"implement": "sess-9"}, "timed out"
+        "exec-1",
+        "implement",
+        {("exec-1", "implement"): _START},
+        {("exec-1", "implement"): "sess-9"},
+        "timed out",
     )
 
     assert result is not None
@@ -208,7 +212,7 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
 
     # A phase with no recorded start yields neither, rather than a zero-duration
     # result that would enter the metrics as a phase that ran instantly.
-    assert failed_phase_outcome("implement", {}, {}, "timed out") == (None, None)
+    assert failed_phase_outcome("exec-1", "implement", {}, {}, "timed out") == (None, None)
 
 
 async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it() -> None:
@@ -267,9 +271,10 @@ def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:
 
     ended = _START + timedelta(seconds=5)
     duration, result = failed_phase_outcome(
+        "exec-1",
         "implement",
-        {"implement": _START},
-        {"implement": "sess-2"},
+        {("exec-1", "implement"): _START},
+        {("exec-1", "implement"): "sess-2"},
         "timed out",
         now=ended,
     )

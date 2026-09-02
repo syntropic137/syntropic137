@@ -110,7 +110,7 @@ async def _run_fail_execution_and_serialize(processor: WorkflowExecutionProcesso
     processor._execution_repo.save = AsyncMock()  # no-op: keep uncommitted events for inspection
 
     fixed_started_at = datetime.now(UTC) - timedelta(seconds=FIXTURE_DURATION_SECONDS)
-    processor._phase_started_at["p-1"] = fixed_started_at
+    processor._phase_started_at[("exec-1", "p-1")] = fixed_started_at
 
     phases = [ExecutablePhase(phase_id="p-1", name="Phase 1", order=1)]
 

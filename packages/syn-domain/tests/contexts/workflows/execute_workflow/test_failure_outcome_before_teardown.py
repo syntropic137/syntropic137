@@ -34,15 +34,16 @@ _TEARDOWN_SECONDS = 30.0
 async def test_duration_excludes_teardown_and_the_session_id_survives() -> None:
     processor = _make_processor(FakeAgentExecutionHandler())
 
+    execution_id = "exec-1"
     started = datetime.now(UTC) - timedelta(seconds=5)
-    processor._phase_started_at[PHASE] = started
-    processor._phase_session_ids[PHASE] = "sess-real"
+    processor._phase_started_at[(execution_id, PHASE)] = started
+    processor._phase_session_ids[(execution_id, PHASE)] = "sess-real"
 
     async def _slow_teardown(*_args: object, **_kwargs: object) -> None:
         """Stands in for cleanup that takes real time and clears the maps."""
-        processor._phase_started_at.pop(PHASE, None)
-        processor._phase_session_ids.pop(PHASE, None)
-        processor._phase_started_at["_teardown_ran"] = datetime.now(UTC)
+        processor._phase_started_at.pop((execution_id, PHASE), None)
+        processor._phase_session_ids.pop((execution_id, PHASE), None)
+        processor._phase_started_at[(execution_id, "_teardown_ran")] = datetime.now(UTC)
         await asyncio.sleep(0)
 
     processor._close_phase_workspace_cms = _slow_teardown  # type: ignore[method-assign]

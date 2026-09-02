@@ -63,9 +63,10 @@ def failed_phase_elapsed_seconds(
 
 
 def failed_phase_outcome(
+    execution_id: str,
     phase_id: str | None,
-    started_at_by_phase: Mapping[str, DateTime],
-    session_id_by_phase: Mapping[str, str],
+    started_at_by_phase: Mapping[tuple[str, str], DateTime],
+    session_id_by_phase: Mapping[tuple[str, str], str],
     error_message: str,
     now: DateTime | None = None,
 ) -> tuple[float | None, PhaseResult | None]:
@@ -74,8 +75,14 @@ def failed_phase_outcome(
     One call rather than three lookups at the call site: the processor is over
     its file-size threshold, and the caller does not need to know that "how long
     did it run" and "what result does it produce" share a start timestamp.
+
+    The maps are keyed (execution_id, phase_id), not phase_id alone (#1044):
+    the processor is shared across concurrent executions, so a phase-only key
+    would let this lookup return a different execution's start time and
+    session id.
     """
-    started_at = started_at_by_phase.get(phase_id) if phase_id else None
+    key = (execution_id, phase_id or "")
+    started_at = started_at_by_phase.get(key) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
@@ -84,7 +91,7 @@ def failed_phase_outcome(
         failed_phase_result(
             phase_id,
             started_at,
-            session_id_by_phase.get(phase_id or "", ""),
+            session_id_by_phase.get(key, ""),
             error_message,
             ended_at=ended_at,
         ),

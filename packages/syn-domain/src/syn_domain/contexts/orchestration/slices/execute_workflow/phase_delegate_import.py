@@ -398,7 +398,7 @@ async def close_phase_workspaces(
     *,
     workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]],
     workspaces: dict[str, ManagedWorkspace],
-    session_ids: dict[str, str],
+    session_ids: dict[tuple[str, str], str],
     leader_native_ids: dict[tuple[str, str], str],
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
@@ -411,15 +411,25 @@ async def close_phase_workspaces(
     ran an agent, and a failed run is the one whose transcript is most worth
     having - so the probe and the import both happen here too, in the same
     order and before the container goes away.
+
+    ``session_ids`` is keyed (execution_id, phase_id), like ``leader_native_ids``
+    (#1044): a phase-only key would let a concurrently running execution's
+    session id answer this lookup. Left uncleared here (unlike ``workspace_cms``
+    and ``leader_native_ids``, which this function owns exclusively) - the
+    caller clears only the current execution's own entries, since this
+    processor is shared across concurrent executions and a blanket clear would
+    erase another execution's still-live session ids.
     """
     for phase_id, workspace_cm in list(workspace_cms.items()):
+        workspace = workspaces.get(phase_id)
+        execution_id = getattr(workspace, "execution_id", "") or ""
         await capture_and_import_phase(
             capture_port,
-            workspaces.get(phase_id),
+            workspace,
             session_store=session_store,
             writer=writer,
             leader_native_ids=leader_native_ids,
-            session_id=session_ids.get(phase_id, ""),
+            session_id=session_ids.get((execution_id, phase_id), ""),
             phase_id=phase_id,
             ledger=ledger,
         )
@@ -429,7 +439,6 @@ async def close_phase_workspaces(
             logger.exception("Error cleaning up workspace during %s", context)
 
     workspace_cms.clear()
-    session_ids.clear()
     leader_native_ids.clear()
 
 

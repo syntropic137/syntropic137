@@ -179,8 +179,11 @@ class WorkflowExecutionProcessor:
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
-        # Per-phase so _finalize_phase can attribute the capture.
-        self._phase_session_ids: dict[str, str] = {}
+        #: Keyed by (execution_id, phase_id), NOT phase_id alone (#1044): this
+        #: processor is shared across concurrent executions, so a phase-only
+        #: key let the second execution's phase overwrite the first's session
+        #: id, and a failed phase reported whichever session id landed last.
+        self._phase_session_ids: dict[tuple[str, str], str] = {}
         #: The id each phase's own harness announced on its stream, which is
         #: what the delegate import subtracts from the sweep.
         #:
@@ -197,7 +200,12 @@ class WorkflowExecutionProcessor:
             str, tuple[int, int, int, int]
         ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
-        self._phase_started_at: dict[str, datetime] = {}
+        #: Keyed (execution_id, phase_id), same reason as _phase_session_ids
+        #: above (#1044): a phase-only key let a concurrent execution's start
+        #: time overwrite this one's, and the failure path never cleared it,
+        #: so a later run that failed before starting its own phase read a
+        #: stale entry left by a run that had already ended.
+        self._phase_started_at: dict[tuple[str, str], datetime] = {}
 
     async def run(
         self,
@@ -396,7 +404,7 @@ class WorkflowExecutionProcessor:
         reason = cancel_reason or "Cancelled by user"
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_cancelled(reason=reason)
-        await self._close_phase_workspace_cms(context="cancel")
+        await self._close_phase_workspace_cms(execution_id, context="cancel")
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
             execution_id=execution_id,
@@ -468,14 +476,18 @@ class WorkflowExecutionProcessor:
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         failed_phase_duration, failed_result = failed_phase_outcome(
-            failed_phase_id, self._phase_started_at, self._phase_session_ids, str(error)
+            execution_id,
+            failed_phase_id,
+            self._phase_started_at,
+            self._phase_session_ids,
+            str(error),
         )
         if failed_result is not None:
             phase_results.append(failed_result)
 
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
-        await self._close_phase_workspace_cms(context="failure")
+        await self._close_phase_workspace_cms(execution_id, context="failure")
 
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
@@ -500,7 +512,7 @@ class WorkflowExecutionProcessor:
             error_message=str(error),
         )
 
-    async def _close_phase_workspace_cms(self, context: str) -> None:
+    async def _close_phase_workspace_cms(self, execution_id: str, context: str) -> None:
         """Close per-phase workspace context managers and clear per-phase state."""
         await close_phase_workspaces(
             context,
@@ -519,6 +531,14 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
+        # Only THIS execution's timing/session-id entries (#1044): a blanket
+        # clear here would erase a concurrently running execution's own start
+        # times and session ids, trading the overwrite bug for an equally
+        # wrong loss.
+        for key in [k for k in self._phase_started_at if k[0] == execution_id]:
+            del self._phase_started_at[key]
+        for key in [k for k in self._phase_session_ids if k[0] == execution_id]:
+            del self._phase_session_ids[key]
 
     async def _handle_provision(
         self,
@@ -555,7 +575,7 @@ class WorkflowExecutionProcessor:
         )
         await session_mgr.start()
         self._session_managers[todo.phase_id] = session_mgr
-        self._phase_started_at[todo.phase_id] = datetime.now(UTC)
+        self._phase_started_at[(todo.execution_id, todo.phase_id)] = datetime.now(UTC)
 
         # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
         repo_urls = [r.https_url for r in (repos or [])]
@@ -629,7 +649,7 @@ class WorkflowExecutionProcessor:
         agent_env = self._active_envs[todo.phase_id]
         claude_cmd = self._active_cmds[todo.phase_id]
         session_id = todo.session_id or ""
-        self._phase_session_ids[todo.phase_id] = session_id
+        self._phase_session_ids[(todo.execution_id, todo.phase_id)] = session_id
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
         # Raises on an unknown or removed provider instead of defaulting to
@@ -672,7 +692,9 @@ class WorkflowExecutionProcessor:
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
             model=phase.agent_config.model,
-            started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
+            started_at=self._phase_started_at.get(
+                (todo.execution_id, todo.phase_id), datetime.now(UTC)
+            ),
         )
         self._phase_tokens[todo.phase_id] = result.tokens
         # Store authoritative totals from CLI result event (includes cache tokens)
@@ -776,7 +798,9 @@ class WorkflowExecutionProcessor:
         self._phase_tokens.pop(todo.phase_id, None)
         auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
-        started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
+        started_at = self._phase_started_at.pop(
+            (todo.execution_id, todo.phase_id), datetime.now(UTC)
+        )
 
         outcome = completed_phase(
             execution_id=todo.execution_id,
@@ -794,6 +818,7 @@ class WorkflowExecutionProcessor:
         await self._save_and_sync(aggregate)
 
         await self._finalize_phase(
+            todo.execution_id,
             todo.phase_id,
             outcome.input_tokens,
             outcome.output_tokens,
@@ -805,6 +830,7 @@ class WorkflowExecutionProcessor:
 
     async def _finalize_phase(
         self,
+        execution_id: str,
         phase_id: str,
         input_tokens: int,
         output_tokens: int,
@@ -827,7 +853,7 @@ class WorkflowExecutionProcessor:
             )
 
         workspace = self._active_workspaces.pop(phase_id, None)
-        session_id = self._phase_session_ids.pop(phase_id, "")
+        session_id = self._phase_session_ids.pop((execution_id, phase_id), "")
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)
         workspace_cm = self._active_workspace_cms.pop(phase_id, None)
