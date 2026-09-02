@@ -425,6 +425,257 @@ async def test_claude_jsonl_lines_survive_noise_filter(mock_conversation_store):
     assert log.lines[0].event_type == "assistant"
 
 
+async def test_claude_tool_use_bash_surfaces_name_and_command(mock_conversation_store):
+    """A real Claude Code ``tool_use`` line (Bash) surfaces its name and command.
+
+    Raw line taken verbatim from a recorded session (agentic-primitives
+    ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``) - this is issue #1067's
+    premise: the nested ``message.content[].tool_use`` shape, not the
+    flattened synthetic shape used by the older tests in this file.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929", '
+        '"id": "msg_01K5vXsmzoYvC8JpXVbnDnpb", "type": "message", "role": "assistant", '
+        '"content": [{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", '
+        '"name": "Bash", "input": {"command": "pytest --version", '
+        '"description": "Check if pytest is installed"}}], "stop_reason": null, '
+        '"stop_sequence": null, "usage": {"input_tokens": 2}, "context_management": null}, '
+        '"parent_tool_use_id": null, "session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+        '"uuid": "df092cdf-514d-4fcc-b578-9ea162850544", "_offset_ms": 0}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Bash"
+    assert line.content_preview == "pytest --version"
+
+
+async def test_claude_tool_use_read_surfaces_file_path(mock_conversation_store):
+    """A real Claude Code ``tool_use`` line (Read) surfaces its ``file_path``.
+
+    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_file-read.jsonl``.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929", '
+        '"id": "msg_016xBPSbaR7QVRzPQ4dVDBrw", "type": "message", "role": "assistant", '
+        '"content": [{"type": "tool_use", "id": "toolu_018iVpEgCDjX5CQofmdEMNgX", '
+        '"name": "Read", "input": {"file_path": "/workspace/pyproject.toml"}}], '
+        '"stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 2}, '
+        '"context_management": null}, "parent_tool_use_id": null, '
+        '"session_id": "221751c1-866a-467d-8adb-c2616eee0748", '
+        '"uuid": "b0351ec9-3576-4fcb-9625-10e00875f1be", "_offset_ms": 0}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Read"
+    assert line.content_preview == "/workspace/pyproject.toml"
+
+
+async def test_claude_tool_result_error_is_flagged(mock_conversation_store):
+    """A real Claude Code ``tool_result`` with ``is_error: true`` is flagged.
+
+    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl`` -
+    the pytest command was denied approval.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", '
+        '"content": "This command requires approval", "is_error": true, '
+        '"tool_use_id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT"}]}, "parent_tool_use_id": null, '
+        '"session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+        '"uuid": "8ece95af-75a0-4b1f-a42c-078b0327960e", '
+        '"tool_use_result": "Error: This command requires approval", "_offset_ms": 0}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "user"
+    assert line.content_preview == "[error] This command requires approval"
+
+
+async def test_claude_tool_result_success_shows_first_line(mock_conversation_store):
+    """A real Claude Code ``tool_result`` without an error shows its output, unflagged.
+
+    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": '
+        '"toolu_01EcpwqYwJdp8gooTES6smmV", "type": "tool_result", '
+        '"content": "No files found"}]}, "parent_tool_use_id": null, '
+        '"session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+        '"uuid": "02830228-ea7a-47b6-88ee-abec55322aa0", '
+        '"tool_use_result": {"filenames": [], "durationMs": 7, "numFiles": 0, '
+        '"truncated": false}, "_offset_ms": 0}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "user"
+    assert line.content_preview == "No files found"
+
+
+async def test_claude_tool_result_list_content_blocks_use_first_line(mock_conversation_store):
+    """A ``tool_result`` whose ``content`` is a list of text blocks (subagent
+
+    results) is flattened and only the first line of the first block is
+    shown. Raw line verbatim from
+    ``v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl``, where the first
+    text block itself spans multiple lines.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": '
+        '"toolu_01XxMwNeHP7xCrM8bj5UickN", "type": "tool_result", "content": '
+        '[{"type": "text", "text": "The command `whoami` returned: **agent**\\n\\n'
+        'This indicates that the current user is \\"agent\\"."}, {"type": "text", '
+        '"text": "agentId: a775cd0 (for resuming to continue this agent\'s work if '
+        'needed)"}]}]}, "parent_tool_use_id": null, '
+        '"session_id": "9c4d2e8f-9fc2-400d-a4f3-60bed3701453", '
+        '"uuid": "70b03589-1849-4baf-9ee4-5b9467f16628", "_offset_ms": 5152}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.content_preview == "The command `whoami` returned: **agent**"
+
+
+async def test_claude_system_init_line_has_no_tool_row(mock_conversation_store):
+    """A real ``system``/``init`` line (session banner) has no tool_name/preview.
+
+    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``.
+    Regression guard: it must not be misidentified as a tool line by the new
+    claude tool extractor.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "system", "subtype": "init", "cwd": "/workspace", '
+        '"session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+        '"tools": ["Task", "Bash", "Read", "Edit", "Write"], "mcp_servers": [], '
+        '"model": "claude-sonnet-4-5-20250929", "permissionMode": "default", '
+        '"apiKeySource": "ANTHROPIC_API_KEY", "claude_code_version": "2.0.74", '
+        '"uuid": "e45d5962-f6b8-4c2f-9010-141f6e77e84e", "_offset_ms": 0}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "system"
+    assert line.tool_name is None
+    assert line.content_preview is None
+
+
+async def test_unrecognized_top_level_type_does_not_crash(mock_conversation_store):
+    """A line whose top-level ``type`` is neither claude's nor codex's vocabulary
+
+    (e.g. an Anthropic API ``rate_limit_event`` passthrough) must not crash
+    the request - it renders as a plain line with that type and no tool
+    fields, same as before this change.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "rate_limit_event", "retry_after": 5}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "rate_limit_event"
+    assert line.tool_name is None
+
+
+async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows(
+    mock_conversation_store,
+):
+    """End-to-end regression guard against issue #1067 using a real recording.
+
+    Runs the full, unmodified ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``
+    recording (agentic-primitives fixture) through the pipeline and asserts
+    every tool_use/tool_result line - not just hand-picked ones - gets a
+    non-null tool_name or content_preview. Before this fix, all of these
+    rendered as (None, None): the exact defect from the issue.
+    """
+    import pathlib
+
+    fixture_path = (
+        pathlib.Path(__file__).parents[3]
+        / "lib"
+        / "agentic-primitives"
+        / "providers"
+        / "workspaces"
+        / "claude-cli"
+        / "fixtures"
+        / "recordings"
+        / "v2.0.74_claude-sonnet-4-5_multi-tool.jsonl"
+    )
+    raw_lines = [line for line in fixture_path.read_text().splitlines() if line.strip()]
+    # First line is a ``_recording`` metadata envelope the real store never
+    # persists (added by the recorder, not the harness) - drop it like the
+    # playback tooling does.
+    raw_lines = [line for line in raw_lines if not line.startswith('{"_recording"')]
+    mock_conversation_store.retrieve_session.return_value = raw_lines
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    lines = result.value.lines
+    assert len(lines) > 0
+
+    import json as _json
+
+    tool_line_count = 0
+    for line in lines:
+        data = _json.loads(line.raw)
+        message = data.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in ("tool_use", "tool_result"):
+                tool_line_count += 1
+                assert line.tool_name is not None or line.content_preview is not None, (
+                    f"Line {line.line_number} is a real tool call/result but rendered "
+                    f"blank: {line.raw}"
+                )
+
+    # Sanity check the fixture actually exercises the shape under test.
+    assert tool_line_count >= 4
+
+
 async def test_get_conversation_metadata(mock_conversation_store):
     """Retrieve conversation metadata from store."""
     mock_conversation_store.get_session_metadata.return_value = {

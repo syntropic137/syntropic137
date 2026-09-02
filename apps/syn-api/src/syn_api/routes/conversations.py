@@ -198,6 +198,104 @@ def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
     return command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
 
 
+# Claude Code's stream-json nests a tool call inside
+# ``message.content[].{type: "tool_use", name, input}`` (assistant lines) and
+# the matching result inside
+# ``message.content[].{type: "tool_result", content, is_error}`` (user
+# lines). There is no top-level ``tool_name``/``name`` key for either, so the
+# generic extractor below always falls through to None for these - this is
+# the claude-side counterpart to ``_extract_codex_fields``.
+_TOOL_PREVIEW_LEN = 100
+
+# Priority order of input keys to surface as a tool_use preview, checked by
+# field name rather than dispatching on tool name so new/renamed tools still
+# get a preview: ``command`` for Bash, ``file_path`` for Read/Edit/Write,
+# ``pattern`` for Grep/Glob, etc.
+_CLAUDE_TOOL_INPUT_KEYS = (
+    "command",
+    "file_path",
+    "pattern",
+    "path",
+    "notebook_path",
+    "url",
+    "query",
+    "description",
+    "prompt",
+)
+
+
+def _claude_tool_use_preview(input_data: Mapping[str, object]) -> str | None:
+    """Pick the first populated salient field from a ``tool_use`` block's input."""
+    for key in _CLAUDE_TOOL_INPUT_KEYS:
+        value = input_data.get(key)
+        if isinstance(value, str) and value:
+            return value[:_TOOL_PREVIEW_LEN]
+    return None
+
+
+def _claude_tool_result_text(content: object) -> str:
+    """Flatten a ``tool_result`` block's ``content`` into plain text.
+
+    ``content`` is either a bare string, or a list of ``{"type": "text",
+    "text": ...}`` blocks (seen in real recordings, e.g. subagent tool
+    results) - join those in order.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part["text"]
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return ""
+
+
+def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
+    """Preview for a ``tool_result`` block: its first output line, error-flagged."""
+    text = _claude_tool_result_text(item.get("content"))
+    first_line = next((line for line in text.splitlines() if line.strip()), "")
+    if item.get("is_error") is True:
+        return f"[error] {first_line}"[:_TOOL_PREVIEW_LEN] if first_line else "[error]"
+    return first_line[:_TOOL_PREVIEW_LEN] if first_line else None
+
+
+def _extract_claude_tool_fields(
+    data: Mapping[str, object],
+) -> tuple[str, str | None, str | None] | None:
+    """Normalize a claude ``tool_use``/``tool_result`` line, or None otherwise.
+
+    Only ``assistant`` and ``user`` lines whose ``message.content[]`` contains
+    a ``tool_use`` or ``tool_result`` block are handled here; every other
+    shape (plain assistant text, a plain user turn, system/init, result,
+    an unrecognized type) returns None so the caller falls back to the
+    generic extractor, which already handles those correctly.
+    """
+    top_type = data.get("type")
+    if top_type not in ("assistant", "user"):
+        return None
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "tool_use":
+            name = item.get("name")
+            tool_name = name if isinstance(name, str) and name else None
+            input_data = item.get("input")
+            preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
+            return TranscriptEventType.TOOL_USE, tool_name, preview
+        if item_type == "tool_result":
+            return str(top_type), None, _claude_tool_result_preview(item)
+    return None
+
+
 _CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))
 
 
@@ -284,6 +382,10 @@ def _extract_line_fields(
     codex = _extract_codex_fields(data)
     if codex is not None:
         return codex
+
+    claude_tool = _extract_claude_tool_fields(data)
+    if claude_tool is not None:
+        return claude_tool
 
     event_type = data.get("type") or data.get("event_type")
     tool_name = data.get("tool_name") or data.get("name")
