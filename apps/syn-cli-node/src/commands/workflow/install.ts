@@ -15,6 +15,7 @@ import type { InstalledWorkflowRef, PackageFormat, PluginManifest, ResolvedWorkf
 import {
   detectFormat,
   isGitHubShorthand,
+  isHomeRelative,
   loadInstalled,
   parseSource,
   recordInstallation,
@@ -42,6 +43,7 @@ export function isBarePluginName(source: string): boolean {
     !source.startsWith("http") &&
     !source.startsWith("git@") &&
     !source.startsWith("ssh://") &&
+    !isHomeRelative(source) &&
     !fs.existsSync(source)
   );
 }

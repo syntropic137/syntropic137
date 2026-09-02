@@ -94,7 +94,7 @@ function isRemoteUrl(source: string): boolean {
 // way to resolve another account's home directory, and guessing would
 // silently resolve to the wrong path. It still falls through as a local,
 // unexpanded string via the existing `~`-prefix checks below.
-function isHomeRelative(source: string): boolean {
+export function isHomeRelative(source: string): boolean {
   return source === "~" || source.startsWith("~/") || source.startsWith("~\\");
 }
 

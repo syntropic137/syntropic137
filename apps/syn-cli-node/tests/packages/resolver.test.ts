@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  isGitHubShorthand,
   parseSource,
   resolvePackage,
 } from "../../src/packages/resolver.js";
@@ -176,6 +177,69 @@ describe("parseSource", () => {
       process.chdir(cwd);
       cleanup(dir);
     }
+  });
+});
+
+// GitHub owner/repo grammar invariant (issue #1066, second review round).
+//
+// The character-class fix (isValidGitHubOwner/isValidGitHubRepoName) is
+// correct today, but every existing test only pins the fabrication-shape
+// REGRESSIONS (colons, `#`/`?`, `.`/`..`, whitespace, trailing slash). None
+// of them assert the grammar's own BOUNDARIES: a one-character owner, the
+// 39/40-character owner cutoff, uppercase, or a repo containing `.`/`_`, or
+// the 100/101-character repo cutoff. A mutation that shrinks either cap, or
+// narrows a character class, leaves every one of those tests green while
+// rejecting a real, valid GitHub identity - a worse failure than the bug
+// this PR fixes, because it is silent (nothing turns red) and user-facing
+// (a legitimate `owner/repo` install just stops working).
+//
+// Each case below is named for the specific boundary it pins, so a mutation
+// that violates it fails a specific, legible test rather than merely
+// dropping a pass count.
+describe("GitHub owner/repo grammar invariant (issue #1066 second review)", () => {
+  const validOwner = "a";
+  const validRepo = "a";
+
+  describe("owner boundaries", () => {
+    it.each<{ name: string; owner: string; accept: boolean }>([
+      { name: "accepts a 1-character owner (the shortest legal owner)", owner: "a", accept: true },
+      { name: "accepts a 39-character owner (GitHub's own maximum)", owner: "a".repeat(39), accept: true },
+      { name: "rejects a 40-character owner (one past GitHub's maximum)", owner: "a".repeat(40), accept: false },
+      { name: "accepts an uppercase owner", owner: "ABC", accept: true },
+      { name: "accepts a mixed-case owner", owner: "Torvalds", accept: true },
+      { name: "accepts digits in an owner", owner: "abc123", accept: true },
+      { name: "accepts a single interior hyphen in an owner", owner: "ab-cd", accept: true },
+      { name: "rejects an owner ending in a hyphen", owner: "abc-", accept: false },
+      { name: "rejects an owner starting with a hyphen", owner: "-abc", accept: false },
+      { name: "rejects consecutive hyphens in an owner", owner: "ab--cd", accept: false },
+      { name: "rejects an underscore in an owner (not in GitHub's owner charset)", owner: "ab_cd", accept: false },
+      { name: "rejects a dot in an owner (not in GitHub's owner charset)", owner: "ab.cd", accept: false },
+      { name: "rejects a space in an owner", owner: "ab cd", accept: false },
+      { name: "rejects an empty owner", owner: "", accept: false },
+    ])("$name", ({ owner, accept }) => {
+      expect(isGitHubShorthand(`${owner}/${validRepo}`)).toBe(accept);
+    });
+  });
+
+  describe("repo boundaries", () => {
+    it.each<{ name: string; repo: string; accept: boolean }>([
+      { name: "accepts a 1-character repo (the shortest legal repo)", repo: "a", accept: true },
+      { name: "accepts a 100-character repo (GitHub's own maximum)", repo: "a".repeat(100), accept: true },
+      { name: "rejects a 101-character repo (one past GitHub's maximum)", repo: "a".repeat(101), accept: false },
+      { name: "accepts an uppercase repo", repo: "REPO", accept: true },
+      { name: "accepts a mixed-case repo", repo: "Linux", accept: true },
+      { name: "accepts digits in a repo", repo: "repo123", accept: true },
+      { name: "accepts a dot in a repo (explicitly allowed by GitHub's own docs)", repo: "my.repo", accept: true },
+      { name: "accepts an underscore in a repo (explicitly allowed by GitHub's own docs)", repo: "my_repo", accept: true },
+      { name: "accepts a hyphen in a repo", repo: "my-repo", accept: true },
+      { name: "rejects a colon in a repo", repo: "repo:tag", accept: false },
+      { name: "rejects a # in a repo", repo: "repo#v1", accept: false },
+      { name: "rejects a ? in a repo", repo: "repo?x=y", accept: false },
+      { name: "rejects a space in a repo", repo: "my repo", accept: false },
+      { name: "rejects an empty repo", repo: "", accept: false },
+    ])("$name", ({ repo, accept }) => {
+      expect(isGitHubShorthand(`${validOwner}/${repo}`)).toBe(accept);
+    });
   });
 });
 
