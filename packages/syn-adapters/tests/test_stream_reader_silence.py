@@ -1,9 +1,10 @@
-"""A live-but-silent agent process must say so, not vanish (issue #1061).
+"""A stream that stops producing complete lines must say so (issue #1061).
 
-A hung phase spins the read loop once a second for its entire timeout, up to an
-hour, emitting nothing. From outside that is indistinguishable from a phase
-between token batches, so the run is only ever ended by a wall clock set for an
-unrelated reason. These tests pin the log that separates the two states.
+A hung phase spins the read loop for its entire timeout, up to an hour, emitting
+nothing. These tests pin the log that makes that visible, and pin the VALUES it
+reports: an earlier version returned a bool from ``line()``, so the caller
+logged a constant 120 for every stall, and a test asserting only on the
+substring "resumed after" passed against it.
 """
 
 from __future__ import annotations
@@ -14,16 +15,18 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_adapters.workspace_backends.agentic import stream_reader
+from syn_adapters.workspace_backends.agentic.stream_reader import _Silence
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 pytestmark = pytest.mark.unit
 
+WARN = stream_reader._SILENCE_WARN_SECONDS
+REPEAT = stream_reader._SILENCE_REPEAT_SECONDS
+
 
 class _FakeProc:
-    """Stands in for asyncio.subprocess.Process; only pid is read."""
-
     pid = 4242
 
 
@@ -31,84 +34,114 @@ async def _drain(gen: AsyncIterator[str]) -> list[str]:
     return [line async for line in gen]
 
 
-def _patch_reads(monkeypatch: pytest.MonkeyPatch, reads: list[bytes | None]) -> list[int]:
-    """Feed read_lines a scripted sequence, one entry per loop iteration."""
-    calls = [0]
+def _patch(monkeypatch: pytest.MonkeyPatch, reads: list[bytes | None], clock: list[float]) -> None:
+    """Feed read_lines a scripted read sequence and a scripted monotonic clock.
 
-    async def fake_read_next_line(_proc: _FakeProc) -> bytes | None:
-        i = calls[0]
-        calls[0] += 1
-        return reads[i] if i < len(reads) else None
+    The clock is scripted because the counter measures elapsed time, not polls.
+    Returning sentinels instantly would otherwise prove only counting logic.
+    """
+    i = [0]
 
-    monkeypatch.setattr(stream_reader, "_read_next_line", fake_read_next_line)
-    return calls
+    async def fake_read(_proc: _FakeProc) -> bytes | None:
+        j = i[0]
+        i[0] += 1
+        return reads[j] if j < len(reads) else None
+
+    t = [0]
+
+    def fake_monotonic() -> float:
+        k = min(t[0], len(clock) - 1)
+        t[0] += 1
+        return clock[k]
+
+    monkeypatch.setattr(stream_reader, "_read_next_line", fake_read)
+    monkeypatch.setattr(stream_reader.time, "monotonic", fake_monotonic)
+
+
+def test_elapsed_is_measured_from_the_clock_not_counted_polls() -> None:
+    """The unit under the logs: one poll spanning ten seconds is ten seconds."""
+    s = _Silence()
+    assert s.tick(1000.0) is False, "the first silent poll only starts the clock"
+    assert s.elapsed(1010.0) == 10.0
+    assert s.stalled(1000.0 + WARN - 1) is False
+    assert s.stalled(1000.0 + WARN) is True
+
+
+def test_line_returns_the_stall_it_ended_not_a_flag() -> None:
+    """The exact regression codex found: a bool here made the caller log a constant."""
+    s = _Silence()
+    s.tick(0.0)
+    ended = s.line(WARN + 37.0)
+    assert ended == WARN + 37.0, "must be the measured stall, not a constant"
+    assert s.line(WARN + 40.0) is None, "a line with no preceding stall reports nothing"
+
+
+def test_a_short_quiet_gap_does_not_warn() -> None:
+    s = _Silence()
+    s.tick(0.0)
+    assert s.tick(WARN - 1.0) is False
+
+
+def test_a_long_stall_repeats_on_the_interval_and_not_faster() -> None:
+    """The invariant: reports are spaced by REPEAT, whatever the poll rate."""
+    s = _Silence()
+    s.tick(0.0)
+    assert s.tick(WARN) is True, "first report at the threshold"
+    assert s.tick(WARN + 1.0) is False, "not once per poll"
+    assert s.tick(WARN + REPEAT - 1.0) is False
+    assert s.tick(WARN + REPEAT) is True, "second report one interval later"
+    assert s.tick(WARN + REPEAT + 1.0) is False
+
+
+def test_the_clock_resets_so_a_second_stall_reports_again() -> None:
+    """Breaks the property for the SECOND stall specifically.
+
+    A tracker that never resets reports once per process and stays silent
+    through every later stall. Only the second stall exposes it.
+    """
+    s = _Silence()
+    s.tick(0.0)
+    assert s.tick(WARN) is True
+    s.line(WARN + 1.0)
+    s.tick(WARN + 2.0)
+    assert s.tick(WARN + 2.0 + WARN) is True, "each stall reports; state must reset"
 
 
 @pytest.mark.asyncio
-async def test_silence_below_the_threshold_logs_nothing(
+async def test_the_loop_reports_a_stall_with_the_measured_duration(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A short quiet gap is ordinary and must not warn."""
-    quiet = stream_reader._SILENCE_WARN_SECONDS - 1
-    _patch_reads(monkeypatch, [b""] * quiet + [b"line one\n", None])
-
-    with caplog.at_level(logging.WARNING):
-        lines = await _drain(stream_reader.read_lines(_FakeProc(), None, 0.0))
-
-    assert lines == ["line one"]
-    assert not [r for r in caplog.records if "silent" in r.getMessage()]
-
-
-@pytest.mark.asyncio
-async def test_silence_at_the_threshold_warns_once_and_names_the_process(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Crossing the threshold must produce exactly one warning, not one per second."""
-    over = stream_reader._SILENCE_WARN_SECONDS + 5
-    _patch_reads(monkeypatch, [b""] * over + [None])
-
-    with caplog.at_level(logging.WARNING):
-        await _drain(stream_reader.read_lines(_FakeProc(), None, 0.0))
-
-    warnings = [r for r in caplog.records if "alive but silent" in r.getMessage()]
-    assert len(warnings) == 1, "one warning at the threshold, not one per silent second"
-    assert "4242" in warnings[0].getMessage(), "must name the process"
-
-
-@pytest.mark.asyncio
-async def test_a_resumed_stream_says_so(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Recovery must be visible, or a warning with no sequel reads as a hang."""
-    over = stream_reader._SILENCE_WARN_SECONDS + 1
-    _patch_reads(monkeypatch, [b""] * over + [b"back\n", None])
+    """End to end through read_lines, asserting the number in the message."""
+    # One monotonic read per loop iteration: start the stall, then observe it
+    # 500s later, then read the line that ends it.
+    _patch(monkeypatch, [b"", b"", b"back\n", None], [0.0, 500.0, 500.0, 500.0])
 
     with caplog.at_level(logging.INFO):
         lines = await _drain(stream_reader.read_lines(_FakeProc(), None, 0.0))
 
     assert lines == ["back"]
-    assert [r for r in caplog.records if "resumed after" in r.getMessage()]
+    warned = [r for r in caplog.records if "No complete stdout line" in r.getMessage()]
+    assert warned, "a stall past the threshold must be reported"
+    assert "500s" in warned[0].getMessage(), "reports the measured stall, not a constant"
+    resumed = [r for r in caplog.records if "resumed after" in r.getMessage()]
+    assert resumed and "500s" in resumed[0].getMessage()
 
 
 @pytest.mark.asyncio
-async def test_the_counter_resets_so_a_second_stall_warns_again(
+async def test_the_warning_does_not_claim_the_process_is_hung(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The invariant: every stall past the threshold warns, not only the first.
+    """A long tool call looks identical from here, so the log must not overclaim.
 
-    A counter that never resets would warn once per process and stay quiet
-    through every later stall. Breaking the reset must fail this test, and it
-    is the second stall that catches it - which the earlier cases cannot.
+    A healthy agent emits tool_use and stays quiet until tool_result. Wording
+    that calls this a hang would be wrong on every such phase.
     """
-    quiet = stream_reader._SILENCE_WARN_SECONDS + 1
-    _patch_reads(
-        monkeypatch,
-        [b""] * quiet + [b"first\n"] + [b""] * quiet + [b"second\n", None],
-    )
+    _patch(monkeypatch, [b"", b"", None], [0.0, 400.0, 400.0])
 
     with caplog.at_level(logging.WARNING):
-        lines = await _drain(stream_reader.read_lines(_FakeProc(), None, 0.0))
+        await _drain(stream_reader.read_lines(_FakeProc(), None, 0.0))
 
-    assert lines == ["first", "second"]
-    warnings = [r for r in caplog.records if "alive but silent" in r.getMessage()]
-    assert len(warnings) == 2, "each stall warns; the counter must reset on a real line"
+    text = " ".join(r.getMessage() for r in caplog.records).lower()
+    assert "no complete stdout line" in text
+    for overclaim in ("hung", "not a slow command", "wrote nothing", "alive but silent"):
+        assert overclaim not in text, f"log must not assert {overclaim!r}"
