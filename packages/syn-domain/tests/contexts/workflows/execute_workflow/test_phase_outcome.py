@@ -199,7 +199,11 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
     )
 
     duration, result = failed_phase_outcome(
-        "implement", {"implement": _START}, {"implement": "sess-9"}, "timed out"
+        "implement",
+        "exec-1",
+        {("exec-1", "implement"): _START},
+        {("exec-1", "implement"): "sess-9"},
+        "timed out",
     )
 
     assert result is not None
@@ -208,7 +212,7 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
 
     # A phase with no recorded start yields neither, rather than a zero-duration
     # result that would enter the metrics as a phase that ran instantly.
-    assert failed_phase_outcome("implement", {}, {}, "timed out") == (None, None)
+    assert failed_phase_outcome("implement", "exec-1", {}, {}, "timed out") == (None, None)
 
 
 async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it() -> None:
@@ -248,6 +252,40 @@ async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it()
     assert metrics["implement"]["status"] == "failed"
 
 
+def test_a_second_executions_entry_does_not_leak_into_the_first() -> None:
+    """#1044: the maps are keyed by (execution_id, phase_id), not phase_id alone.
+
+    Two executions of the same workflow definition share a `phase_id`
+    ("implement" here) but must never share an entry. A lookup that ignored
+    `execution_id` would find execution B's session id when asked about
+    execution A, since both share the exact same phase_id key.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+        failed_phase_outcome,
+    )
+
+    started_at_by_phase = {
+        ("exec-A", "implement"): _START,
+        ("exec-B", "implement"): _START + timedelta(seconds=999),
+    }
+    session_id_by_phase = {
+        ("exec-A", "implement"): "sess-A-only",
+        ("exec-B", "implement"): "sess-B-only",
+    }
+
+    _, result_a = failed_phase_outcome(
+        "implement", "exec-A", started_at_by_phase, session_id_by_phase, "boom", now=_END
+    )
+    _, result_b = failed_phase_outcome(
+        "implement", "exec-B", started_at_by_phase, session_id_by_phase, "boom", now=_END
+    )
+
+    assert result_a is not None
+    assert result_b is not None
+    assert result_a.session_id == "sess-A-only"
+    assert result_b.session_id == "sess-B-only"
+
+
 def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:
     """One clock reading on the failure path, not two.
 
@@ -268,8 +306,9 @@ def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:
     ended = _START + timedelta(seconds=5)
     duration, result = failed_phase_outcome(
         "implement",
-        {"implement": _START},
-        {"implement": "sess-2"},
+        "exec-1",
+        {("exec-1", "implement"): _START},
+        {("exec-1", "implement"): "sess-2"},
         "timed out",
         now=ended,
     )

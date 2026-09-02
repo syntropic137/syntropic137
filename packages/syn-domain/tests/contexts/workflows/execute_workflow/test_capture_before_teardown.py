@@ -88,10 +88,11 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     p = object.__new__(WorkflowExecutionProcessor)
     p._session_managers = {}  # type: ignore[attr-defined]
     p._active_workspaces = {PHASE: workspace}  # type: ignore[attr-defined]
-    p._phase_session_ids = {PHASE: "s-1"}  # type: ignore[attr-defined]
+    p._phase_session_ids = {("e-1", PHASE): "s-1"}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
     p._active_envs = {}  # type: ignore[attr-defined]
     p._active_cmds = {}  # type: ignore[attr-defined]
     p._active_workspace_cms = {PHASE: cm}  # type: ignore[attr-defined]
+    p._phase_started_at = {}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
     p._session_capture = capture  # type: ignore[attr-defined]
     # Delegate import runs on this same path (#895). None here keeps this
     # test about capture ORDERING: with no store there is nothing to import,
@@ -108,6 +109,7 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
 
 async def _finalize(p: WorkflowExecutionProcessor) -> None:
     await p._finalize_phase(  # pyright: ignore[reportPrivateUsage]
+        "e-1",
         PHASE,
         input_tokens=0,
         output_tokens=0,
@@ -170,7 +172,7 @@ class TestCaptureOnCancelAndFailure:
         capture = _Capture(log)
         p = _processor(capture, _Workspace(log), _WorkspaceCm(log))
 
-        await p._close_phase_workspace_cms("cancel")  # pyright: ignore[reportPrivateUsage]
+        await p._close_phase_workspace_cms("e-1", "cancel")  # pyright: ignore[reportPrivateUsage]
 
         assert log == ["capture", "exec", "teardown"]
         assert capture.seen["session_id"] == "s-1"

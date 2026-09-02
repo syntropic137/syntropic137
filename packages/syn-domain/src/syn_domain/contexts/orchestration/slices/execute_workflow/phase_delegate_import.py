@@ -396,9 +396,10 @@ async def capture_and_import_phase(
 async def close_phase_workspaces(
     context: str,
     *,
+    execution_id: str,
     workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]],
     workspaces: dict[str, ManagedWorkspace],
-    session_ids: dict[str, str],
+    session_ids: dict[tuple[str, str], str],
     leader_native_ids: dict[tuple[str, str], str],
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
@@ -411,6 +412,11 @@ async def close_phase_workspaces(
     ran an agent, and a failed run is the one whose transcript is most worth
     having - so the probe and the import both happen here too, in the same
     order and before the container goes away.
+
+    ``session_ids`` is keyed by ``(execution_id, phase_id)`` (#1044): the
+    processor is shared across concurrent executions, so a blanket
+    ``.clear()`` here would erase another still-running execution's session
+    ids along with this one's. Only THIS execution's entries are popped.
     """
     for phase_id, workspace_cm in list(workspace_cms.items()):
         await capture_and_import_phase(
@@ -419,17 +425,17 @@ async def close_phase_workspaces(
             session_store=session_store,
             writer=writer,
             leader_native_ids=leader_native_ids,
-            session_id=session_ids.get(phase_id, ""),
+            session_id=session_ids.get((execution_id, phase_id), ""),
             phase_id=phase_id,
             ledger=ledger,
         )
+        session_ids.pop((execution_id, phase_id), None)
         try:
             await workspace_cm.__aexit__(None, None, None)
         except Exception:
             logger.exception("Error cleaning up workspace during %s", context)
 
     workspace_cms.clear()
-    session_ids.clear()
     leader_native_ids.clear()
 
 
