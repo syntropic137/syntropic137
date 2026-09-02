@@ -5,6 +5,7 @@ Provides session event queries, timelines, cost summaries, and tool summaries.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
@@ -165,33 +166,83 @@ async def get_session_timeline(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
+@dataclass
+class _CallState:
+    """Tracks the single call a `tool_use_id` has already been counted under."""
+
+    tool_name: str
+    has_success: bool = False
+    has_duration: bool = False
+
+
 def _accumulate_tool_stats(
     operations: list[AdapterToolOperation],
 ) -> dict[str, dict[str, int | float]]:
-    """Aggregate tool operation stats by tool name."""
+    """Aggregate tool operation stats by tool name.
+
+    `tool_execution_started` and `tool_execution_completed` are two rows for
+    the same logical call, so counting every row doubles `call_count`
+    (#1061). Counting only started rows undercounts instead (#1063):
+
+    - A completion can arrive with no matching start (Codex explicitly
+      supports this for a truncated stream, CodexStreamProcessor.py
+      `_handle_command_execution_completed`) and the query never requires a
+      pair, so that completion-only row would report `call_count=0` next to
+      `success_count=1` - an impossible summary.
+    - The projection rewrites an Agent/Task call's started row from
+      `tool_execution_started` to `subagent_started` before it reaches here
+      (session_tools_converters.py `row_to_subagent_operation`), so
+      `is_started` is false for it too. Counting on `is_started` alone drops
+      every subagent call to zero.
+
+    Fix: dedupe by `tool_use_id`, which survives the subagent rewrite and is
+    present on completion-only rows. The first row seen for a given
+    `tool_use_id` - start or, absent that, completion - supplies the one
+    call_count increment; later rows for that id (a real completion, or a
+    replayed duplicate) only fill in success/error/duration, once. Rows with
+    no usable `tool_use_id` can't be deduplicated by identity, so each one
+    keeps the previous per-row, `is_started`-gated behavior.
+    """
     tool_stats: dict[str, dict[str, int | float]] = {}
+    calls: dict[str, _CallState] = {}
+
+    def stats_for(name: str) -> dict[str, int | float]:
+        return tool_stats.setdefault(
+            name,
+            {"call_count": 0, "success_count": 0, "error_count": 0, "total_duration_ms": 0.0},
+        )
+
     for op in operations:
         name = op.tool_name or "unknown"
-        if name not in tool_stats:
-            tool_stats[name] = {
-                "call_count": 0,
-                "success_count": 0,
-                "error_count": 0,
-                "total_duration_ms": 0.0,
-            }
-        # Count once per call, on the started row: tool_execution_started and
-        # tool_execution_completed are both rows for the same tool_use_id, so
-        # counting both doubles call_count (#1061). Counting on started (not
-        # completed) keeps a hung call - one that started but never finished -
-        # visible as a call with no success/error outcome, rather than
-        # invisible until it completes.
-        if op.is_started:
-            tool_stats[name]["call_count"] += 1
-        if op.success is True:
-            tool_stats[name]["success_count"] += 1
-        elif op.success is False:
-            tool_stats[name]["error_count"] += 1
-        tool_stats[name]["total_duration_ms"] += op.duration_ms or 0
+
+        if not op.tool_use_id:
+            stats = stats_for(name)
+            if op.is_started:
+                stats["call_count"] += 1
+            if op.success is True:
+                stats["success_count"] += 1
+            elif op.success is False:
+                stats["error_count"] += 1
+            stats["total_duration_ms"] += op.duration_ms or 0
+            continue
+
+        call = calls.get(op.tool_use_id)
+        if call is None:
+            call = _CallState(tool_name=name)
+            calls[op.tool_use_id] = call
+            stats_for(name)["call_count"] += 1
+
+        if not call.has_success and op.success is not None:
+            call.has_success = True
+            if op.success:
+                stats_for(call.tool_name)["success_count"] += 1
+            else:
+                stats_for(call.tool_name)["error_count"] += 1
+
+        if not call.has_duration and op.duration_ms is not None:
+            call.has_duration = True
+            stats_for(call.tool_name)["total_duration_ms"] += op.duration_ms
+
     return tool_stats
 
 
