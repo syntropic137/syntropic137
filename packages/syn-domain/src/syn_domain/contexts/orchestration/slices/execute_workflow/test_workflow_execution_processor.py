@@ -110,6 +110,102 @@ class TestAgentRunnerSelection:
 
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
 
+    @pytest.mark.anyio
+    async def test_handle_run_agent_marks_session_launched_before_dispatch(self) -> None:
+        """_handle_run_agent must call mark_launched() on the phase's session
+        manager before invoking the agent handler - this is the real signal
+        that distinguishes "the agent never ran" from "it ran and later
+        failed" (#1047, #1065). If provisioning fails, RUN_AGENT is never
+        dispatched, so mark_launched() correctly never fires; once RUN_AGENT
+        does dispatch, the session is marked launched regardless of what the
+        agent handler does next.
+        """
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+
+        session_mgr = MagicMock()
+        session_mgr.mark_launched = AsyncMock()
+        processor._session_managers["p-1"] = session_mgr
+
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider="claude"),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
+        session_mgr.mark_launched.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_handle_run_agent_tolerates_missing_session_manager(self) -> None:
+        """No session manager registered for the phase (session tracking
+        disabled, repo=None) must not block agent dispatch.
+        """
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+        # Deliberately no processor._session_managers["p-1"] entry.
+
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider="claude"),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
 
 @pytest.mark.unit
 class TestProcessorTermination:

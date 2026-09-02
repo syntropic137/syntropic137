@@ -206,7 +206,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 3  # Bumped: unified token counting - cache tokens (#695)
+    VERSION = 4  # Bumped: agent_launched fact for never-started detection (#1047, #1065)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -248,8 +248,25 @@ class SessionListProjection(AutoDispatchProjection):
             parent_session_id=event_data.get("parent_session_id"),
             root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
+            agent_launched=False,
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
+
+    async def on_agent_launched(self, event_data: dict) -> None:
+        """Handle AgentLaunched event - record that the agent process ran.
+
+        The sole discriminator between "never started" and "ran then
+        failed" (#1047, #1065): token counts are zero on every failure
+        path regardless of which case it is, so they can't tell them apart.
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        if existing:
+            existing["agent_launched"] = True
+            await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_operation_recorded(self, event_data: dict) -> None:
         """Handle OperationRecorded - update token counts and store operation."""

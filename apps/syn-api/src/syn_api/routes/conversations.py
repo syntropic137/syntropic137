@@ -304,30 +304,39 @@ def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
     )
 
 
-# Terminal statuses a session can settle into without its agent ever having
-# produced a token (see SessionLifecycleManager.complete_failure/cancelled).
-_NEVER_STARTED_STATUSES = frozenset({"failed", "cancelled"})
-
-
-async def _session_never_started(session_id: str) -> bool:
-    """True if the session summary shows the agent never produced any output.
+async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
+    """Classify why a conversation log is missing for this session.
 
     A ``session_summaries`` row exists once ``StartSessionCommand`` succeeds
     (SessionListProjection.on_session_started), so its absence here doesn't
     itself mean "never started" - the caller already resolved this session_id
-    against that same projection to get this far. What distinguishes "no
-    agent ever ran" from "a conversation should exist but the store lost it"
-    is a *terminal* status with zero tokens: a session_error is recorded on
-    every failure/cancellation path, including one whose agent ran and
-    exited non-zero after streaming real tokens, so status alone doesn't
-    discriminate the two cases - zero tokens on a terminal status does
-    (issue #1047).
+    against that same projection to get this far.
+
+    ``agent_launched`` is the domain fact set by ``AgentLaunchedEvent``,
+    recorded the moment ``WorkflowExecutionProcessor`` actually dispatches the
+    agent CLI (``SessionLifecycleManager.mark_launched``). It is the only
+    thing that discriminates "no agent ever ran" from "an agent ran and later
+    failed/was cancelled": both leave ``total_tokens == 0`` on every
+    failure/cancellation path, so status and tokens alone can't tell them
+    apart (issue #1047, #1065).
+
+    A session still ``running`` is neither of those - it may not have
+    produced a log yet regardless of whether the agent has launched, so it
+    gets its own PENDING classification rather than being folded into either
+    terminal case.
     """
     mgr = get_projection_mgr()
     data = await mgr.store.get("session_summaries", session_id)
     if data is None:
-        return False
-    return data.get("status") in _NEVER_STARTED_STATUSES and not data.get("total_tokens")
+        return ObservabilityError.NOT_FOUND
+
+    if data.get("status") == "running":
+        return ObservabilityError.PENDING
+
+    if not data.get("agent_launched", False):
+        return ObservabilityError.NEVER_STARTED
+
+    return ObservabilityError.NOT_FOUND
 
 
 async def get_conversation_log(
@@ -351,12 +360,21 @@ async def get_conversation_log(
         raw_lines = await storage.retrieve_session(session_id)
 
         if raw_lines is None:
-            if await _session_never_started(session_id):
+            classification = await _classify_missing_conversation(session_id)
+            if classification == ObservabilityError.NEVER_STARTED:
                 return Err(
                     ObservabilityError.NEVER_STARTED,
                     message=(
                         f"Session {session_id} never started an agent, so no "
                         "conversation was ever recorded."
+                    ),
+                )
+            if classification == ObservabilityError.PENDING:
+                return Err(
+                    ObservabilityError.PENDING,
+                    message=(
+                        f"Session {session_id} is still running; no conversation "
+                        "log has been recorded yet."
                     ),
                 )
             return Err(
@@ -451,6 +469,8 @@ async def get_conversation_log_endpoint(
 
     if isinstance(result, Err):
         if result.error == ObservabilityError.NEVER_STARTED:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.PENDING:
             raise HTTPException(status_code=404, detail=result.message)
         if result.error == ObservabilityError.NOT_FOUND:
             raise HTTPException(

@@ -55,6 +55,68 @@ class TestStart:
         assert mgr.session is None
 
 
+class TestMarkLaunched:
+    """Tests for mark_launched - the discriminator fact for #1047/#1065."""
+
+    @pytest.mark.asyncio
+    async def test_records_agent_launched_on_session(self) -> None:
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+        repo.save.reset_mock()
+
+        await mgr.mark_launched()
+
+        session = mgr.session
+        assert session is not None
+        assert session.agent_launched is True
+        repo.save.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_noop_when_no_session(self) -> None:
+        mgr = SessionLifecycleManager(
+            repository=None,
+            session_id="s",
+            workflow_id="w",
+            execution_id="e",
+            phase_id="p",
+            agent_provider="claude",
+            agent_model="m",
+        )
+
+        # Should not raise
+        await mgr.mark_launched()
+
+    @pytest.mark.asyncio
+    async def test_swallows_secondary_errors(self) -> None:
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+        repo.save.side_effect = RuntimeError("db down")
+
+        # Should not raise - failing to persist the launch fact must not
+        # block the agent from actually running.
+        await mgr.mark_launched()
+
+    @pytest.mark.asyncio
+    async def test_agent_launched_survives_subsequent_complete_failure(self) -> None:
+        """The regression this whole fix targets: an agent that launched and
+        then failed must still show agent_launched=True after
+        complete_failure runs - complete_failure only sets terminal status,
+        it must never clear the launch fact (#1047, #1065).
+        """
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+
+        await mgr.mark_launched()
+        await mgr.complete_failure(error_message="agent crashed mid-run")
+
+        session = mgr.session
+        assert session is not None
+        assert session.agent_launched is True
+
+
 class TestCompleteSuccess:
     @pytest.mark.asyncio
     async def test_records_tokens_and_completes(self) -> None:

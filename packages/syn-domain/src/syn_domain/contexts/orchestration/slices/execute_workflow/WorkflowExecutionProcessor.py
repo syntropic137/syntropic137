@@ -646,6 +646,14 @@ class WorkflowExecutionProcessor:
             workspace_id=getattr(workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
+        # Record the launch fact before invoking the agent, not after: reaching
+        # this dispatch already means provisioning succeeded and the CLI is
+        # about to be started, so this is the true "agent ran" signal a later
+        # complete_failure/complete_cancelled can't reconstruct from tokens
+        # alone (#1047, #1065). A None session_mgr (repo disabled) is a no-op.
+        session_mgr = self._session_managers.get(todo.phase_id)
+        if session_mgr is not None:
+            await session_mgr.mark_launched()
         result = await self._get_agent_handler().handle(
             todo=todo,
             workspace=workspace,

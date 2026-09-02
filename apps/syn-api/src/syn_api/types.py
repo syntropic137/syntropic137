@@ -147,6 +147,11 @@ class ObservabilityError(StrEnum):
     #: for it. Distinct from NOT_FOUND, which means a log should exist but
     #: could not be located (issue #1047).
     NEVER_STARTED = "never_started"
+    #: The session's agent has been launched but has not yet produced a
+    #: conversation log - it is still running. Distinct from NEVER_STARTED
+    #: (agent never launched) and NOT_FOUND (terminal but unexplained)
+    #: (issue #1047).
+    PENDING = "pending"
 
 
 class TriggerError(StrEnum):

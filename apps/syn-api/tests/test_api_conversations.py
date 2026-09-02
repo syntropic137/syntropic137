@@ -10,6 +10,8 @@ from syn_api.types import Err, ObservabilityError, Ok
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _reset_storage():
@@ -76,12 +78,18 @@ async def test_get_conversation_log_not_found(mock_conversation_store):
     assert result.error == ObservabilityError.NOT_FOUND
 
 
-async def _seed_session_summary(session_id: str, *, status: str, total_tokens: int) -> None:
+async def _seed_session_summary(
+    session_id: str, *, status: str, total_tokens: int, agent_launched: bool
+) -> None:
     """Write a minimal session_summaries row directly, bypassing event replay.
 
-    Mirrors the shape ``SessionListProjection.on_session_started``/
-    ``on_session_completed`` produce in production - only the two fields the
-    never-started detection reads (``status``, ``total_tokens``) matter here.
+    Mirrors the shape ``SessionListProjection.on_session_started`` /
+    ``on_agent_launched`` / ``on_session_completed`` produce in production.
+    ``agent_launched`` is required (no default) because a fixture that omits
+    it silently exercises the pre-fix code path - see #1047/#1065: the write
+    path can never produce a row where a session ran real work but
+    ``agent_launched`` is unset, so every fixture here must set it explicitly
+    to the value the corresponding real event sequence would leave behind.
     """
     from syn_api._wiring import get_projection_mgr
 
@@ -97,6 +105,7 @@ async def _seed_session_summary(session_id: str, *, status: str, total_tokens: i
             "total_tokens": total_tokens,
             "started_at": None,
             "completed_at": None,
+            "agent_launched": agent_launched,
         },
     )
 
@@ -104,12 +113,17 @@ async def _seed_session_summary(session_id: str, *, status: str, total_tokens: i
 async def test_conversation_log_endpoint_reports_honest_message_when_never_started(
     mock_conversation_store,
 ):
-    """A session that failed before the agent produced any tokens gets an honest
-    'never started' message instead of the misleading 'not found' text (#1047).
+    """A session that failed before the agent ever launched (agent_launched=False,
+    the shape SessionLifecycleManager.complete_failure produces when it fires
+    during workspace provisioning, before mark_launched() ever runs) gets an
+    honest 'never started' message instead of the misleading 'not found' text
+    (#1047, #1065).
     """
     from fastapi import HTTPException
 
-    await _seed_session_summary("never-started-1", status="failed", total_tokens=0)
+    await _seed_session_summary(
+        "never-started-1", status="failed", total_tokens=0, agent_launched=False
+    )
 
     with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log_endpoint
@@ -125,13 +139,26 @@ async def test_conversation_log_endpoint_reports_honest_message_when_never_start
 async def test_conversation_log_endpoint_keeps_not_found_when_agent_ran(
     mock_conversation_store,
 ):
-    """A session that ran (has tokens) and then failed keeps the real NOT_FOUND
-    message when its log is genuinely missing from storage - the fix must not
-    mask an actual data-loss case as 'never started'.
+    """A session whose agent actually launched (agent_launched=True) and then
+    failed keeps the real NOT_FOUND message when its log is genuinely missing
+    from storage - the fix must not mask an actual data-loss case as "never
+    started".
+
+    total_tokens=0 here is deliberate: this is the row shape the write path
+    ACTUALLY produces for an agent that launched, streamed nothing (e.g.
+    crashed before its first token), and then failed -
+    ``SessionLifecycleManager.complete_failure`` never calls
+    ``record_operation``, so total_tokens is 0 on every failure path
+    regardless of how much the agent did. A fixture seeding total_tokens=500
+    on a status="failed" row (the old, disproven test) is a shape production
+    can never emit; agent_launched is the only real discriminator (#1047,
+    #1065).
     """
     from fastapi import HTTPException
 
-    await _seed_session_summary("ran-then-failed-1", status="failed", total_tokens=500)
+    await _seed_session_summary(
+        "ran-then-failed-1", status="failed", total_tokens=0, agent_launched=True
+    )
 
     with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log_endpoint
@@ -141,6 +168,33 @@ async def test_conversation_log_endpoint_keeps_not_found_when_agent_ran(
 
     detail = exc_info.value.detail
     assert "not found" in detail.lower()
+    assert "never started" not in detail.lower()
+
+
+async def test_conversation_log_endpoint_reports_pending_while_running(
+    mock_conversation_store,
+):
+    """A session still ``running`` must never be classified as NEVER_STARTED,
+    regardless of ``agent_launched`` - it hasn't reached a terminal state yet
+    and may still produce a log. This is the second blocker fix (#1065): the
+    original predicate (status in {failed, cancelled}) silently excluded
+    "running" and fell through to the misleading generic NOT_FOUND message.
+    """
+    from fastapi import HTTPException
+
+    await _seed_session_summary(
+        "still-running-1", status="running", total_tokens=0, agent_launched=False
+    )
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_conversation_log_endpoint("still-running-1")
+
+    detail = exc_info.value.detail
+    assert "still running" in detail.lower()
+    assert "never started" not in detail.lower()
 
 
 async def test_get_conversation_log_pagination(mock_conversation_store):

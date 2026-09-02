@@ -7,6 +7,9 @@ import pytest
 from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
+from syn_domain.contexts.agent_sessions.domain.commands.MarkAgentLaunchedCommand import (
+    MarkAgentLaunchedCommand,
+)
 from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
@@ -116,3 +119,60 @@ def test_start_session_without_parent_and_explicit_root_uses_explicit_root() -> 
     event = aggregate.get_uncommitted_events()[-1].event
     assert event.parent_session_id is None
     assert event.root_session_id == "explicit-root-4"
+
+
+@pytest.mark.unit
+def test_agent_launched_defaults_false_before_any_command() -> None:
+    """A freshly constructed aggregate has agent_launched=False - the
+    baseline the never-started detection relies on (#1047, #1065).
+    """
+    aggregate = AgentSessionAggregate()
+    assert aggregate.agent_launched is False
+
+
+@pytest.mark.unit
+def test_mark_agent_launched_flips_the_flag() -> None:
+    """mark_agent_launched sets agent_launched=True, the sole discriminator
+    between "no agent ever ran" and "an agent ran and later failed" - both
+    leave total_tokens at 0 on the failure path (#1047, #1065).
+    """
+    aggregate = AgentSessionAggregate()
+    aggregate.start_session(
+        StartSessionCommand(
+            aggregate_id="session-launch-1",
+            workflow_id="wf-1",
+            phase_id="phase-1",
+            agent_provider="claude",
+        )
+    )
+
+    aggregate.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id="session-launch-1"))
+
+    assert aggregate.agent_launched is True
+
+
+@pytest.mark.unit
+def test_mark_agent_launched_is_idempotent() -> None:
+    """A second mark_agent_launched call is a no-op, not an error or a
+    duplicate event - the fact "the agent launched" is true regardless of how
+    many times it's reported, unlike record_operation/complete_session which
+    do enforce invariants that a repeat call could violate.
+    """
+    aggregate = AgentSessionAggregate()
+    aggregate.start_session(
+        StartSessionCommand(
+            aggregate_id="session-launch-2",
+            workflow_id="wf-1",
+            phase_id="phase-1",
+            agent_provider="claude",
+        )
+    )
+
+    aggregate.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id="session-launch-2"))
+    events_after_first = len(aggregate.get_uncommitted_events())
+
+    aggregate.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id="session-launch-2"))
+    events_after_second = len(aggregate.get_uncommitted_events())
+
+    assert aggregate.agent_launched is True
+    assert events_after_second == events_after_first

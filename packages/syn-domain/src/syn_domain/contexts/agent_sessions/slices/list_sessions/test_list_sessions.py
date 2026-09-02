@@ -248,6 +248,66 @@ class TestSessionListProjection:
         assert result["phase_id"] == "phase-123"
 
     @pytest.mark.asyncio
+    async def test_on_session_started_defaults_agent_launched_false(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """A freshly started session has agent_launched=False until the agent
+        process actually launches - this is the pre-launch baseline the
+        never-started detection (#1047, #1065) relies on.
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-not-launched",
+                "workflow_id": "workflow-x",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-not-launched")
+        assert result is not None
+        assert result["agent_launched"] is False
+
+    @pytest.mark.asyncio
+    async def test_on_agent_launched_flips_flag_and_survives_from_dict(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """on_agent_launched must persist through to the SessionSummary the
+        read path actually returns, not just the raw store row - this is the
+        exact "value written correctly, dropped one hop later" trap the fix
+        must not reintroduce (#1047, #1065): the consumer under test here is
+        ``SessionSummary.from_dict`` via ``projection.get_all()``, not the
+        projection dict directly.
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-launched",
+                "workflow_id": "workflow-y",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        await projection.on_agent_launched({"session_id": "session-launched"})
+
+        summaries = await projection.get_all()
+        summary = next(s for s in summaries if s.id == "session-launched")
+        assert summary.agent_launched is True
+
+    @pytest.mark.asyncio
+    async def test_on_agent_launched_is_noop_for_unknown_session(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """on_agent_launched must not create a row for a session it hasn't
+        seen SessionStarted for yet - mirrors the guard already used by
+        on_operation_recorded/on_session_completed.
+        """
+        await projection.on_agent_launched({"session_id": "never-seen"})
+
+        result = await mock_store.get("session_summaries", "never-seen")
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_on_operation_recorded_accumulates_tokens(
         self, projection: SessionListProjection, mock_store: MockProjectionStore
     ) -> None:
@@ -497,6 +557,31 @@ class TestSessionSummaryToDict:
         result = summary.to_dict()
         assert result["started_at"] is None
         assert result["completed_at"] is None
+
+    def test_agent_launched_round_trips_through_to_dict_and_from_dict(self) -> None:
+        """agent_launched=True must survive a full to_dict -> from_dict round
+        trip - the exact serialization hop that a field can be silently
+        dropped at (#1047, #1065). A fixture asserting the default (False)
+        would pass even if this field were never wired into to_dict/from_dict
+        at all, so this uses the non-default value deliberately.
+        """
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary,
+        )
+
+        summary = SessionSummary(
+            id="test-launched",
+            workflow_id="wf-launched",
+            agent_type="claude",
+            status="failed",
+            total_tokens=0,
+            started_at=None,
+            completed_at=None,
+            agent_launched=True,
+        )
+
+        round_tripped = SessionSummary.from_dict(summary.to_dict())
+        assert round_tripped.agent_launched is True
 
 
 # ---------------------------------------------------------------------------

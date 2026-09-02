@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     CompleteSessionCommand,
+    MarkAgentLaunchedCommand,
     OperationType,
     RecordOperationCommand,
     SessionStatus,
@@ -128,6 +129,31 @@ class SessionLifecycleManager:
         self._session.start_session(cmd)
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
+
+    async def mark_launched(self) -> None:
+        """Record that the agent process for this session was launched.
+
+        Call once, right before the agent CLI is invoked (after workspace
+        provisioning succeeds). This is the real discriminator between "the
+        agent never ran" and "the agent ran and later failed" - both leave
+        zero recorded tokens on the failure path, so `complete_failure`
+        alone can't tell them apart (#1047, #1065). Swallows secondary
+        errors like complete_failure/complete_cancelled: failing to persist
+        this fact must not block the agent from actually running.
+        """
+        if self._session is None or self._repo is None:
+            return
+
+        try:
+            cmd = MarkAgentLaunchedCommand(aggregate_id=self._session_id)
+            self._session.mark_agent_launched(cmd)
+            await self._repo.save(self._session)
+        except Exception as launch_err:
+            logger.warning(
+                "Failed to record agent launch for session %s: %s",
+                self._session_id,
+                launch_err,
+            )
 
     async def complete_success(
         self,

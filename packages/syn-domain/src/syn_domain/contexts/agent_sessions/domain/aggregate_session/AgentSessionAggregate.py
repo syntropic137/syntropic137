@@ -18,11 +18,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
         CompleteSessionCommand,
     )
+    from syn_domain.contexts.agent_sessions.domain.commands.MarkAgentLaunchedCommand import (
+        MarkAgentLaunchedCommand,
+    )
     from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
         RecordOperationCommand,
     )
     from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
         StartSessionCommand,
+    )
+    from syn_domain.contexts.agent_sessions.domain.events.AgentLaunchedEvent import (
+        AgentLaunchedEvent,
     )
     from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
         OperationRecordedEvent,
@@ -64,6 +70,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._started_at: datetime | None = None
         self._completed_at: datetime | None = None
         self._metadata: dict[str, str | int | float | bool | None] = {}
+        self._agent_launched: bool = False
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -102,6 +109,16 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def operation_count(self) -> int:
         """Get number of operations recorded."""
         return len(self._operations)
+
+    @property
+    def agent_launched(self) -> bool:
+        """True once the agent process for this session has been launched.
+
+        The sole domain fact that distinguishes a session that died before
+        its agent ever ran from one whose agent ran and later failed - both
+        can legitimately have zero recorded tokens (#1047, #1065).
+        """
+        return self._agent_launched
 
     @property
     def duration_seconds(self) -> float | None:
@@ -218,6 +235,29 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         self._apply(event)
 
+    @command_handler("MarkAgentLaunchedCommand")
+    def mark_agent_launched(self, command: MarkAgentLaunchedCommand) -> None:
+        """Handle MarkAgentLaunchedCommand.
+
+        Records the fact that this session's agent process was launched.
+        Idempotent: a session that emits this twice (defensive re-dispatch
+        after a crash) still only recorded one true fact, so a second call
+        is a no-op rather than an error - unlike record_operation/
+        complete_session, there is no invariant this could violate.
+        """
+        from syn_domain.contexts.agent_sessions.domain.events.AgentLaunchedEvent import (
+            AgentLaunchedEvent,
+        )
+
+        if self._agent_launched:
+            return
+
+        event = AgentLaunchedEvent(
+            session_id=str(self.id),
+            launched_at=datetime.now(UTC),
+        )
+        self._apply(event)
+
     @command_handler("CompleteSessionCommand")
     def complete_session(self, command: CompleteSessionCommand) -> None:
         """Handle CompleteSessionCommand.
@@ -271,6 +311,11 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._status = SessionStatus.RUNNING
         self._started_at = event.started_at
         self._metadata = dict(event.metadata)
+
+    @event_sourcing_handler("AgentLaunched")
+    def on_agent_launched(self, event: AgentLaunchedEvent) -> None:
+        """Apply AgentLaunchedEvent."""
+        self._agent_launched = True
 
     @event_sourcing_handler("OperationRecorded")
     def on_operation_recorded(self, event: OperationRecordedEvent) -> None:
