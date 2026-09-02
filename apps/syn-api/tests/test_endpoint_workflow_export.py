@@ -13,6 +13,10 @@ from syn_api.routes.workflows.queries import (
 )
 from syn_api.types import Err, Ok, WorkflowError
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 def _patch_prefix_resolver(workflow_id: str):
     """Mock resolve_or_raise to return the workflow_id as-is (skip DB lookup)."""

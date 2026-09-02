@@ -6,6 +6,11 @@ import pytest
 
 from syn_api.types import Err, Ok
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
