@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { synPath } from "../persistence/store.js";
 import { readJsonFile, writeJsonFile } from "../persistence/store.js";
@@ -86,6 +87,21 @@ function isRemoteUrl(source: string): boolean {
   return REMOTE_PREFIXES.some((prefix) => source.startsWith(prefix));
 }
 
+// `~` and `~/rest` are the shell's own home-directory shorthand; nothing
+// outside a shell expands them, so parseSource must (issue #1045 review).
+// Anything else that merely starts with `~` (`~alice/rest`, meaning a
+// DIFFERENT user's home directory) is not expanded - Node has no portable
+// way to resolve another account's home directory, and guessing would
+// silently resolve to the wrong path. It still falls through as a local,
+// unexpanded string via the existing `~`-prefix checks below.
+function isHomeRelative(source: string): boolean {
+  return source === "~" || source.startsWith("~/") || source.startsWith("~\\");
+}
+
+function expandHome(source: string): string {
+  return source === "~" ? os.homedir() : path.join(os.homedir(), source.slice(2));
+}
+
 function isLocalPath(source: string): boolean {
   return (
     fs.existsSync(source) ||
@@ -95,18 +111,52 @@ function isLocalPath(source: string): boolean {
   );
 }
 
-// GitHub shorthand is exactly `owner/repo` - two non-empty segments, nothing
-// else. Anything with more segments (`foo/bar/baz`) has no such repo identity
-// and must not be turned into a fabricated github.com URL.
-function isGitHubShorthand(source: string): boolean {
-  if (source.includes("@")) return false;
+// GitHub owner names: alphanumeric characters or hyphens, no two hyphens in
+// a row, cannot start or end with a hyphen, max 39 characters. This is the
+// exact text of the client-side validation on https://github.com/join,
+// reproduced verbatim by github-username-regex
+// (https://github.com/shinnn/github-username-regex, CC0), which quotes the
+// join-page copy directly.
+const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
+
+// GitHub repo names: ASCII letters, digits, `.`, `-`, `_`, max 100
+// characters - GitHub's own docs, verbatim:
+// https://github.com/github/docs/blob/main/data/reusables/repositories/repo-name.md
+// "can only contain ASCII letters, digits, and the characters ., -, and _"
+// (100-character cap stated in the same sentence). `.` and `..` are rejected
+// on top of that pattern: they are reserved path segments to git and the
+// filesystem, not nameable repositories, and GitHub refuses them too.
+const GITHUB_REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
+
+function isValidGitHubOwner(owner: string): boolean {
+  return GITHUB_OWNER_RE.test(owner);
+}
+
+function isValidGitHubRepoName(repo: string): boolean {
+  return repo !== "." && repo !== ".." && GITHUB_REPO_RE.test(repo);
+}
+
+// GitHub shorthand is exactly `owner/repo` where both segments are a real
+// GitHub owner and repo name - a segment COUNT is not a validation of
+// repository identity. Two segments that fail these character rules
+// (`C:/repo`, `foo/.`, `org/repo#v1`, `org/repo?x=y`, `" a/b "`, ...) are not
+// a GitHub repository and must not be turned into a fabricated github.com
+// URL. Exported so every place that needs to classify a source string (the
+// `workflow packages` command included) shares this one definition rather
+// than growing a second, divergent check.
+export function isGitHubShorthand(source: string): boolean {
   const segments = source.split("/");
-  return segments.length === 2 && segments.every((segment) => segment.length > 0);
+  if (segments.length !== 2) return false;
+  const [owner, repo] = segments as [string, string];
+  return isValidGitHubOwner(owner) && isValidGitHubRepoName(repo);
 }
 
 export function parseSource(source: string): { resolved: string; isRemote: boolean } {
   if (isRemoteUrl(source)) {
     return { resolved: source, isRemote: true };
+  }
+  if (isHomeRelative(source)) {
+    return { resolved: expandHome(source), isRemote: false };
   }
   if (isLocalPath(source)) {
     return { resolved: source, isRemote: false };
