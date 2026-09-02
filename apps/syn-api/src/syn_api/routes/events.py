@@ -179,7 +179,14 @@ def _accumulate_tool_stats(
                 "error_count": 0,
                 "total_duration_ms": 0.0,
             }
-        tool_stats[name]["call_count"] += 1
+        # Count once per call, on the started row: tool_execution_started and
+        # tool_execution_completed are both rows for the same tool_use_id, so
+        # counting both doubles call_count (#1061). Counting on started (not
+        # completed) keeps a hung call - one that started but never finished -
+        # visible as a call with no success/error outcome, rather than
+        # invisible until it completes.
+        if op.is_started:
+            tool_stats[name]["call_count"] += 1
         if op.success is True:
             tool_stats[name]["success_count"] += 1
         elif op.success is False:
