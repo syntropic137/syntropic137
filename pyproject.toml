@@ -147,6 +147,7 @@ testpaths = [
     "scripts/workflows",
     "scripts/tests",
     "infra/scripts/tests",
+    "docker/token-injector",
 ]
 pythonpath = [
     "apps/syn-api/src",

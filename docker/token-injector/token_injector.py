@@ -120,6 +120,12 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self._handle_check()
 
+    def do_HEAD(self) -> None:
+        self._handle_check()
+
+    def do_OPTIONS(self) -> None:
+        self._handle_check()
+
     def _handle_check(self) -> None:
         # Envoy forwards the original request's Host header
         host = self.headers.get("x-forwarded-host") or self.headers.get("host", "")
@@ -154,7 +160,10 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # RFC 7231 4.3.2: a HEAD response must not include a body, even
+        # though it reports the headers (incl. Content-Length) GET would.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
 
 # ---------------------------------------------------------------------------
