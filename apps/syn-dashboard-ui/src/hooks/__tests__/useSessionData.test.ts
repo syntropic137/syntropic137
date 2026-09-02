@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useSessionData } from '../useSessionData'
 
@@ -66,5 +66,48 @@ describe('useSessionData', () => {
     const { result } = renderHook(() => useSessionData('sess-1'))
 
     expect(result.current.showConversationLog).toBe(false)
+  })
+
+  describe('live polling (#1048)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        configurable: true,
+      })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('pauses polling while the tab is hidden (usePolling had no visibility handling)', async () => {
+      mockGetSession.mockResolvedValue(makeSession({ status: 'running' }) as never)
+
+      const { result } = renderHook(() => useSessionData('sess-1'))
+      // Wait for the resolved fetch to actually land in state — polling is
+      // gated on `session`, not on the mock having been invoked.
+      await vi.waitFor(() => expect(result.current.session?.status).toBe('running'))
+      expect(mockGetSession).toHaveBeenCalledTimes(1)
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        configurable: true,
+      })
+
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(mockGetSession).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops polling once the session reaches a terminal status', async () => {
+      mockGetSession.mockResolvedValue(makeSession({ status: 'completed' }) as never)
+
+      const { result } = renderHook(() => useSessionData('sess-1'))
+      await vi.waitFor(() => expect(result.current.session?.status).toBe('completed'))
+      expect(mockGetSession).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(mockGetSession).toHaveBeenCalledTimes(1)
+    })
   })
 })

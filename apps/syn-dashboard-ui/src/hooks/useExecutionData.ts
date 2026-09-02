@@ -3,6 +3,7 @@ import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
 import { useExecutionStream } from './useExecutionStream'
 import { useLiveTimer } from './useLiveTimer'
+import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
 
@@ -14,6 +15,14 @@ export interface UseExecutionDataResult {
   isConnected: boolean
   now: number
   refreshExecution: () => void
+}
+
+// Matches useExecutionList's TERMINAL_STATUSES — paused/other non-terminal
+// states should keep polling, not just 'running' (#1048).
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
+
+function isTerminalExecution(e: ExecutionDetailResponse): boolean {
+  return TERMINAL_STATUSES.has(e.status)
 }
 
 const REFRESH_EVENT_TYPES = new Set([
@@ -66,6 +75,14 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
     onEvent: (event) => {
       if (isRefreshEvent(event)) refreshExecution()
     },
+  })
+
+  // SSE only fires on lifecycle transitions; tokens/cost/duration update
+  // continuously, so poll while non-terminal (#1048).
+  useRefetchWhileRunning({
+    items: execution ? [execution] : [],
+    isTerminal: isTerminalExecution,
+    refetch: refreshExecution,
   })
 
   useEffect(() => {
