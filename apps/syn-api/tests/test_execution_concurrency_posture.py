@@ -50,7 +50,18 @@ class TestTheDispatcherIsSafeWhenAskedForNothing:
         construction that omitted the argument quietly reintroduced exactly the
         posture the setting exists to prevent.
         """
-        dispatcher = BackgroundWorkflowDispatcher(handler=object())  # type: ignore[arg-type]
+
+        # `_NullHandler`, not `object()`: the dispatcher now refuses an
+        # unhonourable stored declaration BEFORE acknowledging the dispatch
+        # (#1039), so a handler double has to satisfy that contract too.
+        class _NullHandler:
+            async def validate_stored_declarations(self, _wid: str) -> None:
+                return None
+
+            async def handle(self, *args: object, **kwargs: object) -> None:
+                return None
+
+        dispatcher = BackgroundWorkflowDispatcher(handler=_NullHandler())  # type: ignore[arg-type]
 
         assert dispatcher._semaphore._value == 1
 
@@ -69,6 +80,9 @@ class TestTheDispatcherIsSafeWhenAskedForNothing:
         peak = 0
 
         class BlockingHandler:
+            async def validate_stored_declarations(self, _wid: str) -> None:
+                return None
+
             async def handle(self, *args: object, **kwargs: object) -> None:
                 nonlocal concurrent, peak
                 concurrent += 1

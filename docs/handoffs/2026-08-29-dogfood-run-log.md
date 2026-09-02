@@ -1289,3 +1289,67 @@ mitigation is the premise check.
 **What to do with v4.** Do not run it again on a deployment question until #1053
 is answered. It remains the right shape for a repository-scoped question, and
 the two codex gates are worth their cost on any shape.
+## H7 - does naming a known-bad fixture produce a validator that actually fails?
+
+**Hypothesis.** A task specified with a known-bad fixture that the deliverable
+must flag produces a plan whose tests actually catch defects. The same task
+specified only in prose produces one that passes vacuously.
+
+**Why this subject.** A validator is the purest case of the failure mode: one
+that finds nothing goes green beautifully and looks finished.
+
+**Method.** Two runs of `sdlc-research-plan-v3` against
+`syntropic137/syntropic137-marketplace`, same repo, same models, same hour.
+Sole variable: whether the task text named
+`plugins/sdlc-trunk/workflows/pr-review/workflow.yaml` and a mechanical
+acceptance criterion.
+
+- A (fixture named): `exec-9d0b22037806`, 4.2M tokens, **$2.65**
+- B (prose only): `exec-fc4a1e5f4bef`, 7.0M tokens, **$3.43**
+
+Predictions were recorded before dispatch, along with the scoring rule, so
+neither could be chosen to fit the outcome.
+
+**Result: NOT SUPPORTED. Three of four predictions refuted.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | A names a specific input the validator must reject | **held** |
+| 2 | B says "add tests" without naming an input that must fail | **refuted** |
+| 3 | B never finds the lowercase-tools defect | **refuted** |
+| 4 | costs land within 20 percent | **refuted** (29 percent on cost, 67 percent on tokens) |
+
+B found the defect unaided and reasoned about vacuity more explicitly than A
+did. Its own words: a check stubbed to `return []` "necessarily still passes
+every test whose expected result is an empty error list - it cannot possibly
+fail such a test". It then labelled each planned test by whether it could catch
+a stub, and cited the existing suite's own
+`test_passes_when_version_bumped` / `test_fails_when_version_not_bumped` pair
+as the illustration. Nobody asked it to do that.
+
+**B also found strictly more than A.** Both traced the defect to its source in
+the contributor docs and the scaffold command, which teach the broken tool
+triple; B cited one line A missed. B additionally went to the core repo, found
+the real `ToolName` enum has no git member (so removing `git` costs no
+capability, since `Bash` already grants shell), and found that
+`packages/syn-shared/src/syn_shared/tools.py` **404s at the pinned
+`v0.25.2`** - which bears directly on the schema-alignment gap the task was
+about. A found neither.
+
+**What the fixture actually bought: nothing but a discount.** It did not
+determine rigour. It saved 29 percent of the cost and 67 percent of the tokens
+that B spent rediscovering what A was handed.
+
+**The confound, stated rather than buried.** Both arms ran the same four-phase
+workflow, which includes a codex cross-model review. In BOTH runs that review
+materially improved the verification section: A's plan records accepting
+"BLOCKER 1" on fixture ordering, B's records "IMPROVEMENT 1" (a proposed
+`grep -rn '\bgit\b'` would also match `git log` inside phase prose and could
+never return zero) and "IMPROVEMENT 2" (a blanket mutation claim that a stubbed
+check would survive). So the anti-vacuity work may belong to the review phase
+rather than to the task specification, and H7 cannot separate them.
+
+**The better question this produced.** Run the same two arms with the
+cross-model review phase removed. If rigour survives without it, the
+specification was carrying it; if it collapses in both arms, the review phase
+is what produces it and H3 is a larger effect than H7 was ever testing.

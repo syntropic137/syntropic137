@@ -383,6 +383,14 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
     """
     frontmatter_lines: list[str] = []
 
+    # NOTHING REFUSED BY THE LOADER MAY BE EMITTED HERE. The frontmatter this
+    # writes is re-read by md_prompt_loader on install, so a key the loader
+    # rejects turns export -> reinstall into a hard failure.
+    #
+    # `max-tokens` is omitted: it was being emitted here while
+    # `PhaseYamlDefinition._reject_max_tokens` already refused it, so an
+    # exported phase carrying one could not be reinstalled. Fixed in the same
+    # pass as #1039 rather than left as a known open case of the same class.
     if phase.model:
         frontmatter_lines.append(f"model: {_yaml_quote(phase.model)}")
     if phase.argument_hint:
@@ -391,8 +399,6 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
         frontmatter_lines.append(f"allowed-tools: {','.join(phase.allowed_tools)}")
     if phase.timeout_seconds and phase.timeout_seconds != 300:
         frontmatter_lines.append(f"timeout-seconds: {phase.timeout_seconds}")
-    if phase.max_tokens is not None:
-        frontmatter_lines.append(f"max-tokens: {phase.max_tokens}")
 
     body = phase.prompt_template or ""
 
@@ -507,12 +513,19 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # declares nothing", which reinstalls differently again.
     if phase.timeout_seconds is not None:
         lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
-    # `max_tokens` is deliberately NOT exported. `PhaseYamlDefinition`
-    # rejects it -- "no agent CLI exposes a token cap, so this value has never
-    # bounded anything" -- so emitting it produced a package that could never
-    # be installed. A phase can only carry one via the untyped JSON create
-    # path, which is its own defect (#1015 follow-up); exporting it would
-    # propagate that anomaly into a file the loader refuses.
+    # EXPORT PRESERVES WHAT THE SCHEMA CAN EXPRESS, even when the loader would
+    # refuse it (#1039). Omitting a refused declaration LAUNDERS it: a stored
+    # `execution_type: human_in_loop` phase, dropped on export, reinstalls as
+    # `sequential` and then runs - turning a template this platform refuses
+    # into one it happily executes, with the human gate its author believed in
+    # silently gone. An uninstallable package is the better failure, because it
+    # names the problem instead of hiding it. The same holds for a codex phase
+    # carrying `allowed_tools`.
+    #
+    # `max_tokens` is the ONE exception, and it is a different case: it is not
+    # in the authoring schema at all, so there is no spelling that round-trips.
+    # It can only arrive via the untyped JSON create path (#1015 follow-up).
+    # Nothing that CAN be expressed is dropped here.
     if phase.argument_hint:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:

@@ -44,7 +44,7 @@ phases:
   - id: phase-2
     name: Second Phase
     order: 2
-    execution_type: human_in_loop
+    execution_type: sequential
     input_artifacts:
       - output_1
     output_artifacts:
@@ -84,7 +84,11 @@ def test_parse_phases() -> None:
     assert phase1.max_tokens is None
 
     phase2 = definition.phases[1]
-    assert phase2.execution_type == PhaseExecutionType.HUMAN_IN_LOOP
+    # `human_in_loop` intentionally absent: like `parallel`, it has no
+    # implementation and nothing branches on it, so declaring it is now
+    # rejected rather than parsed and ignored (#1039).
+    assert phase2.execution_type == PhaseExecutionType.SEQUENTIAL
+    # Resolves because phase-1 declares `output_1` in its output_artifacts.
     assert phase2.input_artifacts == ["output_1"]
 
 

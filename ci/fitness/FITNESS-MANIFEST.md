@@ -25,6 +25,26 @@ Run both: `just fitness`
 | 7 | Cost Boundaries | test_cost_ceiling (F7) | - | Enforced |
 | 8 | Boundary Clarity | test_layer_separation, test_dependency_direction | fitness_exceptions.toml `[layer_separation]` | Enforced |
 | 9 | Scalability | test_in_memory_state_audit | fitness_exceptions.toml `[in_memory_state]` | Enforced |
+| 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
+
+### 10. Declaration Integrity (ADR-069 D5)
+
+A phase schema field may exist only if some code path applies or refuses it.
+
+#1039 was four fields - `input_artifacts`, `allowed_tools`, `execution_type`,
+`argument_hint` - validated, persisted, projected, re-exported as YAML, and
+dropped before execution. `ExecutablePhase` has one production construction
+site, so a field not passed there is inert by construction. Every one of them
+had a default, so omitting it was legal Python and legal pyright, and nothing
+failed: phases ran, the dashboard rendered the values, the declarations meant
+nothing.
+
+The gate classifies every field as applied, refused, or validated, and checks
+the classification against the AST rather than against a comment. Both halves
+were verified by reintroducing the real defect: an earlier substring-based
+version PASSED with #1039 restored, because the command builder mentions
+`allowed_tools` whether or not the handler ever sets it. It now asserts the
+keyword is passed at the constructor call.
 
 ## Configuration Surfaces
 

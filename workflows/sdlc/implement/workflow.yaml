@@ -53,6 +53,7 @@ phases:
       - Grep
       - Glob
       - Bash
+      - Write
     agent:
       provider: claude
       model: sonnet
@@ -94,6 +95,7 @@ phases:
       - Glob
       - Bash
       - Edit
+      - Write
     agent:
       provider: claude
       model: sonnet
@@ -111,6 +113,7 @@ phases:
     allowed_tools:
       - Read
       - Bash
+      - Write
     agent:
       provider: claude
       model: sonnet

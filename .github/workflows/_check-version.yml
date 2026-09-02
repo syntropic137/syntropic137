@@ -36,3 +36,27 @@ jobs:
 
       - name: Validate version is bumped vs release branch
         run: python3 scripts/workflows/bump_version.py --check-release
+
+      # WHY: `release` means "this is what production runs". A prerelease
+      # version sitting on that branch breaks the invariant: every consumer
+      # then has to parse the version string to know whether the branch tip
+      # is real, and the beta has to be unwound before the next release.
+      #
+      # Betas do not go near this branch. They are cut from `main` as
+      # prerelease tags (see release-beta.yaml), which publishes images
+      # without `latest` and the CLI under `next`.
+      #
+      # This makes the mistake impossible rather than discouraged.
+      - name: Refuse a prerelease version on a PR into release
+        if: github.base_ref == 'release'
+        run: |
+          VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "Version under review: ${VERSION}"
+          if [[ "${VERSION}" =~ (-|\+) ]]; then
+            echo "::error file=pyproject.toml::Refusing to merge prerelease version '${VERSION}' into 'release'."
+            echo "::error::The release branch carries production versions only. Cut a beta from main instead:"
+            echo "::error::  gh release create v${VERSION} --prerelease --target main"
+            exit 1
+          fi
+          echo "OK: '${VERSION}' is a production version."
+

@@ -42,6 +42,51 @@ class PhaseExecutionType(StrEnum):
     HUMAN_IN_LOOP = "human_in_loop"
 
 
+#: The members an executor actually implements. `parallel` has no parallel
+#: processor and `human_in_loop` has no approval gate; nothing in the codebase
+#: branches on this field at all, so every phase runs sequentially whatever it
+#: declares. Kept as a named set rather than inlined so the authoring check and
+#: the execution check cannot drift apart.
+IMPLEMENTED_EXECUTION_TYPES: frozenset[PhaseExecutionType] = frozenset(
+    {PhaseExecutionType.SEQUENTIAL}
+)
+
+
+class UnsupportedExecutionTypeError(ValueError):
+    """A phase declared an execution type no executor implements."""
+
+    def __init__(self, execution_type: object, *, phase_id: str | None = None) -> None:
+        where = f"Phase '{phase_id}': " if phase_id else ""
+        supported = ", ".join(sorted(t.value for t in IMPLEMENTED_EXECUTION_TYPES))
+        super().__init__(
+            f"{where}execution_type '{execution_type}' is not implemented: every "
+            f"phase runs sequentially, so this value has never changed how a "
+            f"phase runs. Remove it, or use one of: {supported}."
+        )
+
+
+def require_supported_execution_type(
+    execution_type: object,
+    *,
+    phase_id: str | None = None,
+) -> PhaseExecutionType:
+    """Return the execution type, or raise if no executor implements it.
+
+    TWO CALLERS, DELIBERATELY. The YAML validator rejects it at authoring time,
+    which is cheap and early. This is also called at the EXECUTION boundary,
+    because a template stored before this rule existed is rehydrated straight
+    from its historical ``WorkflowTemplateCreated`` event and never sees the
+    YAML validator - the same reason ``require_executable_provider`` guards
+    execution rather than parsing alone. A loader-only check would sail every
+    already-stored ``parallel`` phase straight through, which is precisely the
+    population most likely to have one.
+    """
+    for known in IMPLEMENTED_EXECUTION_TYPES:
+        if execution_type == known:
+            return known
+    raise UnsupportedExecutionTypeError(execution_type, phase_id=phase_id)
+
+
 class InputDeclaration(BaseModel):
     """Declaration of an expected workflow input.
 
