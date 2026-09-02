@@ -9,6 +9,7 @@ See: docs/adrs/ADR-064-observability-monitor-ui.md
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 
 EM_DASH = "\u2014"
@@ -93,6 +94,64 @@ def format_duration_seconds(seconds: float | int | None) -> str:
         return f"{minutes}m {secs}s" if secs else f"{minutes}m"
     hours, mins = divmod(minutes, 60)
     return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+
+def _parse_timestamp(value: datetime | str | None) -> datetime | None:
+    """Parse an ISO 8601 string or pass through an existing datetime.
+
+    Handles the trailing ``Z`` suffix (RFC 3339) that ``fromisoformat`` rejects
+    on Python <3.11. Returns ``None`` for anything unparseable rather than
+    raising, since a malformed timestamp is exactly as "unknown" as a missing
+    one to the caller.
+    """
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def compute_duration_seconds(
+    started_at: datetime | str | None,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    """Elapsed time for something that is still running: ``now - started_at``.
+
+    The single definition of "how long has this been running" shared by the
+    execution and session read paths (``executions/queries.py`` and
+    ``sessions.py``), so the two surfaces can no longer disagree about a phase
+    or session that is live at the moment of the read.
+
+    Terminal phases/sessions are NOT this function's job -- they keep whatever
+    duration was recorded at completion. This only covers the gap where no
+    completion has happened yet, so there is nothing stored to read: without
+    it, a running phase reports a duration frozen at whatever it was when it
+    started (or ``None``), indistinguishable from a hang. That ambiguity got
+    six healthy workflow runs cancelled on 2026-09-01 after a frozen duration
+    reading was misread as one.
+
+    Returns ``None`` when ``started_at`` is missing or unparseable -- a
+    genuinely unknown duration must never collapse to ``0.0``, which looks
+    exactly like a real measurement.
+    """
+    started = _parse_timestamp(started_at)
+    if started is None:
+        return None
+    reference = now if now is not None else datetime.now(UTC)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=UTC)
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return max((reference - started).total_seconds(), 0.0)
 
 
 _UUID_RE = re.compile(

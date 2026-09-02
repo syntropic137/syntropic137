@@ -24,6 +24,7 @@ from syn_api.types import (
     ToolOperation,
 )
 from syn_shared.display import (
+    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_repos,
@@ -233,6 +234,16 @@ async def _map_phase_detail(
     else:
         sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
 
+    # A running phase has no completed_at yet, so its stored duration_seconds
+    # is still the 0.0 the projection seeded it with -- read-time computed
+    # against the wall clock instead. Terminal phases keep the stored value
+    # as-is; store-on-completion is unaffected.
+    duration_seconds = (
+        compute_duration_seconds(phase.started_at)
+        if phase.status == "running"
+        else phase.duration_seconds
+    )
+
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
         name=phase.name,
@@ -245,7 +256,7 @@ async def _map_phase_detail(
         cache_creation_tokens=sc.cache_creation,
         cache_read_tokens=sc.cache_read,
         cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
-        duration_seconds=phase.duration_seconds,
+        duration_seconds=duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
@@ -282,7 +293,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         + phase.output_tokens
         + phase.cache_creation_tokens
         + phase.cache_read_tokens,
-        duration_seconds=phase.duration_seconds or 0.0,
+        duration_seconds=phase.duration_seconds,
         cost_usd=Decimal(str(phase.cost_usd)),
         unpriced_observation_count=phase.unpriced_observation_count,
         started_at=str(phase.started_at) if phase.started_at else None,

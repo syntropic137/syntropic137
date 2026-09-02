@@ -3330,11 +3330,8 @@ export interface components {
             cache_read_tokens: number;
             /** Total Tokens */
             total_tokens: number;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Cost Usd
              * @default 0
@@ -4232,6 +4229,8 @@ export interface components {
              * @default —
              */
             duration_display: string;
+            /** Last Event At */
+            last_event_at?: string | null;
             /** Error Message */
             error_message?: string | null;
             /** Metadata */
@@ -4338,6 +4337,8 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+            /** Last Event At */
+            last_event_at?: string | null;
         };
         /**
          * SessionTokenMetrics

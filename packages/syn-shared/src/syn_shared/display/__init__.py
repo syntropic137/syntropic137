@@ -16,6 +16,7 @@ from __future__ import annotations
 from syn_shared.display.formatters import (
     EM_DASH,
     UNPRICED,
+    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -27,6 +28,7 @@ from syn_shared.display.formatters import (
 __all__ = [
     "EM_DASH",
     "UNPRICED",
+    "compute_duration_seconds",
     "format_cost",
     "format_duration_seconds",
     "format_model_compact",

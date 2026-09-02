@@ -59,7 +59,7 @@ def test_summary_round_trips_lineage_from_an_object() -> None:
         repos: ClassVar[list[str]] = []
         input_tokens = output_tokens = 0
         cache_creation_tokens = cache_read_tokens = total_tokens = 0
-        started_at = completed_at = None
+        started_at = completed_at = last_event_at = None
 
     s = SessionSummary.model_validate(_DomainRow())
     assert s.parent_session_id == "leader-1"
@@ -105,7 +105,7 @@ async def test_the_ROUTE_carries_lineage_from_the_projection() -> None:
         repos: ClassVar[list[str]] = []
         input_tokens = output_tokens = 0
         cache_creation_tokens = cache_read_tokens = total_tokens = 0
-        started_at = completed_at = None
+        started_at = completed_at = last_event_at = None
 
     manager = MagicMock()
     manager.session_list.query = AsyncMock(return_value=[_DomainRow()])

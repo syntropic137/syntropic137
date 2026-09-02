@@ -29,7 +29,11 @@ class PhaseExecutionInfo(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     total_tokens: int
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """``None`` means genuinely unknown. A ``running`` phase computes this live
+    at read time (``now - started_at``); other phases without a completion
+    event to record one have no duration to report.
+    """
     cost_usd: Decimal = Decimal("0")
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.

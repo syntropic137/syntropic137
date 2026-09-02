@@ -513,6 +513,11 @@ class SessionSummary(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    last_event_at: datetime | None = None
+    """Timestamp of the most recent observability event for this session --
+    the only field that answers "is this session alive" (as opposed to
+    "hung"). ``None`` if no operation has been recorded yet.
+    """
 
 
 class ArtifactSummary(BaseModel):
@@ -854,6 +859,11 @@ class SessionDetail(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
+    last_event_at: datetime | None = None
+    """Timestamp of the most recent observability event for this session --
+    the only field that answers "is this session alive" (as opposed to
+    "hung"). ``None`` if no operation has been recorded yet.
+    """
     error_message: str | None = None
 
 

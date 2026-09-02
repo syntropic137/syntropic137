@@ -8652,9 +8652,15 @@
             "title": "Total Tokens"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "cost_usd": {
             "type": "string",
@@ -10222,6 +10228,17 @@
             "title": "Duration Display",
             "default": "\u2014"
           },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
           "error_message": {
             "anyOf": [
               {
@@ -10473,6 +10490,17 @@
               }
             ],
             "title": "Completed At"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
           }
         },
         "type": "object",

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from syn_shared.display import (
+    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -116,6 +118,58 @@ class TestFormatDurationSeconds:
     )
     def test_renders_expected_string(self, value: float | None, expected: str) -> None:
         assert format_duration_seconds(value) == expected
+
+
+@pytest.mark.unit
+class TestComputeDurationSeconds:
+    """The single read-time definition shared by the execution and session
+    routes -- both must agree on what "how long has this been running" means
+    for something that has not completed yet.
+    """
+
+    def test_none_started_at_is_unknown_not_zero(self) -> None:
+        # A missing started_at is genuinely unknown; 0.0 would be a lie --
+        # indistinguishable from "just started this instant".
+        assert compute_duration_seconds(None) is None
+
+    def test_unparseable_string_is_unknown_not_zero(self) -> None:
+        assert compute_duration_seconds("not-a-timestamp") is None
+
+    def test_empty_string_is_unknown(self) -> None:
+        assert compute_duration_seconds("") is None
+
+    def test_computes_elapsed_from_iso_string(self) -> None:
+        now = datetime(2026, 9, 1, 12, 0, 30, tzinfo=UTC)
+        started = "2026-09-01T12:00:00+00:00"
+        assert compute_duration_seconds(started, now=now) == 30.0
+
+    def test_computes_elapsed_from_trailing_z_suffix(self) -> None:
+        # RFC 3339 'Z' suffix is what most of our stored timestamps use;
+        # datetime.fromisoformat() rejects it directly on Python < 3.11.
+        now = datetime(2026, 9, 1, 12, 1, 0, tzinfo=UTC)
+        started = "2026-09-01T12:00:00Z"
+        assert compute_duration_seconds(started, now=now) == 60.0
+
+    def test_computes_elapsed_from_datetime_object(self) -> None:
+        now = datetime(2026, 9, 1, 12, 0, 45, tzinfo=UTC)
+        started = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+        assert compute_duration_seconds(started, now=now) == 45.0
+
+    def test_naive_datetime_is_treated_as_utc(self) -> None:
+        now = datetime(2026, 9, 1, 12, 0, 10)  # naive
+        started = datetime(2026, 9, 1, 12, 0, 0)  # naive
+        assert compute_duration_seconds(started, now=now) == 10.0
+
+    def test_advances_between_two_calls_without_a_fixed_now(self) -> None:
+        # No `now` override: this is what the route layer actually calls.
+        # A frozen or memoized value here is exactly the bug that got six
+        # healthy workflow runs cancelled on 2026-09-01.
+        started = datetime.now(UTC) - timedelta(seconds=5)
+        first = compute_duration_seconds(started)
+        second = compute_duration_seconds(started)
+        assert first is not None
+        assert second is not None
+        assert second >= first
 
 
 @pytest.mark.unit

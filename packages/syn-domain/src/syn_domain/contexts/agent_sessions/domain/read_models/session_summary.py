@@ -202,6 +202,14 @@ class SessionSummary:
     duration_seconds: float | None = None
     """Duration of the session in seconds."""
 
+    last_event_at: datetime | None = None
+    """Timestamp of the most recent observability event recorded for this
+    session. The only field that answers "is this session alive" -- unlike
+    ``duration_seconds`` it advances on every operation, not just start and
+    completion, so a live-but-quiet phase can still be told apart from a dead
+    one. ``None`` until at least one operation has been recorded.
+    """
+
     phase_id: str | None = None
     """ID of the phase this session belongs to."""
 
@@ -264,6 +272,7 @@ class SessionSummary:
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             duration_seconds=data.get("duration_seconds"),
+            last_event_at=data.get("last_event_at"),
             phase_id=data.get("phase_id"),
             execution_id=data.get("execution_id"),
             parent_session_id=data.get("parent_session_id"),
@@ -300,6 +309,14 @@ class SessionSummary:
                 else str(self.completed_at)
             )
 
+        last_event_at_str = None
+        if self.last_event_at:
+            last_event_at_str = (
+                self.last_event_at.isoformat()
+                if isinstance(self.last_event_at, datetime)
+                else str(self.last_event_at)
+            )
+
         return {
             "id": self.id,
             "workflow_id": self.workflow_id,
@@ -313,6 +330,7 @@ class SessionSummary:
             "cache_creation_tokens": self.cache_creation_tokens,
             "cache_read_tokens": self.cache_read_tokens,
             "duration_seconds": self.duration_seconds,
+            "last_event_at": last_event_at_str,
             "phase_id": self.phase_id,
             "execution_id": self.execution_id,
             "parent_session_id": self.parent_session_id,

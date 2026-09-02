@@ -1,6 +1,8 @@
 """Tests for syn_api.routes.executions — list, get, get_detail, list_active."""
 
+import asyncio
 import os
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -155,6 +157,87 @@ async def test_get_detail_not_found():
 
     result = await get_detail("nonexistent-id")
     assert isinstance(result, Err)
+
+
+async def _seed_execution_with_running_phase(
+    exec_id: str, workflow_id: str, phase_started_at: str
+) -> None:
+    """Seed an execution with a single RUNNING phase, exactly as the
+    projection would leave it mid-flight: duration_seconds still 0.0
+    (nothing has completed it yet) and no completed_at.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+
+    await manager.workflow_execution_detail._store.save(
+        "workflow_execution_details",
+        exec_id,
+        {
+            "execution_id": exec_id,
+            "workflow_execution_id": exec_id,
+            "workflow_id": workflow_id,
+            "workflow_name": "Workflow A",
+            "status": "running",
+            "started_at": phase_started_at,
+            "completed_at": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost_usd": "0",
+            "total_duration_seconds": 0.0,
+            "artifact_ids": [],
+            "error_message": None,
+            "phases": [
+                {
+                    "workflow_phase_id": "phase-1",
+                    "name": "Phase 1",
+                    "status": "running",
+                    "session_id": None,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "total_tokens": 0,
+                    "duration_seconds": 0.0,
+                    "started_at": phase_started_at,
+                    "completed_at": None,
+                    "error_message": None,
+                }
+            ],
+        },
+    )
+
+
+async def test_get_detail_running_phase_duration_advances_between_reads():
+    """A RUNNING phase's duration_seconds must be computed live, not read
+    back as the 0.0 the projection seeded it with.
+
+    Regression test for the 2026-09-01 incident: six healthy workflow runs
+    were cancelled because a running phase's duration looked frozen. A test
+    that only asserted ``duration_seconds is not None`` would already pass
+    today against the stored ``0.0`` -- so this asserts the value ADVANCES
+    between two reads of the same still-running phase, which is only
+    possible if it is computed against the wall clock at read time.
+    """
+    from syn_api.routes.executions import get_detail
+
+    started_at = (datetime.now(UTC) - timedelta(seconds=100)).isoformat()
+    await _seed_execution_with_running_phase("exec-running-phase", "wf-1", started_at)
+
+    first = await get_detail("exec-running-phase")
+    assert isinstance(first, Ok)
+    first_duration = first.value.phases[0].duration_seconds
+    assert first_duration is not None
+    assert first_duration > 0.0
+
+    await asyncio.sleep(0.05)
+
+    second = await get_detail("exec-running-phase")
+    assert isinstance(second, Ok)
+    second_duration = second.value.phases[0].duration_seconds
+    assert second_duration is not None
+    assert second_duration > first_duration
 
 
 async def test_list_active():
