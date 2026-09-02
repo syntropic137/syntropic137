@@ -80,10 +80,20 @@ class ControlSignal:
 
 @dataclass(frozen=True)
 class ControlResult:
-    """Result of handling a control command."""
+    """Result of handling a control command.
+
+    `new_state` is read from the projection *before* any control signal is
+    enqueued - cancel/pause/resume are asynchronous, so this handler never
+    observes the transition it requested. `state_pending` says whether
+    `new_state` is that pre-signal read (True: a transition may still be in
+    flight and has not been confirmed) or the actual current state because
+    no signal was queued at all (False, e.g. the command was rejected, or
+    the command - like inject - never changes state) (#1062).
+    """
 
     success: bool
     execution_id: str
     new_state: str
     message: str | None = None
     error: str | None = None
+    state_pending: bool = False

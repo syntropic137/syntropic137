@@ -61,11 +61,24 @@ class InjectRequest(BaseModel):
 
 
 class ControlResponse(BaseModel):
-    """Response from a control command."""
+    """Response from a control command.
+
+    Pause/resume/cancel act by enqueueing a signal for the executor to pick
+    up at its next yield point - this endpoint returns before that signal
+    is processed. `state` is therefore the state observed *before* the
+    signal was enqueued, not a confirmation that the transition happened.
+    Check `state_pending`: if True, `state` is unconfirmed and the actual
+    transition has not been observed by this response - poll
+    `GET /executions/{execution_id}/state` to see it land. If False, no
+    signal was queued (the command was rejected, or - for inject - the
+    command never changes state), so `state` is the accurate current state.
+    (#1062)
+    """
 
     success: bool
     execution_id: str
     state: str
+    state_pending: bool = False
     message: str | None = None
     error: str | None = None
 
@@ -101,6 +114,7 @@ async def pause(
                 new_state=domain_result.new_state,
                 message=domain_result.message,
                 error=domain_result.error,
+                state_pending=domain_result.state_pending,
             )
         )
     except Exception as e:
@@ -123,6 +137,7 @@ async def resume(
                 new_state=domain_result.new_state,
                 message=domain_result.message,
                 error=domain_result.error,
+                state_pending=domain_result.state_pending,
             )
         )
     except Exception as e:
@@ -148,6 +163,7 @@ async def cancel(
                 new_state=domain_result.new_state,
                 message=domain_result.message,
                 error=domain_result.error,
+                state_pending=domain_result.state_pending,
             )
         )
     except Exception as e:
@@ -174,6 +190,7 @@ async def inject(
                 new_state=domain_result.new_state,
                 message=domain_result.message,
                 error=domain_result.error,
+                state_pending=domain_result.state_pending,
             )
         )
     except Exception as e:
@@ -222,6 +239,7 @@ async def _handle_control_result(
         success=ctrl.success,
         execution_id=ctrl.execution_id,
         state=ctrl.new_state,
+        state_pending=ctrl.state_pending,
         message=ctrl.message,
     )
 
@@ -231,7 +249,13 @@ async def pause_execution_endpoint(
     execution_id: str,
     request: PauseRequest | None = None,
 ) -> ControlResponse:
-    """Pause a running execution."""
+    """Pause a running execution.
+
+    Asynchronous: enqueues a pause signal for the executor to pick up at its
+    next yield point and returns immediately. The response's `state` is the
+    state observed before the signal was enqueued - check `state_pending`
+    before treating it as confirmed (#1062).
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await pause(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "pause")
@@ -239,7 +263,13 @@ async def pause_execution_endpoint(
 
 @router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
 async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
-    """Resume a paused execution."""
+    """Resume a paused execution.
+
+    Asynchronous: enqueues a resume signal for the executor to pick up at
+    its next yield point and returns immediately. The response's `state` is
+    the state observed before the signal was enqueued - check
+    `state_pending` before treating it as confirmed (#1062).
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await resume(execution_id)
     return await _handle_control_result(result, "resume")
@@ -250,7 +280,15 @@ async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel a running or paused execution."""
+    """Cancel a running or paused execution.
+
+    Asynchronous: enqueues a cancel signal for the executor to pick up at
+    its next yield point and returns immediately, before the cancellation
+    is observed. The response's `state` is the state observed before the
+    signal was enqueued, not a confirmation that the execution has actually
+    been cancelled - check `state_pending`, or poll
+    `GET /executions/{execution_id}/state` for the confirmed state (#1062).
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")
@@ -261,7 +299,12 @@ async def inject_context_endpoint(
     execution_id: str,
     request: InjectRequest,
 ) -> ControlResponse:
-    """Inject a message into the execution context."""
+    """Inject a message into the execution context.
+
+    Asynchronous: enqueues the message for the executor to pick up at its
+    next yield point. Injection never changes execution state, so `state`
+    is accurate immediately (`state_pending` is always False here).
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await inject(execution_id, message=request.message, role=request.role)
     return await _handle_control_result(result, "inject")

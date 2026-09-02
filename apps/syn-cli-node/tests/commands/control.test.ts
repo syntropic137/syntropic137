@@ -55,6 +55,27 @@ describe("control commands", () => {
     expect(stdout()).toContain("Cancel signal sent");
   });
 
+  it("cancel with a pending state caveats it as unconfirmed (#1062)", async () => {
+    // Cancellation is async: the API returns the pre-enqueue state and
+    // flags it as unconfirmed via state_pending. The CLI must not present
+    // that value as a confirmed transition.
+    mockFetch.mockResolvedValue(jsonResponse({ state: "running", state_pending: true }));
+    const handler = controlGroup.getCommand("cancel")!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    const out = stdout();
+    expect(out).toContain("State: running (unconfirmed - transition pending)");
+    expect(out).toContain("syn control status exec-1");
+  });
+
+  it("cancel with a confirmed state prints it without caveat", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ state: "completed", state_pending: false }));
+    const handler = controlGroup.getCommand("cancel")!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    const out = stdout();
+    expect(out).toContain("State: completed");
+    expect(out).not.toContain("unconfirmed");
+  });
+
   it("status shows execution state", async () => {
     mockFetch.mockResolvedValue(jsonResponse({ state: "running" }));
     const handler = controlGroup.getCommand("status")!.handler;

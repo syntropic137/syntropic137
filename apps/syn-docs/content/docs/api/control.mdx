@@ -32,13 +32,57 @@ _openapi:
       - content: Get Execution State Endpoint
         id: get-execution-state-endpoint
     contents:
-      - content: Pause a running execution.
+      - content: >-
+          Pause a running execution.
+
+
+          Asynchronous: enqueues a pause signal for the executor to pick up at
+          its
+
+          next yield point and returns immediately. The response's `state` is
+          the
+
+          state observed before the signal was enqueued - check `state_pending`
+
+          before treating it as confirmed (#1062).
         heading: pause-execution-endpoint
-      - content: Resume a paused execution.
+      - content: >-
+          Resume a paused execution.
+
+
+          Asynchronous: enqueues a resume signal for the executor to pick up at
+
+          its next yield point and returns immediately. The response's `state`
+          is
+
+          the state observed before the signal was enqueued - check
+
+          `state_pending` before treating it as confirmed (#1062).
         heading: resume-execution-endpoint
-      - content: Cancel a running or paused execution.
+      - content: >-
+          Cancel a running or paused execution.
+
+
+          Asynchronous: enqueues a cancel signal for the executor to pick up at
+
+          its next yield point and returns immediately, before the cancellation
+
+          is observed. The response's `state` is the state observed before the
+
+          signal was enqueued, not a confirmation that the execution has
+          actually
+
+          been cancelled - check `state_pending`, or poll
+
+          `GET /executions/{execution_id}/state` for the confirmed state
+          (#1062).
         heading: cancel-execution-endpoint
-      - content: Inject a message into the execution context.
+      - content: |-
+          Inject a message into the execution context.
+
+          Asynchronous: enqueues the message for the executor to pick up at its
+          next yield point. Injection never changes execution state, so `state`
+          is accurate immediately (`state_pending` is always False here).
         heading: inject-context-endpoint
       - content: Get current execution state.
         heading: get-execution-state-endpoint

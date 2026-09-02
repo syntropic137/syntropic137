@@ -300,6 +300,11 @@ export interface paths {
         /**
          * Pause Execution Endpoint
          * @description Pause a running execution.
+         *
+         *     Asynchronous: enqueues a pause signal for the executor to pick up at its
+         *     next yield point and returns immediately. The response's `state` is the
+         *     state observed before the signal was enqueued - check `state_pending`
+         *     before treating it as confirmed (#1062).
          */
         post: operations["pause_execution_endpoint_executions__execution_id__pause_post"];
         delete?: never;
@@ -320,6 +325,11 @@ export interface paths {
         /**
          * Resume Execution Endpoint
          * @description Resume a paused execution.
+         *
+         *     Asynchronous: enqueues a resume signal for the executor to pick up at
+         *     its next yield point and returns immediately. The response's `state` is
+         *     the state observed before the signal was enqueued - check
+         *     `state_pending` before treating it as confirmed (#1062).
          */
         post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
         delete?: never;
@@ -340,6 +350,13 @@ export interface paths {
         /**
          * Cancel Execution Endpoint
          * @description Cancel a running or paused execution.
+         *
+         *     Asynchronous: enqueues a cancel signal for the executor to pick up at
+         *     its next yield point and returns immediately, before the cancellation
+         *     is observed. The response's `state` is the state observed before the
+         *     signal was enqueued, not a confirmation that the execution has actually
+         *     been cancelled - check `state_pending`, or poll
+         *     `GET /executions/{execution_id}/state` for the confirmed state (#1062).
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -360,6 +377,10 @@ export interface paths {
         /**
          * Inject Context Endpoint
          * @description Inject a message into the execution context.
+         *
+         *     Asynchronous: enqueues the message for the executor to pick up at its
+         *     next yield point. Injection never changes execution state, so `state`
+         *     is accurate immediately (`state_pending` is always False here).
          */
         post: operations["inject_context_endpoint_executions__execution_id__inject_post"];
         delete?: never;
@@ -2065,6 +2086,17 @@ export interface components {
         /**
          * ControlResponse
          * @description Response from a control command.
+         *
+         *     Pause/resume/cancel act by enqueueing a signal for the executor to pick
+         *     up at its next yield point - this endpoint returns before that signal
+         *     is processed. `state` is therefore the state observed *before* the
+         *     signal was enqueued, not a confirmation that the transition happened.
+         *     Check `state_pending`: if True, `state` is unconfirmed and the actual
+         *     transition has not been observed by this response - poll
+         *     `GET /executions/{execution_id}/state` to see it land. If False, no
+         *     signal was queued (the command was rejected, or - for inject - the
+         *     command never changes state), so `state` is the accurate current state.
+         *     (#1062)
          */
         ControlResponse: {
             /** Success */
@@ -2073,6 +2105,11 @@ export interface components {
             execution_id: string;
             /** State */
             state: string;
+            /**
+             * State Pending
+             * @default false
+             */
+            state_pending: boolean;
             /** Message */
             message?: string | null;
             /** Error */

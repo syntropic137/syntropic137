@@ -804,13 +804,18 @@ class ExecutionDetailFull(BaseModel):
 
 
 class ControlResult(BaseModel):
-    """Result of a control command (pause/resume/cancel/inject)."""
+    """Result of a control command (pause/resume/cancel/inject).
+
+    `new_state` may be read before an async control signal was enqueued -
+    see `state_pending` (#1062).
+    """
 
     success: bool
     execution_id: str
     new_state: str
     message: str | None = None
     error: str | None = None
+    state_pending: bool = False
 
 
 # ---------------------------------------------------------------------------

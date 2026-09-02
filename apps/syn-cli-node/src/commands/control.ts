@@ -24,6 +24,21 @@ function reqId(parsed: ParsedArgs): string {
   return id;
 }
 
+/**
+ * Print the state reported by a control command, caveated when it hasn't
+ * been confirmed yet. Pause/resume/cancel are asynchronous - `state` on a
+ * pending response is the value read before the signal was enqueued, not
+ * a confirmation the transition happened (#1062).
+ */
+function printControlState(data: ControlResponse, executionId: string): void {
+  if (data.state_pending) {
+    print(`  State: ${data.state} (unconfirmed - transition pending)`);
+    printDim(`  Run \`syn control status ${executionId}\` to see the confirmed state.`);
+  } else {
+    print(`  State: ${data.state}`);
+  }
+}
+
 const pauseCommand: CommandDef = {
   name: "pause",
   description: "Pause a running execution at the next yield point",
@@ -40,7 +55,7 @@ const pauseCommand: CommandDef = {
       "Pause execution",
     );
     print(style(`Pause signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    printControlState(data, id);
     if (data.message) print(`  Message: ${data.message}`);
   },
 };
@@ -58,7 +73,7 @@ const resumeCommand: CommandDef = {
       "Resume execution",
     );
     print(style(`Resume signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    printControlState(data, id);
   },
 };
 
@@ -85,7 +100,7 @@ const cancelCommand: CommandDef = {
       "Cancel execution",
     );
     print(style(`Cancel signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    printControlState(data, id);
   },
 };
 
@@ -151,7 +166,7 @@ const stopCommand: CommandDef = {
       "Stop execution",
     );
     print(style(`Stop signal sent for execution ${id}`, YELLOW));
-    print(`  State: ${data.state}`);
+    printControlState(data, id);
     if (data.message) print(`  Message: ${data.message}`);
   },
 };

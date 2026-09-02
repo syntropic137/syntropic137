@@ -166,6 +166,9 @@ class TestExecutionController:
 
         assert result.success
         assert result.message == "Pause signal queued"
+        # A signal was enqueued but not yet acknowledged by the executor -
+        # the returned state must be flagged as unconfirmed (#1062).
+        assert result.state_pending is True
 
         # Check signal was queued
         signal = await signal_adapter.dequeue(execution_id)
@@ -184,6 +187,8 @@ class TestExecutionController:
 
         assert not result.success
         assert "Cannot pause" in (result.error or "")
+        # No signal was queued - the read state is the actual current state.
+        assert result.state_pending is False
 
     @pytest.mark.asyncio
     async def test_resume_paused_execution(
@@ -198,6 +203,7 @@ class TestExecutionController:
 
         assert result.success
         assert result.message == "Resume signal queued"
+        assert result.state_pending is True
 
         # Check signal was queued
         signal = await signal_adapter.dequeue(execution_id)
@@ -229,6 +235,11 @@ class TestExecutionController:
 
         assert result.success
         assert result.message == "Cancel signal queued"
+        # Cancellation is asynchronous: the signal was just enqueued, so the
+        # returned state is the pre-cancel value and must be flagged as
+        # unconfirmed rather than presented as the post-cancel state (#1062).
+        assert result.state_pending is True
+        assert result.new_state == ExecutionState.RUNNING.value
 
         # Check signal was queued
         signal = await signal_adapter.dequeue(execution_id)
@@ -258,6 +269,7 @@ class TestExecutionController:
 
         assert not result.success
         assert "Cannot cancel" in (result.error or "")
+        assert result.state_pending is False
 
     @pytest.mark.asyncio
     async def test_inject_into_running_execution(
@@ -272,6 +284,9 @@ class TestExecutionController:
 
         assert result.success
         assert result.message == "Context injection queued"
+        # Inject never transitions execution state, so the reported state
+        # is accurate immediately - nothing is pending confirmation.
+        assert result.state_pending is False
 
         # Check signal was queued
         signal = await signal_adapter.dequeue(execution_id)

@@ -96,6 +96,7 @@ class ExecutionController:
             execution_id=cmd.execution_id,
             new_state=sm.state.value,  # Still running until acknowledged
             message="Pause signal queued",
+            state_pending=True,
         )
 
     async def _handle_resume(self, cmd: ResumeExecution) -> ControlResult:
@@ -119,8 +120,9 @@ class ExecutionController:
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
+            new_state=sm.state.value,  # Still paused until acknowledged
             message="Resume signal queued",
+            state_pending=True,
         )
 
     async def _handle_cancel(self, cmd: CancelExecution) -> ControlResult:
@@ -145,8 +147,9 @@ class ExecutionController:
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
+            new_state=sm.state.value,  # Still running/paused until acknowledged
             message="Cancel signal queued",
+            state_pending=True,
         )
 
     async def _handle_inject(self, cmd: InjectContext) -> ControlResult:
@@ -173,6 +176,8 @@ class ExecutionController:
             execution_id=cmd.execution_id,
             new_state=sm.state.value,
             message="Context injection queued",
+            # Inject never transitions execution state, so the state above
+            # is accurate immediately - state_pending stays False (default).
         )
 
     async def _get_state_machine(self, execution_id: str) -> ExecutionStateMachine:

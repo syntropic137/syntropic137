@@ -881,7 +881,7 @@
           "control"
         ],
         "summary": "Pause Execution Endpoint",
-        "description": "Pause a running execution.",
+        "description": "Pause a running execution.\n\nAsynchronous: enqueues a pause signal for the executor to pick up at its\nnext yield point and returns immediately. The response's `state` is the\nstate observed before the signal was enqueued - check `state_pending`\nbefore treating it as confirmed (#1062).",
         "operationId": "pause_execution_endpoint_executions__execution_id__pause_post",
         "parameters": [
           {
@@ -941,7 +941,7 @@
           "control"
         ],
         "summary": "Resume Execution Endpoint",
-        "description": "Resume a paused execution.",
+        "description": "Resume a paused execution.\n\nAsynchronous: enqueues a resume signal for the executor to pick up at\nits next yield point and returns immediately. The response's `state` is\nthe state observed before the signal was enqueued - check\n`state_pending` before treating it as confirmed (#1062).",
         "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
         "parameters": [
           {
@@ -984,7 +984,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running or paused execution.",
+        "description": "Cancel a running or paused execution.\n\nAsynchronous: enqueues a cancel signal for the executor to pick up at\nits next yield point and returns immediately, before the cancellation\nis observed. The response's `state` is the state observed before the\nsignal was enqueued, not a confirmation that the execution has actually\nbeen cancelled - check `state_pending`, or poll\n`GET /executions/{execution_id}/state` for the confirmed state (#1062).",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -1044,7 +1044,7 @@
           "control"
         ],
         "summary": "Inject Context Endpoint",
-        "description": "Inject a message into the execution context.",
+        "description": "Inject a message into the execution context.\n\nAsynchronous: enqueues the message for the executor to pick up at its\nnext yield point. Injection never changes execution state, so `state`\nis accurate immediately (`state_pending` is always False here).",
         "operationId": "inject_context_endpoint_executions__execution_id__inject_post",
         "parameters": [
           {
@@ -5853,6 +5853,11 @@
             "type": "string",
             "title": "State"
           },
+          "state_pending": {
+            "type": "boolean",
+            "title": "State Pending",
+            "default": false
+          },
           "message": {
             "anyOf": [
               {
@@ -5883,7 +5888,7 @@
           "state"
         ],
         "title": "ControlResponse",
-        "description": "Response from a control command."
+        "description": "Response from a control command.\n\nPause/resume/cancel act by enqueueing a signal for the executor to pick\nup at its next yield point - this endpoint returns before that signal\nis processed. `state` is therefore the state observed *before* the\nsignal was enqueued, not a confirmation that the transition happened.\nCheck `state_pending`: if True, `state` is unconfirmed and the actual\ntransition has not been observed by this response - poll\n`GET /executions/{execution_id}/state` to see it land. If False, no\nsignal was queued (the command was rejected, or - for inject - the\ncommand never changes state), so `state` is the accurate current state.\n(#1062)"
       },
       "ConversationLineResponse": {
         "properties": {
