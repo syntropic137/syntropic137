@@ -87,7 +87,13 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 1800
+    # 3600, not 1800 (2026-09-02). This phase runs the full suite plus
+    # `just preflight`, and it died at exit 124 - timeout's signature - at
+    # 1811s against an 1800s ceiling, taking a completed implement phase's
+    # work down with it because a FAILED execution cannot be resumed
+    # (WorkflowExecutionAggregate.resume_execution refuses any status but
+    # PAUSED). The ceiling was 11 seconds short of the work.
+    timeout_seconds: 3600
     allowed_tools:
       - Read
       - Grep
