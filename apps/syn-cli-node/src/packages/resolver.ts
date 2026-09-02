@@ -87,11 +87,21 @@ function isRemoteUrl(source: string): boolean {
 }
 
 function isLocalPath(source: string): boolean {
-  return fs.existsSync(source) || source.startsWith(".") || source.startsWith("/");
+  return (
+    fs.existsSync(source) ||
+    source.startsWith(".") ||
+    source.startsWith("/") ||
+    source.startsWith("~")
+  );
 }
 
+// GitHub shorthand is exactly `owner/repo` - two non-empty segments, nothing
+// else. Anything with more segments (`foo/bar/baz`) has no such repo identity
+// and must not be turned into a fabricated github.com URL.
 function isGitHubShorthand(source: string): boolean {
-  return source.includes("/") && !source.includes("@") && !source.startsWith(".");
+  if (source.includes("@")) return false;
+  const segments = source.split("/");
+  return segments.length === 2 && segments.every((segment) => segment.length > 0);
 }
 
 export function parseSource(source: string): { resolved: string; isRemote: boolean } {

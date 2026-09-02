@@ -40,6 +40,27 @@ describe("parseSource", () => {
     const result = parseSource("my-workflow");
     expect(result).toEqual({ resolved: "my-workflow", isRemote: false });
   });
+
+  it("does not treat a 3-segment path as GitHub owner/repo shorthand", () => {
+    // A GitHub repo identity is always exactly owner/repo. "foo/bar/baz" has
+    // no such identity, so parseSource must not fabricate
+    // https://github.com/foo/bar/baz.git out of it.
+    const result = parseSource("foo/bar/baz");
+    expect(result.isRemote).toBe(false);
+    expect(result.resolved).not.toContain("github.com");
+  });
+
+  it("does not treat a deeply nested path as GitHub owner/repo shorthand", () => {
+    const result = parseSource("some/nested/dir/deep");
+    expect(result.isRemote).toBe(false);
+    expect(result.resolved).not.toContain("github.com");
+  });
+
+  it("treats a tilde-prefixed path as local, not shorthand", () => {
+    const result = parseSource("~/local/workflow");
+    expect(result.isRemote).toBe(false);
+    expect(result.resolved).not.toContain("github.com");
+  });
 });
 
 function makeTmpDir(): string {
