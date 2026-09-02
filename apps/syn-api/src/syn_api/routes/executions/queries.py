@@ -376,12 +376,21 @@ async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
 # -- Service functions --------------------------------------------------------
 
 
-async def list_(
+async def _list_with_enrichment(
     workflow_id: str | None = None,
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> Result[list[ExecutionSummary], ExecutionError]:
+) -> Result[tuple[list[ExecutionSummary], dict[str, _ExecutionEnrichment]], ExecutionError]:
+    """Load execution summaries and their Lane 2 enrichment together.
+
+    The enrichment dict is returned alongside the summaries so a caller that
+    needs the full per-execution breakdown (token components, not just the
+    cost/unpriced-count already folded into ExecutionSummary below) can reuse
+    it instead of re-running the per-row `get_execution_cost` loop a second
+    time for the same execution_ids (issue #1069 - list_executions_endpoint
+    was doing exactly that, doubling the SQL round trips on every request).
+    """
     await ensure_connected()
     manager = get_projection_mgr()
     projection = manager.workflow_execution_list
@@ -402,35 +411,49 @@ async def list_(
     cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in domain_summaries]
     )
-    return Ok(
-        [
-            ExecutionSummary(
-                workflow_execution_id=s.workflow_execution_id,
-                workflow_id=s.workflow_id,
-                workflow_name=s.workflow_name,
-                status=s.status,
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-                completed_phases=s.completed_phases,
-                total_phases=s.total_phases,
-                total_tokens=s.total_tokens,
-                total_input_tokens=s.total_input_tokens,
-                total_output_tokens=s.total_output_tokens,
-                total_cache_creation_tokens=s.total_cache_creation_tokens,
-                total_cache_read_tokens=s.total_cache_read_tokens,
-                total_cost_usd=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).total_cost_usd,
-                unpriced_observation_count=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).unpriced_observation_count,
-                tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
-                error_message=s.error_message,
-                repos=list(s.repos),
-            )
-            for s in domain_summaries
-        ]
+    summaries = [
+        ExecutionSummary(
+            workflow_execution_id=s.workflow_execution_id,
+            workflow_id=s.workflow_id,
+            workflow_name=s.workflow_name,
+            status=s.status,
+            started_at=s.started_at,
+            completed_at=s.completed_at,
+            completed_phases=s.completed_phases,
+            total_phases=s.total_phases,
+            total_tokens=s.total_tokens,
+            total_input_tokens=s.total_input_tokens,
+            total_output_tokens=s.total_output_tokens,
+            total_cache_creation_tokens=s.total_cache_creation_tokens,
+            total_cache_read_tokens=s.total_cache_read_tokens,
+            total_cost_usd=_enrichment_for(
+                cost_by_execution, s.workflow_execution_id
+            ).total_cost_usd,
+            unpriced_observation_count=_enrichment_for(
+                cost_by_execution, s.workflow_execution_id
+            ).unpriced_observation_count,
+            tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
+            error_message=s.error_message,
+            repos=list(s.repos),
+        )
+        for s in domain_summaries
+    ]
+    return Ok((summaries, cost_by_execution))
+
+
+async def list_(
+    workflow_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> Result[list[ExecutionSummary], ExecutionError]:
+    result = await _list_with_enrichment(
+        workflow_id=workflow_id, status=status, limit=limit, offset=offset
     )
+    if isinstance(result, Err):
+        return result
+    summaries, _enrichment = result.value
+    return Ok(summaries)
 
 
 async def get(
@@ -635,19 +658,16 @@ async def list_executions_endpoint(
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
     offset = (page - 1) * page_size
-    result = await list_(status=status, limit=page_size, offset=offset)
+    result = await _list_with_enrichment(status=status, limit=page_size, offset=offset)
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
-    manager = get_projection_mgr()
-    enrichment = await _load_execution_enrichment(
-        manager, [e.workflow_execution_id for e in result.value]
-    )
+    summaries, enrichment = result.value
     return ExecutionListResponse(
         executions=[
             _build_execution_summary_response(e, enrichment.get(e.workflow_execution_id))
-            for e in result.value
+            for e in summaries
         ],
-        total=len(result.value),
+        total=len(summaries),
         page=page,
         page_size=page_size,
     )
