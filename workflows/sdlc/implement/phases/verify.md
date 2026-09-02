@@ -38,6 +38,13 @@ like proof.
 Run `just qa-ci`. Paste its final lines. If it is not green, that is the finding
 and you should stop and report it rather than working around it.
 
+**Run the whole gate, not the sub-commands you think it contains.** A change can
+pass every test, typecheck and build and still fail CI on something none of them
+touch. A CLI flag added in this repository drifted a generated docs page and
+failed `codegen-check`, a real PR-gating job, while every direct test passed. If
+`just qa-ci` cannot run here, name the gates it would have run and run each one,
+rather than substituting the two you happen to know.
+
 Run `git status --porcelain` before and after. Verification commands in this
 repository have mutated tracked files; if the tree changed, report it.
 
@@ -52,6 +59,34 @@ concluding anything from the test result.
 
 If a test passes against broken code, say so. That is more valuable than a green
 run, and it is the specific failure this phase exists to catch.
+
+## Ask which production input shapes the fixtures cannot construct
+
+This is the question that decides whether the tests are worth anything, and it is
+the one most often skipped. Mutation testing proves a test is not vacuous. It
+cannot prove the fix is correct, because mutating the code can never surface a
+layer the fixture never reaches.
+
+So for every new test, name the shapes of real input it does NOT build, and then
+build them:
+
+- Values the WRITE path can actually emit. Read the producer, not the consumer. A
+  fixture seeding a field the failure path never records certifies a case that
+  cannot occur; a test in this repository asserted on a session with tokens
+  recorded, when the code that completes a failed session records nothing at all.
+- Rows that arrive alone. A start with no completion, a completion with no start,
+  a truncated stream. Pairs are the easy case and rarely the broken one.
+- Values a projection or converter REWRITES before the code under test sees them.
+  A fixture built by hand skips that rewrite, so a defect living in it is
+  invisible to every mutation you try.
+- Inputs a user would plausibly type that the author did not imagine. For a path
+  or an identifier that means absolute paths, trailing separators, dots, query
+  strings, whitespace, and platform-specific spellings.
+- Duplicates and replays. An event store can deliver the same row twice.
+
+Where the real conversion is reachable, drive the fixture THROUGH it rather than
+constructing the object directly. State in your report which shapes you added and
+which you decided were out of scope, with the reason.
 
 ## Attack the change
 
