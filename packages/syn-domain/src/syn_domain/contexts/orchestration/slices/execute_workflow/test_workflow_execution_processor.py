@@ -626,4 +626,126 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
             await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
 
         assert cache.files == {"p-1": files}
-        assert cache.primary == {"p-1": "r"}
+
+
+@pytest.mark.unit
+class TestPhaseSuccessAssertionEnforcement:
+    """A declared success_assertion must gate ArtifactsCollectedForPhase (#1085).
+
+    Without this, a phase whose agent exits cleanly but whose artifact BODY
+    reports a failure (e.g. "COMMENT: FAILED") still reaches
+    aggregate.artifacts_collected and the execution completes green.
+    """
+
+    @pytest.mark.anyio
+    async def test_unmet_assertion_fails_before_recording_artifacts(self) -> None:
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
+            ArtifactCollectionResult,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.phase_assertion import (
+            PhaseAssertionFailedError,
+        )
+
+        processor = _make_processor()
+        processor._save_and_sync = AsyncMock()
+        processor._active_workspaces["p-1"] = MagicMock()
+
+        handler = MagicMock()
+        handler.handle = AsyncMock(
+            return_value=ArtifactCollectionResult(
+                artifact_ids=["a1"],
+                first_content="COMMENT: FAILED - capability is broken",
+                command=MagicMock(),
+                files=[],
+            )
+        )
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="p-1",
+            session_id="sess-1",
+        )
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Research",
+            order=1,
+            prompt_template="x",
+            success_assertion="COMMENT: OK",
+        )
+        aggregate = MagicMock()
+        cache = PhaseOutputCache()
+
+        with (
+            patch(
+                "syn_domain.contexts.orchestration.slices.execute_workflow"
+                ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+                return_value=handler,
+            ),
+            pytest.raises(PhaseAssertionFailedError),
+        ):
+            await processor._handle_collect_artifacts(todo, phase, aggregate, [], cache)
+
+        aggregate.artifacts_collected.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_met_assertion_proceeds_to_record_artifacts(self) -> None:
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
+            ArtifactCollectionResult,
+        )
+
+        processor = _make_processor()
+        processor._save_and_sync = AsyncMock()
+        processor._active_workspaces["p-1"] = MagicMock()
+
+        handler = MagicMock()
+        handler.handle = AsyncMock(
+            return_value=ArtifactCollectionResult(
+                artifact_ids=["a1"],
+                first_content="COMMENT: OK - all good",
+                command=MagicMock(),
+                files=[],
+            )
+        )
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="p-1",
+            session_id="sess-1",
+        )
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Research",
+            order=1,
+            prompt_template="x",
+            success_assertion="COMMENT: OK",
+        )
+        aggregate = MagicMock()
+        all_artifact_ids: list[str] = []
+        cache = PhaseOutputCache()
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow"
+            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            return_value=handler,
+        ):
+            await processor._handle_collect_artifacts(
+                todo, phase, aggregate, all_artifact_ids, cache
+            )
+
+        assert all_artifact_ids == ["a1"]

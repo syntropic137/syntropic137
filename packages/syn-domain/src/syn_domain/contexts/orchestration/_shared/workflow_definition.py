@@ -302,6 +302,12 @@ class PhaseYamlDefinition(BaseModel):
     # identity collision when the two lists are merged at resolution time.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Declared success assertion (#1085). A string that must appear in this
+    # phase's collected artifact for the execution to count as passing.
+    # Absent means the phase's status stays governed purely by agent/process
+    # completion, exactly as before this field existed.
+    success_assertion: str | None = Field(default=None, min_length=1)
+
     @field_validator("allowed_tools", mode="before")
     @classmethod
     def _validate_tool_names(cls, value: object) -> object:
@@ -472,6 +478,7 @@ class PhaseYamlDefinition(BaseModel):
             allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
+            success_assertion=self.success_assertion,
         )
 
 

@@ -41,6 +41,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
     ObservabilityCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_assertion import (
+    check_phase_success_assertion,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
@@ -757,6 +760,7 @@ class WorkflowExecutionProcessor:
             phase_name=phase.name,
             output_artifact_type=phase.output_artifact_type,
         )
+        check_phase_success_assertion(todo.phase_id, phase.success_assertion, result.first_content)
         all_artifact_ids.extend(result.artifact_ids)
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
         phase_outputs.record(todo.phase_id, result.first_content, result.files)

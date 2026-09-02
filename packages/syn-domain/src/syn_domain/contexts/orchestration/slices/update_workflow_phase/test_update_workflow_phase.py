@@ -483,3 +483,37 @@ class TestPhaseProviderUpdate:
         phase = next(p for p in agg.phases if p.phase_id == "phase-1")
         assert len(phase.skills) == 1 and phase.skills[0].skill_name == "review"
         assert len(phase.claude_plugins) == 1 and phase.claude_plugins[0].name == "sdlc"
+
+    def test_prompt_update_preserves_success_assertion(self) -> None:
+        # Regression (#1085): _apply_phase_update reconstructs PhaseDefinition
+        # field-by-field, so a declared success_assertion must be threaded
+        # through explicitly or a prompt-only edit silently wipes it back to
+        # None, unenforcing the check for the rest of the phase's life.
+        agg = WorkflowTemplateAggregate()
+        agg._handle_command(
+            CreateWorkflowTemplateCommand(
+                aggregate_id=_WORKFLOW_ID,
+                name="W",
+                workflow_type=WorkflowType.RESEARCH,
+                classification=WorkflowClassification.SIMPLE,
+                repository_url="",
+                repository_ref="main",
+                phases=[
+                    PhaseDefinition(
+                        phase_id="phase-1",
+                        name="p",
+                        order=1,
+                        prompt_template="orig",
+                        success_assertion="COMMENT: OK",
+                    )
+                ],
+            )
+        )
+        agg.mark_events_as_committed()
+        agg._handle_command(
+            UpdatePhasePromptCommand(
+                aggregate_id=_WORKFLOW_ID, phase_id="phase-1", prompt_template="new"
+            )
+        )
+        phase = next(p for p in agg.phases if p.phase_id == "phase-1")
+        assert phase.success_assertion == "COMMENT: OK"

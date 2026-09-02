@@ -553,6 +553,79 @@ async def test_codex_provider_reaches_executable_phase() -> None:
 
 
 # =============================================================================
+# Declared success assertion (#1085)
+# =============================================================================
+
+SUCCESS_ASSERTION_WORKFLOW_YAML = """
+id: assertion-wf
+name: Assertion Workflow
+requires_repos: false
+
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    success_assertion: "COMMENT: OK"
+    prompt_template: Reply with the marker.
+
+  - id: p2
+    name: Phase 2
+    order: 2
+    prompt_template: No assertion declared here.
+"""
+
+
+@pytest.mark.unit
+def test_success_assertion_parses_and_defaults_to_none() -> None:
+    """A declared phase carries success_assertion; an undeclared one is None."""
+    definition = WorkflowDefinition.from_yaml(SUCCESS_ASSERTION_WORKFLOW_YAML)
+
+    assert definition.phases[0].success_assertion == "COMMENT: OK"
+    assert definition.phases[1].success_assertion is None
+
+
+@pytest.mark.unit
+def test_success_assertion_reaches_domain_phase() -> None:
+    """to_domain() threads success_assertion onto the domain PhaseDefinition."""
+    definition = WorkflowDefinition.from_yaml(SUCCESS_ASSERTION_WORKFLOW_YAML)
+    domain_phases = definition.get_domain_phases()
+
+    assert domain_phases[0].success_assertion == "COMMENT: OK"
+    assert domain_phases[1].success_assertion is None
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_success_assertion_reaches_executable_phase() -> None:
+    """A declared success_assertion round-trips onto ExecutablePhase.
+
+    This is the hop WorkflowExecutionProcessor._handle_collect_artifacts
+    actually reads (#1085) - the field arriving on the domain PhaseDefinition
+    but not on ExecutablePhase would leave every declared assertion silently
+    unenforced.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    definition = WorkflowDefinition.from_yaml(SUCCESS_ASSERTION_WORKFLOW_YAML)
+
+    class _StubTemplate:
+        phases = definition.get_domain_phases()
+        claude_plugins = ()
+        skills = ()
+
+    handler = ExecuteWorkflowHandler(
+        processor=MagicMock(),
+        workflow_repository=MagicMock(),
+    )
+    executable = await handler._get_executable_phases(_StubTemplate())  # type: ignore[arg-type]
+
+    assert executable[0].success_assertion == "COMMENT: OK"
+    assert executable[1].success_assertion is None
+
+
+# =============================================================================
 # Mixed-workflow back-compat (codex bridge demo, Task 9)
 # =============================================================================
 

@@ -65,6 +65,7 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
     "model": ("AgentConfiguration", "model"),
     "agent": ("AgentConfiguration", "provider"),
+    "success_assertion": ("ExecutablePhase", "success_assertion"),
 }
 
 #: Fields refused at authoring time, with WHY. Each must have a validator in

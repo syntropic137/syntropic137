@@ -175,3 +175,17 @@ class PhaseDefinition(BaseModel):
     # follow-up resolution service rewrites them into ResolvedSkill entries
     # on ExecutablePhase.
     skills: tuple[SkillRef, ...] = Field(default_factory=tuple)
+
+    success_assertion: str | None = None
+    """A string that must appear in this phase's collected artifact for the
+    execution to count as passing (#1085). ``None`` means no assertion is
+    declared, and the phase's status stays governed purely by agent/process
+    completion, exactly as before this field existed.
+
+    Without this, an agent that finishes cleanly and accurately reports a
+    broken capability (e.g. a validation workflow whose artifact says
+    ``COMMENT: FAILED``) still lands on ``ExecutionStatus.COMPLETED`` -
+    nothing upstream of the artifact's content is ever inspected. Declaring
+    an assertion here is what lets ``WorkflowExecutionProcessor`` route a
+    mismatch to ``ExecutionStatus.FAILED`` instead.
+    """

@@ -223,3 +223,9 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+    # Declared success assertion (#1085), sourced from the workflow-template
+    # PhaseDefinition of the same name. None means no assertion is declared.
+    # See WorkflowExecutionProcessor._handle_collect_artifacts, the consumer
+    # that enforces this against the phase's collected artifact content.
+    success_assertion: str | None = None
