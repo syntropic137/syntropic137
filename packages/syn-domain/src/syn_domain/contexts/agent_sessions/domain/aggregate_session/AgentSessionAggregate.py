@@ -236,7 +236,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._apply(event)
 
     @command_handler("MarkAgentLaunchedCommand")
-    def mark_agent_launched(self, command: MarkAgentLaunchedCommand) -> None:
+    def mark_agent_launched(self, command: MarkAgentLaunchedCommand) -> None:  # noqa: ARG002
         """Handle MarkAgentLaunchedCommand.
 
         Records the fact that this session's agent process was launched.
@@ -313,7 +313,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._metadata = dict(event.metadata)
 
     @event_sourcing_handler("AgentLaunched")
-    def on_agent_launched(self, event: AgentLaunchedEvent) -> None:
+    def on_agent_launched(self, event: AgentLaunchedEvent) -> None:  # noqa: ARG002
         """Apply AgentLaunchedEvent."""
         self._agent_launched = True
 
