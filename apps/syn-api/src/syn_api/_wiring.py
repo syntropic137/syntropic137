@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, TypeGuard
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from redis.asyncio import Redis as AsyncRedis
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -653,6 +655,30 @@ def get_event_pipeline() -> EventPipeline:
     return pipeline
 
 
+def _build_resilient_redis_client(url: str) -> AsyncRedis:
+    """Build a Redis client with bounded timeouts and a retry policy.
+
+    Both Redis clients in this module previously had none of this (#1078): a
+    transient read timeout on a control-plane call (dedup, signal queue)
+    raised straight out of stream processing and failed an otherwise-healthy
+    phase. Bounding the timeout and retrying narrows that window; adapters
+    that read through this client still need to decide how to fail (open or
+    closed) when retries are exhausted.
+    """
+    import redis.asyncio as aioredis
+    from redis.asyncio.retry import Retry
+    from redis.backoff import ExponentialBackoff
+
+    return aioredis.from_url(
+        url,
+        decode_responses=True,
+        socket_timeout=5.0,
+        socket_connect_timeout=5.0,
+        retry_on_timeout=True,
+        retry=Retry(ExponentialBackoff(), retries=3),
+    )
+
+
 def _create_dedup_adapter() -> DedupPort:
     """Create the appropriate dedup adapter based on environment.
 
@@ -686,11 +712,9 @@ def _create_dedup_adapter() -> DedupPort:
             )
 
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
 
-        redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        redis_client = _build_resilient_redis_client(settings.redis_url)
         logger.info("EventPipeline using Redis dedup")
         return RedisDedupAdapter(
             redis_client,
@@ -896,11 +920,9 @@ def get_controller() -> ExecutionController:
 
     redis_url = get_settings().redis_url
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
 
-        redis_client = aioredis.from_url(redis_url, decode_responses=True)
+        redis_client = _build_resilient_redis_client(redis_url)
         signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
         logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
     except Exception:
