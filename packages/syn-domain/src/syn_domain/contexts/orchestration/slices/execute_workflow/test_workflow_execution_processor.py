@@ -626,6 +626,7 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
             await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
 
         assert cache.files == {"p-1": files}
+        assert cache.primary == {"p-1": "r"}
 
 
 @pytest.mark.unit
