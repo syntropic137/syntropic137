@@ -1353,3 +1353,52 @@ rather than to the task specification, and H7 cannot separate them.
 cross-model review phase removed. If rigour survives without it, the
 specification was carrying it; if it collapses in both arms, the review phase
 is what produces it and H3 is a larger effect than H7 was ever testing.
+
+---
+
+## H10 - can a workflow's own failures be fed back into its prompt?
+
+**Hypothesis.** The prompts are now the dominant variable, not the platform. If
+each cross-model rejection is turned into a rule in the phase that should have
+caught it, the same failure will not recur.
+
+**Method.** Four issues dispatched to `sdlc-implement-v1`, every PR gated by a
+codex read-only pass. When a gate found a defect the phase should have caught,
+the rule went into the phase prompt rather than into the next task's text, and
+the workflow was reinstalled.
+
+**Result: three prompt generations, each fixing what the previous one revealed.**
+
+| generation | rule added | what the next gate found |
+|---|---|---|
+| 1 | none | 3 of 3 PRs blocked. All three: fixtures construct the inputs the author imagined, not what the write path emits |
+| 2 | "which production input shapes can your fixtures not construct?" | the named case gets CONSIDERED but not resolved. #1063 chose behaviour producing `call_count=0, success_count=1` and wrote a test asserting it was correct |
+| 3 | "prefer an invariant to a case list" | in flight |
+
+**The generation-2 finding is the sharp one.** Naming a case does not get it
+right. A test written for a named case can encode the wrong answer and then
+defend it, which is worse than no test: the defect is now pinned by an
+assertion. An invariant cannot be satisfied that way -
+`call_count >= success_count + error_count` fails on the bad output no matter
+which case produced it.
+
+**Strongest evidence the rules are aimed correctly.** #1066's second gate fixed
+all eight reported inputs and left exactly two blockers: a test calling
+`parseSource` directly while the bug lives one level up in the install handler
+(wrong layer), and a case list with no grammar invariant (no invariant). Those
+are precisely the two failure modes generations 2 and 3 name, on a PR written
+before either rule existed.
+
+**Economics, and this is the part worth carrying.** A codex gate costs about
+$0.30. The runs it reviews cost $6 to $9. Four gates produced four distinct
+actionable findings, including two that no amount of mutation testing inside the
+run could have surfaced, because mutating the code cannot reach a layer the
+fixture never touches.
+
+**What was NOT the problem.** Not honesty. Every verify phase ran real mutation
+tests, backed up with `cp` rather than `git checkout`, checked the implementing
+phase's reported SHA against the branch before trusting it, and published the
+gaps it found in its own work. One refused to open a PR at all because
+`codegen-check` would have failed, and said so. The agents graded themselves
+harshly and were still wrong, which is why the gate is load-bearing rather than
+ceremonial.
