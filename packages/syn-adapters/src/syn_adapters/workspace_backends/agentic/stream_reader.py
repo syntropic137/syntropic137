@@ -84,6 +84,82 @@ def _remaining_str(stream_timeout: float | None, start_time: float) -> str:
     return f"{remaining:.0f}s"
 
 
+@dataclass
+class _Silence:
+    """Tracks how long a live process has written nothing.
+
+    Kept out of ``read_lines`` so that loop stays about reading lines. The
+    counter is in seconds because ``_read_next_line`` yields its sentinel on a
+    one-second poll.
+    """
+
+    seconds: int = 0
+    lines_read: int = 0
+
+    def tick(self) -> bool:
+        """Record one silent second. True when this second should be reported."""
+        self.seconds += 1
+        if self.seconds == _SILENCE_WARN_SECONDS:
+            return True
+        past = self.seconds - _SILENCE_WARN_SECONDS
+        return past > 0 and past % _SILENCE_REPEAT_SECONDS == 0
+
+    def line(self) -> bool:
+        """Record a real line. True when this ends a stall worth reporting."""
+        was_stalled = self.stalled
+        self.seconds = 0
+        self.lines_read += 1
+        return was_stalled
+
+    @property
+    def stalled(self) -> bool:
+        return self.seconds >= _SILENCE_WARN_SECONDS
+
+
+def _log_still_silent(
+    proc: asyncio.subprocess.Process,
+    silence: _Silence,
+    stream_timeout: float | None,
+    start_time: float,
+) -> None:
+    logger.warning(
+        "Agent process alive but silent for %ds (pid=%s); %d lines read so far. "
+        "Stream deadline in %s.",
+        silence.seconds,
+        proc.pid,
+        silence.lines_read,
+        _remaining_str(stream_timeout, start_time),
+    )
+
+
+def _log_deadline_reached(proc: asyncio.subprocess.Process, silence: _Silence) -> None:
+    if not silence.stalled:
+        return
+    logger.warning(
+        "Stream deadline reached after %ds of unbroken silence (pid=%s, %d lines "
+        "read). The process was alive and wrote nothing; this is not a slow command.",
+        silence.seconds,
+        proc.pid,
+        silence.lines_read,
+    )
+
+
+def _deadline_passed(
+    proc: asyncio.subprocess.Process,
+    silence: _Silence,
+    stream_timeout: float | None,
+    start_time: float,
+    outcome: StreamOutcome | None,
+) -> bool:
+    """True when the stream deadline has passed, recording why on the way out."""
+    if not _is_stream_timed_out(stream_timeout, start_time):
+        return False
+    _log_deadline_reached(proc, silence)
+    if outcome is not None:
+        outcome.timed_out = True
+    return True
+
+
 async def read_lines(
     proc: asyncio.subprocess.Process,
     stream_timeout: float | None,
@@ -97,22 +173,10 @@ async def read_lines(
             An async generator cannot return a value to an ``async for``, so the
             caller passes in the object it wants filled.
     """
-    silent_seconds = 0
-    lines_read = 0
+    silence = _Silence()
 
     while True:
-        if _is_stream_timed_out(stream_timeout, start_time):
-            if silent_seconds >= _SILENCE_WARN_SECONDS:
-                logger.warning(
-                    "Stream deadline reached after %ds of unbroken silence "
-                    "(pid=%s, %d lines read). The process was alive and wrote "
-                    "nothing; this is not a slow command.",
-                    silent_seconds,
-                    proc.pid,
-                    lines_read,
-                )
-            if outcome is not None:
-                outcome.timed_out = True
+        if _deadline_passed(proc, silence, stream_timeout, start_time, outcome):
             break
 
         raw = await _read_next_line(proc)
@@ -120,29 +184,16 @@ async def read_lines(
             break
         if raw == b"":
             # One second elapsed with the process alive and nothing written.
-            silent_seconds += 1
-            if silent_seconds == _SILENCE_WARN_SECONDS or (
-                silent_seconds > _SILENCE_WARN_SECONDS
-                and (silent_seconds - _SILENCE_WARN_SECONDS) % _SILENCE_REPEAT_SECONDS == 0
-            ):
-                logger.warning(
-                    "Agent process alive but silent for %ds (pid=%s); "
-                    "%d lines read so far. Stream deadline in %s.",
-                    silent_seconds,
-                    proc.pid,
-                    lines_read,
-                    _remaining_str(stream_timeout, start_time),
-                )
+            if silence.tick():
+                _log_still_silent(proc, silence, stream_timeout, start_time)
             continue  # timeout but process still running
 
-        if silent_seconds >= _SILENCE_WARN_SECONDS:
+        if silence.line():
             logger.info(
                 "Agent process resumed after %ds of silence (pid=%s).",
-                silent_seconds,
+                _SILENCE_WARN_SECONDS,
                 proc.pid,
             )
-        silent_seconds = 0
-        lines_read += 1
 
         line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
         if line:

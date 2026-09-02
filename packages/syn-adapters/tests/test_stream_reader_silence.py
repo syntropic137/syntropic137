@@ -9,7 +9,7 @@ unrelated reason. These tests pin the log that separates the two states.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -31,13 +31,11 @@ async def _drain(gen: AsyncIterator[str]) -> list[str]:
     return [line async for line in gen]
 
 
-def _patch_reads(
-    monkeypatch: pytest.MonkeyPatch, reads: list[bytes | None]
-) -> list[int]:
+def _patch_reads(monkeypatch: pytest.MonkeyPatch, reads: list[bytes | None]) -> list[int]:
     """Feed read_lines a scripted sequence, one entry per loop iteration."""
     calls = [0]
 
-    async def fake_read_next_line(_proc: Any) -> bytes | None:
+    async def fake_read_next_line(_proc: _FakeProc) -> bytes | None:
         i = calls[0]
         calls[0] += 1
         return reads[i] if i < len(reads) else None
