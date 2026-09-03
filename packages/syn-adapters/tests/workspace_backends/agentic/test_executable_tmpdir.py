@@ -94,6 +94,7 @@ class TestToolCachesAreOffTheTmpfs:
 
     def test_an_empty_string_is_not_a_choice(self) -> None:
         """`FOO=` is how a variable gets unset by accident, not how it gets chosen."""
-        assert _with_executable_tmpdir({"UV_CACHE_DIR": ""})["UV_CACHE_DIR"] == (
-            _WORKSPACE_CACHE_ENV["UV_CACHE_DIR"]
+        assert (
+            _with_executable_tmpdir({"UV_CACHE_DIR": ""})["UV_CACHE_DIR"]
+            == (_WORKSPACE_CACHE_ENV["UV_CACHE_DIR"])
         )
