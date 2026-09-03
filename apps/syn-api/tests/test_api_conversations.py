@@ -1471,3 +1471,303 @@ async def test_endpoint_response_survives_a_real_recorded_piped_command(
     ), f"the recorded command did not survive verbatim: {[p['content_preview'] for p in piped]}"
 
     _assert_every_tool_block_is_represented(response.lines)
+
+
+# One case per BRANCH of the line dispatcher, each carrying the separator
+# character in a value that branch is the one to produce. The contract is not
+# "the claude join escapes its input", it is "these two response fields never
+# carry a forged boundary", and that is a claim about every branch. Three
+# reviews of #1072 each found a different branch violating it, so this sweep
+# is deliberately organised by branch rather than by symptom: an extractor with
+# no case here is an extractor nothing is checking.
+#
+# Each case pins the EXACT wire value of both fields, not just their segment
+# counts. A count-only assertion passes on a line that renders one segment of
+# the wrong text, and the desync these guard is precisely wrong text in a
+# real-looking slot.
+_SEPARATOR_CASES = (
+    (
+        # codex command_execution, separator in the command's OUTPUT
+        "codex_command_output",
+        '{"type": "item.completed", "item": {"type": "command_execution", '
+        f'"command": "grep -c x f", "aggregated_output": "alpha {_SEP_CHAR} beta"}}}}',
+        "Bash",
+        "alpha | beta",
+    ),
+    (
+        # codex command_execution with no output falls back to the INVOCATION,
+        # a second value this branch can put in the column
+        "codex_command_invocation",
+        '{"type": "item.completed", "item": {"type": "command_execution", '
+        f'"command": "printf a {_SEP_CHAR} b", "aggregated_output": ""}}}}',
+        "Bash",
+        "printf a | b",
+    ),
+    (
+        # codex file_change, separator in a changed PATH (legal in a filename)
+        "codex_file_change_path",
+        '{"type": "item.completed", "item": {"type": "file_change", '
+        f'"changes": [{{"path": "/w/od{_SEP_CHAR}d.py"}}]}}}}',
+        "Edit",
+        "/w/od|d.py",
+    ),
+    (
+        # codex item.started renders a bare system row - no entry, both None
+        "codex_item_started",
+        '{"type": "item.started", "item": {"type": "command_execution", '
+        f'"command": "echo a {_SEP_CHAR} b"}}}}',
+        None,
+        None,
+    ),
+    (
+        # codex agent_message: a preview with no tool name at all
+        "codex_agent_message",
+        '{"type": "item.completed", "item": {"type": "agent_message", '
+        f'"text": "see {_SEP_CHAR} this"}}}}',
+        None,
+        "see | this",
+    ),
+    (
+        "codex_turn_failed",
+        f'{{"type": "turn.failed", "error": "boom {_SEP_CHAR} bang"}}',
+        None,
+        "boom | bang",
+    ),
+    (
+        "codex_turn_completed",
+        '{"type": "turn.completed", "usage": {"input_tokens": 1}}',
+        None,
+        None,
+    ),
+    (
+        "codex_thread_started",
+        '{"type": "thread.started", "thread_id": "t_1"}',
+        None,
+        None,
+    ),
+    (
+        "codex_turn_started",
+        '{"type": "turn.started"}',
+        None,
+        None,
+    ),
+    (
+        "codex_error",
+        '{"type": "error", "message": "x"}',
+        None,
+        None,
+    ),
+    (
+        # claude, separator in an MCP-chosen tool NAME and in a preview
+        "claude_tool_use",
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        f'{{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", '
+        f'"name": "mcp__od{_SEP_CHAR}d__run", '
+        f'"input": {{"command": "echo a {_SEP_CHAR} b"}}}}]}}}}',
+        "mcp__od|d__run",
+        "echo a | b",
+    ),
+    (
+        # claude tool_result: preview only, no name on the line at all
+        "claude_tool_result",
+        '{"type": "user", "message": {"role": "user", "content": ['
+        '{"type": "tool_result", "tool_use_id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", '
+        f'"content": "out {_SEP_CHAR} put"}}]}}}}',
+        None,
+        "out | put",
+    ),
+    (
+        # generic fallback, separator in the tool NAME - the shape that made a
+        # one-tool line render two name segments against one preview segment
+        "generic_fallback_name",
+        f'{{"type": "custom_event", "tool_name": "Read {_SEP_CHAR} Bash", "text": "one call"}}',
+        "Read | Bash",
+        "one call",
+    ),
+    (
+        # generic fallback, separator in the CONTENT side
+        "generic_fallback_content",
+        f'{{"type": "custom_event", "tool_name": "Grep", "text": "hit {_SEP_CHAR} miss"}}',
+        "Grep",
+        "hit | miss",
+    ),
+    (
+        # non-JSON line (a codex CLI diagnostic on stdout)
+        "non_json_log_line",
+        f"ERROR agent {_SEP_CHAR} crashed",
+        None,
+        "ERROR agent | crashed",
+    ),
+    (
+        # valid JSON that is not an object - also routed to the log preview,
+        # which renders the raw source text, quotes and all
+        "json_scalar_log_line",
+        f'"diag {_SEP_CHAR} nostic"',
+        None,
+        '"diag | nostic"',
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("case_id", "raw", "expected_tool_name", "expected_preview"),
+    [pytest.param(*case, id=case[0]) for case in _SEPARATOR_CASES],
+)
+async def test_no_extractor_branch_can_forge_a_column_boundary(
+    mock_conversation_store,
+    case_id,
+    raw,
+    expected_tool_name,
+    expected_preview,
+):
+    """Every branch that writes these fields obeys the separator contract.
+
+    Read through the ENDPOINT and its ``model_dump()``, not through
+    ``get_conversation_log``: the endpoint hand-copies each field into a
+    separate response model, and that copy is what the dashboard and CLI
+    actually read.
+
+    Before the fix only the claude branch rewrote the separator out of its
+    values, so ``codex_command_output``, ``codex_command_invocation``,
+    ``codex_file_change_path``, ``codex_agent_message``, ``codex_turn_failed``,
+    ``generic_fallback_name``, ``generic_fallback_content``,
+    ``non_json_log_line`` and ``json_scalar_log_line`` each produced a field
+    whose split yielded a segment count the other field did not match (1-vs-2
+    and 2-vs-1, or N-vs-None). They now assert the exact expected value, so a
+    fix that only equalises the counts while mangling the text does not pass.
+
+    The five cases expecting ``(None, None)`` are here for the opposite
+    reason: those branches contribute no entry at all, and must keep
+    contributing none - rendering an empty segment instead would be just as
+    wrong, and silently so. ``codex_item_started`` is the one of them that
+    carries the separator, because it is the one whose raw line has a value
+    that would reach a column if the branch ever started emitting one.
+    """
+    mock_conversation_store.retrieve_session.return_value = [raw]
+
+    mgr = AsyncMock()
+    mgr.store = AsyncMock()
+
+    with (
+        _patch_store(mock_conversation_store),
+        patch("syn_api._wiring.get_projection_mgr", return_value=mgr),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise",
+            new=AsyncMock(return_value="sess-1"),
+        ),
+    ):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        response = await get_conversation_log_endpoint("sess-1")
+
+    line = response.model_dump()["lines"][0]
+    tool_name, preview = line["tool_name"], line["content_preview"]
+
+    assert tool_name == expected_tool_name, (
+        f"{case_id}: tool_name on the wire was {tool_name!r}, expected {expected_tool_name!r}"
+    )
+    assert preview == expected_preview, (
+        f"{case_id}: content_preview on the wire was {preview!r}, expected {expected_preview!r}"
+    )
+
+    # The contract itself, restated as the property rather than as values: a
+    # column that exists splits into the same number of segments as the other
+    # column that exists, so an index into one is an index into the other.
+    if tool_name is not None and preview is not None:
+        assert len(tool_name.split(_SEP)) == len(preview.split(_SEP)), (
+            f"{case_id}: columns desynchronized: {tool_name!r} / {preview!r}"
+        )
+
+
+def test_the_separator_sweep_covers_every_codex_line_type():
+    """A new codex line shape must arrive with a separator case of its own.
+
+    The defect this file now guards was never one bad function - it was a
+    contract enforced in one branch while other branches wrote the same two
+    fields. That recurs the moment a branch exists with nothing exercising it,
+    so the sweep's coverage is asserted from the codex vocabulary itself
+    rather than trusted to whoever adds the next item type.
+
+    Claude's shapes and the generic fallback have no such enum to enumerate
+    from; ``claude_tool_use``, ``claude_tool_result``, ``generic_fallback_*``
+    and ``non_json_log_line`` cover those branches by hand.
+    """
+    from syn_shared.codex_stream import CodexItemType, CodexStreamType
+
+    covered = "\n".join(raw for _, raw, _, _ in _SEPARATOR_CASES)
+    missing = [t.value for t in (*CodexStreamType, *CodexItemType) if f'"{t.value}"' not in covered]
+    assert not missing, (
+        f"codex line types with no case in _SEPARATOR_CASES: {missing}. "
+        "Add one carrying the separator character in a value that branch produces."
+    )
+
+
+async def test_a_non_string_tool_name_costs_one_column_not_the_whole_transcript(
+    mock_conversation_store,
+):
+    """A column value that is not a string is no column value, and no fault.
+
+    The generic fallback reads ``tool_name`` straight out of arbitrary JSON,
+    so its type is whatever the producer wrote. Handing a non-string to
+    ``ConversationLine`` raised ``ValidationError``, and
+    ``get_conversation_log``'s enclosing ``except Exception`` turned that into
+    ``QUERY_FAILED`` for the ENTIRE transcript - one malformed line took every
+    good line with it.
+
+    Column entries are typed ``str``, so a non-string cannot become one: the
+    line renders with no tool name, keeps its preview, and its NEIGHBOURS are
+    still returned. The second line here is the point of the fixture - assert
+    only on the odd line and a fix that drops it silently would pass.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "custom_event", "tool_name": 123, "text": "still readable"}',
+        '{"type": "custom_event", "tool_name": "Read", "text": "the next line"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("sess-1")
+
+    assert isinstance(result, Ok), (
+        "one line with a non-string tool_name failed the whole transcript request"
+    )
+    odd, neighbour = result.value.lines
+    assert (odd.tool_name, odd.content_preview) == (None, "still readable")
+    assert (neighbour.tool_name, neighbour.content_preview) == ("Read", "the next line")
+
+
+async def test_a_tool_use_with_no_usable_name_still_renders_as_a_tool_row(
+    mock_conversation_store,
+):
+    """The row's KIND is read from the raw blocks, not from what they rendered.
+
+    A ``tool_use`` block whose ``name`` is missing or non-string contributes
+    an empty name segment, so a line of only such blocks renders
+    ``tool_name`` as None. Deriving the event type from the rendered columns
+    would then call that line ``assistant`` and the reader would lose the one
+    remaining signal that a tool ran at all - the preview would sit in a row
+    that claims to be prose.
+
+    Hence ``_is_claude_tool_use`` reads ``message.content[]`` directly. This
+    test exists so that indirection is not tidied away as redundant.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01bbbbbbbbbbbbbbbbbbbbbb", '
+        '"input": {"command": "ls -la"}}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000099"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use", (
+        f"a nameless tool_use line rendered as {line.event_type!r}, hiding that a tool ran"
+    )
+    assert line.tool_name is None
+    assert line.content_preview == "ls -la"
