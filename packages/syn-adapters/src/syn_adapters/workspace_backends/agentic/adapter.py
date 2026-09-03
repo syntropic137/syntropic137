@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -44,6 +45,8 @@ from syn_shared.env_constants import (
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentic_isolation import AgenticWorkspace
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -56,6 +59,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["AgenticIsolationAdapter", "WorkspaceProvisionError"]
+
+
+#: Where `just` and anything else that writes-then-executes a temp file can do
+#: so. `/tmp` is mounted `noexec` by the isolation layer
+#: (agentic_isolation/config.py: `--tmpfs=/tmp:rw,noexec,nosuid,size=256m`),
+#: alongside `/spool` and `/var/agentic`. That is deliberate hardening and is
+#: not something to weaken for a build tool.
+#:
+#: The consequence was severe and silent: `just` writes a shebang recipe to a
+#: temp file and executes it, so EVERY shebang recipe failed with
+#: `Permission denied (os error 13)` - including `qa-ci`, which is the gate the
+#: verify phase is instructed to run. A phase could spend an hour of model time
+#: and then be unable to certify its own work (#1042).
+#:
+#: Verified inside a running workspace:
+#:
+#:     $ just shebang-recipe
+#:     error: ... execution error: Permission denied (os error 13)
+#:     $ TMPDIR=/workspace/.tmp just shebang-recipe
+#:     SHEBANG_RAN_OK
+#:
+#: `/workspace` is writable and executable; `/var/tmp` and `/dev/shm` are not.
+_EXECUTABLE_TMPDIR = "/workspace/.tmp"
+
+
+def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
+    """Point TMPDIR at an executable directory, unless the caller set one.
+
+    A caller-supplied TMPDIR wins: this is a default for the common case, not a
+    policy. It does not create the directory - `just` and `mktemp` both create
+    what they need, and doing it here would mean a filesystem side effect in a
+    function whose job is to build a dict.
+    """
+    if environment.get("TMPDIR"):
+        return dict(environment)
+    return {**environment, "TMPDIR": _EXECUTABLE_TMPDIR}
 
 
 class AgenticIsolationAdapter:
@@ -163,7 +202,7 @@ class AgenticIsolationAdapter:
         # management that nobody has designed yet, so it is a deliberate
         # follow-up rather than an omission.
         return apply_session_store_env(
-            config.environment or {},
+            _with_executable_tmpdir(config.environment or {}),
             self._session_store,
             execution_id=config.execution_id,
             workspace_id=config.workspace_id,
@@ -173,20 +212,26 @@ class AgenticIsolationAdapter:
             # workspace across dev, beta and prod is indistinguishable in the
             # corpus: the envelope's own origin.environment is the runtime
             # CLASS, which is the same value for all of them.
-            deployment=self._deployment_identity(),
+            deployment=self._deployment_identity(),  # honours the operator override
         )
 
-    @staticmethod
-    def _deployment_identity() -> str:
-        """``syntropic137__<app_environment>`` for this deployment.
+    def _deployment_identity(self) -> str:
+        """``syntropic137__<app_environment>``, or the operator's override.
 
         Imported locally, matching how session-store settings are resolved above:
         syn_shared settings resolve 1Password at first construction, so importing
         at module scope would make that a side effect of importing the adapter.
+
+        Reads the override off `self._session_store` - the SAME settings object
+        `build_expectations` is handed - so the injected value and the expected
+        value cannot disagree.
         """
         from syn_shared.settings import get_settings
 
-        return deployment_identity(str(get_settings().app_environment))
+        return deployment_identity(
+            str(get_settings().app_environment),
+            self._session_store.display_deployment,
+        )
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an isolated workspace container.

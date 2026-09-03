@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
 
 
 class TestSubagentTracker:

@@ -53,3 +53,25 @@ real, and up to 100% of citations were unusable purely because of this.
 
 - Plan only. No production code, no commits.
 - If the research refuted the problem, say so and stop; do not invent work.
+
+## What a good plan optimises for
+
+The plan is judged by what the resulting code will cost to live with, not by how
+quickly it can be executed. Design for reliability, maintainability and
+scalability - those are the actual goals; "it works" is the floor, not the bar.
+
+- **Propose deep modules.** A unit earns its existence by the ratio of
+  functionality provided to interface complexity (Ousterhout, *A Philosophy of
+  Software Design*). If your plan adds three thin layers where one honest
+  interface would do, it has added names and files without hiding anything.
+- **Put boundaries where change stops.** If a likely future change would ripple
+  through every caller, the boundary is in the wrong place. Say where you expect
+  change to come from and check the seams are there.
+- **Design special cases out rather than in.** A branch added for one caller is
+  a permanent cost to everyone who reads that function afterwards.
+- **Never plan two places that must agree without a mechanism forcing them to.**
+  They will drift. This repository has been bitten by exactly that.
+
+State the maintenance cost of your approach explicitly, and name the alternative
+you rejected and why. A plan that only argues for itself has not been designed,
+it has been justified.

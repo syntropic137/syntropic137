@@ -66,6 +66,12 @@ class _StubExecutionCostProjection:
     async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
         return self.cost if execution_id == self.cost.execution_id else None
 
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
+        """Batched counterpart of get_execution_cost (issue #1077)."""
+        if self.cost.execution_id in execution_ids:
+            return {self.cost.execution_id: self.cost}
+        return {}
+
 
 @dataclass
 class _StubProjectionManager:
