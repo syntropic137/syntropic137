@@ -67,7 +67,7 @@ phases:
       - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/research.md
 
   - id: plan
@@ -98,7 +98,7 @@ phases:
       - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/plan.md
 
   - id: cross-model-review
@@ -140,5 +140,5 @@ phases:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/revise.md
