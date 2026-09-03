@@ -1118,3 +1118,61 @@ async def test_get_conversation_metadata_not_found(mock_conversation_store):
 
     assert isinstance(result, Ok)
     assert result.value is None
+
+
+async def test_endpoint_response_keeps_the_two_tool_columns_aligned(
+    mock_conversation_store,
+):
+    """The aligned columns must survive the HTTP endpoint's own serialization.
+
+    Every other test in this file stops at ``get_conversation_log``, which
+    returns ``ConversationLine``. The endpoint does NOT return those objects -
+    it hand-copies each field into a separate ``ConversationLineResponse``,
+    and that model is what FastAPI serializes and what the dashboard and CLI
+    actually read. A field correct on ``ConversationLine`` and dropped or
+    swapped at that hop would pass all of them.
+
+    So this asserts on the endpoint's output. The fixture is the mixed-kind
+    line: ``tool_name`` comes back as ``"Bash | "`` - a trailing EMPTY segment
+    holding the ``tool_result``'s nameless slot. That exact value cannot arise
+    from the two-list shape, which rendered a bare ``"Bash"`` with no slot for
+    the second block and left the two columns different lengths.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", "name": "Bash", '
+        '"input": {"command": "pytest --version"}}, '
+        '{"type": "tool_result", "tool_use_id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", '
+        '"content": "pytest 8.3.4"}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000008"}',
+    ]
+
+    mgr = AsyncMock()
+    mgr.store = AsyncMock()
+
+    with (
+        _patch_store(mock_conversation_store),
+        patch("syn_api._wiring.get_projection_mgr", return_value=mgr),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise",
+            new=AsyncMock(return_value="claude-1"),
+        ),
+    ):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        response = await get_conversation_log_endpoint("claude-1")
+
+    line = response.lines[0]
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert len(names) == len(previews) == 2, (
+        f"the endpoint lost a slot: {line.tool_name!r} / {line.content_preview!r}"
+    )
+    assert names == ["Bash", ""]
+    assert previews == ["pytest --version", "pytest 8.3.4"]
+
+    # Serialize the way FastAPI does. A field the response model declares but
+    # never emits would still be readable as an attribute above.
+    dumped = response.model_dump()["lines"][0]
+    assert dumped["tool_name"] == "Bash | "
+    assert dumped["content_preview"] == "pytest --version | pytest 8.3.4"
