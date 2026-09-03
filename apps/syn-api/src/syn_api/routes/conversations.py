@@ -273,14 +273,37 @@ def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
 # ``tool_name`` and segment i of ``content_preview`` always describe the same
 # block. Either field is None when NO block on the line contributed to it.
 #
-# Separator is " | " and not ", " (the separator ``_codex_file_change_preview``
-# uses for paths) because these values are commands and command output, in
-# which commas are ordinary content; a comma would be indistinguishable from
-# the preview text itself, while " | " keeps the block boundaries readable.
-# It is not escaped, so a segment whose own text contains " | " is ambiguous
-# on its own; the segment COUNT is the authoritative block count, and it is
-# the same on both fields by construction.
-_TOOL_FIELD_SEP = " | "
+# That contract holds for EVERY input, not just for inputs that happen not to
+# collide, because a segment cannot contain the separator: ``_join_block_column``
+# rewrites the separator character out of each value before joining. One rule,
+# stated once and checkable in one line - after the rewrite the character is
+# simply absent, so no run of characters in a segment can spell the separator,
+# whatever the block contained and wherever a preview was truncated.
+#
+# WHICH character carries the structure is then purely a question of how often
+# that rewrite has to fire on real content, and the answer is why this is a
+# BROKEN BAR (U+00A6, "\u00a6") rather than the ASCII pipe it used to be
+# (#1072 review). These values are shell commands and command output, where a
+# real "|" is ordinary content: ``find /workspace -type f -name "*.py" | head
+# -30`` is a checked-in recording line, and with the pipe as the separator that
+# one real command manufactured a second apparent segment for a line with one
+# tool block. Escaping the pipe instead would have mangled every command
+# pipeline in the transcript to fix a collision that only matters when a line
+# carries several blocks. A broken bar has never appeared in this content, so
+# the rewrite is effectively never reached and a real pipe reaches the reader
+# byte-for-byte - but correctness does not rest on that rarity, only fidelity
+# does.
+#
+# ", " (the separator ``_codex_file_change_preview`` uses for paths) is unusable
+# here for the same reason the pipe was: commas are ordinary content in a
+# command, so escaping them would rewrite almost every preview.
+_TOOL_FIELD_SEP_CHAR = "\u00a6"
+_TOOL_FIELD_SEP = f" {_TOOL_FIELD_SEP_CHAR} "
+
+# What a separator character occurring in a block's own text is displayed as.
+# The pipe is the closest reading of a broken bar, and is safe here precisely
+# because the pipe no longer carries any structural meaning in these fields.
+_TOOL_FIELD_SEP_CHAR_AS_CONTENT = "|"
 
 
 _CLAUDE_TOOL_USE = "tool_use"
@@ -356,10 +379,26 @@ def _join_block_column(values: list[str]) -> str | None:
     two columns. A column no block contributed anything to (``tool_name`` on a
     line of only ``tool_result`` blocks) collapses to None rather than
     rendering as a row of bare separators.
+
+    A value can no more forge a block boundary than omit one: the separator
+    character is rewritten out of every value first, so the rendered field
+    splits into exactly as many segments as there are blocks for ANY input.
+    Without that, one block whose own text contained the separator produced an
+    extra apparent segment and shifted the pairing between the two columns
+    from that point on - the #1072 review reproduced it from a real recording.
+
+    This is the only place the separator is known, so it is the only place the
+    guarantee can be made once for all three things that reach a column: a
+    tool name (arbitrary, an MCP server picks it), a ``tool_use`` preview and a
+    ``tool_result`` preview. Escaping inside those producers instead would
+    take three copies of the rule and still not hold, because each truncates
+    AFTER building its text and a truncation can land anywhere.
     """
     if not any(values):
         return None
-    return _TOOL_FIELD_SEP.join(values)
+    return _TOOL_FIELD_SEP.join(
+        value.replace(_TOOL_FIELD_SEP_CHAR, _TOOL_FIELD_SEP_CHAR_AS_CONTENT) for value in values
+    )
 
 
 def _extract_claude_tool_fields(

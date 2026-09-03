@@ -46,10 +46,33 @@ def _patch_store(store: AsyncMock):
     )
 
 
-# The separator ``_extract_claude_tool_fields`` joins per-block values with.
-# Duplicated here deliberately: importing the private constant would make the
-# assertion agree with the implementation by construction.
-_SEP = " | "
+# The separator ``_extract_claude_tool_fields`` joins per-block values with:
+# a space, U+00A6 BROKEN BAR, a space. Duplicated here deliberately - importing
+# the private constant would make every assertion below agree with the
+# implementation by construction, including when the implementation is wrong.
+#
+# Spelled as an escape, not as the glyph, because the whole point of this
+# character is that it is NOT the ASCII pipe, and in many fonts the two are
+# almost indistinguishable.
+_SEP_CHAR = "\u00a6"
+_SEP = f" {_SEP_CHAR} "
+
+# A pipe is ordinary CONTENT in these fields (they carry shell commands), and
+# must reach the reader untouched. Bound separately from ``_SEP`` so a test can
+# say which of the two it means.
+_PIPE_IN_CONTENT = " | "
+
+
+def _as_segment(value: str) -> str:
+    """One block value as it is expected to RENDER inside a joined field.
+
+    The other half of the separator contract, restated here rather than
+    imported for the same reason ``_SEP`` is: a block's own text may not carry
+    the separator character, so an occurrence of it is displayed as an ordinary
+    pipe. Applies to any value that reaches a column - a preview or a tool
+    name, which an MCP server is free to choose.
+    """
+    return value.replace(_SEP_CHAR, "|")
 
 
 _TOOL_BLOCK_TYPES = ("tool_use", "tool_result")
@@ -105,10 +128,20 @@ def _assert_every_tool_block_is_represented(lines) -> int:
                 f"Line {line.line_number} has {len(tool_uses)} tool_use block(s) "
                 f"but rendered no tool_name at all: {line.raw}"
             )
-        if tool_results:
+        # Only results that HAVE output. A command that printed nothing yields
+        # no preview, and a line of nothing but such results collapses the
+        # whole column to None - the module's documented behaviour, and a real
+        # recorded shape (``context-tracking.jsonl`` line 13 is a tool_result
+        # with ``content: ""``). Asserting non-null for every result would fail
+        # on correct output; #1067's "blank tool row" defect was blocks that
+        # HAD content and rendered nothing, which is what this still catches.
+        results_with_output = [
+            item for item in tool_results if str(item.get("content") or "").strip()
+        ]
+        if results_with_output:
             assert line.content_preview is not None, (
-                f"Line {line.line_number} carries {len(tool_results)} tool_result "
-                f"block(s) but rendered no preview: {line.raw}"
+                f"Line {line.line_number} carries {len(results_with_output)} tool_result "
+                f"block(s) with output but rendered no preview: {line.raw}"
             )
 
         rendered_names = line.tool_name.split(_SEP) if line.tool_name is not None else []
@@ -142,7 +175,7 @@ def _assert_every_tool_block_is_represented(lines) -> int:
                 f"Line {line.line_number} has a tool_use block with no usable "
                 f"name, so the invariant cannot hold: {line.raw}"
             )
-            assert rendered_names[index] == name, (
+            assert rendered_names[index] == _as_segment(name), (
                 f"Line {line.line_number} has a tool_use for {name!r} at block "
                 f"index {index}, but the rendered tool_name has "
                 f"{rendered_names[index]!r} there ({line.tool_name!r}): {line.raw}"
@@ -840,8 +873,8 @@ async def test_claude_parallel_tool_use_blocks_all_reach_the_line(
     assert isinstance(result, Ok)
     line = result.value.lines[0]
     assert line.event_type == "tool_use"
-    assert line.tool_name == "Bash | Glob"
-    assert line.content_preview == "pytest --version | **/conftest.py"
+    assert line.tool_name == f"Bash{_SEP}Glob"
+    assert line.content_preview == f"pytest --version{_SEP}**/conftest.py"
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
@@ -867,7 +900,7 @@ async def test_claude_parallel_tool_results_all_reach_the_line(
     # Only tool_results on the line, so it keeps its own top-level type.
     assert line.event_type == "user"
     assert line.tool_name is None
-    assert line.content_preview == "[error] This command requires approval | No files found"
+    assert line.content_preview == (f"[error] This command requires approval{_SEP}No files found")
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
@@ -897,8 +930,8 @@ async def test_claude_repeated_tool_name_renders_once_per_call(
 
     assert isinstance(result, Ok)
     line = result.value.lines[0]
-    assert line.tool_name == "Bash | Bash"
-    assert line.content_preview == "git rev-parse HEAD | git status --short"
+    assert line.tool_name == f"Bash{_SEP}Bash"
+    assert line.content_preview == f"git rev-parse HEAD{_SEP}git status --short"
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
@@ -1079,6 +1112,181 @@ async def test_claude_single_tool_block_line_is_unchanged_by_the_join(
     assert line.content_preview == "**/conftest.py"
 
 
+# The #1072 review's reproduction, verbatim. Three parallel calls where the
+# FIRST one's command contains a shell pipe: ``Bash`` runs a pipeline,
+# ``TodoWrite`` has no preview-yielding input key at all, ``Glob`` has one.
+# With the ASCII pipe as the field separator this rendered
+# ``'Bash | TodoWrite | Glob'`` against
+# ``'find . -name *.py | head -30 |  | **/conftest.py'`` - three names against
+# FOUR previews, so a reader splitting both columns paired ``TodoWrite`` with
+# ``head -30`` (which is Bash's) and ``Glob`` with nothing.
+_CONSTRUCTED_PIPED_COMMAND_LINE = (
+    '{"type": "assistant", "message": {"role": "assistant", "content": ['
+    '{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", "name": "Bash", '
+    '"input": {"command": "find . -name *.py | head -30"}}, '
+    '{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", "name": "TodoWrite", '
+    '"input": {"todos": []}}, '
+    '{"type": "tool_use", "id": "toolu_01EcpwqYwJdp8gooTES6smmV", "name": "Glob", '
+    '"input": {"pattern": "**/conftest.py"}}]}, '
+    '"uuid": "00000000-0000-0000-0000-000000000009"}'
+)
+
+
+async def test_claude_pipe_in_a_command_cannot_forge_a_block_boundary(
+    mock_conversation_store,
+):
+    """A shell pipe in a command must not manufacture a fourth preview segment.
+
+    The columns are aligned per block, but that alignment was only readable if
+    no block's own text could spell the separator - and with the separator
+    spelled ``" | "``, any piped shell command did. Three blocks rendered four
+    preview segments and the pairing was wrong from the pipe onwards.
+
+    The command is asserted back byte-for-byte on purpose: the fix must make
+    the boundary unforgeable WITHOUT rewriting the pipe, because a pipeline is
+    the content a reader of this column came to read.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CONSTRUCTED_PIPED_COMMAND_LINE,
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert len(names) == len(previews) == 3, (
+        f"a pipe in the command forged a segment: {line.tool_name!r} / {line.content_preview!r}"
+    )
+    assert names == ["Bash", "TodoWrite", "Glob"]
+    assert previews == [f"find . -name *.py{_PIPE_IN_CONTENT}head -30", "", "**/conftest.py"]
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_preview_truncated_onto_a_pipe_keeps_the_next_block_intact(
+    mock_conversation_store,
+):
+    """Truncation landing on a pipe must not corrupt the FOLLOWING block.
+
+    The second, quieter half of the #1072 review's finding, and the reason the
+    guarantee belongs at the join rather than inside the preview builders: a
+    preview is cut to ``_TOOL_PREVIEW_LEN`` characters, and a cut can land
+    anywhere. When it landed just after a pipe, the trailing ``" |"`` met the
+    joined ``" | "`` and the NEXT block's preview came back as ``"| /z.py"``.
+    The segment count stayed right, so the file's own invariant helper could
+    not see it - only reading the value back can.
+    """
+    # 98 characters, then " |" - so the 100-character cut ends on a pipe.
+    command = ("a" * 98) + " | echo done"
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01cccccccccccccccccccccc", "name": "Bash", '
+        f'"input": {{"command": "{command}"}}}}, '
+        '{"type": "tool_use", "id": "toolu_01dddddddddddddddddddddd", "name": "Read", '
+        '"input": {"file_path": "/z.py"}}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000010"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert names == ["Bash", "Read"]
+    assert len(previews) == 2, f"truncation split a block: {line.content_preview!r}"
+    # Read's preview, not "| /z.py" with the truncated pipe glued onto it.
+    assert previews[1] == "/z.py", (
+        f"the cut on the previous block corrupted this one: {previews[1]!r}"
+    )
+    assert previews[0] == ("a" * 98) + " |"
+
+
+async def test_claude_pipe_in_tool_result_output_cannot_forge_a_boundary(
+    mock_conversation_store,
+):
+    """The same guarantee on the result side, which the review flagged untested.
+
+    ``_claude_tool_result_preview`` renders command OUTPUT, where a pipe is at
+    least as ordinary as in a command - a table row, a `ps` line, a log format.
+    The review reached this hop by symmetry with the tool_use one rather than
+    by measuring it; this pins it directly.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "user", "message": {"role": "user", "content": ['
+        '{"type": "tool_result", "tool_use_id": "toolu_01cccccccccccccccccccccc", '
+        '"content": "PID | COMMAND"}, '
+        '{"type": "tool_result", "tool_use_id": "toolu_01dddddddddddddddddddddd", '
+        '"content": "ok"}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000011"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    previews = line.content_preview.split(_SEP)
+    assert len(previews) == 2, f"the output's pipe forged a segment: {line.content_preview!r}"
+    assert previews == [f"PID{_PIPE_IN_CONTENT}COMMAND", "ok"]
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_separator_character_in_content_is_rewritten_not_joined(
+    mock_conversation_store,
+):
+    """Content that spells the separator itself is displayed, never structural.
+
+    The other half of the guarantee, and the one that survives changing which
+    character carries the structure: whatever that character is, a block's own
+    text may not contain it. Exercised on BOTH sources that feed a column - a
+    tool NAME (an MCP server chooses those, and nothing constrains them) and a
+    preview - because the fix lives at the join and therefore has to hold for
+    every source, not just the two preview builders the review named.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01eeeeeeeeeeeeeeeeeeeeee", '
+        f'"name": "mcp__odd{_SEP_CHAR}server__run", '
+        f'"input": {{"command": "echo a {_SEP_CHAR} b"}}}}, '
+        '{"type": "tool_use", "id": "toolu_01ffffffffffffffffffffff", "name": "Read", '
+        '"input": {"file_path": "/z.py"}}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000012"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert len(names) == len(previews) == 2, (
+        f"content forged a boundary: {line.tool_name!r} / {line.content_preview!r}"
+    )
+    # Rewritten to an ordinary pipe, which is what the reader sees; the point
+    # is that no segment anywhere carries the separator character.
+    assert names == ["mcp__odd|server__run", "Read"]
+    assert previews == ["echo a | b", "/z.py"]
+    assert _SEP_CHAR not in "".join(names + previews)
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
 async def test_get_conversation_metadata(mock_conversation_store):
     """Retrieve conversation metadata from store."""
     mock_conversation_store.get_session_metadata.return_value = {
@@ -1174,5 +1382,92 @@ async def test_endpoint_response_keeps_the_two_tool_columns_aligned(
     # Serialize the way FastAPI does. A field the response model declares but
     # never emits would still be readable as an attribute above.
     dumped = response.model_dump()["lines"][0]
-    assert dumped["tool_name"] == "Bash | "
-    assert dumped["content_preview"] == "pytest --version | pytest 8.3.4"
+    assert dumped["tool_name"] == f"Bash{_SEP}"
+    assert dumped["content_preview"] == f"pytest --version{_SEP}pytest 8.3.4"
+
+
+async def test_endpoint_response_survives_a_real_recorded_piped_command(
+    mock_conversation_store,
+):
+    """A real, checked-in recording whose command contains a pipe, on the wire.
+
+    ``v2.1.29_claude-sonnet-4-5_context-tracking.jsonl`` line 13 of the file
+    (line 12 of the transcript, once the recorder's envelope is dropped) runs
+    ``find /workspace -type f -name "*.py" | head -30`` - ONE tool block, and
+    with the ASCII pipe as the separator it rendered TWO preview segments
+    against one name, so the file's own invariant helper failed on it. That
+    made the two-column contract false on data already committed to this
+    repository, not on a constructed edge case; the recording was simply never
+    fed to this endpoint by any test.
+
+    Asserted through ``get_conversation_log_endpoint`` and ``model_dump`` - the
+    response model the CLI and dashboard actually read - because that is where
+    the review asked for it, and because the endpoint hand-copies each field
+    into a separate model, a hop that every extractor-level test misses.
+    """
+    import pathlib
+
+    fixture_path = (
+        pathlib.Path(__file__).parents[3]
+        / "lib"
+        / "agentic-primitives"
+        / "providers"
+        / "workspaces"
+        / "claude-cli"
+        / "fixtures"
+        / "recordings"
+        / "v2.1.29_claude-sonnet-4-5_context-tracking.jsonl"
+    )
+    raw_lines = [
+        line
+        for line in fixture_path.read_text().splitlines()
+        if line.strip() and not line.startswith('{"_recording"')
+    ]
+    mock_conversation_store.retrieve_session.return_value = raw_lines
+
+    mgr = AsyncMock()
+    mgr.store = AsyncMock()
+
+    with (
+        _patch_store(mock_conversation_store),
+        patch("syn_api._wiring.get_projection_mgr", return_value=mgr),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise",
+            new=AsyncMock(return_value="claude-1"),
+        ),
+    ):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        response = await get_conversation_log_endpoint("claude-1")
+
+    # Serialize the way FastAPI does, then hold the invariant against the
+    # DECODED wire values rather than against the in-process objects.
+    dumped = response.model_dump()["lines"]
+    assert len(dumped) == len(raw_lines)
+
+    piped = [
+        line
+        for line in dumped
+        if line["content_preview"] and _PIPE_IN_CONTENT in line["content_preview"]
+    ]
+    assert piped, (
+        "this recording is the fixture because it contains piped commands; "
+        "if it no longer does, this test is guarding nothing"
+    )
+    for line in piped:
+        names = line["tool_name"].split(_SEP)
+        previews = line["content_preview"].split(_SEP)
+        assert len(names) == len(previews) == 1, (
+            f"line {line['line_number']} has one tool block but renders "
+            f"{len(names)} name and {len(previews)} preview segment(s): "
+            f"{line['tool_name']!r} / {line['content_preview']!r}"
+        )
+        assert names == ["Bash"]
+
+    # The pipeline itself, unmangled, straight off the wire.
+    assert any(
+        line["content_preview"] == 'find /workspace -type f -name "*.py" | head -30'
+        for line in piped
+    ), f"the recorded command did not survive verbatim: {[p['content_preview'] for p in piped]}"
+
+    _assert_every_tool_block_is_represented(response.lines)
