@@ -13,7 +13,7 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
@@ -252,14 +252,13 @@ async def _build_agent_env(
     return env
 
 
-def _owners_of(repos: Sequence[str]) -> list[str]:
-    """The GitHub account names in `repos`, lower-cased, first occurrence first.
+def _repo_full_names(repos: Sequence[str]) -> list[str]:
+    """`owner/repo` for each entry, first occurrence first, unparseable ones dropped.
 
-    Accepts the shapes the platform actually stores: a full URL
-    (`https://github.com/owner/repo(.git)`), an `owner/repo` shorthand, and an
-    `ssh://`/`git@` remote.
+    Accepts the shapes the platform stores: a full URL with or without `.git`,
+    an `owner/repo` shorthand, and `git@` / `ssh://` remotes.
     """
-    owners: list[str] = []
+    names: list[str] = []
     for repo in repos:
         text = repo.strip().removesuffix(".git")
         if "github.com" in text:
@@ -267,46 +266,42 @@ def _owners_of(repos: Sequence[str]) -> list[str]:
             text = tail.lstrip(":/")
         parts = [part for part in text.split("/") if part]
         if len(parts) >= _OWNER_REPO_SEGMENTS:
-            owner = parts[-2].lower()
-            if owner not in owners:
-                owners.append(owner)
-    return owners
-
-
-def _installation_for_owners(
-    installations: Sequence[Mapping[str, object]], owners: Sequence[str]
-) -> Mapping[str, object] | None:
-    """The installation whose account owns one of `owners`, or None."""
-    by_login: dict[str, Mapping[str, object]] = {}
-    for installation in installations:
-        account = installation.get("account")
-        login = account.get("login") if isinstance(account, Mapping) else None
-        if isinstance(login, str):
-            by_login.setdefault(login.lower(), installation)
-    for owner in owners:
-        found = by_login.get(owner)
-        if found is not None:
-            return found
-    return None
+            name = f"{parts[-2]}/{parts[-1]}"
+            if name not in names:
+                names.append(name)
+    return names
 
 
 async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
-    """Mint an installation token for the installation that owns the repo under work.
+    """Mint an installation token for the repo under work.
 
-    Returns None when the App is not configured, no installations are reachable,
-    or none of them owns any repo in `repos`.
+    ASKS GITHUB WHICH INSTALLATION OWNS THE REPO, rather than listing every
+    installation and matching account logins. `GET /repos/{owner}/{repo}/
+    installation` is authoritative and is what `setup_phase_secrets.py` already
+    uses, so both credential paths now resolve the same way and cannot disagree.
 
-    RETURNING NONE IS THE POINT when nothing matches. A token from the wrong
-    installation cannot write - or often even read - the repository under work,
-    and injecting it as $GITHUB_TOKEN makes `gh` prefer it over the repo-scoped
-    credential the setup phase already wrote to hosts.yml. So the wrong token is
-    strictly worse than no token: it replaces a working credential with a
-    broken one, silently. Falling back to `installations[0]` is exactly that
-    failure, and it is what this function used to do (#1129).
+    The list-and-match version this replaced had the original bug back by
+    another route: `list_installations` issues one unpaginated request, GitHub
+    pages that endpoint at 30, and an owner sitting on page two matched nothing
+    (#1129, found in review).
+
+    NO REPOS IS NOT A ROUTING FAILURE. A `requires_repos: false` workflow has no
+    repo to route on, and nine in-tree workflows are that shape. Returning None
+    for them would remove GitHub access entirely - setup only writes hosts.yml
+    when it has repo tokens - so they keep the previous behaviour of the first
+    installation, with the arbitrariness stated rather than implied.
+
+    Returns None when the App is not configured, or when a repo IS named and no
+    installation owns it: a token from elsewhere cannot reach that repo and
+    would displace the repo-scoped hosts.yml credential `gh` would otherwise
+    use, which is strictly worse than no token at all.
     """
     try:
         from syn_adapters.github import GitHubAppClient
-        from syn_adapters.github.client_endpoints import list_installations
+        from syn_adapters.github.client_endpoints import (
+            get_installation_for_repo,
+            list_installations,
+        )
         from syn_adapters.github.client_token import get_installation_token
         from syn_shared.settings.github import GitHubAppSettings
 
@@ -314,23 +309,33 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
         if not github_settings.is_configured:
             return None
 
-        owners = _owners_of(repos)
-        if not owners:
-            return None
+        repo_names = _repo_full_names(repos)
 
         async with GitHubAppClient(github_settings) as client:
-            installations = await list_installations(client)
-            if not installations:
-                return None
-            match = _installation_for_owners(installations, owners)
-            if match is None:
-                logger.warning(
-                    "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN "
-                    "unset so the repo-scoped hosts.yml credential is used",
-                    owners,
+            if not repo_names:
+                installations = await list_installations(client)
+                if not installations:
+                    return None
+                logger.info(
+                    "No repo to route the GitHub token on (repo-less workflow); "
+                    "using the first installation"
                 )
-                return None
-            return await get_installation_token(client, str(match["id"]))
+                return await get_installation_token(client, str(installations[0]["id"]))
+
+            for name in repo_names:
+                try:
+                    installation_id = await get_installation_for_repo(client, name)
+                except Exception:
+                    logger.debug("No GitHub App installation owns %s", name, exc_info=True)
+                    continue
+                return await get_installation_token(client, installation_id)
+
+            logger.warning(
+                "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
+                "so the repo-scoped hosts.yml credential is used",
+                repo_names,
+            )
+            return None
     except Exception as exc:
         logger.warning("Could not mint GitHub App token for agent env: %s", exc)
         return None
