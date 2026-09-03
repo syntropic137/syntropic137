@@ -31,6 +31,8 @@ from syn_domain.contexts.orchestration import (
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
@@ -61,10 +63,17 @@ class FakeAgentExecutionHandler:
         interrupt: bool = False,
         exit_code: int = 0,
         interrupt_reason: str | None = "Cancelled by user",
+        output_files: Mapping[str, str] | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
+        #: Files the simulated agent leaves under ``artifacts/output/``, keyed
+        #: by path relative to that directory. Exit code alone cannot express
+        #: "the agent finished and reported the capability broken", which is
+        #: the whole subject of #1085, so the fake has to be able to produce
+        #: the deliverable as well as the status.
+        self._output_files = dict(output_files or {})
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -86,6 +95,13 @@ class FakeAgentExecutionHandler:
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.runners.append(runner)
+        if self._output_files:
+            await workspace.inject_files(
+                [
+                    (f"artifacts/output/{path}", content.encode())
+                    for path, content in self._output_files.items()
+                ]
+            )
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
@@ -131,9 +147,14 @@ class FakeAgentExecutionHandler:
         return cls(interrupt=True, interrupt_reason=reason)
 
     @classmethod
-    def success(cls) -> FakeAgentExecutionHandler:
-        """Simulates a clean agent completion (exit code 0)."""
-        return cls(interrupt=False, exit_code=0)
+    def success(cls, output_files: Mapping[str, str] | None = None) -> FakeAgentExecutionHandler:
+        """Simulates a clean agent completion (exit code 0).
+
+        ``output_files`` maps a path under ``artifacts/output/`` to its
+        content, so a test can distinguish an agent that succeeded from one
+        that merely exited 0.
+        """
+        return cls(interrupt=False, exit_code=0, output_files=output_files)
 
     @classmethod
     def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:

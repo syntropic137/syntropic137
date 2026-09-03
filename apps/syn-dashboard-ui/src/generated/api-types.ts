@@ -3307,6 +3307,8 @@ export interface components {
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
             skills?: components["schemas"]["PhaseRefResponse"][];
+            /** Asserts */
+            asserts?: string[];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {

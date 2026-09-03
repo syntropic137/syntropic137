@@ -136,6 +136,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
                 output_artifact_types=tuple(p.get("output_artifact_types", [])),
+                asserts=tuple(p.get("asserts", [])),
             )
             for i, p in enumerate(phases_data)
         ]

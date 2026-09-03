@@ -2,11 +2,14 @@
 model: haiku
 description: "Report which skills actually reached the agent's context"
 argument-hint: "[ignored]"
-allowed-tools: Read,Glob,Grep
+allowed-tools: Read,Write,Glob,Grep
 timeout-seconds: 300
 ---
 
-Report exactly three things, each on its own line, and nothing else.
+Write `artifacts/output/report.md` containing exactly three lines, each
+starting at column 1, and nothing else. The file is what the platform reads
+to decide whether this run passed; an answer only spoken back counts as no
+answer at all.
 
 1. `SENTINEL: <value>` — the deployment sentinel from the `deployment-sentinel`
    skill. If that skill is not in your context, write `SENTINEL: MISSING`.

@@ -8,6 +8,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration._shared.phase_assertions import (
+    require_asserted_output,
+)
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -762,6 +765,16 @@ class WorkflowExecutionProcessor:
         phase_outputs.record(todo.phase_id, result.first_content, result.files)
         aggregate.artifacts_collected(result.command)
         await self._save_and_sync(aggregate)
+        # AFTER the save, deliberately (#1085). The artifact is the evidence an
+        # operator reads to find out WHAT was broken, so it has to survive the
+        # failure. Raising here reuses the existing exception path in `run()`,
+        # which fails the execution the same way a non-zero exit code does -
+        # no new terminal state, and no new field on any event.
+        require_asserted_output(
+            phase_id=todo.phase_id,
+            assertions=phase.asserts,
+            outputs=[f.content for f in result.files],
+        )
 
     async def _handle_complete_phase(
         self,

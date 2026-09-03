@@ -167,6 +167,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 ),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
+                asserts=tuple(p.get("asserts") or ()),
             )
             for i, p in enumerate(phases)
         ]

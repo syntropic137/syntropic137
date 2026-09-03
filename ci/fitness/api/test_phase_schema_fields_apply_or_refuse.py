@@ -62,6 +62,7 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "timeout_seconds": ("ExecutablePhase", "timeout_seconds"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
+    "asserts": ("ExecutablePhase", "asserts"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
     "model": ("AgentConfiguration", "model"),
     "agent": ("AgentConfiguration", "provider"),

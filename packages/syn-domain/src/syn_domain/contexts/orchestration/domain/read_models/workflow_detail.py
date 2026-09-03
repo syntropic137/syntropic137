@@ -167,6 +167,13 @@ class PhaseDefinitionDetail:
     output_artifact_types: tuple[str, ...] = ()
     """Expected output artifact types from this phase."""
 
+    asserts: tuple[str, ...] = ()
+    """Patterns this phase's output must contain to count as passing (#1085).
+
+    A reader has to see these: they are the difference between a phase that
+    is judged on its report and one judged only on the agent exiting 0. An
+    export that drops them reinstalls a workflow that cannot fail."""
+
 
 @dataclass(frozen=True)
 class InputDeclarationDetail:
@@ -252,6 +259,7 @@ class WorkflowDetail:
                 max_tokens=p.get(PhaseFields.MAX_TOKENS),
                 input_artifact_types=tuple(p.get("input_artifact_types", [])),
                 output_artifact_types=tuple(p.get("output_artifact_types", [])),
+                asserts=tuple(p.get("asserts", [])),
             )
             for i, p in enumerate(phases_data)
         ]
@@ -321,6 +329,7 @@ class WorkflowDetail:
                 PhaseFields.MAX_TOKENS: p.max_tokens,
                 "input_artifact_types": list(p.input_artifact_types),
                 "output_artifact_types": list(p.output_artifact_types),
+                "asserts": list(p.asserts),
             }
 
         def input_decl_to_dict(d: InputDeclarationDetail | dict) -> dict:

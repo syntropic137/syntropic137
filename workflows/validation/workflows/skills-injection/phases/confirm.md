@@ -1,11 +1,13 @@
 ---
 model: haiku
 description: "Second phase declaring NO skills - proves workflow scope reaches every phase"
-allowed-tools: Read,Glob,Grep
+allowed-tools: Read,Write,Glob,Grep
 timeout-seconds: 300
 ---
 
-Report exactly two lines and nothing else.
+Write `artifacts/output/report.md` containing exactly two lines, each starting
+at column 1, and nothing else. The file is what the platform reads to decide
+whether this run passed; an answer only spoken back counts as no answer at all.
 
     SENTINEL: <value>
     PHASE: confirm

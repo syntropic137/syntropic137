@@ -22,3 +22,11 @@ phases:
     prompt_file: phases/exercise.md
     agent:
       provider: claude
+    # The capability this workflow exists to prove, stated where the platform
+    # can enforce it (#1085). Without these the phase reported `CLOSE: FAILED`
+    # and the execution still finished green, because the agent had exited 0.
+    asserts:
+      - '^ISSUE: [0-9]+$'
+      - '^COMMENT: ok$'
+      - '^CLOSE: ok$'
+      - '^TOKEN_SCOPE: none$'

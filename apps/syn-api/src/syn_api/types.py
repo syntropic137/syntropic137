@@ -408,6 +408,10 @@ class PhaseDefinitionResponse(BaseModel):
     max_tokens: int | None = None
     input_artifact_types: list[str] = Field(default_factory=list)
     output_artifact_types: list[str] = Field(default_factory=list)
+    # What the phase's output must contain for the run to count as passing
+    # (#1085). Readable because it is the difference between a phase that can
+    # fail on its report and one that can only fail by crashing.
+    asserts: list[str] = Field(default_factory=list)
 
 
 class WorkflowDetail(BaseModel):

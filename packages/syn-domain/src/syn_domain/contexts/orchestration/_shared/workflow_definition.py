@@ -29,6 +29,9 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
+from syn_domain.contexts.orchestration._shared.phase_assertions import (
+    require_valid_assertions,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
@@ -302,6 +305,23 @@ class PhaseYamlDefinition(BaseModel):
     # identity collision when the two lists are merged at resolution time.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # What this phase's output must contain for the run to count as passing
+    # (issue #1085). Empty means the phase is judged on the agent's exit code
+    # alone, which is every workflow that pre-dates this field.
+    asserts: list[str] = Field(default_factory=list)
+
+    @field_validator("asserts", mode="before")
+    @classmethod
+    def _validate_assertion_patterns(cls, value: object) -> object:
+        """Refuse a pattern that cannot compile, at authoring time (#1085).
+
+        The RULE lives in `require_valid_assertions`, not here, for the same
+        reason `execution_type` delegates: execution has to apply it to stored
+        templates that never saw this validator, and two copies of a rule are
+        two things to drift apart.
+        """
+        return require_valid_assertions(value)
+
     @field_validator("allowed_tools", mode="before")
     @classmethod
     def _validate_tool_names(cls, value: object) -> object:
@@ -472,6 +492,7 @@ class PhaseYamlDefinition(BaseModel):
             allow_delegation=allow_delegation,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
+            asserts=tuple(self.asserts),
         )
 
 

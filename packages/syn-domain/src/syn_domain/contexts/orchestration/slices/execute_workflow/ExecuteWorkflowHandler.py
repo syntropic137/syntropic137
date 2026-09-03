@@ -446,6 +446,7 @@ class ExecuteWorkflowHandler:
                     timeout_seconds=phase.timeout_seconds,
                     claude_plugins=resolved,
                     skills=resolved_skills,
+                    asserts=tuple(phase.asserts),
                 )
             )
         return executable_phases

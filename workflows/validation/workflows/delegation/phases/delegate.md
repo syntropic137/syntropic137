@@ -15,7 +15,10 @@ Do exactly two things.
        claude -p --permission-mode bypassPermissions --output-format stream-json \
          --verbose "Review /workspace/palindrome.py for correctness; reply with a one-line verdict"
 
-Then report exactly these lines and nothing else:
+Then write `artifacts/output/report.md` containing exactly these two lines,
+each starting at column 1, and nothing else. The file is what the platform reads
+to decide whether this run passed; a report only printed to the terminal counts
+as no report at all.
 
     DELEGATE_RAN: <ok or FAILED>
     VERDICT: <the one-line verdict Claude returned, or none>

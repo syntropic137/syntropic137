@@ -31,6 +31,13 @@ phases:
     # skills. External refs are pinned by commit sha; "@latest" is rejected.
     skills:
       - anthropics/skills/doc-coauthoring@3b3fad96af16a10759d930941b4520ba0c40edae
+    # Both delivery paths, asserted where the platform can enforce them
+    # (#1085). The sentinel is unguessable, so matching it is evidence; the
+    # agent's own `SKILL_SOURCE` line is deliberately NOT asserted, because a
+    # self-report about its own process is the one thing here that is not.
+    asserts:
+      - '^SENTINEL: VENDORED-SKILL-OK-7f3a91$'
+      - '^EXTERNAL_SKILL: present$'
 
   # Declares NO skills. If the sentinel still reaches it, workflow-scope
   # injection covers every phase; if it does not, scope is being applied only
@@ -42,3 +49,8 @@ phases:
     prompt_file: phases/confirm.md
     agent:
       provider: claude
+    # Workflow-scope injection reaching a LATER phase is the whole claim of
+    # this phase, so a missing sentinel here must fail the run (#1085).
+    asserts:
+      - '^SENTINEL: VENDORED-SKILL-OK-7f3a91$'
+      - '^PHASE: confirm$'

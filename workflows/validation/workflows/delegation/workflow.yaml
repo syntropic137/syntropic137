@@ -27,3 +27,8 @@ phases:
       # The concrete model id, not the alias: an unnamed model resolves to no
       # rate and the run prices as unpriced. See #892.
       model: gpt-5.6-sol
+    # A run where the delegation silently did not happen still produces a
+    # working palindrome and still exits 0, which is exactly the shape #1085
+    # describes: green for a capability that is broken.
+    asserts:
+      - '^DELEGATE_RAN: ok$'

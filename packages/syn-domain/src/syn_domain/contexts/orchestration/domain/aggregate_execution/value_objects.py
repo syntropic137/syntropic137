@@ -223,3 +223,7 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+    # Patterns the phase's collected output must contain for it to count as
+    # passing (issue #1085). Empty means judged on the agent's exit code alone.
+    asserts: tuple[str, ...] = ()

@@ -305,6 +305,13 @@
           },
           "title": "Skills",
           "type": "array"
+        },
+        "asserts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Asserts",
+          "type": "array"
         }
       },
       "required": [

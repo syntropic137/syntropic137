@@ -87,6 +87,7 @@ class PhaseDefinition(BaseModel):
     allow_delegation: bool = False
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
+    asserts: list[str] = Field(default_factory=list)
 
 
 class WorkflowResponse(BaseModel):
@@ -181,6 +182,7 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             max_tokens=p.max_tokens,
             input_artifact_types=list(p.input_artifact_types),
             output_artifact_types=list(p.output_artifact_types),
+            asserts=list(p.asserts),
         )
         for p in (raw_phases or [])
     ]
@@ -533,6 +535,13 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
+    # Emitted through the flow-list emitter, not concatenated: an assertion is
+    # a REGEX, so `[A-Z]`, `a,b` and `yes` are all ordinary values here and all
+    # three restructure or retype a hand-built list (#1085). Dropping them
+    # would be worse than a broken export -- the package would reinstall
+    # cleanly as a workflow that can no longer fail on a broken capability.
+    if phase.asserts:
+        lines.append(f"    asserts: {_yaml_flow_list(list(phase.asserts))}")
     return lines
 
 
@@ -748,6 +757,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
                 # would be a second translation of the same value.
                 claude_plugins=list(p.claude_plugins),
                 skills=list(p.skills),
+                asserts=list(p.asserts),
             )
             for p in detail.phases
         ],

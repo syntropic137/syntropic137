@@ -13,12 +13,16 @@ given. Do all four steps, then report.
    body saying it was opened by an automated validation run and is safe to close.
 2. Comment on that issue with the single word `ack`.
 3. Close the issue.
-4. Report exactly these lines and nothing else:
+4. Write `artifacts/output/report.md` containing exactly these four lines and
+   nothing else, each starting at column 1:
 
        ISSUE: <number or FAILED>
        COMMENT: <ok or FAILED>
        CLOSE: <ok or FAILED>
        TOKEN_SCOPE: <what the failure said, or none>
+
+   The file is what the platform reads to decide whether this run passed, so a
+   report only printed to the terminal counts as no report at all.
 
 If a step fails, say `FAILED` for that step and put the actual error text in
 `TOKEN_SCOPE`. Do not retry a step more than once, and do not work around a

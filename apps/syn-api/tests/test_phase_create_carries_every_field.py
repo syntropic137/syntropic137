@@ -67,6 +67,7 @@ _EVERY_FIELD: Mapping[str, object] = {
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
     "skills": ["owner/repo/some-skill@abc123"],
+    "asserts": ["^CLOSE: ok$"],
 }
 
 
@@ -119,6 +120,10 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.skills[0].skill_name == "some-skill"
     assert phase.skills[0].source_url.endswith("owner/repo")
     assert phase.execution_type == PhaseExecutionType.PARALLEL
+    # The value, not the count. `asserts` decides whether an execution can
+    # fail on its report at all (#1085), so a mapping that carried the wrong
+    # pattern would silently pass a broken capability.
+    assert phase.asserts == ("^CLOSE: ok$",)
 
 
 class TestTheFieldsThatWereActuallyDropped:

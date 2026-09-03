@@ -175,3 +175,14 @@ class PhaseDefinition(BaseModel):
     # follow-up resolution service rewrites them into ResolvedSkill entries
     # on ExecutablePhase.
     skills: tuple[SkillRef, ...] = Field(default_factory=tuple)
+
+    asserts: tuple[str, ...] = Field(default_factory=tuple)
+    """Patterns this phase's collected output must contain to count as passing.
+
+    Issue #1085: an execution's status said whether the agent finished, so a
+    validation phase that successfully reported a BROKEN capability finished
+    green. Declaring the expected report here moves the verdict into the
+    workflow definition, where its author already writes the assertion in
+    prose. Empty means judged on exit code alone, which is every workflow
+    written before this field existed.
+    """
