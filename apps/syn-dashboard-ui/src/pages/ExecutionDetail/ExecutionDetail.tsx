@@ -16,6 +16,7 @@ import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
 import type { ExecutionDetailResponse } from '../../types'
+import { executionTokenTotals } from '../../utils/executionTokens'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
@@ -137,10 +138,9 @@ function ExecutionMetricsGrid({
   hasCostByModel: boolean
 }) {
   const completedPhases = execution.phases.filter((p) => p.status === 'completed').length
-  const cacheCreation = execution.total_cache_creation_tokens
-  const cacheRead = execution.total_cache_read_tokens
-  const totalTokens =
-    execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
+  const tokens = executionTokenTotals(execution)
+  const attributedIn = tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
+  const inOutSubtitle = `In: ${attributedIn.toLocaleString()} / Out: ${tokens.outputTokens.toLocaleString()}`
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -154,9 +154,13 @@ function ExecutionMetricsGrid({
       />
       <MetricCard
         title="Total Tokens"
-        value={totalTokens.toLocaleString()}
+        value={tokens.total.toLocaleString()}
         icon={FileText}
-        subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
+        subtitle={
+          tokens.inProgressTokens > 0
+            ? `${inOutSubtitle} / ${tokens.inProgressTokens.toLocaleString()} in progress`
+            : inOutSubtitle
+        }
         scrollToId="token-breakdown"
       />
       <MetricCard
@@ -199,6 +203,7 @@ export function ExecutionDetail() {
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
   const aggregatedCostByModel = aggregateCostByModel(execution.phases)
+  const tokens = executionTokenTotals(execution)
 
   return (
     <div className="space-y-6">
@@ -212,10 +217,11 @@ export function ExecutionDetail() {
       />
       <section id="token-breakdown">
         <TokenBreakdown
-          inputTokens={execution.total_input_tokens}
-          outputTokens={execution.total_output_tokens}
-          cacheCreationTokens={execution.total_cache_creation_tokens}
-          cacheReadTokens={execution.total_cache_read_tokens}
+          inputTokens={tokens.inputTokens}
+          outputTokens={tokens.outputTokens}
+          cacheCreationTokens={tokens.cacheCreationTokens}
+          cacheReadTokens={tokens.cacheReadTokens}
+          inProgressTokens={tokens.inProgressTokens}
         />
       </section>
       {Object.keys(aggregatedCostByModel).length > 0 && (
