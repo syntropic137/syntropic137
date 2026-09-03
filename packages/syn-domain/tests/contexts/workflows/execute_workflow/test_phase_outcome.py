@@ -237,6 +237,7 @@ async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it()
     await projection.on_workflow_failed(
         {
             "workflow_id": "wf-1",
+            "execution_id": "e2",
             "failed_phase_id": "implement",
             "failed_phase_duration_seconds": 3.0,
         }

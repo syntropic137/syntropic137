@@ -24,6 +24,10 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 # enough from 0.0 that a regression cannot hide inside a tolerance.
 ELAPSED = 300.0
 
+# A second, longer run of the same phase, by a different execution. Shares no
+# factor with ELAPSED so a total of the two cannot be either one of them.
+SETTLED = 610.0
+
 
 def _started_seconds_ago(seconds: float) -> str:
     return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
@@ -145,6 +149,47 @@ class TestMetricsEndpointPhaseDuration:
         assert phase.status == "running"
         assert phase.duration_seconds is not None
         assert phase.duration_seconds >= ELAPSED + 10.0
+
+    @pytest.mark.asyncio
+    async def test_completing_one_execution_does_not_terminalise_the_other(self) -> None:
+        """Four to six executions of a workflow run at once, so their phases overlap.
+
+        The phase row this endpoint returns belongs to the workflow, not to an
+        execution. When the first execution to finish stamped it "completed",
+        /metrics reported the phase finished while other executions were still
+        inside it, and their elapsed time left the total - the same silently
+        cheap number as a bare 0.0, arrived at from the other direction.
+
+        SETTLED and ELAPSED share no factor, so the total can only be the sum:
+        the settled run alone, or the live run alone, both fail.
+        """
+        projection = await _phase_projection()
+        for execution_id, ago in (("exec-1", SETTLED), ("exec-2", ELAPSED)):
+            await projection.on_phase_started(
+                {
+                    "workflow_id": "wf-1",
+                    "execution_id": execution_id,
+                    "phase_id": "p-1",
+                    "phase_name": "Build",
+                    "started_at": _started_seconds_ago(ago),
+                }
+            )
+
+        await projection.on_phase_completed(
+            {
+                "workflow_id": "wf-1",
+                "execution_id": "exec-1",
+                "phase_id": "p-1",
+                "duration_seconds": SETTLED,
+                "success": True,
+            }
+        )
+
+        phase = (await _phase_metrics("wf-1"))["p-1"]
+
+        assert phase.status == "running"
+        assert phase.duration_seconds is not None
+        assert phase.duration_seconds >= SETTLED + ELAPSED
 
     @pytest.mark.asyncio
     async def test_finished_phase_that_recorded_no_duration_is_unknown(self) -> None:

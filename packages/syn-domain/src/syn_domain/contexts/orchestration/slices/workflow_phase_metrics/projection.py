@@ -1,7 +1,8 @@
 """Projection for per-phase metrics aggregated by workflow.
 
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
-Keyed by workflow_id; accumulates token/duration metrics per phase_id.
+Keyed by workflow_id; accumulates token/duration metrics per phase_id, with
+the runs still in flight tracked per execution_id underneath.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from event_sourcing import ProjectionStore
 
@@ -19,6 +21,21 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.phase_entry import (
     PhaseMetricsEntry,
 )
+
+NO_EXECUTION = ""
+"""The run key for an event that carried no execution id.
+
+PhaseStarted, PhaseCompleted, WorkflowFailed, ExecutionCancelled and
+WorkflowInterrupted all require one, so this is only reached by a truncated or
+hand-built payload. Such runs share a single slot, which is exactly how this
+projection behaved before it could tell executions apart: a degraded answer for
+a degraded input, rather than a branch every reader has to carry.
+"""
+
+
+def _execution_of(event_data: dict) -> str:
+    """Which execution's run of a phase this event is about."""
+    return event_data.get("execution_id") or NO_EXECUTION
 
 
 class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
@@ -36,7 +53,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_phase_metrics"
-    VERSION = 4  # Bumped: phases now store started_at, so a running phase can be timed
+    VERSION = 5  # Bumped: phases track their in-flight runs per execution_id
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -70,10 +87,53 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
             {"phases": {phase_id: entry.to_stored() for phase_id, entry in phases.items()}},
         )
 
+    async def _close_execution(
+        self,
+        event_data: dict,
+        *,
+        status: str,
+        ended_at: datetime | str | None,
+        recorded_seconds: float | None = None,
+    ) -> None:
+        """Close whatever run this execution still had open, however it ended.
+
+        An execution that has stopped is not running any phase, so its run has
+        to be closed by every route out - completion, failure, cancellation,
+        interruption. Leaving one open would keep the workflow's phase
+        reporting "running" and accruing wall-clock time against a run that is
+        over, forever (#1036) - and now, since runs no longer overwrite each
+        other, no later execution would come along and paper over it.
+
+        An execution runs its phases one at a time, so at most one run of one
+        phase is open per execution; the loop is over the workflow's phases to
+        find it, not because several can be open at once.
+        """
+        workflow_id = event_data.get("workflow_id", "")
+        if not workflow_id:
+            return
+        execution_id = _execution_of(event_data)
+
+        phases = await self._load_phases(workflow_id)
+        open_phase_ids = [
+            phase_id for phase_id, entry in phases.items() if execution_id in entry.active_runs
+        ]
+        if not open_phase_ids:
+            return
+
+        for phase_id in open_phase_ids:
+            phases[phase_id] = phases[phase_id].with_run_finished(
+                execution_id,
+                status=status,
+                recorded_seconds=recorded_seconds,
+                ended_at=ended_at,
+            )
+
+        await self._save_phases(workflow_id, phases)
+
     # === Event handlers ===
 
     async def on_phase_started(self, event_data: dict) -> None:
-        """Open a run of this phase: it is running, and it started just now.
+        """Open this execution's run of the phase: it is running, from now.
 
         Both facts are recorded on every start, not only the first. The same
         phase runs again on every execution of its workflow (this projection
@@ -92,17 +152,20 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         entry = phases.get(phase_id) or PhaseMetricsEntry(phase_id=phase_id, phase_name=phase_name)
 
         phases[phase_id] = replace(
-            entry,
+            entry.with_run_started(_execution_of(event_data), event_data.get("started_at")),
             # Phase name may not have been set on first encounter
             phase_name=entry.phase_name or phase_name,
-            status="running",
-            started_at=event_data.get("started_at"),
         )
 
         await self._save_phases(workflow_id, phases)
 
     async def on_phase_completed(self, event_data: dict) -> None:
-        """Accumulate token/duration metrics for the phase."""
+        """Accumulate token/duration metrics for the phase.
+
+        Only the completing execution's run is closed. Any other execution of
+        this workflow still in this phase keeps its run, and the phase keeps
+        reporting itself as running for as long as one of them is.
+        """
         workflow_id = event_data.get("workflow_id", "")
         phase_id = event_data.get("phase_id", "")
         if not workflow_id or not phase_id:
@@ -112,38 +175,56 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         # PhaseStarted may have been missed; fall back to a fresh entry
         entry = phases.get(phase_id) or PhaseMetricsEntry(phase_id=phase_id, phase_name=phase_id)
 
+        finished = entry.with_run_finished(
+            _execution_of(event_data),
+            status="completed" if event_data.get("success", True) else "failed",
+            recorded_seconds=event_data.get("duration_seconds"),
+            ended_at=event_data.get("completed_at"),
+        )
         phases[phase_id] = replace(
-            entry.with_finished_run(event_data.get("duration_seconds")),
+            finished,
             input_tokens=entry.input_tokens + event_data.get("input_tokens", 0),
             output_tokens=entry.output_tokens + event_data.get("output_tokens", 0),
             total_tokens=entry.total_tokens + event_data.get("total_tokens", 0),
             artifact_count=entry.artifact_count + (1 if event_data.get("artifact_id") else 0),
-            status="completed" if event_data.get("success", True) else "failed",
         )
 
         await self._save_phases(workflow_id, phases)
 
     async def on_workflow_failed(self, event_data: dict) -> None:
-        """Mark the failed phase's real status and duration.
+        """Mark the failed run's real status and duration.
 
         A failed phase never gets a PhaseCompleted event -- the only other
         writer of these fields -- so without this it stays "running" and keeps
         accruing wall-clock time against a run that ended, forever (#1036).
+
+        ``failed_phase_duration_seconds`` is how long the run had been going
+        when the failure was caught; the processor measured it, so it beats
+        anything derived from ``failed_at`` here.
         """
-        workflow_id = event_data.get("workflow_id", "")
-        phase_id = event_data.get("failed_phase_id")
-        if not workflow_id or not phase_id:
-            return
+        await self._close_execution(
+            event_data,
+            status="failed",
+            ended_at=event_data.get("failed_at"),
+            recorded_seconds=event_data.get("failed_phase_duration_seconds"),
+        )
 
-        phases = await self._load_phases(workflow_id)
-        entry = phases.get(phase_id)
-        if entry is None:
-            return
+    async def on_execution_cancelled(self, event_data: dict) -> None:
+        """A cancelled execution's run ended when the cancellation landed.
 
-        failed_run = entry.with_finished_run(event_data.get("failed_phase_duration_seconds"))
-        phases[phase_id] = replace(failed_run, status="failed")
+        Nothing records how long it had run, so the elapsed time is measured
+        against ``cancelled_at`` -- NOT the wall clock, which would keep the
+        phase's total growing forever after the run stopped.
+        """
+        await self._close_execution(
+            event_data, status="cancelled", ended_at=event_data.get("cancelled_at")
+        )
 
-        await self._save_phases(workflow_id, phases)
+    async def on_workflow_interrupted(self, event_data: dict) -> None:
+        """Same as cancellation, by the forceful route (SIGINT mid-stream)."""
+        await self._close_execution(
+            event_data, status="interrupted", ended_at=event_data.get("interrupted_at")
+        )
 
     # === Query ===
 
@@ -151,7 +232,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         """Return this workflow's phases, keyed by phase_id.
 
         Entries are typed so that no caller has to know which stored field
-        means what -- in particular, how a settled total and a run still in
+        means what -- in particular, how a settled total and the runs still in
         flight combine into "how long has this phase run". Empty if no data
         found.
         """
