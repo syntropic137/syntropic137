@@ -35,23 +35,15 @@ like proof.
 
 ## Run the gates
 
-Run `just preflight-agent`, then `uv run pytest -m unit -q`. Paste the final
-lines of each. If either is not green, that is the finding and you should stop
-and report it rather than working around it.
-
-**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and `node`
-and nothing else, so seven of the gates in `just preflight` cannot run here at
-all: `vsa-validate` (no `vsa`), `fitness` (no `cargo`), `codegen-check` (no
-`pnpm`), `check-submodules`, `check-compose-overlays`,
-`check-default-workspace-image` and `check-pinned-image-channels`. Attempting
-`qa-ci` here fails on the missing binary, not on the change. CI runs those
-seven; passing here does not promise a green CI, and if CI fails on one of them
-that is a real failure to fix, not an exception to claim.
+Run `just qa-ci`. Paste its final lines. If it is not green, that is the finding
+and you should stop and report it rather than working around it.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
-pass every test, typecheck and build and still fail on something none of them
+pass every test, typecheck and build and still fail CI on something none of them
 touch. A CLI flag added in this repository drifted a generated docs page and
-failed `codegen-check`, a real PR-gating job, while every direct test passed.
+failed `codegen-check`, a real PR-gating job, while every direct test passed. If
+`just qa-ci` cannot run here, name the gates it would have run and run each one,
+rather than substituting the two you happen to know.
 
 Run `git status --porcelain` before and after. Verification commands in this
 repository have mutated tracked files; if the tree changed, report it.
@@ -177,8 +169,7 @@ passed.
 
 ## Output
 
-A verdict: is the change correct and complete, or not. The `preflight-agent` and
-unit-test output, each
+A verdict: is the change correct and complete, or not. The `qa-ci` output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
 
