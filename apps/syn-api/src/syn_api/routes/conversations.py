@@ -272,6 +272,61 @@ def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
 _TOOL_FIELD_SEP = " | "
 
 
+_CLAUDE_TOOL_USE = "tool_use"
+_CLAUDE_TOOL_RESULT = "tool_result"
+
+
+def _claude_block_fields(
+    item: Mapping[str, object],
+) -> tuple[str | None, str | None, str | None]:
+    """Normalize ONE ``message.content[]`` block to (kind, tool_name, preview).
+
+    ``kind`` is None for a block that is not a tool block (plain ``text``,
+    ``thinking``, an unrecognized type), which the caller skips.
+    """
+    item_type = item.get("type")
+    if item_type == _CLAUDE_TOOL_USE:
+        name = item.get("name")
+        input_data = item.get("input")
+        preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
+        return _CLAUDE_TOOL_USE, (name if isinstance(name, str) and name else None), preview
+    if item_type == _CLAUDE_TOOL_RESULT:
+        return _CLAUDE_TOOL_RESULT, None, _claude_tool_result_preview(item)
+    return None, None, None
+
+
+def _collect_claude_tool_blocks(
+    content: list[object],
+) -> tuple[list[str], list[str], bool] | None:
+    """Scan EVERY block in one message's content, or None if none is a tool block.
+
+    Returns (tool_names, previews, saw_tool_use). Kept separate from
+    ``_extract_claude_tool_fields`` so neither function exceeds the
+    cyclomatic-complexity threshold; the guards live there, the scan here.
+    """
+    tool_names: list[str] = []
+    previews: list[str] = []
+    saw_tool_use = False
+    saw_tool_block = False
+
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        kind, tool_name, preview = _claude_block_fields(item)
+        if kind is None:
+            continue
+        saw_tool_block = True
+        saw_tool_use = saw_tool_use or kind == _CLAUDE_TOOL_USE
+        if tool_name:
+            tool_names.append(tool_name)
+        if preview:
+            previews.append(preview)
+
+    if not saw_tool_block:
+        return None
+    return tool_names, previews, saw_tool_use
+
+
 def _extract_claude_tool_fields(
     data: Mapping[str, object],
 ) -> tuple[str, str | None, str | None] | None:
@@ -306,33 +361,10 @@ def _extract_claude_tool_fields(
     if not isinstance(content, list):
         return None
 
-    tool_names: list[str] = []
-    previews: list[str] = []
-    saw_tool_use = False
-    saw_tool_block = False
-
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        if item_type == "tool_use":
-            saw_tool_block = True
-            saw_tool_use = True
-            name = item.get("name")
-            if isinstance(name, str) and name:
-                tool_names.append(name)
-            input_data = item.get("input")
-            preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
-            if preview:
-                previews.append(preview)
-        elif item_type == "tool_result":
-            saw_tool_block = True
-            preview = _claude_tool_result_preview(item)
-            if preview:
-                previews.append(preview)
-
-    if not saw_tool_block:
+    collected = _collect_claude_tool_blocks(content)
+    if collected is None:
         return None
+    tool_names, previews, saw_tool_use = collected
 
     # A line holding any tool_use renders as a tool row; a line holding only
     # tool_results keeps its own top-level type, as before this change.
