@@ -27,9 +27,25 @@ finding as though addressing it. If the reviewer was wrong, say so and show the
 code that proves it - a reviewer that cannot read the running system will
 sometimes be confidently wrong about it.
 
+## First: which verdict are you under
+
+Read the coverage gate's verdict before writing anything. It governs the shape
+of this document, and getting this wrong is the failure mode the whole workflow
+exists to prevent.
+
+- **`DO NOT REFACTOR`** - the deliverable is blockers, evidence, and the
+  conditions that would lift the verdict. NO extraction steps, NO module
+  layout, NO ordered plan. Producing an extraction design under this verdict
+  would hand someone a plan the gate refused, which is worse than producing
+  nothing. Stop after the blockers.
+- **`CHARACTERIZATION TESTS REQUIRED FIRST`** - the test work is the
+  deliverable's spine and every extraction step hangs off a named test.
+- **`SAFE TO REFACTOR`** - the full document below.
+
 ## The deliverable
 
-One document someone can execute from:
+For `SAFE TO REFACTOR` and `CHARACTERIZATION TESTS REQUIRED FIRST`, one
+document someone can execute from:
 
 1. **The verdict**, unchanged from the gate unless the review overturned it,
    with the coverage evidence.

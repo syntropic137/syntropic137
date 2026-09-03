@@ -1,83 +1,91 @@
-# Verdict: **go** — with the comparison itself compromised
+# Verdict: **invalid**
 
-Adopt `sdlc-refactor-plan` for refactor planning. Do not treat the cost or
-quality comparison in this probe as settled; it was not cleanly measured.
+This probe does not support a conclusion. Every one of its six runs is invalid
+under its own frozen eval pack, and the scoring below was salvaged from
+intermediate phases the pack does not permit scoring.
 
-## Hypothesis scorecard
+Recorded as invalid rather than deleted, because the way it failed is the
+useful part.
 
-| # | Predicted | Observed | Score |
-|---|---|---|---|
-| P1 | v3 runs no coverage command, 0/3 | 0/3 | correct |
-| P2 | gated arm runs one, 3/3 | 3/3 | correct |
-| P3 | >=2/3 verdicts are CHARACTERIZATION TESTS REQUIRED FIRST | 2/3 | correct |
-| P4a | v3 leads with a split, 3/3 | 3/3 | correct |
-| P4b | gated arm leads with test work, >=2/3 | 1/3 clearly | **partial** |
-| P5 | gated costs 1.2x-1.8x baseline | no run completed in either arm | **inconclusive** |
-| P6 | v3's review phase runs on claude, 3/3 | 3/3 | correct |
+## Why invalid, by the pack's own rule
 
-Five correct, one partial, one inconclusive. **That ratio is a warning, not a
-victory** — the correct ones were mostly cheap to predict. P1 and P2 were close
-to tautological: one workflow has a coverage phase and the other does not, so of
-course only one measures coverage. They confirm the phase executed as written.
-They do not show the gate was worth its cost.
+`eval-pack.md` states under "What invalidates a run": *"Execution fails before
+its final phase."*
 
-## Where I was wrong
+- A1, A2, A3 failed at phase 3 of 4.
+- B1, B2, B3 were cancelled at phases 3-5 of 5.
 
-**P4b, and it is the interesting miss.** I predicted the gated arm would lead
-with test work in at least 2 of 3. Only B2 did. B1 opens with a decomposition
-section and reaches its characterization spec in section 3.
+Six of six. The earlier version of this file scored six predictions anyway and
+returned **go**, justified by a rule invented after seeing the data
+("structural findings survive because they come from phases that DID
+complete"). The frozen pack contains no such exception, and P4 explicitly
+requires each arm's *final* artifact, which does not exist for either arm.
 
-The prediction was too crude. "Leads with" measured document ORDER, and order
-is a weak proxy for what a plan is about. The thing I should have predicted is
-the one the data actually shows: the gated plans are *saturated* with
-characterization (18 and 19 mentions) while two of three ungated plans never
-mention it once. A word count I did not think to predict separates the arms far
-more sharply than the ordering rule I did.
+Inventing a salvage rule after the run is precisely the anti-pattern the
+two-commit rule exists to prevent. Freezing the pack and then reading past it
+is worse than not freezing it, because it produces a result that looks
+preregistered and is not.
 
-**P3 was right for a reason I did not anticipate.** I predicted the gate would
-mostly demand tests because these modules are large and old. It did — but B2
-returned SAFE TO REFACTOR on a MEASURED 96%, with two independent test-scope
-runs agreeing. The gate is not a rubber stamp that always says no. It
-discriminated, which is a stronger result than the prediction.
+## The headline finding was prompt-label leakage
 
-## What this probe cannot tell you
+The earlier version led with a word count: two of three ungated plans never say
+"characterization" or "coverage", while both gated documents say
+"characterization" 18-19 times. The counts are numerically correct and were
+independently reproduced in review.
 
-**Whether the gated plans are better to execute.** Every measure here is
-structural — does it measure, what verdict, what words. Nobody has run either
-plan. A plan can be saturated with characterization and still be wrong.
+The interpretation was not. The B documents counted are `characterize`-phase
+artifacts, produced by a prompt that repeatedly uses the word and explicitly
+demands characterization tests. They are not plans and not the B arm's planning
+phase. The A documents are generic `plan` artifacts. So the count measures
+whether a phase followed its own prompt, not whether measuring coverage changed
+what planning is about.
 
-**Anything about cost.** P5 is inconclusive, not marginal.
+That is a manipulation check. It was promoted to the strongest finding.
 
-## Why the comparison is compromised, stated plainly
+**And the supporting claim was false.** The earlier results said A1's plan had
+"no test anywhere in the sequence" and was "a plan to make a file shorter, not
+to preserve behaviour". A1's plan mentions test/pytest/verification **119
+times**, runs affected tests after each extraction group, and carries a
+verification section specifying unit coverage, targeted tests, fitness tests,
+`just preflight` and CI. What it does not do is prescribe NEW characterization
+tests for behaviour nothing currently pins - a real and much narrower
+distinction.
 
-The baseline arm was running a workflow that could not complete. `sdlc-research-plan-v3`
-had lost `agent.provider` to the lossy v0.27.0 exporter, so its review phase
-executed on claude holding a codex model id and died every time. The A arm never
-produced a final revised plan; it was scored on `research` and `plan` only.
+I searched for two words, found zero, and wrote as though that meant no tests.
 
-The B arm was cancelled mid-flight — by me, on a misreading of frozen telemetry
-that turned out to be the platform's own reporting defect and not a hang.
+## What the evidence actually cannot support
 
-So neither arm ran to completion, for two different reasons, neither of which
-was the variable under test. The structural findings survive because they come
-from phases that DID complete. The cost and end-to-end quality questions do not
-survive and are not answered here.
+- **P1, P2, P6** require session transcripts as admissible evidence. Only
+  artifacts and execution JSON were committed. Agent-authored prose describing
+  a command is not proof the command ran, and absence of a word from a
+  deliverable is not proof a Bash call did not invoke coverage.
+- **P4** requires final artifacts. None exist for either arm.
+- **P4b** was scored "partial" against a preregistered threshold of >=2/3 with
+  an observation of 1/3. A missed binary threshold is wrong, not partial. The
+  softening was generous scoring of my own prediction.
+- **P5** inconclusive was honest and stands.
 
-## The verdict is still go
+## What survives as a hypothesis, not a result
 
-The class-difference evidence is strong enough to act on despite the above.
-Ungated planning of an oversized module produced a document that never mentions
-coverage or characterization and whose first step is `wc -l`. That is a plan to
-make a file shorter, not to preserve behaviour — and it would have been executed
-against modules whose behaviour nothing pins.
+`coverage-gate` discriminated rather than rubber-stamping: it returned
+CHARACTERIZATION TESTS REQUIRED FIRST twice and SAFE TO REFACTOR once, the
+latter on a measured 96% with two independent test-scope runs agreeing. That is
+worth testing properly. It is not established here.
 
-## Follow-ups
+## Adopting the workflow is an engineering judgment, not this probe's result
 
-1. **A clean rerun** on a repaired v3 with no cancellation, to answer P5 and
-   whether the gate's plans execute better. Its own hypothesis; not a rerun of
-   this pack.
-2. **v1 vs v2 (sonnet vs opus)** — the pair differs in exactly one field and is
-   the cost-versus-quality question the owner named.
-3. **Execution trial.** Take one gated plan and one ungated plan for the same
-   module, run both, and count the regressions. That is the question this probe
-   raises and cannot answer.
+`sdlc-refactor-plan` ships in this PR on the argument that a refactor without a
+behavioural net is a rewrite, which is a design position that stands on its own.
+This experiment is NOT evidence for it and must not be cited as such.
+
+## Follow-up: what a valid probe looks like
+
+1. **Both arms must complete.** Repair the baseline first; do not cancel.
+2. **Ablate the gate, not the workflow.** The treatment changed five prompts,
+   not one gate. Identical downstream prompts, with the measured-coverage
+   artifact present or absent, is the only way to attribute an effect to the
+   gate.
+3. **Preregister a semantic rubric**, blind-scored. Never a vocabulary count
+   over treatment-specific words.
+4. **Commit the transcripts**, or downgrade any prediction that depends on them
+   to not-independently-verifiable.

@@ -15,12 +15,10 @@ requires_repos: false
 # A human and an agent independently read that as a hang.
 #
 # This probe is the instrument, not the answer. It emits ground truth the
-# platform cannot fake - a file per interval, each carrying the wall-clock time
-# it was written - so "what happened" and "what was reported" can be compared
-# directly rather than inferred from a counter.
-#
-# Deliberately sonnet, not opus: this calibrates the instrument. Model quality
-# is irrelevant to whether a counter updates.
+# platform cannot fake: one line per interval in a run-unique log, each
+# carrying the wall-clock time it was written, plus a line count emitted by the
+# shell rather than by the agent - so "what happened" and "what was reported"
+# can be compared directly rather than inferred from a counter.
 
 phases:
   - id: heartbeat

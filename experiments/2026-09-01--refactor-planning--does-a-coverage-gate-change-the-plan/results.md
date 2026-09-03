@@ -1,68 +1,74 @@
 # Results
 
-Six runs, three targets, one variable. Artifacts in `runs/`, pulled from the
-deployment after the fact; `runs/<RUN>_<phase>.json` is the phase artifact and
-`runs/<RUN>.json` the execution record.
+**This run is INVALID under its own eval pack.** See `verdict.md`. Nothing below
+is a scored result; it is recorded as observation only, and every row names why
+it is not admissible.
 
-## Headline
+Artifacts in `runs/`: `<RUN>_<phase>.json` are phase artifacts, `<RUN>.json` the
+execution records.
 
-| # | Prediction | Observed | Score |
+## Run outcomes
+
+| Run | Workflow | Target | Outcome |
 |---|---|---|---|
-| P1 | v3 runs NO coverage command (0/3) | 0/3 — no coverage command, no coverage output in any A research artifact | correct |
-| P2 | gated arm runs a real coverage command (3/3) | 3/3 — real invocations with real output | correct |
-| P3 | gated arm returns CHARACTERIZATION TESTS REQUIRED FIRST on >=2/3 | 2/3 (B1, B3). B2 returned SAFE TO REFACTOR on measured 96% coverage | correct |
-| P4a | v3 leads with a module split (3/3) | 3/3 | correct |
-| P4b | gated arm leads with test work (>=2/3) | 1/3 clearly (B2). B1 opens with a decomposition section before its test spec | **partial** |
-| P5 | gated arm costs 1.2x-1.8x the $5.83 baseline | unscorable — 3 runs failed, 3 cancelled | **inconclusive** |
-| P6 | v3's cross-model-review executes on CLAUDE (3/3) | 3/3 — all three died on claude's own error text | correct |
+| A1 | research-plan-v3 | `_wiring.py` | failed at phase 3/4 |
+| A2 | research-plan-v3 | `WorkflowExecutionProcessor.py` | failed at phase 3/4 |
+| A3 | research-plan-v3 | `lifecycle.py` | failed at phase 3/4 |
+| B1 | refactor-plan-v1 | `_wiring.py` | cancelled at phase 4/5 |
+| B2 | refactor-plan-v1 | `WorkflowExecutionProcessor.py` | cancelled at phase 5/5 |
+| B3 | refactor-plan-v1 | `lifecycle.py` | cancelled at phase 3/5 |
 
-## The finding that was not predicted
+Six of six invalid. The pack's rule: *"Execution fails before its final phase."*
 
-The strongest signal is not in any prediction. It is a word count.
+## Observations, none of them scored
 
-| run | "characterization" | "coverage" |
-|---|---|---|
-| A1 (no gate) | 0 | 0 |
-| A2 (no gate) | 0 | 0 |
-| A3 (no gate) | 0 | 5 |
-| B1 (gated) | 18 | - |
-| B2 (gated) | 19 | - |
+| # | Prediction | What was seen | Why it is not a result |
+|---|---|---|---|
+| P1 | v3 runs no coverage command | no coverage command or output in any A `research` artifact | pack requires the session TRANSCRIPT; absence from a deliverable does not prove no Bash call ran coverage |
+| P2 | gated arm runs one, 3/3 | all three `coverage-gate` artifacts contain a command and output | agent-authored prose is not proof the command executed; transcripts not committed |
+| P3 | >=2/3 CHARACTERIZATION TESTS REQUIRED FIRST | 2/3 (B1, B3); B2 SAFE TO REFACTOR on measured 96% | phase completed, but from an invalid execution |
+| P4a | v3 leads with a split | A `plan` artifacts open with Problem then Approach | pack requires the arm's FINAL artifact; none exists |
+| P4b | gated arm leads with test work, >=2/3 | 1/3 | **wrong**, not partial - a missed binary threshold. Also scored against intermediate documents, one of which (B3) is not committed |
+| P5 | cost 1.2-1.8x baseline | no run completed in either arm | unscorable |
+| P6 | v3 review phase runs on claude | all three died with claude's error text naming `gpt-5.6-sol` | strong circumstantial evidence, but the pack named the transcript as the ONLY admissible source |
 
-Two of three ungated plans never use either word once, across documents of
-18-27KB. A1's first ordered step is `wc -l` on the new module — it verifies the
-FILE GOT SMALLER, with no test anywhere in the sequence.
+## The word count, correctly labelled
 
-So the gate does not merely add a phase that reports coverage. It changes what
-the plan is about. Without it, "refactor this 1582-line module" is understood as
-a file-size problem; with it, as a behaviour-preservation problem. That is a
-difference in kind, and it is what the probe was actually asking.
+| artifact | "characterization" | "coverage" |
+|---|---:|---:|
+| A1 `plan` | 0 | 0 |
+| A2 `plan` | 0 | 0 |
+| A3 `plan` | 0 | 5 |
+| B1 `characterize` | 18 | 14 |
+| B2 `characterize` | 19 | 11 |
 
-## P6, and why the evidence is admissible
+These counts are correct and were independently reproduced in review. They are a
+**manipulation check**: the `characterize` phase used the vocabulary its own
+prompt demands. They compare a `characterize` artifact against a `plan`
+artifact, so they say nothing about whether the gate changed planning.
 
-The eval pack ruled `cost_by_model` inadmissible for P6 because it records the
-DECLARED model and reports `gpt-5.6-sol` whichever binary ran. The runs
-supplied better evidence than the transcript inspection anticipated — they
-failed, with claude's own error text:
+An earlier version of this file promoted them to the headline finding and added
+that A1 had "no test anywhere in the sequence". That is false: A1 mentions
+test/pytest/verification 119 times, runs affected tests after each extraction
+group, and specifies unit coverage, fitness tests, `just preflight` and CI. The
+true and much narrower difference is that A1 prescribes no NEW characterization
+tests for behaviour nothing currently pins.
 
-```
-Agent failed: There's an issue with the selected model (gpt-5.6-sol). It may not
-exist or you may not have access to it. Run --model to pick a different model.
-(phase=cross-model-review, exit_code=1) (tokens=0+0)
-```
+## Why both arms died - neither reason was the variable
 
-Codex does not say "Run --model to pick a different model" about its own model
-id. The phase ran on claude. Confirmed 3/3 in-pack, plus the excluded
-pre-hypothesis run.
+- **A arm:** `sdlc-research-plan-v3` had lost `agent.provider` to the lossy
+  v0.27.0 exporter, so its review phase ran on claude holding a codex model id
+  and failed every time. Now fixed on the deployment.
+- **B arm:** cancelled by me, on a misreading of frozen telemetry that turned
+  out to be the platform's own reporting defect (fixed in #1076), not a hang.
 
-## The control
+## One clean control worth keeping
 
-`B2`'s `cross-model-review` COMPLETED on codex. Same phase, same model id, same
-deployment — on a workflow freshly installed rather than round-tripped through
-the lossy exporter, which preserved `provider: codex`. That is the clean
-counterpart to P6: the failure is the missing provider, not the model id.
+B2's `cross-model-review` COMPLETED on codex - same phase, same model id, same
+deployment - because `sdlc-refactor-plan-v1` was freshly installed and never
+went through the lossy exporter. That isolates the A-arm failure to the missing
+provider rather than the model id.
 
 ## Cost
 
-$19.83 across six runs. P5 is unscorable rather than merely uncertain: the A arm
-died at phase 3 of 4 and the B arm was cancelled at phases 3-5 of 5, so neither
-completed a run to compare against five complete baselines.
+$19.83 across six runs, none of which completed.

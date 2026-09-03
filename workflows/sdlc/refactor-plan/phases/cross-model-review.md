@@ -10,7 +10,14 @@ input artifacts.
 
 $ARGUMENTS
 
-## Attack these, hardest first
+## If the gate said DO NOT REFACTOR
+
+There is no extraction plan to review, and that is correct rather than a
+failure. Review the VERDICT instead: is it earned by the evidence, or is it an
+excuse? An unjustified refusal is as costly as an unjustified go-ahead. Then
+stop - do not review a plan that should not exist.
+
+## Otherwise, attack these, hardest first
 
 1. **Is the coverage verdict earned?** Did the gate MEASURE, or estimate and
    dress it up? If it reported a percentage, is there real tool output behind
