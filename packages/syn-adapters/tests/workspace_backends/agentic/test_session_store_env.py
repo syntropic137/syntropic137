@@ -14,7 +14,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.agentic.adapter import (
+    _EXECUTABLE_TMPDIR,
+    AgenticIsolationAdapter,
+)
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     DEPLOYMENT_SEPARATOR,
     apply_session_store_env,
@@ -410,7 +413,15 @@ class TestAdapterIntegration:
         provider = await _create(_disabled_settings())
         ws_config = provider.create.await_args.args[0]
 
-        assert ws_config.environment == {"EXISTING_VAR": "kept"}
+        assert ws_config.environment == {
+            "EXISTING_VAR": "kept",
+            # An unconditional platform default, unrelated to the session store:
+            # /tmp is mounted noexec, so `just` cannot execute a shebang recipe
+            # without this (#1042). Named explicitly rather than relaxing this to
+            # a subset check, so an unrelated future addition still trips the
+            # self-hostability guarantee.
+            "TMPDIR": _EXECUTABLE_TMPDIR,
+        }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
         assert ws_config.labels == {
             "syn.execution_id": "exec-abc",
@@ -474,7 +485,15 @@ class TestReservedKeys:
         provider = await _create(_disabled_settings(), caller_env)
         ws_config = provider.create.await_args.args[0]
 
-        assert ws_config.environment == {"EXISTING_VAR": "kept"}
+        assert ws_config.environment == {
+            "EXISTING_VAR": "kept",
+            # An unconditional platform default, unrelated to the session store:
+            # /tmp is mounted noexec, so `just` cannot execute a shebang recipe
+            # without this (#1042). Named explicitly rather than relaxing this to
+            # a subset check, so an unrelated future addition still trips the
+            # self-hostability guarantee.
+            "TMPDIR": _EXECUTABLE_TMPDIR,
+        }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
 
     @pytest.mark.asyncio

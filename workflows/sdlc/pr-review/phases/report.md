@@ -49,3 +49,50 @@ Mark confidence where it is not total. A finding you are 60% sure of is worth
 reporting AS a 60% finding.
 
 You are read-only. Do not edit files, do not commit, do not push.
+
+## Post the verdict to the pull request
+
+Writing the verdict to an artifact is not delivering it. A review nobody reads
+is indistinguishable from no review, and costs the same. Until this step
+existed, every verdict this workflow produced had to be copied to the PR by
+hand, and several were nearly missed (#1097).
+
+After writing your deliverable, post it as a comment on the PR you reviewed:
+
+```bash
+gh pr comment <PR-NUMBER> --repo <OWNER>/<REPO> --body-file <your-deliverable>
+```
+
+The GitHub App credential in this workspace can comment on pull requests -
+verified, `syntropic137-swe-mini` has existing PR comments. If the command
+fails, report the exact error and the fact that the verdict was not delivered.
+Do NOT treat a failed post as a completed phase: the artifact existing is not
+delivery.
+
+### Two things the comment must carry
+
+**1. The head SHA you reviewed.** A verdict against an old head is how a
+reviewer ends up acting on findings that are already fixed - that happened here
+and cost a full run. State it explicitly:
+
+```
+Reviewed at head `<sha>`.
+```
+
+**2. Which model ran each phase.** A verdict is only a cross-model check if the
+`verify` phase actually ran on a different harness. A deployed workflow silently
+drifted to all-sonnet once (#1107), and the resulting same-model verdict was
+indistinguishable from a real gate until someone checked. State it plainly:
+
+```
+Gate: investigate <provider>/<model>, verify <provider>/<model>, report <provider>/<model>.
+```
+
+If you cannot determine the models, say so rather than omitting the line -
+absence reads as "nobody checked", which is the correct impression in that case.
+
+### Do not duplicate
+
+If a comment from a previous run of this workflow already stands on this PR for
+the SAME head SHA, do not post a second one. Say so in your deliverable instead.
+Repeated identical verdicts train a reader to skip them.

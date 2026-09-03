@@ -145,6 +145,16 @@ class SessionCostQueryService:
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate(session_id)
 
+    async def get_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
+        """Get cost data for many sessions in a fixed number of round-trips.
+
+        Same answers as calling ``get`` per id - it is the same code path - but
+        four queries for the whole set instead of four per session (#1114).
+        Sessions with no cost data are absent from the mapping.
+        """
+        query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
+        return await query.calculate_many(session_ids)
+
     async def list_all(self, limit: int = 500) -> list[SessionCost]:
         """List cost data for all sessions.
 

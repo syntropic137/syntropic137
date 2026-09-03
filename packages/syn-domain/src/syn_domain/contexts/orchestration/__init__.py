@@ -60,8 +60,12 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    FailExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -172,6 +176,8 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionStatus",
+    "FailExecutionCommand",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates

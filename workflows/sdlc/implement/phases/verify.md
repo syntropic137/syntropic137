@@ -35,15 +35,62 @@ like proof.
 
 ## Run the gates
 
-Run `just qa-ci`. Paste its final lines. If it is not green, that is the finding
-and you should stop and report it rather than working around it.
+Run the gate as:
+
+```
+mkdir -p /workspace/.tmp /workspace/.cache
+export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
+just preflight-agent
+uv run pytest -m unit -q
+```
+
+Paste the final lines of each. If either is not green, that is the finding and
+you should stop and report it rather than working around it.
+
+**The `TMPDIR=` prefix is a temporary workaround, not decoration.** This
+workspace mounts `/tmp` `noexec` (deliberate hardening), and `just` materialises
+every shebang recipe into a temp directory before running it. With the default
+`TMPDIR` the gate dies on its FIRST recipe, before touching your change:
+
+```
+error: recipe `check-agent-docs` with shebang `#!/usr/bin/env bash`
+execution error: Permission denied (os error 13)
+```
+
+The real fix (#1100) sets `TMPDIR` in the workspace environment and is already
+merged, but the running deployment predates it. Set it on the command line for
+now.
+
+**The cache variables are there for the same reason.** `$HOME` in this workspace
+is a 128 MB tmpfs, and uv, ruff and node all cache under it by default. A real
+run died mid-gate with
+
+```
+No space left on device (os error 28)
+error: recipe `lint` failed on line 932 with exit code 1
+```
+
+having already redirected only `TMPDIR`. `/workspace` is on the container's real
+filesystem with room to spare, so point the caches there too. Tracked as #1133;
+like the `TMPDIR` prefix, this line should disappear when the workspace gives
+the gate somewhere to write. When the deployment carries #1100, this prefix should be deleted - tracked
+on #1120. Do not "fix" a Permission denied here by editing the justfile or
+running the recipes by hand: that hides the one condition this prefix exists to
+compensate for.
+
+**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and `node`
+and nothing else, so seven of the gates in `just preflight` cannot run here at
+all: `vsa-validate` (no `vsa`), `fitness` (no `cargo`), `codegen-check` (no
+`pnpm`), `check-submodules`, `check-compose-overlays`,
+`check-default-workspace-image` and `check-pinned-image-channels`. Attempting
+`qa-ci` here fails on the missing binary, not on the change. CI runs those
+seven; passing here does not promise a green CI, and if CI fails on one of them
+that is a real failure to fix, not an exception to claim.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
-pass every test, typecheck and build and still fail CI on something none of them
+pass every test, typecheck and build and still fail on something none of them
 touch. A CLI flag added in this repository drifted a generated docs page and
-failed `codegen-check`, a real PR-gating job, while every direct test passed. If
-`just qa-ci` cannot run here, name the gates it would have run and run each one,
-rather than substituting the two you happen to know.
+failed `codegen-check`, a real PR-gating job, while every direct test passed.
 
 Run `git status --porcelain` before and after. Verification commands in this
 repository have mutated tracked files; if the tree changed, report it.
@@ -169,6 +216,51 @@ passed.
 
 ## Output
 
-A verdict: is the change correct and complete, or not. The `qa-ci` output, each
+A verdict: is the change correct and complete, or not. The `preflight-agent` and
+unit-test output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
+
+## Judge the design, not only the correctness
+
+A change can be correct and still be the wrong change. Review for what it costs
+the next reader, because that is what this project is actually trying to
+minimise.
+
+- **Shallow modules.** Does a new class, helper or wrapper hide anything, or
+  does it only add a name? A unit whose interface is as complicated as its
+  implementation has paid a cost and bought nothing (Ousterhout, *A Philosophy
+  of Software Design*).
+- **Leaked decisions.** Would changing the implementation force callers to
+  change? Then the boundary is wrong, however clean the code looks.
+- **Special cases.** Was a branch added to satisfy one caller? Ask whether the
+  case could have been made not to exist. Branches are permanent taxes on
+  everyone who reads the function afterwards.
+- **Duplication of judgement.** Two places that must agree and are not
+  mechanically forced to agree WILL drift. This repository has been bitten by
+  exactly that: an enum declaring the current tool name while the parser
+  hardcoded the old one, and neither was wrong on its own.
+
+Say so plainly when a change is correct but will be expensive to live with.
+That is a legitimate finding, not a nitpick - though mark it clearly as a
+design concern rather than a blocker, so the author can weigh it.
+
+## Assume the work may be dressed up
+
+Agents under pressure to finish produce work that LOOKS complete: tests that
+assert what is already true, a narrower fix that leaves the real defect, a
+report stating a number nobody measured. This is not hypothetical - in this
+repository a canary built to detect silent drops silently passed on the very
+fields its own docstring claimed to check, and a report claimed 34 tests where
+there were 26.
+
+So verify the claim against the artifact, not the prose:
+
+- If the report says a test was added, read it. Would it fail if the fix were
+  reverted? If you cannot tell, revert the fix and run it.
+- If it cites a file and line, open them.
+- If it states a count or a timing, run the command and compare.
+- If it says a gate passed, check that the gate actually ran.
+
+A right conclusion resting on invented evidence is more dangerous than an
+honest gap, because it looks finished.
