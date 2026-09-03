@@ -1,5 +1,5 @@
-id: sdlc-implement-v1
-name: "SDLC: Implement, verify, open a PR (v1)"
+id: bake-implement-sonnet-v1
+name: "Bake-off: implement phase on sonnet"
 description: >
   Take a well-specified issue to a reviewed pull request. Four phases: prepare
   the workspace, make the change, verify it independently, open the PR. The
@@ -77,7 +77,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: opus
+      model: sonnet
     prompt_file: phases/implement.md
 
   - id: verify

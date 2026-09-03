@@ -1,5 +1,5 @@
-id: sdlc-implement-v1
-name: "SDLC: Implement, verify, open a PR (v1)"
+id: bake-implement-opus-v1
+name: "Bake-off: implement phase on opus"
 description: >
   Take a well-specified issue to a reviewed pull request. Four phases: prepare
   the workspace, make the change, verify it independently, open the PR. The

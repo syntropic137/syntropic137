@@ -74,7 +74,7 @@ phases:
       - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/research.md
 
   - id: review-spec
@@ -102,7 +102,7 @@ phases:
     allowed_tools: [Read, Grep, Glob, Bash]
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/revise-spec.md
 
   - id: experiment
@@ -117,7 +117,7 @@ phases:
     allowed_tools: [Read, Grep, Glob, Bash, Write, Task]
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/experiment.md
 
   - id: revise-after-experiment
@@ -130,7 +130,7 @@ phases:
     allowed_tools: [Read, Grep, Glob]
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/revise-after-experiment.md
 
   - id: plan
@@ -148,7 +148,7 @@ phases:
       - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/plan.md
 
   - id: review-plan
@@ -176,5 +176,5 @@ phases:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/final-plan.md
