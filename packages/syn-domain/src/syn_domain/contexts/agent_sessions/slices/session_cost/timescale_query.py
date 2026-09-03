@@ -21,8 +21,25 @@ from syn_shared.events import (
     TOOL_EXECUTION_COMPLETED,
 )
 
-_SESSION_SUMMARY_QUERY = """
-SELECT
+# --- The four queries, all keyed by a session-id ARRAY -----------------------
+#
+# WHY (issue #1114). `calculate` ran up to four round-trips per session, and the
+# sessions list endpoint called it once per row: `limit=50` cost 2.4s and
+# `limit=200` cost 8.3s, dead-linear at ~41ms per session, while the underlying
+# Postgres work for a page is 2ms. The cost was round-trips, not queries.
+#
+# `calculate` delegates to `calculate_many`, so there is ONE implementation of
+# the pricing path rather than two that have to agree - the
+# summary-then-fallback rule, the per-model grouping and the unpriced
+# accounting all stay in exactly one place. The single-session forms these
+# replaced are gone for the same reason.
+#
+# DISTINCT ON is how the summary query keeps its per-session `ORDER BY time DESC
+# LIMIT 1` semantics under an array: `ORDER BY session_id, time DESC` makes the
+# first row of each session group the newest one, which is what LIMIT 1 picked.
+_SESSION_SUMMARY_BATCH_QUERY = """
+SELECT DISTINCT ON (session_id)
+    session_id,
     (data->>'total_input_tokens')::int as total_input,
     (data->>'total_output_tokens')::int as total_output,
     (data->>'cache_creation_tokens')::int as cache_creation,
@@ -34,9 +51,8 @@ SELECT
     execution_id,
     phase_id
 FROM agent_events
-WHERE session_id = $1 AND event_type = $2
-ORDER BY time DESC
-LIMIT 1
+WHERE session_id = ANY($1::text[]) AND event_type = $2
+ORDER BY session_id, time DESC
 """
 
 # Fallback: aggregate individual token_usage events for one session.
@@ -54,8 +70,9 @@ LIMIT 1
 # Grouping by model lets each group be priced with its own rate and lets
 # COUNT(*) be summed for unpriced groups ONLY - mirroring
 # execution_cost/timescale_query.py, which already had to solve this.
-_TOKEN_USAGE_FALLBACK_QUERY = """
+_TOKEN_USAGE_FALLBACK_BATCH_QUERY = """
 SELECT
+    session_id,
     data->>'model' as agent_model,
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
@@ -68,20 +85,22 @@ SELECT
     execution_id,
     phase_id
 FROM agent_events
-WHERE session_id = $1 AND event_type = $2
-GROUP BY execution_id, phase_id, data->>'model'
+WHERE session_id = ANY($1::text[]) AND event_type = $2
+GROUP BY session_id, execution_id, phase_id, data->>'model'
 """
 
-_COUNT_QUERY = """
-SELECT COUNT(*)
+_COUNT_BATCH_QUERY = """
+SELECT session_id, COUNT(*) as cnt
 FROM agent_events
-WHERE session_id = $1 AND event_type = $2
+WHERE session_id = ANY($1::text[]) AND event_type = $2
+GROUP BY session_id
 """
 
-_MIN_TIME_QUERY = """
-SELECT MIN(time)
+_MIN_TIME_BATCH_QUERY = """
+SELECT session_id, MIN(time) as started_at
 FROM agent_events
-WHERE session_id = $1 AND event_type = $2
+WHERE session_id = ANY($1::text[]) AND event_type = $2
+GROUP BY session_id
 """
 
 
@@ -132,6 +151,21 @@ class PricedSessionTotals:
     workspace_id: str | None
     execution_id: str | None
     phase_id: str | None
+
+
+@dataclass(frozen=True)
+class _PageRows:
+    """Every row one page of sessions needs, fetched once.
+
+    Passing this around rather than four loose dicts is what lets the pricing of
+    a single session stay a pure function of already-fetched rows - which is
+    also why ``calculate`` and ``calculate_many`` cannot drift apart.
+    """
+
+    summaries: dict[str, asyncpg.Record]
+    fallback: dict[str, list[asyncpg.Record]]
+    tool_counts: dict[str, int]
+    started: dict[str, datetime | None]
 
 
 def _row_sdk_cost(row: asyncpg.Record) -> Decimal | None:
@@ -322,23 +356,6 @@ class TimescaleSessionCostQuery:
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
-    async def _query_priced_totals(
-        self, conn: asyncpg.pool.PoolConnectionProxy, session_id: str
-    ) -> tuple[asyncpg.Record | None, PricedSessionTotals | None]:
-        """Price a session from its summary, or from model-grouped token_usage.
-
-        Both paths run through ``price_session_rows``. The summary is a single
-        authoritative row for one model, so it is passed as a one-row list
-        rather than given its own pricing branch - one pricing rule, two
-        callers, which is what keeps the two answers reconcilable.
-        """
-        summary = await conn.fetchrow(_SESSION_SUMMARY_QUERY, session_id, SESSION_SUMMARY)
-        if summary is not None and summary["total_input"] is not None:
-            return summary, price_session_rows([summary], self._cost_calculator, session_id)
-
-        rows = await conn.fetch(_TOKEN_USAGE_FALLBACK_QUERY, session_id, TOKEN_USAGE)
-        return None, price_session_rows(rows, self._cost_calculator, session_id)
-
     @staticmethod
     def _build_session_cost(
         session_id: str,
@@ -380,25 +397,82 @@ class TimescaleSessionCostQuery:
         return sc
 
     async def calculate(self, session_id: str) -> SessionCost | None:
-        """Calculate session cost from TimescaleDB."""
+        """Calculate session cost from TimescaleDB.
+
+        One session is the degenerate case of many. Delegating keeps a single
+        implementation of the summary-then-fallback rule: two copies would be
+        two things that have to agree about pricing, and nothing would force
+        them to.
+        """
+        return (await self.calculate_many([session_id])).get(session_id)
+
+    async def calculate_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
+        """Calculate cost for many sessions in a fixed number of round-trips.
+
+        Sessions with no cost data are absent from the result, exactly as
+        ``calculate`` returns ``None`` for them. Order is not meaningful; the
+        caller indexes by session id.
+        """
+        ids = list(dict.fromkeys(session_ids))
+        if not ids:
+            return {}
+        page = await self._fetch_page(ids)
+        results: dict[str, SessionCost] = {}
+        for sid in ids:
+            cost = self._cost_for(sid, page)
+            if cost is not None:
+                results[sid] = cost
+        return results
+
+    async def _fetch_page(self, ids: list[str]) -> _PageRows:
+        """The four queries, once, for the whole page."""
         async with self._pool.acquire() as conn:
-            summary, totals = await self._query_priced_totals(conn, session_id)
-            if totals is None:
-                return None
+            summary_rows = await conn.fetch(_SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY)
+            summaries = {row["session_id"]: row for row in summary_rows}
 
-            tool_count = await conn.fetchval(_COUNT_QUERY, session_id, TOOL_EXECUTION_COMPLETED)
+            # A summary row with a NULL total_input is not usable, so those
+            # sessions fall back to token_usage - the same test the
+            # single-session path made, applied once to the whole page.
+            fallback_ids = [
+                sid for sid in ids if sid not in summaries or summaries[sid]["total_input"] is None
+            ]
+            fallback: dict[str, list[asyncpg.Record]] = {}
+            if fallback_ids:
+                for row in await conn.fetch(
+                    _TOKEN_USAGE_FALLBACK_BATCH_QUERY, fallback_ids, TOKEN_USAGE
+                ):
+                    fallback.setdefault(row["session_id"], []).append(row)
 
-            started_at = await conn.fetchval(_MIN_TIME_QUERY, session_id, SESSION_STARTED)
-            if started_at is None:
-                started_at = totals.started_at
+            tool_counts = {
+                row["session_id"]: row["cnt"]
+                for row in await conn.fetch(_COUNT_BATCH_QUERY, ids, TOOL_EXECUTION_COMPLETED)
+            }
+            started = {
+                row["session_id"]: row["started_at"]
+                for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)
+            }
+        return _PageRows(summaries, fallback, tool_counts, started)
 
-            completed_at, duration_ms = _resolve_duration(summary, totals, started_at)
-
-            return self._build_session_cost(
-                session_id=session_id,
-                totals=totals,
-                tool_count=tool_count or 0,
-                started_at=started_at,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
+    def _cost_for(self, session_id: str, page: _PageRows) -> SessionCost | None:
+        """Price one session out of an already-fetched page."""
+        summary = page.summaries.get(session_id)
+        if summary is not None and summary["total_input"] is not None:
+            totals = price_session_rows([summary], self._cost_calculator, session_id)
+        else:
+            summary = None
+            totals = price_session_rows(
+                page.fallback.get(session_id, []), self._cost_calculator, session_id
             )
+        if totals is None:
+            return None
+
+        started_at = page.started.get(session_id) or totals.started_at
+        completed_at, duration_ms = _resolve_duration(summary, totals, started_at)
+        return self._build_session_cost(
+            session_id=session_id,
+            totals=totals,
+            tool_count=page.tool_counts.get(session_id) or 0,
+            started_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+        )
