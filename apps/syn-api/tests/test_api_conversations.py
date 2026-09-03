@@ -1287,6 +1287,39 @@ async def test_claude_separator_character_in_content_is_rewritten_not_joined(
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
+async def test_claude_separator_in_second_block_cannot_forge_a_boundary(
+    mock_conversation_store,
+):
+    """Every value is sanitized, including values after index zero.
+
+    The second block carries the structural character in both columns.  This
+    specifically guards against sanitizing only ``values[0]`` in
+    ``_join_column``: that mutation leaves the first block looking correct but
+    lets the second block forge extra segments.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", '
+        '"name": "Read", "input": {"file_path": "/a.py"}}, '
+        '{"type": "tool_use", "id": "toolu_01bbbbbbbbbbbbbbbbbbbbbb", '
+        f'"name": "Read {_SEP_CHAR} Bash", '
+        f'"input": {{"command": "echo left {_SEP_CHAR} right"}}}}]}}}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name != f"Read{_SEP}Bash"
+    assert line.tool_name == f"Read{_SEP}Read | Bash"
+    assert line.content_preview is not None
+    assert line.content_preview.split(_SEP) == ["/a.py", "echo left | right"]
+    assert len(line.content_preview.split(_SEP)) == 2
+
+
 async def test_get_conversation_metadata(mock_conversation_store):
     """Retrieve conversation metadata from store."""
     mock_conversation_store.get_session_metadata.return_value = {
