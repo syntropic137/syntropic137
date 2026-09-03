@@ -18,6 +18,7 @@ import pytest
 
 from syn_adapters.workspace_backends.agentic.adapter import (
     _EXECUTABLE_TMPDIR,
+    _WORKSPACE_CACHE_ENV,
     _with_executable_tmpdir,
 )
 
@@ -59,3 +60,41 @@ class TestNoSideEffects:
         original = {"FOO": "bar"}
         _with_executable_tmpdir(original)
         assert "TMPDIR" not in original
+
+
+class TestToolCachesAreOffTheTmpfs:
+    """`$HOME` is a 128 MB tmpfs, and it is where every tool caches (#1133).
+
+    A real verify phase died there, mid-gate, having already redirected TMPDIR:
+
+        the workspace's 128 MiB /home/agent tmpfs ran out of space
+        error: recipe `lint` failed on line 932 with exit code 1
+
+    A prompt-level `export` is not enough: it lasts one shell, and the command
+    that fills the disk is usually a dependency install run before the command
+    carrying the export. So it belongs in the environment the workspace is
+    given, next to TMPDIR.
+    """
+
+    @pytest.mark.parametrize("key", sorted(_WORKSPACE_CACHE_ENV))
+    def test_every_cache_variable_is_set(self, key: str) -> None:
+        assert _with_executable_tmpdir({})[key] == _WORKSPACE_CACHE_ENV[key]
+
+    @pytest.mark.parametrize("key", sorted(_WORKSPACE_CACHE_ENV))
+    def test_no_cache_lands_under_home_or_tmp(self, key: str) -> None:
+        """The two small tmpfs mounts are exactly what these exist to avoid."""
+        value = _with_executable_tmpdir({})[key]
+        assert not value.startswith("/home"), f"{key}={value} is on the 128 MB tmpfs"
+        assert not value.startswith("/tmp"), f"{key}={value} is on the 256 MB tmpfs"
+
+    @pytest.mark.parametrize("key", sorted(_WORKSPACE_CACHE_ENV))
+    def test_a_caller_supplied_value_wins(self, key: str) -> None:
+        """A default, not a policy - the same contract TMPDIR already has."""
+        assert _with_executable_tmpdir({key: "/somewhere/else"})[key] == "/somewhere/else"
+
+    def test_an_empty_string_is_not_a_choice(self) -> None:
+        """`FOO=` is how a variable gets unset by accident, not how it gets chosen."""
+        assert (
+            _with_executable_tmpdir({"UV_CACHE_DIR": ""})["UV_CACHE_DIR"]
+            == (_WORKSPACE_CACHE_ENV["UV_CACHE_DIR"])
+        )
