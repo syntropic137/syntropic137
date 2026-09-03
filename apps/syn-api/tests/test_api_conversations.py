@@ -469,3 +469,182 @@ async def test_get_conversation_metadata_not_found(mock_conversation_store):
 
     assert isinstance(result, Ok)
     assert result.value is None
+
+
+# =============================================================================
+# Claude nested tool blocks (#1067)
+#
+# The lines marked "verbatim" below are copied unmodified from the recorded
+# session
+# lib/agentic-primitives/.../recordings/v2.0.74_claude-sonnet-4-5_git-status.jsonl
+# (a matched tool_use / tool_result pair - note the shared tool_use_id). They
+# are inlined rather than read from the submodule so these tests do not depend
+# on a submodule checkout. Claude puts the tool name at
+# ``message.content[].name`` and NOTHING at the top level, which is why the
+# generic extractor rendered every one of these rows as an em dash.
+# =============================================================================
+
+_CLAUDE_TOOL_USE_LINE = (  # verbatim
+    '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929",'
+    ' "id": "msg_01DNPo5rXDrdLzG9L1kwRb9V", "type": "message", "role": "assistant",'
+    ' "content": [{"type": "tool_use", "id": "toolu_01CdeRemHbNPyT5JosrR89Z6",'
+    ' "name": "Bash", "input": {"command": "git status",'
+    ' "description": "Check git repository status"}}], "stop_reason": null},'
+    ' "session_id": "292ca99e-3884-420e-b533-788c09885348"}'
+)
+
+_CLAUDE_TOOL_RESULT_LINE = (  # verbatim
+    '{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result",'
+    ' "content": "Exit code 128\\nfatal: not a git repository (or any of the parent'
+    ' directories): .git", "is_error": true,'
+    ' "tool_use_id": "toolu_01CdeRemHbNPyT5JosrR89Z6"}]},'
+    ' "session_id": "292ca99e-3884-420e-b533-788c09885348"}'
+)
+
+
+async def test_claude_tool_use_surfaces_tool_name_and_command(mock_conversation_store):
+    """A claude ``tool_use`` line reports the tool it called and what it ran.
+
+    "Bash" and "git status" exist ONLY inside ``message.content[0]`` - there is
+    no top-level ``name``/``tool_name``/``content`` on the line - so neither
+    value can be produced by the top-level lookup this replaced.
+    """
+    mock_conversation_store.retrieve_session.return_value = [_CLAUDE_TOOL_USE_LINE]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name == "Bash"
+    assert line.content_preview == "git status"
+
+
+async def test_claude_tool_result_surfaces_output_and_marks_error(mock_conversation_store):
+    """A claude ``tool_result`` line previews its output and flags failure.
+
+    The tool name is deliberately absent: the line carries only a
+    ``tool_use_id``, so naming the tool here would be a guess.
+    """
+    mock_conversation_store.retrieve_session.return_value = [_CLAUDE_TOOL_RESULT_LINE]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name is None
+    assert line.content_preview is not None
+    assert line.content_preview.startswith("Error: ")
+    assert "fatal: not a git repository" in line.content_preview
+
+
+async def test_claude_tool_use_previews_unrecognized_input_shape(mock_conversation_store):
+    """A tool whose input has no command/path/pattern key still previews.
+
+    TodoWrite's input is ``{"todos": [...]}``. Falling back to the serialized
+    input keeps the row informative for tool shapes that did not exist when
+    this code was written, instead of blanking on every unfamiliar tool.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"content": [{"type": "tool_use",'
+        ' "id": "toolu_9", "name": "TodoWrite", "input": {"todos":'
+        ' [{"content": "Run the h2o script", "status": "in_progress"}]}}]}}'
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name == "TodoWrite"
+    assert line.content_preview is not None
+    assert "Run the h2o script" in line.content_preview
+
+
+async def test_preview_is_always_single_line(mock_conversation_store):
+    """No preview contains a newline, on either harness.
+
+    Every preview lands in a one-line cell (the CLI's table column, the
+    dashboard's ``truncate`` row), so a raw newline breaks the layout of
+    whatever renders it. Both a claude tool result and a codex command
+    output carry real multi-line shell output here.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CLAUDE_TOOL_RESULT_LINE,
+        '{"type":"item.completed","item":{"id":"item_2","type":"command_execution",'
+        '"command":"ls","aggregated_output":"one.txt\\ntwo.txt\\n","exit_code":0,'
+        '"status":"completed"}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("mixed-1")
+
+    assert isinstance(result, Ok)
+    previews = [line.content_preview for line in result.value.lines]
+    assert all(p is not None for p in previews)
+    for preview in previews:
+        assert "\n" not in preview, f"preview leaks a newline into a one-line cell: {preview!r}"
+    # The codex row still shows both files - single-lining must not truncate.
+    assert previews[1] == "one.txt two.txt"
+
+
+async def test_tool_fields_survive_the_http_response_hop(mock_conversation_store):
+    """The endpoint's response model carries tool_name/content_preview through.
+
+    ``get_conversation_log_endpoint`` rebuilds every line field-by-field into
+    ``ConversationLineResponse``. That is the object the CLI and dashboard
+    actually receive, and a field dropped there is invisible to every test
+    that stops at ``ConversationLine``.
+    """
+    from unittest.mock import MagicMock
+
+    mock_conversation_store.retrieve_session.return_value = [_CLAUDE_TOOL_USE_LINE]
+
+    with (
+        _patch_store(mock_conversation_store),
+        patch("syn_api._wiring.get_projection_mgr", new=MagicMock()),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise",
+            new=AsyncMock(return_value="claude-1"),
+        ),
+    ):
+        from syn_api.routes.conversations import get_conversation_log_endpoint
+
+        response = await get_conversation_log_endpoint("claude-1")
+
+    line = response.lines[0]
+    assert line.tool_name == "Bash"
+    assert line.content_preview == "git status"
+
+
+async def test_claude_result_line_previews_its_summary(mock_conversation_store):
+    """Claude's final ``result`` line previews the summary it carries.
+
+    ``result`` is a plain string here, which is the shape the real CLI emits;
+    only the ``{"output": ...}`` dict form used to be read, so the closing
+    line of every claude transcript rendered as an em dash.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "result", "subtype": "success", "is_error": false,'
+        ' "result": "The current directory is not a git repository.",'
+        ' "session_id": "292ca99e-3884-420e-b533-788c09885348"}'
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "result"
+    assert line.content_preview == "The current directory is not a git repository."

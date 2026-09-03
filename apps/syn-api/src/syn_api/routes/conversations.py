@@ -94,6 +94,11 @@ def _get_top_level_content(data: dict[str, Any]) -> str:
     return ""
 
 
+def _first_text_block(blocks: list[Any]) -> str:
+    """Text of the first ``{"type": "text", "text": ...}`` block, or ""."""
+    return next((b["text"] for b in blocks if isinstance(b, dict) and b.get("text")), "")
+
+
 def _get_message_content(data: dict[str, Any]) -> str:
     """Check nested ``message.content`` (Claude Code JSONL format)."""
     msg = data.get("message")
@@ -103,16 +108,20 @@ def _get_message_content(data: dict[str, Any]) -> str:
     if isinstance(msg_content, str):
         return msg_content
     if isinstance(msg_content, list):
-        return next(
-            (p["text"] for p in msg_content if isinstance(p, dict) and p.get("text")),
-            "",
-        )
+        return _first_text_block(msg_content)
     return ""
 
 
 def _get_result_content(data: dict[str, Any]) -> str:
-    """Check nested ``result.output`` / ``result.text``."""
+    """Check ``result``, either a plain string or nested ``output``/``text``.
+
+    Claude's final ``{"type": "result"}`` line puts the whole summary in
+    ``result`` as a STRING. Only the dict form was handled, so the single
+    most informative line of every claude transcript previewed blank (#1067).
+    """
     result = data.get("result")
+    if isinstance(result, str):
+        return result
     if isinstance(result, dict):
         return result.get("output", "") or result.get("text", "")
     return ""
@@ -148,6 +157,25 @@ class TranscriptEventType(StrEnum):
 
 _PREVIEW_LEN = 200
 
+
+def _preview(text: object) -> str | None:
+    """Normalize any transcript text into a one-line preview, or None if empty.
+
+    Every preview this module produces ends up in a single-line cell - the
+    CLI's ``Tool``/``Preview`` table columns and the dashboard's ``truncate``
+    row - so embedded newlines break the layout of whatever is rendering it.
+    Collapsing whitespace happens BEFORE truncating, otherwise a line whose
+    first 200 characters are mostly indentation previews as blank.
+
+    This is the single place a preview is shaped; callers pass raw text and
+    do not repeat the truncation rule.
+    """
+    if not isinstance(text, str):
+        return None
+    collapsed = " ".join(text.split())
+    return collapsed[:_PREVIEW_LEN] if collapsed else None
+
+
 # Codex writes plain-text banners to stdout alongside its JSONL events. These
 # are pure CLI chrome (not conversation, not diagnostics) and are dropped from
 # the transcript entirely. Matched by prefix on non-JSON lines only.
@@ -158,12 +186,6 @@ _CODEX_CLI_NOISE_PREFIXES = (
 )
 
 _CODEX_STREAM_TYPES = frozenset(t.value for t in CodexStreamType)
-
-
-def _log_line_preview(raw: str) -> str | None:
-    """Preview for a non-object transcript line (CLI diagnostic or JSON scalar)."""
-    stripped = raw.strip() if raw else ""
-    return stripped[:_PREVIEW_LEN] if stripped else None
 
 
 def _is_codex_cli_noise(raw: str) -> bool:
@@ -180,8 +202,7 @@ def _codex_file_change_preview(item: Mapping[str, object]) -> str | None:
     if not isinstance(changes, list):
         return None
     paths = [str(c.get("path", "")) for c in changes if isinstance(c, dict) and c.get("path")]
-    joined = ", ".join(paths)
-    return joined[:_PREVIEW_LEN] if joined else None
+    return _preview(", ".join(paths))
 
 
 def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
@@ -191,11 +212,7 @@ def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
     (``command``) when the output is empty (e.g. a command that produced no
     stdout), so the row is never blank.
     """
-    output = item.get("aggregated_output")
-    if isinstance(output, str) and output:
-        return output[:_PREVIEW_LEN]
-    command = item.get("command")
-    return command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
+    return _preview(item.get("aggregated_output")) or _preview(item.get("command"))
 
 
 _CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))
@@ -214,9 +231,7 @@ def _codex_item_fields(
     """
     item_type = item.get("type")
     if item_type == CodexItemType.AGENT_MESSAGE:
-        text = item.get("text")
-        preview = text[:_PREVIEW_LEN] if isinstance(text, str) and text else None
-        return TranscriptEventType.ASSISTANT, None, preview
+        return TranscriptEventType.ASSISTANT, None, _preview(item.get("text"))
     if item_type in _CODEX_TOOL_ITEM_TYPES and stream_type == CodexStreamType.ITEM_STARTED:
         return TranscriptEventType.SYSTEM, None, None
     if item_type == CodexItemType.COMMAND_EXECUTION:
@@ -251,12 +266,95 @@ def _extract_codex_fields(
         return TranscriptEventType.RESULT, None, None
     if raw_type == CodexStreamType.TURN_FAILED:
         error = data.get("error")
-        preview = str(error)[:_PREVIEW_LEN] if error else None
-        return TranscriptEventType.ERROR, None, preview
+        return TranscriptEventType.ERROR, None, _preview(str(error) if error else None)
     item = data.get("item")
     if not isinstance(item, dict):
         return TranscriptEventType.SYSTEM, None, None
     return _codex_item_fields(item, CodexStreamType(raw_type))
+
+
+# Claude nests tool calls and their results as blocks inside
+# ``message.content[]``; these are the two block ``type`` values that carry
+# tool information. Local constants rather than reusing TranscriptEventType:
+# that enum is the DISPLAY vocabulary, and conflating the two would mean a
+# change to how a row is styled silently changed which lines are parsed.
+_CLAUDE_TOOL_USE_BLOCK = "tool_use"
+_CLAUDE_TOOL_RESULT_BLOCK = "tool_result"
+
+# Which key of a tool's ``input`` best says what the call actually did, most
+# specific first. Deliberately NOT a tool-name -> key table: claude ships new
+# tools regularly, and a table would render every unrecognized tool blank
+# until someone edited this list. Matching on the input keys instead means a
+# tool we have never heard of still previews usefully if it takes a command,
+# a path or a pattern.
+_TOOL_INPUT_PREVIEW_KEYS = (
+    "command",
+    "file_path",
+    "pattern",
+    "path",
+    "url",
+    "query",
+    "description",
+    "prompt",
+)
+
+
+def _claude_tool_use_preview(tool_input: object) -> str | None:
+    """Summarize a claude tool call's ``input`` for the preview column."""
+    if not isinstance(tool_input, dict):
+        return None
+    for key in _TOOL_INPUT_PREVIEW_KEYS:
+        preview = _preview(tool_input.get(key))
+        if preview:
+            return preview
+    # No recognized key (e.g. TodoWrite's ``todos``). The compact JSON still
+    # says more than an em dash, and keeps the row non-blank for tool shapes
+    # that do not exist yet.
+    return _preview(json.dumps(tool_input, default=str)) if tool_input else None
+
+
+def _extract_claude_tool_fields(
+    data: Mapping[str, object],
+) -> tuple[str | None, str | None] | None:
+    """(tool_name, preview) for a claude tool line, or None if it is not one.
+
+    Claude's ``stream-json`` nests a tool call as
+    ``message.content[].{type: tool_use, name, input}`` and its result as
+    ``message.content[].{type: tool_result, content}``. Neither carries a
+    top-level ``name``/``tool_name``, and neither block has a ``text`` key,
+    so the generic top-level lookup finds nothing and every tool row in a
+    claude transcript renders as an em dash (#1067).
+
+    A ``tool_result`` line reports only a ``tool_use_id``, so its tool name
+    is genuinely not knowable from the line alone and stays None rather than
+    being guessed.
+    """
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return None
+    blocks = message.get("content")
+    if not isinstance(blocks, list):
+        return None
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == _CLAUDE_TOOL_USE_BLOCK:
+            name = block.get("name")
+            return (
+                name if isinstance(name, str) and name else None,
+                _claude_tool_use_preview(block.get("input")),
+            )
+        if block_type == _CLAUDE_TOOL_RESULT_BLOCK:
+            content = block.get("content")
+            if isinstance(content, list):
+                content = _first_text_block(content)
+            preview = _preview(content)
+            if block.get("is_error") and preview:
+                preview = _preview(f"Error: {preview}")
+            return None, preview
+    return None
 
 
 def _extract_line_fields(
@@ -272,24 +370,28 @@ def _extract_line_fields(
     except (json.JSONDecodeError, AttributeError):
         # Non-JSON line: a codex CLI diagnostic (e.g. an ERROR trace) on stdout.
         # Label it ``log`` rather than leaving it to render as "unknown".
-        return TranscriptEventType.LOG, None, _log_line_preview(raw)
+        return TranscriptEventType.LOG, None, _preview(raw)
 
     # Valid JSON but not an object (a bare scalar/array). Both the codex and
     # claude extractors call ``.get()``, so guard here - otherwise one odd line
     # (``null``, ``[]``, ``"diagnostic"``) would raise and fail the WHOLE
     # transcript request with QUERY_FAILED.
     if not isinstance(data, dict):
-        return TranscriptEventType.LOG, None, _log_line_preview(raw)
+        return TranscriptEventType.LOG, None, _preview(raw)
 
     codex = _extract_codex_fields(data)
     if codex is not None:
         return codex
 
     event_type = data.get("type") or data.get("event_type")
+
+    claude_tool = _extract_claude_tool_fields(data)
+    if claude_tool is not None:
+        tool_name, preview = claude_tool
+        return event_type, tool_name, preview
+
     tool_name = data.get("tool_name") or data.get("name")
-    content = _extract_content_preview(data)
-    preview = content[:_PREVIEW_LEN] if content else None
-    return event_type, tool_name, preview
+    return event_type, tool_name, _preview(_extract_content_preview(data))
 
 
 def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
