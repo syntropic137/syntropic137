@@ -52,7 +52,7 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 | **api** | FastAPI API backend, workflow engine, GitHub App | Custom (Python 3.12) | 8000 |
 | **collector** | Agent event ingestion (batched writes to TimescaleDB) | Custom (Python 3.12) | 8080 |
 | **event-store** | Rust gRPC event sourcing server | Custom (Rust) | 50051 |
-| **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.25.1-pg16` | 5432 |
+| **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.29.2-pg16` | 5432 |
 | **redis** | Pub/sub + caching (AOF persistence) | `redis:7-alpine` | 6379 |
 | **minio** | S3-compatible object storage (artifacts, conversations) | `minio/minio` | 9000 |
 | **cloudflared** | Cloudflare Tunnel for external access (optional) | `cloudflare/cloudflared` | — |

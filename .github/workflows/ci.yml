@@ -231,7 +231,7 @@ jobs:
 
     services:
       timescaledb:
-        image: timescale/timescaledb:latest-pg16
+        image: timescale/timescaledb:2.29.2-pg16
         env:
           POSTGRES_USER: syn
           POSTGRES_PASSWORD: syn_dev_password
