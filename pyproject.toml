@@ -147,6 +147,7 @@ testpaths = [
     "scripts/workflows",
     "scripts/tests",
     "infra/scripts/tests",
+    "docker/token-injector/tests",
 ]
 pythonpath = [
     "apps/syn-api/src",
@@ -158,6 +159,7 @@ pythonpath = [
     "scripts/workflows",
     "scripts/tests",
     ".",  # infra/scripts importable from repo root
+    "docker/token-injector",  # not a package (hyphen); imported by path
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]

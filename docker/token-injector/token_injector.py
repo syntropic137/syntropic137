@@ -28,6 +28,10 @@ import logging
 import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -108,17 +112,34 @@ PASSTHROUGH_HOSTS = {
 
 
 class TokenInjectorHandler(BaseHTTPRequestHandler):
-    """Handle ext_authz check requests from Envoy."""
+    """Handle ext_authz check requests from Envoy, for every HTTP method.
+
+    Envoy copies the downstream request's ``:method`` onto the check request it
+    sends here — ``:method`` is added to the allowed set unconditionally when
+    ``authorization_request.allowed_headers`` is configured — so this server is
+    asked to authorize whatever verb the agent used: GET, POST, HEAD, OPTIONS,
+    and so on. The decision never depends on the verb, only on the Host header,
+    so every method resolves to the same check.
+
+    Enumerating verbs instead is a trap. ``BaseHTTPRequestHandler`` answers 501
+    for any method with no matching ``do_*`` attribute, without ever reaching
+    ``_handle_check``, and ext_authz reads a 5xx from the auth server as ERROR
+    rather than a denial. With ``failure_mode_allow: false`` the agent then gets
+    an opaque 403 with no body, and nothing is logged here to explain it — which
+    is how the Claude CLI's ``HEAD`` connectivity probe killed healthy phases
+    (#1080).
+    """
 
     def log_message(self, fmt: str, *args: object) -> None:
         # Route access logs through Python logger
         logger.debug(fmt, *args)
 
-    def do_GET(self) -> None:
-        self._handle_check()
-
-    def do_POST(self) -> None:
-        self._handle_check()
+    def __getattr__(self, name: str) -> Callable[[], None]:
+        # BaseHTTPRequestHandler dispatches on a "do_<METHOD>" lookup. Answering
+        # for every method keeps the supported-verb list from existing at all.
+        if name.startswith("do_"):
+            return self._handle_check
+        raise AttributeError(name)
 
     def _handle_check(self) -> None:
         # Envoy forwards the original request's Host header
@@ -154,7 +175,11 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # A HEAD response repeats the headers of the equivalent GET but carries
+        # no body; writing one would frame the next response wrong on a reused
+        # connection.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
 
 # ---------------------------------------------------------------------------
