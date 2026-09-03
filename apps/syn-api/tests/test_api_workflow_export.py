@@ -1,12 +1,19 @@
 """Tests for workflow export service — export_workflow() with in-memory storage."""
 
 import os
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from syn_api.types import Err, Ok
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
+
+# Without this, CI's `pytest -m unit` deselects every test in this file and the
+# gate reports green having run none of them - which is how two failures
+# reached main (#1065). The marker is what makes this file exist for CI.
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
@@ -107,9 +114,19 @@ async def test_export_package_workflow_yaml_has_prompt_file_refs():
     assert "prompt_template:" not in yaml_content
 
 
-async def test_export_package_phase_md_has_frontmatter():
-    """Phase .md files should have kebab-case YAML frontmatter."""
+async def test_export_package_phase_md_has_frontmatter(tmp_path: Path):
+    """Phase .md files should carry frontmatter the loader reads back correctly.
+
+    Asserted through `load_md_prompt`, the loader that actually re-reads this
+    file on install, rather than against the emitted characters. The previous
+    version pinned `argument-hint: "[topic]"` with double quotes; `_yaml_quote`
+    now delegates to the YAML emitter, which spells the same string
+    `'[topic]'`. Both parse to `[topic]`, so the old assertion was failing on
+    a quoting style that carries no meaning. What must hold is that the keys
+    are kebab-case and the values survive the round trip.
+    """
     from syn_api.routes.workflows import export_workflow
+    from syn_domain.contexts.orchestration._shared.md_prompt_loader import load_md_prompt
 
     wf_id = await _create_test_workflow()
     result = await export_workflow(wf_id, fmt="package")
@@ -121,14 +138,18 @@ async def test_export_package_phase_md_has_frontmatter():
     assert discovery_md.startswith("---\n")
     assert "\n---\n" in discovery_md
 
-    # Should have kebab-case keys (matching md_prompt_loader.py expectations)
-    assert "model: sonnet" in discovery_md
-    assert 'argument-hint: "[topic]"' in discovery_md
-    assert "allowed-tools: Read,Grep,Bash" in discovery_md
-    assert "timeout-seconds: 600" in discovery_md
+    md_path = tmp_path / "discovery.md"
+    md_path.write_text(discovery_md, encoding="utf-8")
+    prompt = load_md_prompt(md_path)
+
+    # Kebab-case keys, matching md_prompt_loader.py expectations
+    assert prompt.metadata["model"] == "sonnet"
+    assert prompt.metadata["argument-hint"] == "[topic]"
+    assert prompt.metadata["allowed-tools"] == "Read,Grep,Bash"
+    assert prompt.metadata["timeout-seconds"] == 600
 
     # Body should be the prompt template
-    assert "Research the topic: $ARGUMENTS" in discovery_md
+    assert "Research the topic: $ARGUMENTS" in prompt.content
 
 
 async def test_export_package_phase_without_optional_fields():
@@ -244,9 +265,20 @@ async def test_export_package_preserves_execution_type():
     assert "execution_type: parallel" in yaml_content
 
 
-async def test_export_package_preserves_max_tokens():
-    """max_tokens should appear in phase .md frontmatter."""
+async def test_export_omits_max_tokens_the_loader_would_reject():
+    """The exporter must NOT write `max-tokens` into phase frontmatter (#964).
+
+    This test used to assert the opposite. That assertion was wrong: it
+    required the exporter to emit a field `PhaseYamlDefinition._reject_max_tokens`
+    refuses at parse time, so every exported package containing a `max_tokens`
+    phase was one that could not be reinstalled. Preserving a field into an
+    artifact its own loader rejects is not preservation, it is a broken round
+    trip, and `_build_phase_md` stopped emitting it deliberately.
+    """
     from syn_api.routes.workflows import export_workflow
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        PhaseYamlDefinition,
+    )
 
     wf_id = await _create_test_workflow(
         phases=[
@@ -263,7 +295,12 @@ async def test_export_package_preserves_max_tokens():
     assert isinstance(result, Ok)
 
     phase_md = result.value.files["phases/limited.md"]
-    assert "max-tokens: 4096" in phase_md
+    assert "max-tokens" not in phase_md
+    assert "Work carefully." in phase_md
+
+    # The reason it must be omitted: the loader refuses it outright.
+    with pytest.raises(ValidationError):
+        PhaseYamlDefinition(id="limited", name="Limited", max_tokens=4096)
 
 
 async def test_export_workflow_with_input_declarations():

@@ -6,6 +6,10 @@ import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 class TestFromSlug:
     def test_valid_slug(self) -> None:

@@ -7,6 +7,10 @@ from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import ClaudePluginRef
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 class TestGitHubShorthand:
     def test_org_repo_at_semver(self) -> None:

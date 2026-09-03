@@ -35,8 +35,21 @@ concurrency:
   group: release-beta-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
+# A reusable workflow called with `uses:` INHERITS the caller's permissions and
+# can only NARROW them - it cannot request more. So this block must be the UNION
+# of everything release-containers.yaml and release-cli.yaml declare, or the run
+# fails at startup with "This run likely failed because of a workflow file
+# issue" and no job logs to explain it.
+#
+# That is exactly what happened to v0.28.0-beta.2: this block said
+# `contents: read` alone, the called workflows need packages/id-token/etc, and
+# the whole release failed before a single step ran. The individual jobs still
+# scope themselves down; this is a ceiling, not a grant.
 permissions:
-  contents: read
+  contents: write        # release-containers attaches assets to the release
+  packages: write        # push images to GHCR
+  id-token: write        # cosign keyless signing, npm OIDC provenance
+  security-events: write # upload SARIF from the image scan
 
 jobs:
   guard:
