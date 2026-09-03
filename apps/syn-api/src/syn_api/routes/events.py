@@ -236,6 +236,16 @@ def _accumulate_tool_stats(
     undercounted as one - the same accepted risk the `tool_use_id` path
     already carries for a duplicate id, now extended to the no-id path
     instead of guaranteeing an impossible summary on every such row.
+
+    That cost is not paid by tool events: no `tool_execution_started` or
+    `tool_execution_completed` row reaches the fallback, because both stream
+    processors carry the harness's own id through to the stored payload (a
+    production census of 48,011 such rows found zero missing it). The rows
+    that do arrive with no `tool_use_id` are git and subagent events, which
+    are single events with no second row to double-count.
+    `tests/test_tool_execution_identity.py` is what holds that true - it
+    fails if an unidentified tool_execution pair ever starts being produced,
+    which is the point at which this paragraph would need revisiting.
     """
     tool_stats: dict[str, dict[str, int | float]] = {}
     calls: dict[str, _CallState] = {}

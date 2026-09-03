@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import itertools
 from datetime import UTC, datetime
-from typing import Any
+from typing import TypedDict
 
 import pytest
 
@@ -68,6 +68,31 @@ def _completed(
     )
 
 
+class _EventData(TypedDict, total=False):
+    """The event payload column, with the keys these fixtures set.
+
+    `total=False` is load-bearing: a key the fixture leaves out is genuinely
+    absent from the payload, which is the shape `_build_standard_operation`
+    reads with `data.get(...)` - and an absent `tool_use_id` is a different
+    input from an empty one.
+    """
+
+    tool_name: str
+    tool_use_id: str
+    success: bool
+    duration_ms: int
+    operation: str
+    sha: str
+
+
+class _Row(TypedDict):
+    """A row shaped like the `asyncpg.Record` the projection reads from the DB."""
+
+    event_type: str
+    time: datetime
+    data: _EventData
+
+
 def _row(
     event_type: str,
     tool_name: str | None,
@@ -75,13 +100,9 @@ def _row(
     *,
     success: bool | None = None,
     duration_ms: int | None = None,
-) -> dict[str, Any]:
-    """A dict shaped like the `asyncpg.Record` the projection reads from the DB.
-
-    Omitting `tool_use_id` (rather than passing "") reproduces the real
-    absent-key shape `_build_standard_operation` sees via `data.get(...)`.
-    """
-    data: dict[str, Any] = {}
+) -> _Row:
+    """Build one such row; `None` for a field means the key is absent."""
+    data: _EventData = {}
     if tool_name is not None:
         data["tool_name"] = tool_name
     if tool_use_id is not None:
@@ -93,7 +114,7 @@ def _row(
     return {"event_type": event_type, "time": _NOW, "data": data}
 
 
-def _convert(row: dict[str, Any]) -> ToolOperation:
+def _convert(row: _Row) -> ToolOperation:
     """Run a row through the real projection conversion, not a hand-built object."""
     op = SessionToolsProjection()._row_to_operation(row)
     assert op is not None
@@ -266,7 +287,7 @@ def test_git_operation_row_counts_as_one_call() -> None:
     the real `row_to_operation` -> `row_to_git_operation` path, not a
     hand-built `ToolOperation`.
     """
-    row = {
+    row: _Row = {
         "event_type": GIT_COMMIT,
         "time": _NOW,
         "data": {"operation": "commit", "sha": "deadbeef"},
