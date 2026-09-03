@@ -881,7 +881,7 @@
           "control"
         ],
         "summary": "Pause Execution Endpoint",
-        "description": "Pause a running execution.",
+        "description": "Pause a running execution.\n\nAsynchronous. This queues a pause signal and returns at once, so the\nreturned `state` is the state read *before* the signal was queued and an\nimmediate re-read may still report it. The execution reaches `paused` only\nonce the executor picks the signal up at its next yield point.",
         "operationId": "pause_execution_endpoint_executions__execution_id__pause_post",
         "parameters": [
           {
@@ -941,7 +941,7 @@
           "control"
         ],
         "summary": "Resume Execution Endpoint",
-        "description": "Resume a paused execution.",
+        "description": "Resume a paused execution.\n\nAsynchronous. This queues a resume signal and returns at once, so the\nreturned `state` is the state read *before* the signal was queued and an\nimmediate re-read may still report `paused`.",
         "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
         "parameters": [
           {
@@ -984,7 +984,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel a running or paused execution.",
+        "description": "Cancel a running or paused execution.\n\nAsynchronous. This queues a cancel signal and returns at once, so the\nreturned `state` is the state read *before* the signal was queued and an\nimmediate re-read may still report `running`. That is not a refused cancel;\nthe execution reaches `cancelled` once the executor picks the signal up.",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -1044,7 +1044,7 @@
           "control"
         ],
         "summary": "Inject Context Endpoint",
-        "description": "Inject a message into the execution context.",
+        "description": "Inject a message into the execution context.\n\nAsynchronous. This queues the message and returns at once; the agent sees it\nwhen the executor next checks for signals. The returned `state` is the state\nread before queuing - injection does not change it.",
         "operationId": "inject_context_endpoint_executions__execution_id__inject_post",
         "parameters": [
           {
@@ -5851,7 +5851,8 @@
           },
           "state": {
             "type": "string",
-            "title": "State"
+            "title": "State",
+            "description": "The execution's state as read BEFORE the control signal was queued. Control commands are asynchronous - they queue a signal and return immediately - so this is not the outcome of the command, and a read issued straight after this response may still report the same value. Poll GET /executions/{execution_id}/state for the state the signal eventually produces."
           },
           "message": {
             "anyOf": [

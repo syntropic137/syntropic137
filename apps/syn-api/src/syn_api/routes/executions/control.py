@@ -9,7 +9,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from syn_api._wiring import get_controller
 from syn_api.types import (
@@ -65,7 +65,16 @@ class ControlResponse(BaseModel):
 
     success: bool
     execution_id: str
-    state: str
+    state: str = Field(
+        description=(
+            "The execution's state as read BEFORE the control signal was queued. "
+            "Control commands are asynchronous - they queue a signal and return "
+            "immediately - so this is not the outcome of the command, and a read "
+            "issued straight after this response may still report the same value. "
+            "Poll GET /executions/{execution_id}/state for the state the signal "
+            "eventually produces."
+        ),
+    )
     message: str | None = None
     error: str | None = None
 
@@ -218,6 +227,8 @@ async def _handle_control_result(
     if not ctrl.success:
         raise HTTPException(status_code=400, detail=ctrl.error)
 
+    # `new_state` is the controller's pre-signal reading, not the command's
+    # outcome (see ExecutionController._handle_*). ControlResponse.state says so.
     return ControlResponse(
         success=ctrl.success,
         execution_id=ctrl.execution_id,
@@ -231,7 +242,13 @@ async def pause_execution_endpoint(
     execution_id: str,
     request: PauseRequest | None = None,
 ) -> ControlResponse:
-    """Pause a running execution."""
+    """Pause a running execution.
+
+    Asynchronous. This queues a pause signal and returns at once, so the
+    returned `state` is the state read *before* the signal was queued and an
+    immediate re-read may still report it. The execution reaches `paused` only
+    once the executor picks the signal up at its next yield point.
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await pause(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "pause")
@@ -239,7 +256,12 @@ async def pause_execution_endpoint(
 
 @router.post("/executions/{execution_id}/resume", response_model=ControlResponse)
 async def resume_execution_endpoint(execution_id: str) -> ControlResponse:
-    """Resume a paused execution."""
+    """Resume a paused execution.
+
+    Asynchronous. This queues a resume signal and returns at once, so the
+    returned `state` is the state read *before* the signal was queued and an
+    immediate re-read may still report `paused`.
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await resume(execution_id)
     return await _handle_control_result(result, "resume")
@@ -250,7 +272,13 @@ async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel a running or paused execution."""
+    """Cancel a running or paused execution.
+
+    Asynchronous. This queues a cancel signal and returns at once, so the
+    returned `state` is the state read *before* the signal was queued and an
+    immediate re-read may still report `running`. That is not a refused cancel;
+    the execution reaches `cancelled` once the executor picks the signal up.
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await cancel(execution_id, reason=request.reason if request else None)
     return await _handle_control_result(result, "cancel")
@@ -261,7 +289,12 @@ async def inject_context_endpoint(
     execution_id: str,
     request: InjectRequest,
 ) -> ControlResponse:
-    """Inject a message into the execution context."""
+    """Inject a message into the execution context.
+
+    Asynchronous. This queues the message and returns at once; the agent sees it
+    when the executor next checks for signals. The returned `state` is the state
+    read before queuing - injection does not change it.
+    """
     execution_id = await _resolve_execution_id(execution_id)
     result = await inject(execution_id, message=request.message, role=request.role)
     return await _handle_control_result(result, "inject")

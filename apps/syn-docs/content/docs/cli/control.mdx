@@ -5,6 +5,8 @@ description: "Control running executions"
 
 Control running executions
 
+`pause`, `resume`, `cancel` and `stop` are asynchronous: they queue a signal for the executor and return straight away. The state they print is the state read *before* the signal was queued, and `syn control status` may report that same state for a short while afterwards. That is not a refused command - poll `syn control status` until it changes.
+
 ## `syn control cancel`
 
 Cancel a running or paused execution

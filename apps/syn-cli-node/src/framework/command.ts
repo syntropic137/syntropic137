@@ -28,11 +28,17 @@ export interface CommandDef {
 export class CommandGroup {
   readonly name: string;
   readonly description: string;
+  /**
+   * Prose for the generated docs page, for context that does not fit the
+   * one-line `description` shown in the padded `--help` column.
+   */
+  readonly notes: string | undefined;
   private readonly _commands = new Map<string, CommandDef>();
 
-  constructor(name: string, description: string) {
+  constructor(name: string, description: string, notes?: string) {
     this.name = name;
     this.description = description;
+    this.notes = notes;
   }
 
   get commands(): ReadonlyMap<string, CommandDef> {

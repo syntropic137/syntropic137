@@ -14,6 +14,22 @@ import { formatStatus } from "../output/format.js";
 type ControlResponse = components["schemas"]["ControlResponse"];
 type StateResponse = components["schemas"]["StateResponse"];
 
+/**
+ * Render the body of a control response.
+ *
+ * pause, resume, cancel and stop all queue a signal and return immediately, so
+ * `state` is the execution's state from *before* the signal was queued. Printing
+ * it as a bare `State:` under "signal sent" reads as "the command did nothing" —
+ * which is how a live cancel gets reported as a stuck execution. Label it for
+ * what it is, and always surface the server's own message, which says what was
+ * actually queued.
+ */
+function printSignalQueued(data: ControlResponse): void {
+  print(`  State before signal: ${data.state}`);
+  if (data.message) print(`  Message: ${data.message}`);
+  printDim("  Asynchronous: run `syn control status <execution-id>` for the new state.");
+}
+
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
   if (!id) {
@@ -40,8 +56,7 @@ const pauseCommand: CommandDef = {
       "Pause execution",
     );
     print(style(`Pause signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
-    if (data.message) print(`  Message: ${data.message}`);
+    printSignalQueued(data);
   },
 };
 
@@ -58,7 +73,7 @@ const resumeCommand: CommandDef = {
       "Resume execution",
     );
     print(style(`Resume signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    printSignalQueued(data);
   },
 };
 
@@ -85,7 +100,7 @@ const cancelCommand: CommandDef = {
       "Cancel execution",
     );
     print(style(`Cancel signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    printSignalQueued(data);
   },
 };
 
@@ -151,12 +166,19 @@ const stopCommand: CommandDef = {
       "Stop execution",
     );
     print(style(`Stop signal sent for execution ${id}`, YELLOW));
-    print(`  State: ${data.state}`);
-    if (data.message) print(`  Message: ${data.message}`);
+    printSignalQueued(data);
   },
 };
 
-export const controlGroup = new CommandGroup("control", "Control running executions");
+export const controlGroup = new CommandGroup(
+  "control",
+  "Control running executions",
+  "`pause`, `resume`, `cancel` and `stop` are asynchronous: they queue a signal " +
+    "for the executor and return straight away. The state they print is the state " +
+    "read *before* the signal was queued, and `syn control status` may report that " +
+    "same state for a short while afterwards. That is not a refused command - " +
+    "poll `syn control status` until it changes.",
+);
 controlGroup
   .command(pauseCommand)
   .command(resumeCommand)

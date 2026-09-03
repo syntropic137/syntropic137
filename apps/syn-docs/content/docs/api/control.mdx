@@ -32,13 +32,57 @@ _openapi:
       - content: Get Execution State Endpoint
         id: get-execution-state-endpoint
     contents:
-      - content: Pause a running execution.
+      - content: >-
+          Pause a running execution.
+
+
+          Asynchronous. This queues a pause signal and returns at once, so the
+
+          returned `state` is the state read *before* the signal was queued and
+          an
+
+          immediate re-read may still report it. The execution reaches `paused`
+          only
+
+          once the executor picks the signal up at its next yield point.
         heading: pause-execution-endpoint
-      - content: Resume a paused execution.
+      - content: >-
+          Resume a paused execution.
+
+
+          Asynchronous. This queues a resume signal and returns at once, so the
+
+          returned `state` is the state read *before* the signal was queued and
+          an
+
+          immediate re-read may still report `paused`.
         heading: resume-execution-endpoint
-      - content: Cancel a running or paused execution.
+      - content: >-
+          Cancel a running or paused execution.
+
+
+          Asynchronous. This queues a cancel signal and returns at once, so the
+
+          returned `state` is the state read *before* the signal was queued and
+          an
+
+          immediate re-read may still report `running`. That is not a refused
+          cancel;
+
+          the execution reaches `cancelled` once the executor picks the signal
+          up.
         heading: cancel-execution-endpoint
-      - content: Inject a message into the execution context.
+      - content: >-
+          Inject a message into the execution context.
+
+
+          Asynchronous. This queues the message and returns at once; the agent
+          sees it
+
+          when the executor next checks for signals. The returned `state` is the
+          state
+
+          read before queuing - injection does not change it.
         heading: inject-context-endpoint
       - content: Get current execution state.
         heading: get-execution-state-endpoint

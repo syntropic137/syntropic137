@@ -23,6 +23,15 @@ describe("control commands", () => {
     });
   }
 
+  /**
+   * What the API actually answers when a running execution is cancelled:
+   * the pre-signal state, plus the message that says the signal was queued.
+   * See ExecutionController._handle_cancel.
+   */
+  function cancelOfALiveExecution(): Response {
+    return jsonResponse({ state: "running", message: "Cancel signal queued" });
+  }
+
   function stdout(): string {
     return (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
       .map((c: unknown[]) => String(c[0]))
@@ -49,10 +58,43 @@ describe("control commands", () => {
   });
 
   it("cancel with --force sends signal", async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ state: "cancelled" }));
+    mockFetch.mockResolvedValue(cancelOfALiveExecution());
     const handler = controlGroup.getCommand("cancel")!.handler;
     await handler({ positionals: ["exec-1"], values: { force: true } });
     expect(stdout()).toContain("Cancel signal sent");
+  });
+
+  // #1062 — cancel is asynchronous. `state` is the reading taken before the
+  // signal was queued, so a successful cancel of a live execution answers
+  // `running`. Printed as a bare `State: running` under "Cancel signal sent"
+  // that reads as a refused cancel, which is how the issue was filed.
+  it("cancel labels the state as the reading from before the signal", async () => {
+    mockFetch.mockResolvedValue(cancelOfALiveExecution());
+    const handler = controlGroup.getCommand("cancel")!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    const out = stdout();
+    expect(out).toContain("State before signal: running");
+    expect(out).not.toContain("State: running");
+  });
+
+  it("cancel surfaces the server's message, which says what was queued", async () => {
+    // The API's honest field. The printer used to drop it for cancel and
+    // resume, leaving the misleading state as the only detail on screen.
+    mockFetch.mockResolvedValue(cancelOfALiveExecution());
+    const handler = controlGroup.getCommand("cancel")!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    expect(stdout()).toContain("Cancel signal queued");
+  });
+
+  it("resume surfaces the server's message too", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ state: "paused", message: "Resume signal queued" }),
+    );
+    const handler = controlGroup.getCommand("resume")!.handler;
+    await handler({ positionals: ["exec-1"], values: {} });
+    const out = stdout();
+    expect(out).toContain("State before signal: paused");
+    expect(out).toContain("Resume signal queued");
   });
 
   it("status shows execution state", async () => {

@@ -300,6 +300,11 @@ export interface paths {
         /**
          * Pause Execution Endpoint
          * @description Pause a running execution.
+         *
+         *     Asynchronous. This queues a pause signal and returns at once, so the
+         *     returned `state` is the state read *before* the signal was queued and an
+         *     immediate re-read may still report it. The execution reaches `paused` only
+         *     once the executor picks the signal up at its next yield point.
          */
         post: operations["pause_execution_endpoint_executions__execution_id__pause_post"];
         delete?: never;
@@ -320,6 +325,10 @@ export interface paths {
         /**
          * Resume Execution Endpoint
          * @description Resume a paused execution.
+         *
+         *     Asynchronous. This queues a resume signal and returns at once, so the
+         *     returned `state` is the state read *before* the signal was queued and an
+         *     immediate re-read may still report `paused`.
          */
         post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
         delete?: never;
@@ -340,6 +349,11 @@ export interface paths {
         /**
          * Cancel Execution Endpoint
          * @description Cancel a running or paused execution.
+         *
+         *     Asynchronous. This queues a cancel signal and returns at once, so the
+         *     returned `state` is the state read *before* the signal was queued and an
+         *     immediate re-read may still report `running`. That is not a refused cancel;
+         *     the execution reaches `cancelled` once the executor picks the signal up.
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -360,6 +374,10 @@ export interface paths {
         /**
          * Inject Context Endpoint
          * @description Inject a message into the execution context.
+         *
+         *     Asynchronous. This queues the message and returns at once; the agent sees it
+         *     when the executor next checks for signals. The returned `state` is the state
+         *     read before queuing - injection does not change it.
          */
         post: operations["inject_context_endpoint_executions__execution_id__inject_post"];
         delete?: never;
@@ -2071,7 +2089,10 @@ export interface components {
             success: boolean;
             /** Execution Id */
             execution_id: string;
-            /** State */
+            /**
+             * State
+             * @description The execution's state as read BEFORE the control signal was queued. Control commands are asynchronous - they queue a signal and return immediately - so this is not the outcome of the command, and a read issued straight after this response may still report the same value. Poll GET /executions/{execution_id}/state for the state the signal eventually produces.
+             */
             state: string;
             /** Message */
             message?: string | null;

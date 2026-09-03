@@ -119,7 +119,7 @@ class ExecutionController:
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
+            new_state=sm.state.value,  # Still paused until acknowledged
             message="Resume signal queued",
         )
 
@@ -145,7 +145,7 @@ class ExecutionController:
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
+            new_state=sm.state.value,  # Unchanged until acknowledged
             message="Cancel signal queued",
         )
 
@@ -171,7 +171,7 @@ class ExecutionController:
         return ControlResult(
             success=True,
             execution_id=cmd.execution_id,
-            new_state=sm.state.value,
+            new_state=sm.state.value,  # Injection does not change state
             message="Context injection queued",
         )
 

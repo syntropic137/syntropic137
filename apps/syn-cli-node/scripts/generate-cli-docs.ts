@@ -55,6 +55,7 @@ interface CmdInfo {
 interface GrpInfo {
   name: string;
   help: string;
+  notes: string | undefined;
   commands: CmdInfo[];
 }
 
@@ -124,6 +125,7 @@ function extractGroup(group: CommandGroup): GrpInfo {
   return {
     name: group.name,
     help: group.description,
+    notes: group.notes,
     commands,
   };
 }
@@ -227,6 +229,9 @@ function renderGroupMdx(group: GrpInfo): string {
     group.help,
     "",
   ];
+  if (group.notes) {
+    lines.push(group.notes, "");
+  }
   for (const cmd of group.commands) {
     lines.push(...renderCommandMdx(group.name, cmd));
   }
