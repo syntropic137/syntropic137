@@ -395,6 +395,140 @@ describe("workflow run commands", () => {
       expect(errOut.length === 0 || errOut).toBeDefined();
     });
 
+    it("warns when an -i key matches no {{placeholder}} in any phase prompt (issue #1081)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-unref-123456789", name: "Research WF", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-unref-123456789",
+            name: "Research WF",
+            workflow_type: "custom",
+            classification: "standard",
+            // Prompt only uses $ARGUMENTS, never {{issue}} — matches the
+            // real workflow from the incident report (0a129131-8d27...).
+            phases: [{ phase_id: "p1", name: "scope", prompt_template: "Do the work: $ARGUMENTS" }],
+            input_declarations: [{ name: "issue", description: null, required: false, default: null }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-001" }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-unref"],
+        values: { input: ["issue=syntropic137/syntropic137#993"] },
+      });
+
+      const out = stdout();
+      expect(out).toContain("Warning:");
+      expect(out).toContain("'issue'");
+      expect(out).toContain("Research WF");
+    });
+
+    it("does not warn when the -i key IS referenced by a phase prompt", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-ref-123456789", name: "Templated WF", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-ref-123456789",
+            name: "Templated WF",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [{ phase_id: "p1", name: "scope", prompt_template: "Work on {{issue}}" }],
+            input_declarations: [{ name: "issue", description: null, required: false, default: null }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-002" }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-ref"],
+        values: { input: ["issue=syntropic137/syntropic137#993"] },
+      });
+
+      expect(stdout()).not.toContain("Warning:");
+    });
+
+    it("warns when -R is passed to a requires_repos: false workflow, including under --dry-run (issue #1081)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-norepo-123456789", name: "Research WF", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-norepo-123456789",
+            name: "Research WF",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+            requires_repos: false,
+          }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-norepo"],
+        values: { repo: ["syntropic137/syntropic137"], "dry-run": true },
+      });
+
+      const out = stdout();
+      expect(out).toContain("Warning:");
+      expect(out).toContain("Research WF");
+      expect(out).toContain("DRY RUN");
+      // dry-run must never reach execute
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not warn about -R when requires_repos: true", async () => {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-hasrepo-123456789", name: "Impl WF", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-hasrepo-123456789",
+            name: "Impl WF",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+            requires_repos: true,
+          }),
+        );
+
+      await runCommand.handler({
+        positionals: ["wf-hasrepo"],
+        values: { repo: ["syntropic137/syntropic137"], "dry-run": true },
+      });
+
+      expect(stdout()).not.toContain("Warning:");
+    });
+
     it("fails loud when API returns status!=started", async () => {
       mockFetch
         // resolveWorkflow probes GET /workflows/{id} first (issue #880);
