@@ -61,7 +61,6 @@ export interface ResolvedWorkflow {
   description: string | null;
   project_name: string | null;
   phases: Record<string, unknown>[];
-  requires_repos: boolean;
   input_declarations: Record<string, unknown>[];
   source_path: string;
   /**
@@ -72,6 +71,14 @@ export interface ResolvedWorkflow {
    * named fields are a lossy projection kept for local preview and the
    * install registry - anything the projection does not name (skills,
    * claude_plugins, and whatever is added next) survives only here.
+   *
+   * WHY there is no `requires_repos` among the named fields (#1050): the CLI
+   * used to compute one, inferring `false` when the YAML declared no
+   * `repository:`, while the server infers `true` for the same YAML. Nothing
+   * read the CLI's answer, so the disagreement stayed invisible until an
+   * author hit the 422 it contradicted. `requires_repos` is declared in the
+   * document above and decided by the server's `infer_requires_repos`; read
+   * it off an API response, never re-derive it here.
    */
   definition: Record<string, unknown>;
 }

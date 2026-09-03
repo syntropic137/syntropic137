@@ -35,7 +35,6 @@ function workflow(definition: Record<string, unknown>): ResolvedWorkflow {
     repository_ref: "main",
     description: null,
     project_name: null,
-    requires_repos: false,
     phases: [],
     input_declarations: [],
     source_path: pkg,

@@ -67,16 +67,6 @@ export function recordInstallation(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// ADR-058: requires_repos default inference
-// ---------------------------------------------------------------------------
-
-function inferRequiresRepos(data: Record<string, unknown>): boolean {
-  if (data["requires_repos"] === true) return true;
-  if (data["requires_repos"] === false) return false;
-  return data["repository"] != null;
-}
-
-// ---------------------------------------------------------------------------
 // Source parsing
 // ---------------------------------------------------------------------------
 
@@ -222,7 +212,6 @@ function loadWorkflowYamlFromPath(
     repository_ref: repository ? String(repository["ref"] ?? "main") : "main",
     description: data["description"] ? String(data["description"]) : null,
     project_name: data["project_name"] ? String(data["project_name"]) : null,
-    requires_repos: inferRequiresRepos(data),
     phases: resolvedPhases as Record<string, unknown>[],
     input_declarations: parseInputDeclarations(data),
     source_path: sourcePath,
@@ -579,7 +568,6 @@ function resolveStandaloneYaml(
       repository_ref: "main",
       description: data["description"] ? String(data["description"]) : null,
       project_name: data["project_name"] ? String(data["project_name"]) : null,
-      requires_repos: inferRequiresRepos(data),
       phases: resolvedPhases,
       input_declarations: [],
       source_path: source,

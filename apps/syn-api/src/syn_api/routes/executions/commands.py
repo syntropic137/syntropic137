@@ -461,9 +461,16 @@ async def _preflight_repos_or_reject(
     if not typed_repos and (not preflight_repos or leaked_in_merged):
         raise HTTPException(
             status_code=422,
+            # WHY the opt-out is named here (#1050): `requires_repos` defaults
+            # to true when the YAML omits it, so an author who never wrote the
+            # field is the most likely reader of this message -- and had no way
+            # to learn that `requires_repos: false` is what a repo-less
+            # workflow needs.
             detail=(
                 f"Workflow '{workflow_id}' requires a repository, but none was "
-                "resolved. Pass one via the 'repos' field (ADR-058)."
+                "resolved. Pass one via the 'repos' field, or declare "
+                "'requires_repos: false' in the workflow if it operates on no "
+                "repos (ADR-058)."
             ),
         )
     await _validate_all_repos_access(preflight_repos)

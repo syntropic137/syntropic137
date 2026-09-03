@@ -472,6 +472,7 @@
         }
       ],
       "default": null,
+      "description": "Whether executing this workflow requires at least one repository. Omitting it means true: a workflow that operates on no repos must opt out with `requires_repos: false`, or execution is rejected (ADR-058).",
       "title": "Requires Repos"
     },
     "project_name": {

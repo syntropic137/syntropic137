@@ -428,3 +428,105 @@ class TestReservedRepoInputKeyRejection:
         assert typed_repos[1].https_url == "https://github.com/owner/b"
         assert "repos" not in effective_inputs
         assert "repository" not in effective_inputs
+
+
+# -- unset requires_repos: the rule and the message it produces (#1050) --------
+
+
+class TestUnsetRequiresReposRejection:
+    """A workflow that declares no ``requires_repos`` still needs a repo (#1050).
+
+    The rule and the refusal are tested as one path on purpose. The reported
+    symptom was a repo-less workflow refusing to start, and what made it a bug
+    rather than a policy was that nothing an author could read told them so:
+    the field's own documentation claimed the default was inferred from
+    ``repository:`` presence, and the 422 never mentioned the opt-out that
+    would have let them past it. Asserting the message alone would let the
+    default flip underneath it; asserting the default alone would let the
+    message go back to being a dead end.
+    """
+
+    @staticmethod
+    async def _reject(yaml_text: str) -> str:
+        """Execute a workflow installed from ``yaml_text`` with no repos, return the 422 detail.
+
+        The gate flag comes from ``infer_requires_repos`` rather than a literal,
+        so this exercises the server's actual rule for the YAML an author wrote.
+        """
+        import yaml as yaml_lib
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+        from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+            infer_requires_repos,
+        )
+
+        definition = WorkflowDefinition.model_validate(yaml_lib.safe_load(yaml_text))
+        wf = MagicMock()
+        wf.requires_repos = infer_requires_repos(definition)
+        wf.input_declarations = []
+        wf.repository_url = ""
+        wf.phases = []
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await _validate_execution_request(
+                definition.id, ExecuteWorkflowRequest(inputs={}, repos=[])
+            )
+
+        assert exc_info.value.status_code == 422
+        return str(exc_info.value.detail)
+
+    #: The document from the issue: no ``requires_repos``, no ``repository:``.
+    _NO_REPOS_YAML = """
+id: probe-websearch-v1
+name: Probe Websearch
+phases:
+  - id: research
+    name: Research
+    order: 1
+    prompt_template: Search the web and write up what you find.
+"""
+
+    @pytest.mark.asyncio
+    async def test_rejection_names_the_opt_out(self) -> None:
+        """The author who never wrote the field learns which field to write.
+
+        ``requires_repos`` is not in this workflow, so the person reading this
+        message has no reason to know the field exists. Naming the escape hatch
+        is the difference between a refusal they can act on and one that only
+        leaves ``-R <some repo the workflow never uses>``.
+        """
+        detail = await self._reject(self._NO_REPOS_YAML)
+
+        assert "requires_repos: false" in detail
+
+    @pytest.mark.asyncio
+    async def test_omitting_the_field_still_means_repos_are_required(self) -> None:
+        """The opt-out default (ADR-058 v0.25.2) is what produces that message.
+
+        Reaching a 422 at all is the assertion: it only happens because
+        ``infer_requires_repos`` called this repo-less YAML ``True``. If the
+        default were ever inferred from ``repository:`` presence again -- the
+        rule the field comment used to claim and the CLI used to implement --
+        execution would be allowed and ``_reject`` would raise Failed: DID NOT
+        RAISE instead.
+        """
+        detail = await self._reject(self._NO_REPOS_YAML)
+
+        assert "probe-websearch-v1" in detail

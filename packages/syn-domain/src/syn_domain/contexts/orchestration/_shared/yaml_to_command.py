@@ -31,6 +31,15 @@ def infer_requires_repos(definition: WorkflowDefinition) -> bool:
     The platform's primary use case is running workflows against repos, so the
     default favors that path. Research/no-repo workflows must opt out with
     ``requires_repos: false``.
+
+    This is the only implementation of the rule (#1050). It was previously
+    stated three ways -- this function, a field comment claiming inference from
+    ``repository:`` presence, and a second implementation in the CLI resolver
+    that did infer -- so the same YAML got different answers depending on who
+    was asked, and an author could not predict whether their workflow would
+    run. The CLI now uploads the declaration verbatim and lets this decide.
+    Anything that needs the verdict must call this or read what the server
+    computed; do not re-derive it.
     """
     if definition.requires_repos is not None:
         return definition.requires_repos

@@ -553,8 +553,26 @@ class WorkflowDefinition(BaseModel):
     # added here rather than deleting the documented capability.
     repos: list[str] = Field(default_factory=list)
 
-    # Execution gate (ADR-058 #666): None = infer from repository presence
-    requires_repos: bool | None = None
+    # Execution gate (ADR-058 #666). `infer_requires_repos` is the only code
+    # that turns an unset value into a verdict; this field carries the
+    # author's declaration, nothing more.
+    #
+    # WHY the description rather than a comment (#1050): this comment used to
+    # claim "None = infer from repository presence", which was the pre-v0.25.2
+    # rule and had been false since ADR-058 moved to opt-out. A workflow author
+    # reading the schema was told their repo-less workflow would run, and it
+    # was then rejected at execute time. The schema is what authors validate
+    # against, so the rule belongs in the generated schema, not in a comment
+    # only this repo can see.
+    requires_repos: bool | None = Field(
+        default=None,
+        description=(
+            "Whether executing this workflow requires at least one repository. "
+            "Omitting it means true: a workflow that operates on no repos must "
+            "opt out with `requires_repos: false`, or execution is rejected "
+            "(ADR-058)."
+        ),
+    )
 
     # Project association
     project_name: str | None = None
