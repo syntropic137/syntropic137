@@ -67,7 +67,7 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 2400
+    timeout_seconds: 3600
     allowed_tools:
       - Read
       - Grep
