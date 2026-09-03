@@ -35,6 +35,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ENV_SYN_SESSION_STORE_URL = "SYN_SESSION_STORE_URL"
 ENV_SYN_SESSION_STORE_AUTH_TOKEN = "SYN_SESSION_STORE_AUTH_TOKEN"
 ENV_SYN_SESSION_STORE_LABEL = "SYN_SESSION_STORE_LABEL"
+ENV_SYN_SESSION_STORE_DEPLOYMENT = "SYN_SESSION_STORE_DEPLOYMENT"
 
 #: Provider identifier understood by the capability inside the workspace image.
 SESHMAGIC_PROVIDER = "seshmagic"
@@ -71,6 +72,22 @@ def usable_label(label: str | None) -> str:
     definition of what a usable label is.
     """
     candidate = (label or "").strip()
+    return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
+
+
+def usable_deployment(deployment: str | None) -> str:
+    """The operator's deployment identity if usable, otherwise "".
+
+    Same rule as `usable_label` and deliberately so: both end up in the startup
+    posture line, and the deployment identity additionally travels to the store
+    as the ``deployment`` tag, where it is a JOIN KEY. A homoglyph or a stray
+    newline in a join key is worse than in a display string - it silently
+    partitions one deployment's corpus into two.
+
+    A module function for the same reason `usable_label` is one: a caller may
+    need the rule when the rest of the settings cannot be built.
+    """
+    candidate = (deployment or "").strip()
     return candidate if _LABEL_PATTERN.fullmatch(candidate) else ""
 
 
@@ -135,6 +152,28 @@ class SessionStoreSettings(BaseSettings):
             "than an auth failure. Falls back to SYN_SESSION_STORE_AUTH_TOKEN "
             "when unset, which is correct for a store that issues one token "
             "carrying both scopes. Handled as a credential."
+        ),
+    )
+
+    deployment: str = Field(
+        default="",
+        description=(
+            "Overrides the deployment identity this install stamps on every "
+            "session it exports, replacing the derived "
+            "syntropic137__<APP_ENVIRONMENT>. Set it when two installs share an "
+            "APP_ENVIRONMENT but are different deployments - the canonical case "
+            "is migrating a selfhost install between hosts, where both the old "
+            "and the new one report syntropic137__selfhost and their sessions "
+            "become indistinguishable in the corpus during exactly the window "
+            "you most want to compare them. This is the deployment's OWN "
+            "identity; SYN_SESSION_STORE_LABEL names the store it writes TO. "
+            "MUST be a plain identifier: ASCII letters, digits, dot, underscore "
+            "and hyphen, 1 to 64 characters (so syntropic137__vps, not "
+            "syn/vps). Anything else is IGNORED with a warning that does not "
+            "repeat the value, falling back to the derived identity. Applies to "
+            "sessions exported AFTER it is set; already-stored sessions keep "
+            "the identity they were written with. "
+            "Example: syntropic137__vps"
         ),
     )
 
@@ -312,6 +351,31 @@ class SessionStoreSettings(BaseSettings):
         misconfiguration worth reporting - without repeating the value.
         """
         return bool(self.label.strip()) and not self.display_label
+
+    @property
+    def display_deployment(self) -> str:
+        """The operator's deployment identity override, or "" when unset.
+
+        "" means "no override" and callers derive the identity from
+        APP_ENVIRONMENT as before. An unusable value yields "" too, so a
+        malformed override degrades to the derived identity rather than
+        stamping garbage onto every exported session.
+
+        The invalid text is deliberately NOT echoed, matching `display_label`:
+        whatever it is, it is probably not what the operator believed they set.
+        """
+        return usable_deployment(self.deployment)
+
+    @property
+    def has_unusable_deployment(self) -> bool:
+        """True when a deployment override was configured but cannot be used.
+
+        Distinguishes "none declared" from "one was declared and it is not
+        usable". Worth reporting: the operator set it precisely so their
+        sessions would be attributable, and silently falling back to the derived
+        identity defeats the reason they set it.
+        """
+        return bool(self.deployment.strip()) and not self.display_deployment
 
     @property
     def auth_value(self) -> str:
