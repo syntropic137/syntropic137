@@ -46,7 +46,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
@@ -80,6 +80,17 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: The reason recorded when a codex stream carries no fault of its own and
+#: simply stops before `turn.completed`. It is a TELEMETRY gap - the run has no
+#: authoritative usage - and it is deliberately distinguishable from every other
+#: value `error_reason` can take, all of which name a real fault (a login
+#: failure, a malformed line). AgentExecutionHandler relies on that distinction:
+#: it will let a phase that reached this state complete IF the phase actually
+#: produced a deliverable, and only this state (issue #1111).
+MISSING_TERMINAL_TURN_REASON: Final[str] = (
+    "codex stream ended without a terminal turn.completed event (no authoritative usage)"
+)
 
 # This processor drives a CODEX primary, so its declared delegate is claude -p.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
@@ -373,12 +384,7 @@ class CodexStreamProcessor:
 
         if not self._totals.saw_terminal_turn:
             self._error_reason = (
-                self._error_reason
-                or self._auth_fault_candidate
-                or (
-                    "codex stream ended without a terminal turn.completed event "
-                    "(no authoritative usage)"
-                )
+                self._error_reason or self._auth_fault_candidate or MISSING_TERMINAL_TURN_REASON
             )
 
         total_cost_usd = self._estimate_cost()
