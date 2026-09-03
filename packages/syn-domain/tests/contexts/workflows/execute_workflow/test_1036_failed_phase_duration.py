@@ -192,12 +192,20 @@ class TestFailedPhaseDurationMetricsProjection:
         event_data = await _run_fail_execution_and_serialize(processor)
 
         metrics = WorkflowPhaseMetricsProjection(InMemoryProjectionStore())
+        # Same execution the WorkflowFailed event names: the metrics projection
+        # aggregates across executions, so it closes the run of the execution
+        # that failed, not whichever run of the phase happens to be open.
         await metrics.on_phase_started(
-            {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "Phase 1"}
+            {
+                "workflow_id": "wf-1",
+                "execution_id": "exec-1",
+                "phase_id": "p-1",
+                "phase_name": "Phase 1",
+            }
         )
 
         await metrics.on_workflow_failed(event_data)
 
         phases = await metrics.get_phase_metrics("wf-1")
-        assert phases["p-1"]["status"] == "failed"
-        assert phases["p-1"]["duration_seconds"] == pytest.approx(FIXTURE_DURATION_SECONDS, abs=1.0)
+        assert phases["p-1"].status == "failed"
+        assert phases["p-1"].duration_seconds() == pytest.approx(FIXTURE_DURATION_SECONDS, abs=1.0)

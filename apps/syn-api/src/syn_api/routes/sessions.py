@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
 )
 from syn_shared.display import (
     EM_DASH,
+    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -522,6 +523,14 @@ async def get_session(
     operations = await _load_tool_operations(manager, session_id)
     # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
     cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
+    # A running session has no completed_at, so Lane 2's duration_ms is unset
+    # and this reported None for the whole run. Computed against the wall clock
+    # instead. Terminal sessions keep whatever Lane 2 recorded.
+    duration_seconds = (
+        compute_duration_seconds(session.started_at)
+        if session.status == "running"
+        else cd.duration_seconds
+    )
 
     # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
     wf_name: str | None = None
@@ -559,7 +568,7 @@ async def get_session(
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,
-            duration_seconds=cd.duration_seconds,
+            duration_seconds=duration_seconds,
             error_message=session.error_message,
         )
     )
@@ -591,6 +600,11 @@ def _build_session_summary_response(
         info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
     )
     total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
+    # Same rule as get_session above. Applied here too because the LIST and the
+    # DETAIL of one running session previously disagreed with each other.
+    duration_seconds = (
+        compute_duration_seconds(s.started_at) if s.status == "running" else info.duration_seconds
+    )
     return SessionSummaryResponse(
         id=s.id,
         workflow_id=s.workflow_id,
@@ -615,8 +629,8 @@ def _build_session_summary_response(
         total_cost_usd=info.total_cost_usd,
         total_cost_display=format_cost(info.total_cost_usd, info.unpriced_observation_count),
         unpriced_observation_count=info.unpriced_observation_count,
-        duration_seconds=info.duration_seconds,
-        duration_display=format_duration_seconds(info.duration_seconds),
+        duration_seconds=duration_seconds,
+        duration_display=format_duration_seconds(duration_seconds),
         started_at=str(s.started_at) if s.started_at else None,
         completed_at=str(s.completed_at) if s.completed_at else None,
     )
