@@ -344,6 +344,9 @@ class CodexStreamProcessor:
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
+        #: A fault codex reported on `error` / `turn.failed`, held until
+        #: end-of-stream so a recovered turn is not failed by it (#1117).
+        self._turn_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -380,8 +383,12 @@ class CodexStreamProcessor:
             await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
+            # Order is deliberate, most specific first: a fault codex itself
+            # reported beats an inferred auth fault, which beats the generic
+            # "it just stopped".
             self._error_reason = (
                 self._error_reason
+                or self._turn_fault_candidate
                 or self._auth_fault_candidate
                 or (
                     "codex stream ended without a terminal turn.completed event "
@@ -572,6 +579,23 @@ class CodexStreamProcessor:
         This is #891 again for a different event type, so it takes the same
         shape: keep the FIRST fault, because a later generic one must not
         overwrite the specific one that ended the run.
+
+        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
+        directly would be worse than the bug it fixes. `AgentExecutionHandler`
+        forces a non-zero phase exit whenever a codex stream carries ANY
+        `error_reason`, and it does not consult `saw_terminal_turn`. So an
+        `error` event the CLI then recovers from - `error` ... `turn.completed`
+        - would fail a phase that finished cleanly, and would report the
+        mid-turn hiccup as its cause. That does not mask a failure; it invents
+        one. This module's own comment already names that class as the worse
+        defect (an early #891 draft "would have failed SUCCESSFUL codex
+        phases"), and the sibling `_note_non_json_fault` holds its result as a
+        candidate for exactly this reason.
+
+        So the message is held and promoted at end-of-stream only when no
+        `turn.completed` arrived. A turn that genuinely failed emits no terminal
+        turn, so the reason still surfaces; a turn that recovered keeps its
+        success. Found by the cross-model review of #1117.
         """
         message = event.get("message")
         if not message:
@@ -581,7 +605,9 @@ class CodexStreamProcessor:
             return
         reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
         logger.error("Codex turn failed: %s", message)
-        self._error_reason = self._error_reason or reason
+        # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
+        # terminal turn arrived. See the class comment above for why.
+        self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.
