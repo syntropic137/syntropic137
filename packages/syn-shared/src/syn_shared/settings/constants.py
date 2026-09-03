@@ -44,6 +44,9 @@ ENV_SYN_PUBLIC_HOSTNAME = "SYN_PUBLIC_HOSTNAME"
 ENV_SYN_GATEWAY_PORT = "SYN_GATEWAY_PORT"
 """Env var for the selfhost gateway port."""
 
+ENV_SYN_GATEWAY_BIND = "SYN_GATEWAY_BIND"
+"""Env var for the host address the selfhost gateway binds to."""
+
 ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 """Env var for the Anthropic API key."""
 

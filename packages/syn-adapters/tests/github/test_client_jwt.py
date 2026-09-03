@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 
 from syn_adapters.github.client_jwt import decode_private_key
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # Minimal valid PEM for testing format detection (not a real key)
 TEST_PEM = "-----BEGIN PRIVATE KEY-----\nMIIBVAIBADANBgkqhki\n-----END PRIVATE KEY-----\n"
 

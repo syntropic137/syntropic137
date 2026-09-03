@@ -3,11 +3,17 @@
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
 
+import asyncio
 import os
 
 import pytest
 
 from syn_api.types import Ok
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -134,3 +140,52 @@ async def test_get_session_includes_lineage_fields():
     # A leader session (no parent) has root_session_id == its own id.
     assert result.value.parent_session_id is None
     assert result.value.root_session_id == session_id
+
+
+async def test_get_session_running_duration_advances_between_reads():
+    """A RUNNING session's duration_seconds must be computed live, not read
+    back as the ``None`` Lane 2 leaves it in before completion.
+
+    Regression test for the 2026-09-01 incident (frozen duration misread as
+    a hang). A test asserting only ``duration_seconds is not None`` would
+    already pass today against a stale value -- so this asserts it ADVANCES
+    between two reads of the same still-running session.
+    """
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session
+    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
+    from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
+        StartSessionCommand,
+    )
+
+    repo = get_session_repo()
+    session_id = "duration-advance-test-0001"
+
+    agg = AgentSessionAggregate()
+    agg.start_session(
+        StartSessionCommand(
+            aggregate_id=session_id,
+            workflow_id="wf-duration",
+            execution_id="exec-duration",
+            phase_id="phase-1",
+            agent_provider="claude",
+        )
+    )
+    await repo.save(agg)
+    await sync_published_events_to_projections()
+
+    first = await get_session(session_id)
+    assert isinstance(first, Ok)
+    assert first.value.status == "running"
+    first_duration = first.value.duration_seconds
+    assert first_duration is not None
+
+    await asyncio.sleep(0.05)
+
+    second = await get_session(session_id)
+    assert isinstance(second, Ok)
+    second_duration = second.value.duration_seconds
+    assert second_duration is not None
+    assert second_duration > first_duration

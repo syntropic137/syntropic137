@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
 )
 from syn_shared.display import (
     EM_DASH,
+    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -51,9 +52,6 @@ if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
         SessionCost,
-    )
-    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
-        SessionCostQueryService,
     )
 
 logger = logging.getLogger(__name__)
@@ -272,37 +270,27 @@ def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
     )
 
 
-async def _fetch_one_session_cost(
-    query_svc: SessionCostQueryService, sid: str
-) -> _SummaryEnrichment | None:
-    """Fetch one session's enrichment; returns None on miss or transient failure."""
-    try:
-        cost = await query_svc.get(sid)
-    except Exception:
-        logger.debug("Failed to load cost for session %s", sid, exc_info=True)
-        return None
-    return _enrichment_from_cost(cost) if cost is not None else None
-
-
 async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnrichment]:
     """Load per-session enrichment from the Lane 2 session_cost projection (#695).
 
     Returns cost, agent model, and duration so the list endpoint can populate
     display fields without a second round-trip.
+
+    ONE batched query, not one per session (#1114). The per-session loop this
+    replaced cost ~41ms per row against a database that answers a whole page in
+    2ms: `limit=200` took 8.3s, and the endpoint's own default of 50 took 2.4s.
+    A failure still degrades to "no enrichment" rather than a 500 - the same
+    behaviour the per-session version had, now decided once for the page.
     """
     if not session_ids:
         return {}
     try:
         query_svc = get_session_cost_query()
+        costs = await query_svc.get_many(session_ids)
     except Exception:
-        logger.debug("Session cost query service unavailable", exc_info=True)
+        logger.debug("Session cost enrichment unavailable", exc_info=True)
         return {}
-    enriched: dict[str, _SummaryEnrichment] = {}
-    for sid in session_ids:
-        info = await _fetch_one_session_cost(query_svc, sid)
-        if info is not None:
-            enriched[sid] = info
-    return enriched
+    return {sid: _enrichment_from_cost(cost) for sid, cost in costs.items()}
 
 
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
@@ -535,6 +523,14 @@ async def get_session(
     operations = await _load_tool_operations(manager, session_id)
     # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
     cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
+    # A running session has no completed_at, so Lane 2's duration_ms is unset
+    # and this reported None for the whole run. Computed against the wall clock
+    # instead. Terminal sessions keep whatever Lane 2 recorded.
+    duration_seconds = (
+        compute_duration_seconds(session.started_at)
+        if session.status == "running"
+        else cd.duration_seconds
+    )
 
     # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
     wf_name: str | None = None
@@ -572,7 +568,7 @@ async def get_session(
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,
-            duration_seconds=cd.duration_seconds,
+            duration_seconds=duration_seconds,
             error_message=session.error_message,
         )
     )
@@ -604,6 +600,11 @@ def _build_session_summary_response(
         info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
     )
     total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
+    # Same rule as get_session above. Applied here too because the LIST and the
+    # DETAIL of one running session previously disagreed with each other.
+    duration_seconds = (
+        compute_duration_seconds(s.started_at) if s.status == "running" else info.duration_seconds
+    )
     return SessionSummaryResponse(
         id=s.id,
         workflow_id=s.workflow_id,
@@ -628,8 +629,8 @@ def _build_session_summary_response(
         total_cost_usd=info.total_cost_usd,
         total_cost_display=format_cost(info.total_cost_usd, info.unpriced_observation_count),
         unpriced_observation_count=info.unpriced_observation_count,
-        duration_seconds=info.duration_seconds,
-        duration_display=format_duration_seconds(info.duration_seconds),
+        duration_seconds=duration_seconds,
+        duration_display=format_duration_seconds(duration_seconds),
         started_at=str(s.started_at) if s.started_at else None,
         completed_at=str(s.completed_at) if s.completed_at else None,
     )

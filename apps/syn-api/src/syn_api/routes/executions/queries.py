@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -28,6 +29,7 @@ from syn_shared.display import (
     format_duration_seconds,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 from .models import (
@@ -39,9 +41,14 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
+    )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
     )
 
 logger = logging.getLogger(__name__)
@@ -55,22 +62,41 @@ def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
 
 
-def _coerce_dt(value: object | None) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        with contextlib.suppress(ValueError):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return None
+@dataclass(frozen=True)
+class _DurationTotal:
+    """An execution's wall-clock total, with the coverage of that total.
+
+    Same shape as the unpriced-cost totals alongside it (#890): a bare number
+    cannot say whether it is the whole story. An execution whose phases report
+    10s, 10s and "unknown" is not a 20s execution, and rendering it as one is
+    the defect, not the missing phase.
+    """
+
+    seconds: float | None
+    """Sum of the phase durations we could resolve, or ``None`` if none could be."""
+
+    unknown_phase_count: int
+    """Phases that contributed nothing because their duration is unknown."""
+
+    @classmethod
+    def over(cls, durations: Iterable[float | None]) -> _DurationTotal:
+        """Fold per-phase durations into a total that admits what it is missing."""
+        resolved = list(durations)
+        known = [d for d in resolved if d is not None]
+        return cls(
+            seconds=math.fsum(known) if known else None,
+            unknown_phase_count=len(resolved) - len(known),
+        )
 
 
-def _duration_seconds(started: object | None, completed: object | None) -> float | None:
-    """Compute duration from start/end timestamps when both are present."""
-    s = _coerce_dt(started)
-    c = _coerce_dt(completed)
-    if s is None or c is None:
-        return None
-    return (c - s).total_seconds()
+def _phase_duration(phase: PhaseExecutionDetail) -> float | None:
+    """Resolve one domain phase's duration the way every read surface must."""
+    return resolve_duration_seconds(
+        phase.status,
+        started_at=phase.started_at,
+        completed_at=phase.completed_at,
+        recorded_seconds=phase.duration_seconds,
+    )
 
 
 @dataclass
@@ -132,7 +158,13 @@ def _build_execution_summary_response(
     from raw values via syn_shared.display so all clients (dashboard,
     CLI) share identical strings.
     """
-    duration_seconds = _duration_seconds(e.started_at, e.completed_at)
+    # Same rule the detail view applies, so a running execution no longer
+    # reports a live duration in one place and nothing in the other. This
+    # previously required both timestamps, and a running execution has no
+    # completed_at by definition.
+    duration_seconds = resolve_duration_seconds(
+        e.status, started_at=e.started_at, completed_at=e.completed_at
+    )
     totals = _merge_totals(e, enrichment)
     return ExecutionSummaryResponse(
         workflow_execution_id=e.workflow_execution_id,
@@ -233,6 +265,13 @@ async def _map_phase_detail(
     else:
         sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
 
+    duration_seconds = resolve_duration_seconds(
+        phase.status,
+        started_at=phase.started_at,
+        completed_at=phase.completed_at,
+        recorded_seconds=phase.duration_seconds,
+    )
+
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
         name=phase.name,
@@ -245,7 +284,7 @@ async def _map_phase_detail(
         cache_creation_tokens=sc.cache_creation,
         cache_read_tokens=sc.cache_read,
         cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
-        duration_seconds=phase.duration_seconds,
+        duration_seconds=duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
@@ -282,7 +321,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         + phase.output_tokens
         + phase.cache_creation_tokens
         + phase.cache_read_tokens,
-        duration_seconds=phase.duration_seconds or 0.0,
+        duration_seconds=phase.duration_seconds,
         cost_usd=Decimal(str(phase.cost_usd)),
         unpriced_observation_count=phase.unpriced_observation_count,
         started_at=str(phase.started_at) if phase.started_at else None,
@@ -322,16 +361,23 @@ def _enrichment_for(
 async def _load_execution_enrichment(
     manager: ProjectionManager, execution_ids: list[str]
 ) -> dict[str, _ExecutionEnrichment]:
-    """Load per-execution enrichment from the Lane 2 execution_cost projection (#695)."""
+    """Load enrichment for a list of executions from the Lane 2 execution_cost
+    projection (#695), in one batched lookup rather than one round trip per
+    execution id (issue #1077).
+
+    Callers must fetch this once per request for a given set of ids and reuse
+    the result — calling it twice for the same ids doubles the cost for no
+    new data (issue #1077).
+    """
+    if not execution_ids:
+        return {}
+    try:
+        costs = await manager.execution_cost.list_costs_for_ids(execution_ids)
+    except Exception:
+        logger.debug("Failed to load execution cost enrichment", exc_info=True)
+        return {}
     out: dict[str, _ExecutionEnrichment] = {}
-    for eid in execution_ids:
-        try:
-            ec = await manager.execution_cost.get_execution_cost(eid)
-        except Exception:
-            logger.debug("Failed to load execution cost for %s", eid, exc_info=True)
-            continue
-        if ec is None:
-            continue
+    for eid, ec in costs.items():
         # Summed explicitly rather than read from ExecutionCost.total_tokens.
         # This path and the cost path must arrive at the same number by
         # independent routes, which is what makes the cross-read-model test in
@@ -376,14 +422,19 @@ async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
 # -- Service functions --------------------------------------------------------
 
 
-async def list_(
-    workflow_id: str | None = None,
-    status: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> Result[list[ExecutionSummary], ExecutionError]:
-    await ensure_connected()
-    manager = get_projection_mgr()
+async def _load_execution_list_data(
+    manager: ProjectionManager,
+    workflow_id: str | None,
+    status: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
+    """Fetch domain summaries plus their tool-count and cost enrichment, once.
+
+    Shared by ``list_()`` and ``list_executions_endpoint`` so a single request
+    never issues the enrichment lookup for the same execution ids twice
+    (issue #1077 - that duplication doubled every per-execution round trip).
+    """
     projection = manager.workflow_execution_list
     if workflow_id:
         domain_summaries = await projection.get_by_workflow_id(workflow_id)
@@ -393,44 +444,54 @@ async def list_(
             offset=offset,
             status_filter=status,
         )
-    tool_counts = (
-        await _fetch_tool_counts([s.workflow_execution_id for s in domain_summaries])
-        if domain_summaries
-        else {}
+    execution_ids = [s.workflow_execution_id for s in domain_summaries]
+    tool_counts = await _fetch_tool_counts(execution_ids) if domain_summaries else {}
+    # Enrich each execution's cost + token totals from the Lane 2 execution_cost projection (#695)
+    cost_by_execution = await _load_execution_enrichment(manager, execution_ids)
+    return domain_summaries, tool_counts, cost_by_execution
+
+
+def _to_execution_summary(
+    s: WorkflowExecutionSummary,
+    tool_counts: dict[str, int],
+    cost_by_execution: dict[str, _ExecutionEnrichment],
+) -> ExecutionSummary:
+    """Build an ExecutionSummary from a domain summary plus already-loaded enrichment."""
+    enrichment = _enrichment_for(cost_by_execution, s.workflow_execution_id)
+    return ExecutionSummary(
+        workflow_execution_id=s.workflow_execution_id,
+        workflow_id=s.workflow_id,
+        workflow_name=s.workflow_name,
+        status=s.status,
+        started_at=s.started_at,
+        completed_at=s.completed_at,
+        completed_phases=s.completed_phases,
+        total_phases=s.total_phases,
+        total_tokens=s.total_tokens,
+        total_input_tokens=s.total_input_tokens,
+        total_output_tokens=s.total_output_tokens,
+        total_cache_creation_tokens=s.total_cache_creation_tokens,
+        total_cache_read_tokens=s.total_cache_read_tokens,
+        total_cost_usd=enrichment.total_cost_usd,
+        unpriced_observation_count=enrichment.unpriced_observation_count,
+        tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
+        error_message=s.error_message,
+        repos=list(s.repos),
     )
-    # Enrich each execution's total_cost_usd from the Lane 2 execution_cost projection (#695)
-    cost_by_execution = await _load_execution_enrichment(
-        manager, [s.workflow_execution_id for s in domain_summaries]
+
+
+async def list_(
+    workflow_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> Result[list[ExecutionSummary], ExecutionError]:
+    await ensure_connected()
+    manager = get_projection_mgr()
+    domain_summaries, tool_counts, cost_by_execution = await _load_execution_list_data(
+        manager, workflow_id, status, limit, offset
     )
-    return Ok(
-        [
-            ExecutionSummary(
-                workflow_execution_id=s.workflow_execution_id,
-                workflow_id=s.workflow_id,
-                workflow_name=s.workflow_name,
-                status=s.status,
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-                completed_phases=s.completed_phases,
-                total_phases=s.total_phases,
-                total_tokens=s.total_tokens,
-                total_input_tokens=s.total_input_tokens,
-                total_output_tokens=s.total_output_tokens,
-                total_cache_creation_tokens=s.total_cache_creation_tokens,
-                total_cache_read_tokens=s.total_cache_read_tokens,
-                total_cost_usd=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).total_cost_usd,
-                unpriced_observation_count=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).unpriced_observation_count,
-                tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
-                error_message=s.error_message,
-                repos=list(s.repos),
-            )
-            for s in domain_summaries
-        ]
-    )
+    return Ok([_to_execution_summary(s, tool_counts, cost_by_execution) for s in domain_summaries])
 
 
 async def get(
@@ -448,7 +509,11 @@ async def get(
     total_cache_creation = detail.total_cache_creation_tokens
     total_cache_read = detail.total_cache_read_tokens
     total_cost: Decimal | str = Decimal("0")
-    total_duration = detail.total_duration_seconds
+    # Derived from the phases rather than read from the projection's running
+    # sum, so the total and the phase list can never disagree: the sum only
+    # counts phases that have COMPLETED, which silently excluded the one still
+    # running and presented the shortfall as the final figure.
+    duration = _DurationTotal.over(_phase_duration(p) for p in detail.phases)
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -461,8 +526,6 @@ async def get(
             total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
             total_cache_read = exec_cost.cache_read_tokens or total_cache_read
             total_cost = exec_cost.total_cost_usd
-            if exec_cost.duration_ms > 0:
-                total_duration = exec_cost.duration_ms / 1000.0
 
     return Ok(
         ExecutionDetail(
@@ -477,7 +540,8 @@ async def get(
             total_cache_creation_tokens=total_cache_creation,
             total_cache_read_tokens=total_cache_read,
             total_cost_usd=total_cost,
-            total_duration_seconds=total_duration,
+            total_duration_seconds=duration.seconds,
+            unknown_duration_phase_count=duration.unknown_phase_count,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
             repos=list(detail.repos),
@@ -550,6 +614,9 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
+    # Folded from the phases this response already carries, so the header total
+    # and the timeline below it are the same numbers by construction.
+    duration = _DurationTotal.over(p.duration_seconds for p in phases)
 
     enriched = await _enrich_costs(
         execution_id,
@@ -578,7 +645,8 @@ async def get_detail(
             completed_at=detail.completed_at,
             error_message=detail.error_message,
             repos=list(detail.repos),
-            total_duration_seconds=detail.total_duration_seconds,
+            total_duration_seconds=duration.seconds,
+            unknown_duration_phase_count=duration.unknown_phase_count,
         )
     )
 
@@ -635,19 +703,23 @@ async def list_executions_endpoint(
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
     offset = (page - 1) * page_size
-    result = await list_(status=status, limit=page_size, offset=offset)
-    if isinstance(result, Err):
-        raise HTTPException(status_code=500, detail=result.message)
+    await ensure_connected()
     manager = get_projection_mgr()
-    enrichment = await _load_execution_enrichment(
-        manager, [e.workflow_execution_id for e in result.value]
+    domain_summaries, tool_counts, cost_by_execution = await _load_execution_list_data(
+        manager, None, status, page_size, offset
     )
     return ExecutionListResponse(
         executions=[
-            _build_execution_summary_response(e, enrichment.get(e.workflow_execution_id))
-            for e in result.value
+            _build_execution_summary_response(
+                _to_execution_summary(s, tool_counts, cost_by_execution),
+                cost_by_execution.get(s.workflow_execution_id),
+            )
+            for s in domain_summaries
         ],
-        total=len(result.value),
+        # The COLLECTION size, not this page's length (#1119). `total` is the
+        # only field a client can page on, and reporting the page length made
+        # it always say "you have them all".
+        total=await manager.workflow_execution_list.count(status),
         page=page,
         page_size=page_size,
     )
@@ -695,4 +767,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         error_message=detail.error_message,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
+        unknown_duration_phase_count=detail.unknown_duration_phase_count,
     )
