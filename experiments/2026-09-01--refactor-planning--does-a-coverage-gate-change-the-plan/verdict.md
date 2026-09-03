@@ -12,10 +12,15 @@ useful part.
 `eval-pack.md` states under "What invalidates a run": *"Execution fails before
 its final phase."*
 
-- A1, A2, A3 failed at phase 3 of 4.
-- B1, B2, B3 were cancelled at phases 3-5 of 5.
+- A1, A2, A3 FAILED at phase 3 of 4.
+- B1 and B3 were CANCELLED before their final phase.
+- B2 was cancelled DURING phase 5 of 5 and produced no `revise` artifact.
 
-Six of six. The earlier version of this file scored six predictions anyway and
+The quoted wording literally covers five of the six; B2 was cancelled during
+its last phase, not before it, and all three B runs are `cancelled` rather than
+`failed`. The criterion the rule exists to enforce holds for all six: no arm
+produced a final artifact, so P4 cannot be scored and the arms cannot be
+compared. The earlier version of this file scored six predictions anyway and
 returned **go**, justified by a rule invented after seeing the data
 ("structural findings survive because they come from phases that DID
 complete"). The frozen pack contains no such exception, and P4 explicitly
@@ -44,8 +49,9 @@ That is a manipulation check. It was promoted to the strongest finding.
 
 **And the supporting claim was false.** The earlier results said A1's plan had
 "no test anywhere in the sequence" and was "a plan to make a file shorter, not
-to preserve behaviour". A1's plan mentions test/pytest/verification **119
-times**, runs affected tests after each extraction group, and carries a
+to preserve behaviour". A1's plan contains 60 occurrences of
+`\btests?\b` (`jq -r .content runs/A1_plan.json | grep -ioE '\btests?\b' | wc -l`),
+runs affected tests after each extraction group, and carries a
 verification section specifying unit coverage, targeted tests, fitness tests,
 `just preflight` and CI. What it does not do is prescribe NEW characterization
 tests for behaviour nothing currently pins - a real and much narrower

@@ -20,7 +20,9 @@ LOG=$(mktemp /tmp/heartbeat.XXXXXX)
 set -u
 for i in $(seq 1 12); do
   printf '%s %s %s\n' "marker" "$i" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOG" || exit 1
-  [ "$i" -lt 12 ] && sleep 10
+  if [ "$i" -lt 12 ]; then
+    sleep 10 || exit 1
+  fi
 done
 echo "COUNT=$(wc -l < "$LOG")"
 cat "$LOG"
@@ -32,8 +34,10 @@ Notes on why it is written this way, so you do not "improve" it:
   run's markers with a previous run's and the result would look plausible.
 - The last iteration does not sleep. Sleeping after the final marker adds ten
   seconds of dead time that a later reader would mistake for work.
-- `|| exit 1` means a failed write ends the run instead of being masked by the
-  sleeps that follow it.
+- `|| exit 1` on BOTH the write and the sleep. A failed write would otherwise be
+  masked by the sleeps after it, and an interrupted `sleep` would let the loop
+  finish twelve markers at the wrong cadence - a successful-looking artifact
+  from a run that did not measure what it claims.
 - `COUNT` is emitted by the shell, not by you. It is the only trustworthy count.
 
 ## Then
