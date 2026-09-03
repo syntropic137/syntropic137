@@ -38,10 +38,13 @@ The application calls `CREATE EXTENSION IF NOT EXISTS timescaledb`, which is a
 **no-op** when the extension already exists at the older version. The extension
 update is therefore a manual step and will not happen on its own.
 
-Between starting the new image and running the `ALTER`, the server refuses
-queries with an extension version mismatch against the loaded shared library.
-That state is expected and recoverable, not damage, but it does mean the stack
-is down for the duration. Drain in-flight work first.
+In rehearsal the server did **not** refuse queries in the window between
+starting the 2.29.2 image and running the `ALTER`: it served reads and writes
+normally with the extension still registered at 2.25.1. Do not rely on a hard
+failure to tell you the step was missed. Check `extversion` explicitly.
+
+The outage is the container recreate itself, which drops every pool held by
+`api`, `collector` and `event-store`. Drain in-flight work first.
 
 1. Confirm nothing is executing. A container recreate drops every pool held by
    `api`, `collector` and `event-store`, which fails phases mid-flight:
@@ -87,6 +90,25 @@ is down for the duration. Drain in-flight work first.
    notes, `/health` answered in 36 ms while `/api/v1/executions` took 23 s
    during an outage. Check an execution list, an execution detail, and an
    artifact download.
+
+## Rehearsed
+
+Run against a throwaway restore of real `agent_events` data (1151 rows,
+1 hypertable, 1 compressed chunk) on 2026-09-03, using the exact sequence
+above:
+
+| | before | after |
+|---|---|---|
+| PostgreSQL | 16.11 | **16.15** |
+| timescaledb extension | 2.25.1 | **2.29.2** |
+| hypertables | 1 | 1 |
+| compressed chunks | 1 | 1 |
+| `agent_events` rows | 1151 | 1151 |
+| policy jobs | 3 | 3 |
+
+After the upgrade, reads against compressed chunks returned (1128 rows below
+the compression boundary), an insert succeeded, and `decompress_chunk()` ran
+cleanly. No data loss, no policy loss, no manual chunk repair.
 
 ## Rollback
 
