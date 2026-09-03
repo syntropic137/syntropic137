@@ -74,7 +74,7 @@ Following ADR-026 (TimescaleDB for Observability), we had **two PostgreSQL insta
 ```yaml
 # docker-compose.dev.yaml
 timescaledb:
-  image: timescale/timescaledb:latest-pg16
+  image: timescale/timescaledb:2.29.2-pg16
   container_name: syn-db
   environment:
     POSTGRES_DB: syn        # Single unified database
