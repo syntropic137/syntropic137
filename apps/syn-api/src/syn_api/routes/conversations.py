@@ -200,6 +200,84 @@ def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
 
 _CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))
 
+# Salient input field to preview per claude tool_use ``name`` — mirrors the
+# issue's own proposal (#1067): command for Bash, file_path for Read/Edit,
+# pattern for Grep. Tools not listed here still get their tool_name shown,
+# just no preview.
+_CLAUDE_TOOL_USE_PREVIEW_KEY: Mapping[str, str] = {
+    "Bash": "command",
+    "Read": "file_path",
+    "Edit": "file_path",
+    "Grep": "pattern",
+}
+
+
+def _claude_tool_use_fields(item: Mapping[str, object]) -> tuple[str | None, str | None]:
+    """(tool_name, preview) for a claude ``message.content[*]`` item of type ``tool_use``."""
+    name = item.get("name")
+    tool_name = name if isinstance(name, str) else None
+    key = _CLAUDE_TOOL_USE_PREVIEW_KEY.get(tool_name) if tool_name else None
+    tool_input = item.get("input")
+    if key is None or not isinstance(tool_input, dict):
+        return tool_name, None
+    value = tool_input.get(key)
+    preview = value[:_PREVIEW_LEN] if isinstance(value, str) and value else None
+    return tool_name, preview
+
+
+def _claude_tool_result_fields(item: Mapping[str, object]) -> tuple[str | None, str | None]:
+    """(tool_name, preview) for a claude ``message.content[*]`` item of type ``tool_result``.
+
+    Tool name is unknown here — claude only carries a ``tool_use_id`` back-reference,
+    not the tool name, on the result item.
+    """
+    content = item.get("content")
+    text = content if isinstance(content, str) else None
+    if text is None and isinstance(content, list):
+        text = next(
+            (
+                p.get("text")
+                for p in content
+                if isinstance(p, dict) and isinstance(p.get("text"), str)
+            ),
+            None,
+        )
+    if not text:
+        return None, None
+    first_line = text.splitlines()[0] if text.splitlines() else text
+    preview = first_line[:_PREVIEW_LEN]
+    if item.get("is_error"):
+        preview = f"[error] {preview}"
+    return None, preview
+
+
+def _extract_claude_message_tool_fields(
+    data: Mapping[str, object],
+) -> tuple[str | None, str | None] | None:
+    """(tool_name, preview) for a claude ``tool_use``/``tool_result`` line, or None.
+
+    Claude's ``stream-json`` nests tool calls and results inside
+    ``message.content[*]`` items (``{"type": "tool_use", "name": ..., "input": {...}}``
+    or ``{"type": "tool_result", "content": ...}``) — a shape the top-level
+    ``tool_name``/``content`` lookups in ``_extract_line_fields`` never match,
+    which is why those columns render empty (#1067).
+    """
+    msg = data.get("message")
+    if not isinstance(msg, dict):
+        return None
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "tool_use":
+            return _claude_tool_use_fields(item)
+        if item_type == "tool_result":
+            return _claude_tool_result_fields(item)
+    return None
+
 
 def _codex_item_fields(
     item: Mapping[str, object], stream_type: CodexStreamType
@@ -289,6 +367,12 @@ def _extract_line_fields(
     tool_name = data.get("tool_name") or data.get("name")
     content = _extract_content_preview(data)
     preview = content[:_PREVIEW_LEN] if content else None
+
+    if tool_name is None and preview is None:
+        claude_tool = _extract_claude_message_tool_fields(data)
+        if claude_tool is not None:
+            tool_name, preview = claude_tool
+
     return event_type, tool_name, preview
 
 

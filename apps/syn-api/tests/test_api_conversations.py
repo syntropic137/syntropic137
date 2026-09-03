@@ -125,6 +125,36 @@ async def test_get_conversation_log_parses_json(mock_conversation_store):
     assert lines[1].tool_name is None
 
 
+async def test_claude_tool_use_and_result_populate_empty_columns(mock_conversation_store):
+    """#1067: claude's real nested ``message.content[*]`` tool shape must not render blank.
+
+    The synthetic flat shape in ``test_get_conversation_log_parses_json`` above
+    (``{"type": "tool_use", "tool_name": "Bash", ...}``) is not what the Claude
+    CLI actually emits. The real shape nests the tool call inside
+    ``message.content[*]`` with no top-level ``tool_name``/``name`` — a shape
+    the flat-shape test can't catch since it never exercises this path.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"name":"Bash","input":{"command":"ls -la /workspace"}}]}}',
+        '{"type":"user","message":{"content":[{"tool_use_id":"toolu_01NFH",'
+        '"type":"tool_result","content":"total 28\\ndrwxr-xr-x 8 agent agent 256 Sep 2 02:22 ."}]}}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("session-1")
+
+    assert isinstance(result, Ok)
+    lines = result.value.lines
+    assert lines[0].event_type == "assistant"
+    assert lines[0].tool_name == "Bash"
+    assert lines[0].content_preview == "ls -la /workspace"
+    assert lines[1].event_type == "user"
+    assert lines[1].content_preview == "total 28"
+
+
 async def test_codex_agent_message_renders_as_talking(mock_conversation_store):
     """A codex ``agent_message`` item surfaces its text as readable conversation."""
     mock_conversation_store.retrieve_session.return_value = [
