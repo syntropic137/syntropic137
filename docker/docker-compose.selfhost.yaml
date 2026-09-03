@@ -121,10 +121,13 @@ services:
     deploy:
       resources:
         limits:
-          # Post-tuning target. Pre-tuning collector peaked at 143MB; with
-          # MALLOC_ARENA_MAX=2 + PYTHONMALLOC=malloc + dedup defaults this
-          # drops to 95-110MB under load. 96M leaves slack for OTLP bursts.
-          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
+          # Sized from load, not from an 8GB Docker Desktop VM budget. The
+          # earlier 96m target came from single-run tuning (95-110MB); under 8
+          # concurrent executions the collector peaked at 90.55MiB, 94% of it
+          # (#1093). This is the event ingestion path, its load scales with
+          # concurrency and this ceiling does not, so an OOM kill here reads
+          # as missing telemetry rather than as a memory error.
+          memory: ${COLLECTOR_MEMORY_LIMIT:-512m}
           cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
     logging:
       driver: "json-file"
@@ -361,7 +364,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${MINIO_MEMORY_LIMIT:-256m}
+          # Peaked at 227.60MiB (89%) under the same 8 concurrent
+          # executions as the collector above (#1093).
+          memory: ${MINIO_MEMORY_LIMIT:-1g}
           cpus: "${MINIO_CPU_LIMIT:-0.25}"
     logging:
       driver: "json-file"

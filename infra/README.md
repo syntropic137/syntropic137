@@ -319,9 +319,9 @@ These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) a
 | `POSTGRES_MEMORY_LIMIT` | `1g` | PostgreSQL memory limit |
 | `POSTGRES_CPU_LIMIT` | `1.0` | PostgreSQL CPU limit |
 | `EVENT_STORE_MEMORY_LIMIT` | `512m` | Event store memory limit |
-| `COLLECTOR_MEMORY_LIMIT` | `256m` | Collector memory limit |
+| `COLLECTOR_MEMORY_LIMIT` | `512m` | Collector memory limit |
 | `COLLECTOR_CPU_LIMIT` | `0.25` | Collector CPU limit |
-| `MINIO_MEMORY_LIMIT` | `256m` | MinIO memory limit |
+| `MINIO_MEMORY_LIMIT` | `1g` | MinIO memory limit |
 | `MINIO_CPU_LIMIT` | `0.25` | MinIO CPU limit |
 | `REDIS_MEMORY_LIMIT` | `256m` | Redis memory limit |
 | `REDIS_CPU_LIMIT` | `0.25` | Redis CPU limit |

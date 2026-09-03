@@ -191,10 +191,10 @@ class InfraSettings(BaseSettings):
 
     event_store_memory_limit: str = Field(default="512m", description="Event Store memory limit.")
 
-    collector_memory_limit: str = Field(default="256m", description="Collector memory limit.")
+    collector_memory_limit: str = Field(default="512m", description="Collector memory limit.")
     collector_cpu_limit: str = Field(default="0.25", description="Collector CPU limit.")
 
-    minio_memory_limit: str = Field(default="256m", description="MinIO memory limit.")
+    minio_memory_limit: str = Field(default="1g", description="MinIO memory limit.")
     minio_cpu_limit: str = Field(default="0.25", description="MinIO CPU limit.")
 
     redis_memory_limit: str = Field(default="256m", description="Redis memory limit.")

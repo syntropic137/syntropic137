@@ -167,7 +167,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
+          memory: ${COLLECTOR_MEMORY_LIMIT:-512m}
           cpus: ${COLLECTOR_CPU_LIMIT:-0.25}
     logging:
       driver: json-file
@@ -423,7 +423,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${MINIO_MEMORY_LIMIT:-256m}
+          memory: ${MINIO_MEMORY_LIMIT:-1g}
           cpus: ${MINIO_CPU_LIMIT:-0.25}
     logging:
       driver: json-file
