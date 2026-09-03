@@ -323,10 +323,32 @@ export const validateCommand: CommandDef = {
   },
 };
 
+/**
+ * A workflow with no phases is not valid, so `validate` must not say it is.
+ *
+ * The API refuses it outright (`phases: list[...] = Field(..., min_length=1)`),
+ * and every per-phase content rule the validator exists to run passes vacuously
+ * when there is nothing to run them against. Printing "Valid" beside
+ * "Total phases: 0" is the headline of #1056 — an operator scanning for the
+ * success word ships it. Checked here rather than in the parser because it is
+ * true of a genuinely empty `phases: []` too, not just a dropped block.
+ */
+function assertEveryWorkflowHasPhases(
+  workflows: { id: string; phases: unknown[] }[],
+): void {
+  const empty = workflows.filter((wf) => wf.phases.length === 0);
+  if (empty.length === 0) return;
+  throw new Error(
+    `workflow has no phases: ${empty.map((wf) => wf.id).join(", ")} ` +
+      `(a workflow must declare at least one phase; the API rejects zero)`,
+  );
+}
+
 function validatePackageDir(pkgPath: string): void {
   try {
     const fmt = detectFormat(pkgPath);
     const { workflows } = resolvePackage(pkgPath);
+    assertEveryWorkflowHasPhases(workflows);
 
     printSuccess(`Valid ${fmt} package\n`);
     print(`  ${style("Directory:", DIM)} ${pkgPath}`);

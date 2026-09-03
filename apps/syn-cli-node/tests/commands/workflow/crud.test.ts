@@ -7,6 +7,7 @@ import {
   listCommand,
   showCommand,
   deleteCommand,
+  validateCommand,
 } from "../../../src/commands/workflow/crud.js";
 import { CLIError } from "../../../src/framework/errors.js";
 
@@ -363,6 +364,103 @@ describe("workflow crud commands", () => {
       await expect(
         deleteCommand.handler({ positionals: [], values: {} }),
       ).rejects.toThrow(CLIError);
+    });
+  });
+  // -------------------------------------------------------------------------
+  // validate (#1056)
+  // -------------------------------------------------------------------------
+  //
+  // These drive `syn workflow validate <dir>` end to end — the command, the
+  // resolver and the parser — because that is where the bug was visible. The
+  // parser returned a document with `phases:` missing, the resolver read zero
+  // phases off it, and the command printed the success word anyway. Asserting
+  // on the parser alone would not have caught the print.
+  describe("validate package directory", () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "syn-validate-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function writePackage(yaml: string): string {
+      const dir = path.join(tmpDir, "pkg");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "workflow.yaml"), yaml);
+      return dir;
+    }
+
+    // Four phases, not one: a truncated parse yields zero, and a fixture of
+    // one could not tell "parsed correctly" apart from "recovered a single
+    // phase by accident".
+    const PHASES = [
+      "phases:",
+      "  - id: alpha",
+      "    name: Alpha",
+      "    prompt: Do alpha.",
+      "  - id: beta",
+      "    name: Beta",
+      "    prompt: Do beta.",
+      "  - id: gamma",
+      "    name: Gamma",
+      "    prompt: Do gamma.",
+      "  - id: delta",
+      "    name: Delta",
+      "    prompt: Do delta.",
+    ].join("\n");
+
+    it("accepts a package whose description sits on one line", async () => {
+      const dir = writePackage(
+        ["id: control", "name: Control", "description: 'Fits on one line.'", "type: sdlc", PHASES].join("\n"),
+      );
+
+      await validateCommand.handler({ positionals: [dir], values: {} });
+
+      expect(stdout()).toContain("Valid single package");
+      expect(stdout()).toContain("Total phases: 4");
+    });
+
+    it("refuses a package whose quoted description wraps instead of reporting zero phases", async () => {
+      // Byte-identical to the control except the description is folded across
+      // two physical lines, exactly as the platform's own exporter emitted it.
+      // Before the fix the continuation line ended the top-level map, so
+      // `type:` and `phases:` were dropped and this printed
+      // "Valid single package" / "Total phases: 0".
+      const dir = writePackage(
+        [
+          "id: wrapped",
+          "name: Wrapped",
+          "description: 'One line description that wraps across two physical lines because",
+          "  the emitter folded it at eighty columns.'",
+          "type: sdlc",
+          PHASES,
+        ].join("\n"),
+      );
+
+      await expect(
+        validateCommand.handler({ positionals: [dir], values: {} }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stdout()).not.toContain("Valid");
+      expect(stdout()).not.toContain("Total phases: 0");
+    });
+
+    it("refuses a package whose phases list is genuinely empty", async () => {
+      // Not a parser failure: the document is understood exactly as written.
+      // The API rejects zero phases (`min_length=1`), so the validator must
+      // too, rather than printing "Valid" beside "Total phases: 0".
+      const dir = writePackage(
+        ["id: hollow", "name: Hollow", "description: No phases at all.", "type: sdlc", "phases: []"].join("\n"),
+      );
+
+      await expect(
+        validateCommand.handler({ positionals: [dir], values: {} }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stdout()).not.toContain("Valid");
     });
   });
 });

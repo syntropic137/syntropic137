@@ -1,11 +1,23 @@
 /**
  * Minimal YAML subset parser — zero dependencies.
  *
- * Supports: maps, lists, strings (plain/quoted/multiline), numbers,
- * booleans, null. Enough for workflow.yaml and syntropic137.yaml files.
+ * Supports: maps, lists, plain and quoted strings on a single line, block
+ * scalars introduced by a bare `|` or `>`, numbers, booleans, null. Enough for
+ * workflow.yaml and syntropic137.yaml files.
  *
- * Does NOT support: anchors, aliases, tags, flow sequences/maps on
- * multiple lines, complex keys, merge keys.
+ * Does NOT support: quoted scalars spanning more than one line, block scalars
+ * with a chomping or indentation indicator (`|-`, `>-`, `>2`), anchors,
+ * aliases, tags, flow sequences/maps on multiple lines, complex keys, merge
+ * keys.
+ *
+ * The previous version of this list said "multiline" without qualification,
+ * which is what #1056 was really about: the parser did not support a wrapped
+ * quoted scalar and did not say so, it just stopped reading and returned what
+ * it had. Anything in the second list now raises. This is a strict subset of
+ * YAML, so a document it accepts parses identically under a real YAML loader —
+ * that equivalence is the point, since the API loads these same bytes with
+ * PyYAML. Widening the first list is fine; letting the two drift apart in
+ * silence is not.
  */
 
 type YamlValue =
@@ -18,8 +30,32 @@ type YamlValue =
 
 export function parseYaml(input: string): YamlValue {
   const lines = input.split("\n");
-  const { value } = parseNode(lines, 0, -1);
+  const { value, nextLine } = parseNode(lines, 0, -1);
+  assertFullyConsumed(lines, nextLine);
   return value;
+}
+
+/**
+ * Fail closed on anything this parser cannot place.
+ *
+ * Every container loop here stops at the first line whose indent it does not
+ * recognise, and that stop propagates all the way up to the document. Handing
+ * back the partial document at that point is the defect behind #1056: a
+ * workflow package whose `phases:` block had been discarded still parsed
+ * "successfully", so `syn workflow validate` called it valid with zero phases
+ * and every per-phase content rule passed vacuously.
+ *
+ * So leftover input means the document was not fully understood, whatever the
+ * construct that tripped it. Refusing the whole document closes that class
+ * rather than the one trigger, and keeps the zero-dependency choice intact.
+ */
+function assertFullyConsumed(lines: string[], nextLine: number): void {
+  const i = skipBlanksAndComments(lines, nextLine);
+  if (i >= lines.length) return;
+  throw new Error(
+    `YAML line ${i + 1}: unsupported construct \u2014 parsing stopped here, ` +
+      `which would discard the rest of the document. Got: ${lines[i]!.trim()}`,
+  );
 }
 
 interface ParseResult {
@@ -77,7 +113,7 @@ function parseMapEntry(
     return parseMultilineString(lines, i + 1, afterColon as "|" | ">");
   }
 
-  return { value: parseInlineValue(afterColon), nextLine: i + 1 };
+  return { value: parseInlineValue(afterColon, i), nextLine: i + 1 };
 }
 
 function parseMap(
@@ -130,7 +166,7 @@ function parseListItem(
     return parseInlineMapItem(lines, i, afterDash, indent);
   }
 
-  return { value: parseInlineValue(afterDash), nextLine: i + 1 };
+  return { value: parseInlineValue(afterDash, i), nextLine: i + 1 };
 }
 
 function parseInlineMapItem(
@@ -219,7 +255,7 @@ function parseMultilineString(
   return { value, nextLine };
 }
 
-function parseInlineValue(raw: string): YamlValue {
+function parseInlineValue(raw: string, lineNo: number): YamlValue {
   const value = stripInlineComment(raw);
 
   if (value.startsWith("[") && value.endsWith("]")) {
@@ -228,7 +264,30 @@ function parseInlineValue(raw: string): YamlValue {
     return splitFlow(inner).map((item) => parseScalar(item.trim()));
   }
 
+  assertQuoteClosed(value, lineNo);
   return parseScalar(value);
+}
+
+/**
+ * Reject a quoted scalar that opens on one line and closes on another.
+ *
+ * `assertFullyConsumed` already catches the common shape of this, because the
+ * continuation line is indented past the map and so ends the document early.
+ * It cannot catch the one where the wrapped scalar is the LAST entry: nothing
+ * is left over, and `parseScalar` quietly keeps the fragment complete with its
+ * dangling quote (`description: 'oops` became the string `'oops`). Same defect
+ * as #1056 — an unsupported construct accepted as data — so it is refused in
+ * the same breath, and this is where the offending line is still known.
+ */
+function assertQuoteClosed(value: string, lineNo: number): void {
+  const quote = value[0];
+  if (quote !== "'" && quote !== '"') return;
+  if (value.length > 1 && value.endsWith(quote)) return;
+  throw new Error(
+    `YAML line ${lineNo + 1}: quoted string is never closed on this line. ` +
+      `Multi-line quoted scalars are not supported \u2014 put the value on one ` +
+      `line, or use a block scalar (| or >). Got: ${value}`,
+  );
 }
 
 const TRUE_VALUES = new Set(["true", "True", "TRUE"]);
