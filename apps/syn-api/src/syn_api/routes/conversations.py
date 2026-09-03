@@ -260,6 +260,18 @@ def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
     return first_line[:_TOOL_PREVIEW_LEN] if first_line else None
 
 
+# ``message.content[]`` is a LIST, and every tool block in it is a distinct
+# call or result. One raw line therefore maps to N tool blocks but only ONE
+# ``ConversationLine``, whose ``tool_name``/``content_preview`` are each a
+# single ``str | None`` - so the blocks are joined rather than dropped.
+#
+# Separator is " | " and not ", " (the separator ``_codex_file_change_preview``
+# uses for paths) because these values are commands and command output, in
+# which commas are ordinary content; a comma would be indistinguishable from
+# the preview text itself, while " | " keeps the block boundaries readable.
+_TOOL_FIELD_SEP = " | "
+
+
 def _extract_claude_tool_fields(
     data: Mapping[str, object],
 ) -> tuple[str, str | None, str | None] | None:
@@ -270,6 +282,19 @@ def _extract_claude_tool_fields(
     shape (plain assistant text, a plain user turn, system/init, result,
     an unrecognized type) returns None so the caller falls back to the
     generic extractor, which already handles those correctly.
+
+    EVERY tool block on the line is represented, not just the first. An
+    assistant message that makes parallel tool calls carries one ``tool_use``
+    block per call, and the matching ``user`` message carries one
+    ``tool_result`` block per call; ``agentic_isolation``'s claude_cli
+    ``event_parser`` - the harness-side authority on this format - likewise
+    emits one observability event per block rather than stopping at the first.
+    Returning on the first block silently deleted the rest of the line (#1067
+    review).
+
+    Each block's preview is bounded by ``_TOOL_PREVIEW_LEN``, so the joined
+    value is bounded by the block count, which is bounded by the raw line -
+    already returned in full and unbounded as ``ConversationLine.raw``.
     """
     top_type = data.get("type")
     if top_type not in ("assistant", "user"):
@@ -281,19 +306,42 @@ def _extract_claude_tool_fields(
     if not isinstance(content, list):
         return None
 
+    tool_names: list[str] = []
+    previews: list[str] = []
+    saw_tool_use = False
+    saw_tool_block = False
+
     for item in content:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
         if item_type == "tool_use":
+            saw_tool_block = True
+            saw_tool_use = True
             name = item.get("name")
-            tool_name = name if isinstance(name, str) and name else None
+            if isinstance(name, str) and name:
+                tool_names.append(name)
             input_data = item.get("input")
             preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
-            return TranscriptEventType.TOOL_USE, tool_name, preview
-        if item_type == "tool_result":
-            return str(top_type), None, _claude_tool_result_preview(item)
-    return None
+            if preview:
+                previews.append(preview)
+        elif item_type == "tool_result":
+            saw_tool_block = True
+            preview = _claude_tool_result_preview(item)
+            if preview:
+                previews.append(preview)
+
+    if not saw_tool_block:
+        return None
+
+    # A line holding any tool_use renders as a tool row; a line holding only
+    # tool_results keeps its own top-level type, as before this change.
+    event_type = TranscriptEventType.TOOL_USE if saw_tool_use else str(top_type)
+    return (
+        event_type,
+        _TOOL_FIELD_SEP.join(tool_names) or None,
+        _TOOL_FIELD_SEP.join(previews) or None,
+    )
 
 
 _CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))

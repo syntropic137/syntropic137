@@ -41,6 +41,84 @@ def _patch_store(store: AsyncMock):
     )
 
 
+# The separator ``_extract_claude_tool_fields`` joins per-block values with.
+# Duplicated here deliberately: importing the private constant would make the
+# assertion agree with the implementation by construction.
+_SEP = " | "
+
+
+def _assert_every_tool_block_is_represented(lines) -> int:
+    """Assert EVERY raw tool block on every line reaches that line's fields.
+
+    Returns the number of tool blocks checked, so callers can sanity-check
+    that their fixture actually contains the shape.
+
+    This is the invariant the #1067 review asked for, and it is written to
+    survive both of the review's checks on property tests:
+
+    1. The assertions reference the loop variable - each block's OWN name is
+       looked up in the line's rendered ``tool_name``. The earlier version of
+       this helper re-checked the line-level fields inside the per-block loop,
+       so the first valid block made every later block pass; deleting the loop
+       would not have changed its meaning.
+    2. Breaking the property for the SECOND block only fails it - a line whose
+       later blocks are dropped has fewer rendered names than raw tool_use
+       blocks, which the count assertion below catches.
+
+    The property asserted is the stated one - every raw ``tool_use`` has a
+    non-null tool name and that name is rendered - not the weaker
+    "``tool_name`` OR ``content_preview`` is set somewhere on the line".
+    """
+    import json as _json
+
+    checked = 0
+    for line in lines:
+        data = _json.loads(line.raw)
+        message = data.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+
+        blocks = [item for item in content if isinstance(item, dict)]
+        tool_uses = [item for item in blocks if item.get("type") == "tool_use"]
+        tool_results = [item for item in blocks if item.get("type") == "tool_result"]
+        rendered_names = (line.tool_name or "").split(_SEP) if line.tool_name else []
+
+        for item in tool_uses:
+            checked += 1
+            name = item.get("name")
+            assert isinstance(name, str) and name, (
+                f"Line {line.line_number} has a tool_use block with no usable "
+                f"name, so the invariant cannot hold: {line.raw}"
+            )
+            assert name in rendered_names, (
+                f"Line {line.line_number} contains a tool_use for {name!r}, but "
+                f"the rendered tool_name is {line.tool_name!r} - that block was "
+                f"dropped: {line.raw}"
+            )
+
+        # Every tool_use contributed exactly one name above, so any surplus of
+        # raw blocks over rendered names is a block that went missing. This is
+        # what catches "only the first block survives" on a line whose blocks
+        # happen to share a tool name (e.g. two parallel Bash calls), where the
+        # membership check alone would pass.
+        assert len(rendered_names) == len(tool_uses), (
+            f"Line {line.line_number} has {len(tool_uses)} tool_use block(s) but "
+            f"renders {len(rendered_names)} tool name(s) ({line.tool_name!r}): "
+            f"{line.raw}"
+        )
+
+        for _item in tool_results:
+            checked += 1
+        if tool_results:
+            assert line.content_preview is not None, (
+                f"Line {line.line_number} carries {len(tool_results)} tool_result "
+                f"block(s) but rendered no preview: {line.raw}"
+            )
+
+    return checked
+
+
 async def test_get_conversation_log(mock_conversation_store):
     """Retrieve a conversation log with 3 JSONL lines."""
     mock_conversation_store.retrieve_session.return_value = [
@@ -428,10 +506,12 @@ async def test_claude_jsonl_lines_survive_noise_filter(mock_conversation_store):
 async def test_claude_tool_use_bash_surfaces_name_and_command(mock_conversation_store):
     """A real Claude Code ``tool_use`` line (Bash) surfaces its name and command.
 
-    Raw line taken verbatim from a recorded session (agentic-primitives
-    ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``) - this is issue #1067's
-    premise: the nested ``message.content[].tool_use`` shape, not the
-    flattened synthetic shape used by the older tests in this file.
+    Raw line taken from a recorded session (agentic-primitives
+    ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``) with the ``usage`` object
+    trimmed to ``input_tokens`` - the shape under test is unaffected by the
+    token fields. This is issue #1067's premise: the nested
+    ``message.content[].tool_use`` shape, not the flattened synthetic shape
+    used by the older tests in this file.
     """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929", '
@@ -459,7 +539,8 @@ async def test_claude_tool_use_bash_surfaces_name_and_command(mock_conversation_
 async def test_claude_tool_use_read_surfaces_file_path(mock_conversation_store):
     """A real Claude Code ``tool_use`` line (Read) surfaces its ``file_path``.
 
-    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_file-read.jsonl``.
+    Raw line from ``v2.0.74_claude-sonnet-4-5_file-read.jsonl``, with the
+    ``usage`` object trimmed to ``input_tokens``.
     """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929", '
@@ -540,9 +621,10 @@ async def test_claude_tool_result_list_content_blocks_use_first_line(mock_conver
     """A ``tool_result`` whose ``content`` is a list of text blocks (subagent
 
     results) is flattened and only the first line of the first block is
-    shown. Raw line verbatim from
-    ``v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl``, where the first
-    text block itself spans multiple lines.
+    shown. Raw line from
+    ``v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl`` (where the first
+    text block itself spans multiple lines), with the recording's sibling
+    ``tool_use_result`` key dropped - the extractor reads ``message`` only.
     """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": '
@@ -568,9 +650,11 @@ async def test_claude_tool_result_list_content_blocks_use_first_line(mock_conver
 async def test_claude_system_init_line_has_no_tool_row(mock_conversation_store):
     """A real ``system``/``init`` line (session banner) has no tool_name/preview.
 
-    Raw line verbatim from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``.
-    Regression guard: it must not be misidentified as a tool line by the new
-    claude tool extractor.
+    Raw line from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl`` with the
+    banner's long inventory fields (``tools``, ``slash_commands``, ``agents``,
+    ``skills``, ``plugins``, ``output_style``) shortened or dropped; none of
+    them are read by the extractor. Regression guard: it must not be
+    misidentified as a tool line by the new claude tool extractor.
     """
     mock_conversation_store.retrieve_session.return_value = [
         '{"type": "system", "subtype": "init", "cwd": "/workspace", '
@@ -655,25 +739,162 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
     lines = result.value.lines
     assert len(lines) > 0
 
-    import json as _json
+    # Sanity check the recording actually exercises the shape under test.
+    assert _assert_every_tool_block_is_represented(lines) >= 4
 
-    tool_line_count = 0
-    for line in lines:
-        data = _json.loads(line.raw)
-        message = data.get("message")
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            continue
-        for item in content:
-            if isinstance(item, dict) and item.get("type") in ("tool_use", "tool_result"):
-                tool_line_count += 1
-                assert line.tool_name is not None or line.content_preview is not None, (
-                    f"Line {line.line_number} is a real tool call/result but rendered "
-                    f"blank: {line.raw}"
-                )
 
-    # Sanity check the fixture actually exercises the shape under test.
-    assert tool_line_count >= 4
+# Claude emits parallel tool calls as several ``tool_use`` blocks inside ONE
+# ``message.content[]`` list, and their results as several ``tool_result``
+# blocks inside one user message. No recording checked into this repo or its
+# submodules contains that shape - every recorded line carries exactly one
+# content block, because the CLI versions that produced them split each block
+# onto its own stream-json line. The lines below are therefore CONSTRUCTED,
+# not recorded: real content blocks (including their real ``toolu_`` ids) are
+# lifted verbatim from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl`` lines
+# 3-7 and merged into single messages, with an obviously-synthetic ``uuid`` so
+# nobody mistakes these for a recording. The merged shape is the one
+# ``agentic_isolation``'s claude_cli ``event_parser`` already handles by
+# iterating every block, so it is the format's shape, not an invention here.
+_CONSTRUCTED_PARALLEL_TOOL_USE_LINE = (
+    '{"type": "assistant", "message": {"model": "claude-sonnet-4-5-20250929", '
+    '"id": "msg_01K5vXsmzoYvC8JpXVbnDnpb", "type": "message", "role": "assistant", '
+    '"content": [{"type": "text", "text": "I\'ll check if pytest is installed and '
+    'then look for conftest.py."}, '
+    '{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", "name": "Bash", '
+    '"input": {"command": "pytest --version", "description": "Check if pytest is '
+    'installed"}}, '
+    '{"type": "tool_use", "id": "toolu_01EcpwqYwJdp8gooTES6smmV", "name": "Glob", '
+    '"input": {"pattern": "**/conftest.py"}}], '
+    '"stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 2}}, '
+    '"parent_tool_use_id": null, "session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+    '"uuid": "00000000-0000-0000-0000-000000000001"}'
+)
+
+_CONSTRUCTED_PARALLEL_TOOL_RESULT_LINE = (
+    '{"type": "user", "message": {"role": "user", "content": ['
+    '{"type": "tool_result", "content": "This command requires approval", '
+    '"is_error": true, "tool_use_id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT"}, '
+    '{"tool_use_id": "toolu_01EcpwqYwJdp8gooTES6smmV", "type": "tool_result", '
+    '"content": "No files found"}]}, '
+    '"parent_tool_use_id": null, "session_id": "62f1c87d-c98b-4053-aab1-766804bdd1db", '
+    '"uuid": "00000000-0000-0000-0000-000000000002"}'
+)
+
+
+async def test_claude_parallel_tool_use_blocks_all_reach_the_line(
+    mock_conversation_store,
+):
+    """Both tool_use blocks on one assistant line are rendered, not just the first.
+
+    Guards the #1067 review blocker: ``_extract_claude_tool_fields`` used to
+    return on the first tool block, so the second parallel call vanished from
+    the transcript. ``Glob``/``**/conftest.py`` cannot appear in either field
+    unless every block is scanned - before the fix this line rendered
+    ``("Bash", "pytest --version")`` and the Glob call was gone.
+
+    Asserted through ``get_conversation_log`` (the consumer), not the private
+    extractor, so a value dropped between extractor and ``ConversationLine``
+    would still fail this.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CONSTRUCTED_PARALLEL_TOOL_USE_LINE,
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.event_type == "tool_use"
+    assert line.tool_name == "Bash | Glob"
+    assert line.content_preview == "pytest --version | **/conftest.py"
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_parallel_tool_results_all_reach_the_line(
+    mock_conversation_store,
+):
+    """Both tool_result blocks on one user line are previewed, not just the first.
+
+    The second result (``No files found``) is only reachable by scanning past
+    the first block; the error flag on the first is preserved alongside it.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CONSTRUCTED_PARALLEL_TOOL_RESULT_LINE,
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    # Only tool_results on the line, so it keeps its own top-level type.
+    assert line.event_type == "user"
+    assert line.tool_name is None
+    assert line.content_preview == "[error] This command requires approval | No files found"
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_repeated_tool_name_renders_once_per_call(
+    mock_conversation_store,
+):
+    """Two parallel calls to the SAME tool render two names, not one.
+
+    The membership half of the invariant cannot see this case - ``"Bash" in
+    ["Bash"]`` holds however many Bash blocks were dropped - so the count half
+    is what catches it. Without the fix this renders ``"Bash"`` and only the
+    first command.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", "name": "Bash", '
+        '"input": {"command": "git rev-parse HEAD"}}, '
+        '{"type": "tool_use", "id": "toolu_01bbbbbbbbbbbbbbbbbbbbbb", "name": "Bash", '
+        '"input": {"command": "git status --short"}}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000003"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name == "Bash | Bash"
+    assert line.content_preview == "git rev-parse HEAD | git status --short"
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_single_tool_block_line_is_unchanged_by_the_join(
+    mock_conversation_store,
+):
+    """The one-block shape every real recording actually has gains no separator.
+
+    Every line in every recording in this repo has exactly one content block,
+    so this is the case that must not regress: no trailing separator, no
+    change to the values.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01EcpwqYwJdp8gooTES6smmV", "name": "Glob", '
+        '"input": {"pattern": "**/conftest.py"}}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000004"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+    assert line.tool_name == "Glob"
+    assert line.content_preview == "**/conftest.py"
 
 
 async def test_get_conversation_metadata(mock_conversation_store):
