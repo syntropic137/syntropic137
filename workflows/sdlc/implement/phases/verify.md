@@ -38,8 +38,9 @@ like proof.
 Run the gate as:
 
 ```
-mkdir -p /workspace/.tmp
-TMPDIR=/workspace/.tmp just preflight-agent
+mkdir -p /workspace/.tmp /workspace/.cache
+export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
+just preflight-agent
 uv run pytest -m unit -q
 ```
 
@@ -58,7 +59,21 @@ execution error: Permission denied (os error 13)
 
 The real fix (#1100) sets `TMPDIR` in the workspace environment and is already
 merged, but the running deployment predates it. Set it on the command line for
-now. When the deployment carries #1100, this prefix should be deleted - tracked
+now.
+
+**The cache variables are there for the same reason.** `$HOME` in this workspace
+is a 128 MB tmpfs, and uv, ruff and node all cache under it by default. A real
+run died mid-gate with
+
+```
+No space left on device (os error 28)
+error: recipe `lint` failed on line 932 with exit code 1
+```
+
+having already redirected only `TMPDIR`. `/workspace` is on the container's real
+filesystem with room to spare, so point the caches there too. Tracked as #1133;
+like the `TMPDIR` prefix, this line should disappear when the workspace gives
+the gate somewhere to write. When the deployment carries #1100, this prefix should be deleted - tracked
 on #1120. Do not "fix" a Permission denied here by editing the justfile or
 running the recipes by hand: that hides the one condition this prefix exists to
 compensate for.
