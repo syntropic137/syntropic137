@@ -2055,7 +2055,7 @@ proxy-start:
     set -euo pipefail
     PROXY_PORT="${SYN_PROXY_PORT:-18080}"
     docker rm -f syn-egress-proxy 2>/dev/null || true
-    docker run -d --name syn-egress-proxy -p "${PROXY_PORT}:8080" \
+    docker run -d --name syn-egress-proxy -p "127.0.0.1:${PROXY_PORT}:8080" \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
         syn-egress-proxy:latest
     echo "✓ Egress proxy started on port ${PROXY_PORT}"
