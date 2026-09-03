@@ -85,11 +85,27 @@ phases:
     # Shorter deliberately: this phase composes findings that already exist. If
     # it needs longer, the verify phase did not finish its job.
     timeout_seconds: 900
+    # Bash is here for ONE reason: this phase posts its verdict to the pull
+    # request with `gh pr comment`, and without Bash it cannot (#1122).
+    #
+    # It was not obvious that it could not. #1110 added the posting step to the
+    # prompt, the install reported success, and the deployed prompt did carry
+    # the instruction - so the change looked delivered. Three reviews then ran
+    # and each wrote, in its own deliverable:
+    #
+    #   "it requires `gh pr comment 1113 ...`, which needs a tool this phase
+    #    does not have. Whoever picks this up next should run that command."
+    #
+    # The verdicts stayed in object storage exactly as before. An instruction to
+    # use a tool the phase was never granted is not a smaller version of the
+    # feature; it is the feature not existing, with a paper trail suggesting it
+    # does.
     allowed_tools:
       - Read
       - Grep
       - Glob
       - Write
+      - Bash
     agent:
       provider: claude
       model: sonnet
