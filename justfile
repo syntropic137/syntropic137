@@ -1081,7 +1081,7 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 check-openapi-drift:
     @uv run python scripts/check_openapi_drift.py
 
-preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
@@ -1904,6 +1904,14 @@ check-env-example:
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
     bash scripts/check_compose_overlays.sh
+
+# Every published container port must name its host interface (#1146).
+# A bare `- "5432:5432"` binds 0.0.0.0, and a host firewall does not stop it:
+# Docker's NAT rewrites the destination before the routing decision, so the
+# packet never reaches the INPUT chain. See scripts/no_public_ports.sh.
+check-no-public-ports:
+    bash scripts/no_public_ports.sh
+
 
 # Generate llms.txt from API docs
 generate-llms-txt:
