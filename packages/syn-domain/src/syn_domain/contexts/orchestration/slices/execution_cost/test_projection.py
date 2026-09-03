@@ -239,10 +239,24 @@ class TestAgentObservationHandling:
             }
         )
 
+        # The execution ran 48s of wall clock, per the CLI's own result event.
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "phase_id": "phase-1",
+                "data": {"duration_ms": 48_000},
+            }
+        )
+
         execution_cost = await projection.get_execution_cost("exec-1")
         assert execution_cost is not None
         assert execution_cost.tool_calls == 2
-        assert execution_cost.duration_ms == 300
+        # 48_000, NOT 48_300: the two tools ran INSIDE those 48 seconds, so
+        # adding their durations would bill the same time twice (#1064). This
+        # asserted 300 while per-tool duration was never recorded and the
+        # summary branch never ran together with it.
+        assert execution_cost.duration_ms == 48_000
 
     @pytest.mark.asyncio
     async def test_session_counted_once(self, projection: ExecutionCostProjection) -> None:

@@ -9,12 +9,15 @@ Extracted from EventStreamProcessor to enforce two-lane separation.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_shared.events import SESSION_SUMMARY
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -71,6 +74,7 @@ class ObservabilityCollector:
         phase_id: str,
         workspace_id: str | None,
         agent_model: str | None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._writer = writer
         self._session_id = session_id
@@ -78,6 +82,11 @@ class ObservabilityCollector:
         self._phase_id = phase_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
+        self._clock = clock
+        # tool_use_id -> clock reading at record_tool_started (#1064). Entries
+        # are popped on completion, so only tools whose completion never
+        # arrived are still held at end of stream.
+        self._tool_started_at: dict[str, float] = {}
 
     @property
     def has_writer(self) -> bool:
@@ -144,9 +153,11 @@ class ObservabilityCollector:
         tool_use_id: str,
         input_preview: str,
     ) -> None:
-        """Record tool execution started."""
+        """Record tool execution started, and start its duration clock."""
         if self._writer is None:
             return
+
+        self._tool_started_at[tool_use_id] = self._clock()
 
         await self._writer.record_observation(
             session_id=self._session_id,
@@ -168,7 +179,13 @@ class ObservabilityCollector:
         success: bool,
         output_preview: str | None,
     ) -> None:
-        """Record tool execution completed."""
+        """Record tool execution completed, including how long the tool ran.
+
+        The duration is measured here rather than passed in: this collector is
+        the only object that sees both ends of a tool op, so every caller would
+        otherwise keep its own start-time map and compute the same number
+        (#1064).
+        """
         if self._writer is None:
             return
 
@@ -180,11 +197,26 @@ class ObservabilityCollector:
                 "tool_use_id": tool_use_id,
                 "success": success,
                 "output_preview": output_preview,
+                "duration_ms": self._elapsed_ms(tool_use_id),
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
+
+    def _elapsed_ms(self, tool_use_id: str) -> int | None:
+        """Milliseconds between this tool's recorded start and now, or None.
+
+        None means no start was recorded for ``tool_use_id``. A truncated
+        stream can complete a tool whose start never arrived, and a duplicate
+        completion has no second start to measure from. Consumers already
+        treat a missing duration as unknown, which is the honest answer -
+        a zero would read as a measurement.
+        """
+        started_at = self._tool_started_at.pop(tool_use_id, None)
+        if started_at is None:
+            return None
+        return int((self._clock() - started_at) * 1000)
 
     async def record_subagent_started(
         self,

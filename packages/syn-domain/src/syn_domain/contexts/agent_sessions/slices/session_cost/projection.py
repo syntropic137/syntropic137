@@ -205,14 +205,15 @@ class SessionCostProjection:
     def _handle_tool_execution(self, session_cost: SessionCost, data: dict[str, Any]) -> None:
         """Handle TOOL_EXECUTION_COMPLETED observation data.
 
-        Increments tool call count and tracks duration.
+        Counts the call. Deliberately does NOT add the tool's own
+        ``duration_ms``: ``SessionCost.duration_ms`` is the session's elapsed
+        wall clock (``/sessions`` renders it as ``duration_seconds``, and the
+        session summary SETS it at end of stream), so accumulating tool times
+        into it would make a running session report a different quantity from
+        the one it settles on. That was invisible only while per-tool duration
+        was never recorded (#1064).
         """
         session_cost.tool_calls += 1
-
-        # Track duration if available
-        duration_ms = data.get("duration_ms")
-        if duration_ms:
-            session_cost.duration_ms += duration_ms
 
         # Track tool name for breakdown
         tool_name = data.get("tool_name")

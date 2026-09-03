@@ -124,12 +124,17 @@ def _apply_token_usage(
     execution_cost.turns += 1
 
 
-def _apply_tool_execution(execution_cost: ExecutionCost, data: dict[str, Any]) -> None:
-    """Apply TOOL_EXECUTION_COMPLETED observation to execution cost."""
+def _apply_tool_execution(execution_cost: ExecutionCost) -> None:
+    """Apply TOOL_EXECUTION_COMPLETED observation to execution cost.
+
+    Counts the call and nothing else. ``ExecutionCost.duration_ms`` is elapsed
+    wall clock summed over the execution's sessions - ``/executions/{id}``
+    divides it straight into ``total_duration`` - and tools run INSIDE a
+    session, so adding a tool's own duration on top of the session summary's
+    would bill the same seconds twice. That was invisible only while per-tool
+    duration was never recorded (#1064).
+    """
     execution_cost.tool_calls += 1
-    duration_ms = data.get("duration_ms")
-    if duration_ms:
-        execution_cost.duration_ms += duration_ms
 
 
 def _update_completed_at(execution_cost: ExecutionCost, ts: str | datetime | None) -> None:
@@ -195,7 +200,7 @@ class ExecutionCostProjection:
         if event_type == ObservationType.TOKEN_USAGE.value:
             _apply_token_usage(execution_cost, data, event_data)
         elif event_type == ObservationType.TOOL_EXECUTION_COMPLETED.value:
-            _apply_tool_execution(execution_cost, data)
+            _apply_tool_execution(execution_cost)
 
         await self._store.save(self.PROJECTION_NAME, execution_id, execution_cost.to_dict())
 

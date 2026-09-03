@@ -197,7 +197,12 @@ class TestAgentObservationHandling:
         session_cost = await projection.get_session_cost("session-1")
         assert session_cost is not None
         assert session_cost.tool_calls == 2
-        assert session_cost.duration_ms == 400  # 150 + 250
+        # 0, NOT 400: duration_ms is the SESSION's elapsed wall clock - the
+        # summary SETS it at end of stream and /sessions renders it as
+        # duration_seconds. Accumulating the tools that ran inside the session
+        # would make a running session report a quantity it then abandons
+        # (#1064). This asserted 400 while per-tool duration was never recorded.
+        assert session_cost.duration_ms == 0
 
     @pytest.mark.asyncio
     async def test_mixed_observations(self, projection: SessionCostProjection) -> None:
