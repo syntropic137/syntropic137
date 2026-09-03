@@ -231,6 +231,7 @@ class CodexObservabilityRecorder(Protocol):
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        duration_ms: int | None,
     ) -> None: ...
 
     async def record_token_usage(
@@ -336,6 +337,13 @@ class CodexStreamProcessor:
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
+
+        # #1064: command_execution tool_use_id -> monotonic start time (set on
+        # item.started, popped on item.completed). file_change items have no
+        # separate started event on the wire (item.completed carries the full
+        # change list) so they never get an entry here and always report
+        # duration_ms=None.
+        self._command_started_at: dict[str, float] = {}
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -557,6 +565,7 @@ class CodexStreamProcessor:
         tool_use_id = str(item.get("id", "unknown"))
         command = str(item.get("command", ""))
         self._note_delegation_attempt(tool_use_id, command)
+        self._command_started_at[tool_use_id] = time.monotonic()
         await self._collector.record_tool_started(
             tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,
@@ -603,11 +612,16 @@ class CodexStreamProcessor:
                 tool_use_id,
                 exit_code,
             )
+        started_at = self._command_started_at.pop(tool_use_id, None)
+        duration_ms = (
+            int((time.monotonic() - started_at) * 1000) if started_at is not None else None
+        )
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,
             success=success,
             output_preview=output[:_MAX_PREVIEW_LEN] if output else None,
+            duration_ms=duration_ms,
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:
@@ -626,11 +640,16 @@ class CodexStreamProcessor:
             tool_use_id=tool_use_id,
             input_preview=preview,
         )
+        # Synthetic started+completed pair from a single item.completed event
+        # (see class-level note on self._command_started_at): no real start
+        # was ever observed on the wire, so duration_ms is None rather than a
+        # near-zero value that would only measure this function's own runtime.
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
             tool_use_id=tool_use_id,
             success=success,
             output_preview=preview or None,
+            duration_ms=None,
         )
 
     async def _handle_turn_completed(self, event: _CodexEvent) -> None:

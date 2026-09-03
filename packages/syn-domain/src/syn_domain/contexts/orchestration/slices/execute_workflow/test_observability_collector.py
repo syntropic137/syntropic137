@@ -86,15 +86,33 @@ class TestObservabilityCollectorWithWriter:
 
     @pytest.mark.anyio
     async def test_record_tool_completed(self) -> None:
-        """record_tool_completed writes TOOL_EXECUTION_COMPLETED."""
+        """record_tool_completed writes TOOL_EXECUTION_COMPLETED, including duration_ms (#1064)."""
         writer = AsyncMock()
         collector = _make_collector(writer=writer)
 
-        await collector.record_tool_completed("Read", "t-1", success=True, output_preview="ok")
+        await collector.record_tool_completed(
+            "Read", "t-1", success=True, output_preview="ok", duration_ms=1234
+        )
 
         call = writer.record_observation.call_args
         assert call.kwargs["observation_type"] == ObservationType.TOOL_EXECUTION_COMPLETED
         assert call.kwargs["data"]["success"] is True
+        # 1234 could not have arisen without the fix — the old signature had
+        # no duration_ms parameter at all, so this key was never written.
+        assert call.kwargs["data"]["duration_ms"] == 1234
+
+    @pytest.mark.anyio
+    async def test_record_tool_completed_duration_ms_none_when_unknown(self) -> None:
+        """A caller with no observed start passes None, not a synthesized 0 (#1064)."""
+        writer = AsyncMock()
+        collector = _make_collector(writer=writer)
+
+        await collector.record_tool_completed(
+            "Read", "t-1", success=True, output_preview="ok", duration_ms=None
+        )
+
+        call = writer.record_observation.call_args
+        assert call.kwargs["data"]["duration_ms"] is None
 
     @pytest.mark.anyio
     async def test_record_subagent_started(self) -> None:
@@ -241,7 +259,7 @@ class TestObservabilityCollectorNullWriter:
         """All record methods are safe with None writer."""
         collector = _make_collector(writer=None)
         await collector.record_tool_started("Read", "t-1", "preview")
-        await collector.record_tool_completed("Read", "t-1", True, "output")
+        await collector.record_tool_completed("Read", "t-1", True, "output", 42)
         await collector.record_subagent_started("agent", "t-1")
         await collector.record_subagent_stopped("agent", "t-1", 100, True, {"Read": 1})
         await collector.record_embedded_event("test", {"context": {}})

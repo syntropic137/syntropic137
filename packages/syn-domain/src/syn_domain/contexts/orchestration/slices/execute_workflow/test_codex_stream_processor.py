@@ -12,6 +12,8 @@ equal the sum of each turn's fresh_input/output/cache_read.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -138,6 +140,101 @@ async def test_command_execution_tool_pair_recorded() -> None:
     assert len(edit_started) == 2  # item_1 (one.txt), item_3 (two.txt)
     assert len(edit_completed) == 2
     assert all(c["success"] is True for c in edit_completed)
+
+    # #1064: a command_execution has a real item.started/item.completed pair
+    # on the wire, so it gets a duration key; a file_change item.completed
+    # arrives with no matching started event (its "start" is synthesized
+    # inline), so it must report None rather than a near-zero stand-in.
+    # `c["duration_ms"]` (not `.get`) so this fails with KeyError, not a
+    # silent pass, against the pre-fix collector that never wrote the key.
+    assert all(c["duration_ms"] is not None for c in bash_completed)
+    assert all(c["duration_ms"] is None for c in edit_completed)
+
+
+@pytest.mark.asyncio
+async def test_command_execution_duration_ms_measures_elapsed_time() -> None:
+    """duration_ms reflects the real gap between item.started and item.completed (#1064).
+
+    The 15ms floor is well below the injected asyncio.sleep(0.03) but could
+    not be produced by a hardcoded stand-in value.
+    """
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    started_event = json.dumps(
+        {
+            "type": "item.started",
+            "item": {"id": "cmd-1", "type": "command_execution", "command": "echo hi"},
+        }
+    )
+    completed_event = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "cmd-1",
+                "type": "command_execution",
+                "command": "echo hi",
+                "aggregated_output": "hi\n",
+                "exit_code": 0,
+            },
+        }
+    )
+    turn_completed_event = json.dumps(
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 10, "cached_input_tokens": 0, "output_tokens": 5},
+        }
+    )
+
+    async def _delayed_stream() -> AsyncIterator[str]:
+        yield started_event
+        await asyncio.sleep(0.03)
+        yield completed_event
+        yield turn_completed_event
+
+    await processor.process_stream(_delayed_stream(), _NoopWorkspace())
+
+    completed = [c[1] for c in collector.calls if c[0] == "tool_completed"]
+    assert len(completed) == 1
+    duration_ms = completed[0]["duration_ms"]
+    assert duration_ms is not None
+    assert duration_ms >= 15
+
+
+@pytest.mark.asyncio
+async def test_command_execution_completed_without_started_has_no_duration() -> None:
+    """A truncated stream (completed with no matching started) yields None, not 0 (#1064)."""
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    completed_event = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "cmd-orphan",
+                "type": "command_execution",
+                "command": "echo hi",
+                "aggregated_output": "hi\n",
+                "exit_code": 0,
+            },
+        }
+    )
+    turn_completed_event = json.dumps(
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 1, "cached_input_tokens": 0, "output_tokens": 1},
+        }
+    )
+
+    async def _stream() -> AsyncIterator[str]:
+        yield completed_event
+        yield turn_completed_event
+
+    await processor.process_stream(_stream(), _NoopWorkspace())
+
+    completed = [c[1] for c in collector.calls if c[0] == "tool_completed"]
+    assert len(completed) == 1
+    assert completed[0]["duration_ms"] is None
 
 
 @pytest.mark.asyncio

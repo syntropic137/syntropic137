@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -290,6 +291,75 @@ class TestEventStreamProcessor:
         tool_completed = [r for r in obs.recordings if r[0] == "tool_execution_completed"]
         assert len(tool_started) == 1
         assert len(tool_completed) == 1
+        # #1064: the completed observation carries a duration key at all —
+        # the pre-fix ObservabilityCollector never wrote "duration_ms" into
+        # data, so this key lookup itself would fail without the fix.
+        assert "duration_ms" in tool_completed[0][2]
+
+    @pytest.mark.asyncio
+    async def test_tool_use_and_result_duration_ms_measures_elapsed_time(self) -> None:
+        """duration_ms on the completed observation reflects real elapsed time (#1064).
+
+        A hardcoded 0 or a value derived from something other than the actual
+        gap between tool_use and tool_result could not pass this: the
+        assertion floor (15ms) is well below a real asyncio.sleep(0.03) but
+        could not have arisen from a stub value.
+        """
+        obs = MockObservability()
+        proc = _make_processor(observability=obs)
+
+        tool_use_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_use", "id": "tu-2", "name": "Bash", "input": {}}],
+                    "usage": {},
+                },
+            }
+        )
+        tool_result_line = json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [{"type": "tool_result", "tool_use_id": "tu-2", "content": "done"}],
+                },
+            }
+        )
+
+        async def _delayed_stream() -> AsyncIterator[str]:
+            yield tool_use_line
+            await asyncio.sleep(0.03)
+            yield tool_result_line
+
+        await proc.process_stream(_delayed_stream(), MockWorkspace())
+
+        tool_completed = [r for r in obs.recordings if r[0] == "tool_execution_completed"]
+        assert len(tool_completed) == 1
+        duration_ms = tool_completed[0][2]["duration_ms"]
+        assert duration_ms is not None
+        assert duration_ms >= 15
+
+    @pytest.mark.asyncio
+    async def test_tool_result_without_matching_tool_use_has_no_duration(self) -> None:
+        """A tool_result with no prior tool_use yields duration_ms=None, not 0 (#1064)."""
+        obs = MockObservability()
+        proc = _make_processor(observability=obs)
+
+        tool_result_line = json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu-orphan", "content": "done"}
+                    ],
+                },
+            }
+        )
+        await proc.process_stream(_lines_to_stream(tool_result_line), MockWorkspace())
+
+        tool_completed = [r for r in obs.recordings if r[0] == "tool_execution_completed"]
+        assert len(tool_completed) == 1
+        assert tool_completed[0][2]["duration_ms"] is None
 
     @pytest.mark.asyncio
     async def test_task_result_parsing(self) -> None:

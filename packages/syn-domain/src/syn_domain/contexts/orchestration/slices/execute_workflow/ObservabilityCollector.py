@@ -167,8 +167,13 @@ class ObservabilityCollector:
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        duration_ms: int | None,
     ) -> None:
-        """Record tool execution completed."""
+        """Record tool execution completed.
+
+        ``duration_ms`` is ``None`` when the caller never observed a matching
+        start (e.g. a truncated stream), not synthesized as 0 (#1064).
+        """
         if self._writer is None:
             return
 
@@ -180,6 +185,7 @@ class ObservabilityCollector:
                 "tool_use_id": tool_use_id,
                 "success": success,
                 "output_preview": output_preview,
+                "duration_ms": duration_ms,
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,

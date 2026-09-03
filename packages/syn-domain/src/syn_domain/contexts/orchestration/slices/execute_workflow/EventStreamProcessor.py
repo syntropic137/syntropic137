@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol
@@ -293,6 +294,12 @@ class EventStreamProcessor:
         # the same message.id and identical usage. Without this, mid-flight totals
         # overcount by the number of content blocks per turn.
         self._seen_message_ids: set[str] = set()
+
+        # #1064: tool_use_id -> monotonic start time, so the matching
+        # tool_result can report how long the tool ran. Popped on completion;
+        # a tool_use_id with no entry (never started, or already popped by a
+        # replayed tool_result) yields duration_ms=None rather than a guess.
+        self._tool_started_at: dict[str, float] = {}
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -628,6 +635,7 @@ class EventStreamProcessor:
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
         self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
+        self._tool_started_at[tool_use_id] = time.monotonic()
 
         await self._collector.record_tool_started(
             tool_name=tool_name,
@@ -694,11 +702,16 @@ class EventStreamProcessor:
             self._delegation_successes += 1
 
         # Record tool completion
+        started_at = self._tool_started_at.pop(tool_use_id, None)
+        duration_ms = (
+            int((time.monotonic() - started_at) * 1000) if started_at is not None else None
+        )
         await self._collector.record_tool_completed(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             success=not is_error,
             output_preview=output_preview,
+            duration_ms=duration_ms,
         )
         logger.debug("Tool completed: %s (%s) success=%s", tool_use_id, tool_name, not is_error)
 
