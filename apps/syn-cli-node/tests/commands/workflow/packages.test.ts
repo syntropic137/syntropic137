@@ -10,6 +10,9 @@
  * than kept around by a looser, second classifier.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { packagesCommand } from "../../../src/commands/workflow/install.js";
 import { recordInstallation, saveInstalled } from "../../../src/packages/resolver.js";
 
@@ -53,5 +56,45 @@ describe("workflow packages", () => {
     const out = stdout();
     expect(out).not.toContain("frag-pkg");
     expect(out).toContain("No packages installed yet.");
+  });
+
+  describe("home-relative sources (issue #1066)", () => {
+    // `~/pkg` only means something once it is expanded against a home
+    // directory - the real $HOME the test happens to run under is not a
+    // fixture we control, so pin os.homedir() the same way
+    // install-tilde-precedence.test.ts does, and use a directory name that
+    // could never coincidentally already exist there.
+    let fakeHome: string;
+
+    beforeEach(() => {
+      fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "syn-packages-tilde-test-"));
+      vi.spyOn(os, "homedir").mockReturnValue(fakeHome);
+    });
+
+    afterEach(() => {
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    });
+
+    it("lists a package installed from a home-relative path whose directory genuinely exists", async () => {
+      const pkgDir = path.join(fakeHome, "tilde-pkg-1066");
+      fs.mkdirSync(pkgDir);
+
+      install("tilde-pkg-1066", "~/tilde-pkg-1066");
+      await packagesCommand.handler({ positionals: [], values: {} });
+
+      expect(stdout()).toContain("tilde-pkg-1066");
+    });
+
+    it("still prunes a home-relative source whose directory does not exist", async () => {
+      // No directory created at `${fakeHome}/gone-pkg` - this is what
+      // distinguishes a real liveness check from one that treats every `~`
+      // source as always-live once it merely stops crashing on the prefix.
+      install("gone-pkg", "~/gone-pkg");
+      await packagesCommand.handler({ positionals: [], values: {} });
+
+      const out = stdout();
+      expect(out).not.toContain("gone-pkg");
+      expect(out).toContain("No packages installed yet.");
+    });
   });
 });

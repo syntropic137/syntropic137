@@ -412,11 +412,20 @@ export const packagesCommand: CommandDef = {
     // ever produces, since `source` is always the raw CLI argument and a ref
     // is stored separately as `sourceRef`) that could disagree with the
     // parser actually used to resolve the source.
+    //
+    // WHY parseSource here (issue #1066): `source` is the raw CLI argument
+    // (e.g. `~/foo`), stored verbatim so the table can display it and so
+    // re-expanding against a different $HOME later (a synced registry file,
+    // a container rebuild) stays correct. The liveness check must resolve it
+    // through the exact same function `install`/`update` use to turn that
+    // raw string into a filesystem path - parseSource's `expandHome` - rather
+    // than a second, ad-hoc `path.resolve`, which does not know `~` and
+    // silently drops every home-relative install from this list.
     const liveInstallations = registry.installations.filter((r) => {
       const src = r.source;
       const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand(src);
       if (isRemote) return true;
-      return fs.existsSync(path.resolve(src));
+      return fs.existsSync(path.resolve(parseSource(src).resolved));
     });
 
     if (liveInstallations.length === 0) {
