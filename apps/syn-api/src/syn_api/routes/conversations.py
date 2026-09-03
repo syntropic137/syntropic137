@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -265,10 +266,20 @@ def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
 # ``ConversationLine``, whose ``tool_name``/``content_preview`` are each a
 # single ``str | None`` - so the blocks are joined rather than dropped.
 #
+# The contract on the joined values, which consumers may rely on: splitting
+# either field on this separator yields ONE segment per tool block on the
+# line, in block order, and the two fields split to the same length. A segment
+# is empty where that block has no value for that column. So segment i of
+# ``tool_name`` and segment i of ``content_preview`` always describe the same
+# block. Either field is None when NO block on the line contributed to it.
+#
 # Separator is " | " and not ", " (the separator ``_codex_file_change_preview``
 # uses for paths) because these values are commands and command output, in
 # which commas are ordinary content; a comma would be indistinguishable from
 # the preview text itself, while " | " keeps the block boundaries readable.
+# It is not escaped, so a segment whose own text contains " | " is ambiguous
+# on its own; the segment COUNT is the authoritative block count, and it is
+# the same on both fields by construction.
 _TOOL_FIELD_SEP = " | "
 
 
@@ -276,55 +287,79 @@ _CLAUDE_TOOL_USE = "tool_use"
 _CLAUDE_TOOL_RESULT = "tool_result"
 
 
-def _claude_block_fields(
-    item: Mapping[str, object],
-) -> tuple[str | None, str | None, str | None]:
-    """Normalize ONE ``message.content[]`` block to (kind, tool_name, preview).
+@dataclass(frozen=True)
+class _ClaudeToolBlock:
+    """One ``message.content[]`` tool block, in both columns it renders into.
 
-    ``kind`` is None for a block that is not a tool block (plain ``text``,
-    ``thinking``, an unrecognized type), which the caller skips.
+    ``name`` and ``preview`` are always ``str`` and never None: a block with no
+    name (every ``tool_result``) or no preview (a ``tool_use`` whose input has
+    no key in ``_CLAUDE_TOOL_INPUT_KEYS`` - ``TodoWrite`` is the common real
+    one) carries the empty string instead of being skipped.
+
+    That is the whole point of this type. One record per block means one
+    segment per block in BOTH rendered columns, so segment *i* of
+    ``tool_name`` always describes the same block as segment *i* of
+    ``content_preview``. The previous shape accumulated the two columns as two
+    independently-filtered lists, so a block contributing one side but not the
+    other shifted every later entry of the shorter list up by one and the join
+    made the shift invisible - the reader saw a real preview confidently
+    attributed to the wrong tool (#1072 review).
+    """
+
+    is_tool_use: bool
+    name: str
+    preview: str
+
+
+def _claude_tool_block(item: Mapping[str, object]) -> _ClaudeToolBlock | None:
+    """Normalize ONE ``message.content[]`` block, or None if it is not a tool block.
+
+    None covers plain ``text``, ``thinking`` and unrecognized types, which the
+    caller skips - they occupy no slot in either column.
     """
     item_type = item.get("type")
     if item_type == _CLAUDE_TOOL_USE:
         name = item.get("name")
         input_data = item.get("input")
         preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
-        return _CLAUDE_TOOL_USE, (name if isinstance(name, str) and name else None), preview
+        return _ClaudeToolBlock(
+            is_tool_use=True,
+            name=name if isinstance(name, str) else "",
+            preview=preview or "",
+        )
     if item_type == _CLAUDE_TOOL_RESULT:
-        return _CLAUDE_TOOL_RESULT, None, _claude_tool_result_preview(item)
-    return None, None, None
+        return _ClaudeToolBlock(
+            is_tool_use=False,
+            name="",
+            preview=_claude_tool_result_preview(item) or "",
+        )
+    return None
 
 
-def _collect_claude_tool_blocks(
-    content: list[object],
-) -> tuple[list[str], list[str], bool] | None:
-    """Scan EVERY block in one message's content, or None if none is a tool block.
-
-    Returns (tool_names, previews, saw_tool_use). Kept separate from
-    ``_extract_claude_tool_fields`` so neither function exceeds the
-    cyclomatic-complexity threshold; the guards live there, the scan here.
-    """
-    tool_names: list[str] = []
-    previews: list[str] = []
-    saw_tool_use = False
-    saw_tool_block = False
-
+def _collect_claude_tool_blocks(content: list[object]) -> list[_ClaudeToolBlock]:
+    """Every tool block in one message's ``content``, in order; empty if there are none."""
+    blocks: list[_ClaudeToolBlock] = []
     for item in content:
         if not isinstance(item, dict):
             continue
-        kind, tool_name, preview = _claude_block_fields(item)
-        if kind is None:
-            continue
-        saw_tool_block = True
-        saw_tool_use = saw_tool_use or kind == _CLAUDE_TOOL_USE
-        if tool_name:
-            tool_names.append(tool_name)
-        if preview:
-            previews.append(preview)
+        block = _claude_tool_block(item)
+        if block is not None:
+            blocks.append(block)
+    return blocks
 
-    if not saw_tool_block:
+
+def _join_block_column(values: list[str]) -> str | None:
+    """Render one column of a block list into its ``str | None`` field.
+
+    Empty values are KEPT as empty segments - that is what preserves one
+    segment per block, and therefore the positional correspondence between the
+    two columns. A column no block contributed anything to (``tool_name`` on a
+    line of only ``tool_result`` blocks) collapses to None rather than
+    rendering as a row of bare separators.
+    """
+    if not any(values):
         return None
-    return tool_names, previews, saw_tool_use
+    return _TOOL_FIELD_SEP.join(values)
 
 
 def _extract_claude_tool_fields(
@@ -347,6 +382,12 @@ def _extract_claude_tool_fields(
     Returning on the first block silently deleted the rest of the line (#1067
     review).
 
+    The two returned fields stay positionally aligned: both are rendered from
+    the SAME list of per-block records, one segment per block, so a block that
+    has a name but no preview (or the reverse) leaves an empty segment rather
+    than pulling every later segment of the shorter column up by one. See
+    ``_ClaudeToolBlock`` and ``_TOOL_FIELD_SEP``.
+
     Each block's preview is bounded by ``_TOOL_PREVIEW_LEN``, so the joined
     value is bounded by the block count, which is bounded by the raw line -
     already returned in full and unbounded as ``ConversationLine.raw``.
@@ -361,18 +402,21 @@ def _extract_claude_tool_fields(
     if not isinstance(content, list):
         return None
 
-    collected = _collect_claude_tool_blocks(content)
-    if collected is None:
+    blocks = _collect_claude_tool_blocks(content)
+    if not blocks:
         return None
-    tool_names, previews, saw_tool_use = collected
 
     # A line holding any tool_use renders as a tool row; a line holding only
     # tool_results keeps its own top-level type, as before this change.
-    event_type = TranscriptEventType.TOOL_USE if saw_tool_use else str(top_type)
+    event_type = (
+        TranscriptEventType.TOOL_USE
+        if any(block.is_tool_use for block in blocks)
+        else str(top_type)
+    )
     return (
         event_type,
-        _TOOL_FIELD_SEP.join(tool_names) or None,
-        _TOOL_FIELD_SEP.join(previews) or None,
+        _join_block_column([block.name for block in blocks]),
+        _join_block_column([block.preview for block in blocks]),
     )
 
 

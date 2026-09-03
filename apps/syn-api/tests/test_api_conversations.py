@@ -52,27 +52,33 @@ def _patch_store(store: AsyncMock):
 _SEP = " | "
 
 
+_TOOL_BLOCK_TYPES = ("tool_use", "tool_result")
+
+
 def _assert_every_tool_block_is_represented(lines) -> int:
-    """Assert EVERY raw tool block on every line reaches that line's fields.
+    """Assert every raw tool block reaches its OWN slot in the line's fields.
 
     Returns the number of tool blocks checked, so callers can sanity-check
     that their fixture actually contains the shape.
 
-    This is the invariant the #1067 review asked for, and it is written to
-    survive both of the review's checks on property tests:
+    Two properties, and the second is the one that pins the #1072 review's
+    positional-desync finding:
 
-    1. The assertions reference the loop variable - each block's OWN name is
-       looked up in the line's rendered ``tool_name``. The earlier version of
-       this helper re-checked the line-level fields inside the per-block loop,
-       so the first valid block made every later block pass; deleting the loop
-       would not have changed its meaning.
-    2. Breaking the property for the SECOND block only fails it - a line whose
-       later blocks are dropped has fewer rendered names than raw tool_use
-       blocks, which the count assertion below catches.
+    1. Every raw ``tool_use`` has a non-null name, and that name is rendered
+       at that block's OWN index in ``tool_name`` - not merely present
+       somewhere in it. Membership plus a count would let two blocks swap.
+    2. A rendered column carries exactly one segment per TOOL BLOCK, in block
+       order. That holds for BOTH columns, so an index into one is an index
+       into the other, and a block that contributes to one column but not the
+       other cannot pull every later segment of the shorter column up by one.
+       A column collapses to None only when no block contributed to it at all.
 
-    The property asserted is the stated one - every raw ``tool_use`` has a
-    non-null tool name and that name is rendered - not the weaker
-    "``tool_name`` OR ``content_preview`` is set somewhere on the line".
+    Written to survive both of the #1067 review's checks on property tests:
+    the assertions reference the loop variable (each block's own name at its
+    own index, so deleting the loop changes the meaning), and breaking the
+    property for the SECOND block only fails it - a dropped or shifted later
+    block changes that column's segment count or puts the wrong value at that
+    index.
     """
     import json as _json
 
@@ -85,40 +91,61 @@ def _assert_every_tool_block_is_represented(lines) -> int:
             continue
 
         blocks = [item for item in content if isinstance(item, dict)]
-        tool_uses = [item for item in blocks if item.get("type") == "tool_use"]
-        tool_results = [item for item in blocks if item.get("type") == "tool_result"]
-        rendered_names = (line.tool_name or "").split(_SEP) if line.tool_name else []
+        tool_blocks = [item for item in blocks if item.get("type") in _TOOL_BLOCK_TYPES]
+        if not tool_blocks:
+            # No tool block on this line: it never reaches the claude tool
+            # extractor at all, so it has nothing to say about the invariant.
+            continue
 
-        for item in tool_uses:
+        tool_uses = [item for item in tool_blocks if item.get("type") == "tool_use"]
+        tool_results = [item for item in tool_blocks if item.get("type") == "tool_result"]
+
+        if tool_uses:
+            assert line.tool_name is not None, (
+                f"Line {line.line_number} has {len(tool_uses)} tool_use block(s) "
+                f"but rendered no tool_name at all: {line.raw}"
+            )
+        if tool_results:
+            assert line.content_preview is not None, (
+                f"Line {line.line_number} carries {len(tool_results)} tool_result "
+                f"block(s) but rendered no preview: {line.raw}"
+            )
+
+        rendered_names = line.tool_name.split(_SEP) if line.tool_name is not None else []
+        rendered_previews = (
+            line.content_preview.split(_SEP) if line.content_preview is not None else []
+        )
+
+        # One segment per tool block, on whichever columns are present. This is
+        # what catches both "only the first block survives" (too few segments)
+        # and "the two columns were filtered independently" (the columns
+        # disagree with each other and with the block count).
+        for field, rendered in (
+            ("tool_name", rendered_names),
+            ("content_preview", rendered_previews),
+        ):
+            if not rendered:
+                continue
+            assert len(rendered) == len(tool_blocks), (
+                f"Line {line.line_number} has {len(tool_blocks)} tool block(s) but "
+                f"{field} renders {len(rendered)} segment(s) "
+                f"({line.tool_name!r} / {line.content_preview!r}) - a block is "
+                f"missing a slot, so the two columns no longer line up: {line.raw}"
+            )
+
+        for index, item in enumerate(tool_blocks):
             checked += 1
+            if item.get("type") != "tool_use":
+                continue
             name = item.get("name")
             assert isinstance(name, str) and name, (
                 f"Line {line.line_number} has a tool_use block with no usable "
                 f"name, so the invariant cannot hold: {line.raw}"
             )
-            assert name in rendered_names, (
-                f"Line {line.line_number} contains a tool_use for {name!r}, but "
-                f"the rendered tool_name is {line.tool_name!r} - that block was "
-                f"dropped: {line.raw}"
-            )
-
-        # Every tool_use contributed exactly one name above, so any surplus of
-        # raw blocks over rendered names is a block that went missing. This is
-        # what catches "only the first block survives" on a line whose blocks
-        # happen to share a tool name (e.g. two parallel Bash calls), where the
-        # membership check alone would pass.
-        assert len(rendered_names) == len(tool_uses), (
-            f"Line {line.line_number} has {len(tool_uses)} tool_use block(s) but "
-            f"renders {len(rendered_names)} tool name(s) ({line.tool_name!r}): "
-            f"{line.raw}"
-        )
-
-        for _item in tool_results:
-            checked += 1
-        if tool_results:
-            assert line.content_preview is not None, (
-                f"Line {line.line_number} carries {len(tool_results)} tool_result "
-                f"block(s) but rendered no preview: {line.raw}"
+            assert rendered_names[index] == name, (
+                f"Line {line.line_number} has a tool_use for {name!r} at block "
+                f"index {index}, but the rendered tool_name has "
+                f"{rendered_names[index]!r} there ({line.tool_name!r}): {line.raw}"
             )
 
     return checked
@@ -872,6 +899,156 @@ async def test_claude_repeated_tool_name_renders_once_per_call(
     line = result.value.lines[0]
     assert line.tool_name == "Bash | Bash"
     assert line.content_preview == "git rev-parse HEAD | git status --short"
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+# A middle block that yields a NAME but no PREVIEW. ``TodoWrite`` is the real,
+# common tool with that shape: its input's only key is ``todos``, which is not
+# in ``_CLAUDE_TOOL_INPUT_KEYS``, so it can never produce a preview. The Bash
+# and Glob blocks are lifted verbatim (real ``toolu_`` ids and all) from
+# ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl`` lines 4-5; the TodoWrite block
+# keeps its real id from ``v2.1.29_claude-sonnet-4-5_multi-model-usage`` line 4
+# with its ``todos`` array trimmed to one entry - the entries' contents are
+# irrelevant here, the absence of any preview-yielding key is the point. The
+# merge into one message is CONSTRUCTED, as documented above.
+_CONSTRUCTED_PREVIEWLESS_MIDDLE_BLOCK_LINE = (
+    '{"type": "assistant", "message": {"role": "assistant", "content": ['
+    '{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", "name": "Bash", '
+    '"input": {"command": "pytest --version", "description": "Check if pytest is '
+    'installed"}}, '
+    '{"type": "tool_use", "id": "toolu_0165StoiZTi2jCHfh3GDaohs", "name": "TodoWrite", '
+    '"input": {"todos": [{"content": "Write Python script h2o_lightyear.py", '
+    '"status": "in_progress", "activeForm": "Writing Python script h2o_lightyear.py"}]}}, '
+    '{"type": "tool_use", "id": "toolu_01EcpwqYwJdp8gooTES6smmV", "name": "Glob", '
+    '"input": {"pattern": "**/conftest.py"}}]}, '
+    '"uuid": "00000000-0000-0000-0000-000000000005"}'
+)
+
+# The same asymmetry in the other column and the other block kind: a
+# ``tool_result`` whose output is blank (a command that printed nothing)
+# yields no preview, while every ``tool_result`` yields no name. Ids are the
+# real ones from ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl`` lines 6-7.
+_CONSTRUCTED_PREVIEWLESS_FIRST_RESULT_LINE = (
+    '{"type": "user", "message": {"role": "user", "content": ['
+    '{"type": "tool_result", "tool_use_id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", '
+    '"content": ""}, '
+    '{"type": "tool_result", "tool_use_id": "toolu_01EcpwqYwJdp8gooTES6smmV", '
+    '"content": "No files found"}]}, '
+    '"uuid": "00000000-0000-0000-0000-000000000006"}'
+)
+
+
+async def test_claude_previewless_middle_block_keeps_later_previews_on_their_own_tool(
+    mock_conversation_store,
+):
+    """A block with a name but no preview must not shift later previews up one.
+
+    The #1072 review's finding. ``tool_name`` and ``content_preview`` used to
+    be accumulated as two independently-filtered lists with no shared index, so
+    ``TodoWrite`` (a name, never a preview) took a slot in one column and none
+    in the other. This exact line then rendered:
+
+        tool_name       "Bash | TodoWrite | Glob"
+        content_preview "pytest --version | **/conftest.py"
+
+    Glob's ``**/conftest.py`` sat at index 1, under ``TodoWrite`` - active
+    misattribution, not a missing value, and invisible to a reader of the two
+    joined strings. Asserted through ``get_conversation_log`` (the consumer),
+    not the private extractor, so a value dropped on the way to
+    ``ConversationLine`` would still fail this.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CONSTRUCTED_PREVIEWLESS_MIDDLE_BLOCK_LINE,
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert names == ["Bash", "TodoWrite", "Glob"]
+    # Three blocks, so three preview slots - the middle one empty because
+    # TodoWrite has no preview-yielding input key. Two slots is the bug.
+    assert len(previews) == len(names) == 3, (
+        f"columns disagree: {line.tool_name!r} / {line.content_preview!r}"
+    )
+    assert previews[names.index("TodoWrite")] == ""
+    assert previews[names.index("Glob")] == "**/conftest.py"
+    assert previews[names.index("Bash")] == "pytest --version"
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_previewless_first_result_keeps_later_previews_in_place(
+    mock_conversation_store,
+):
+    """A blank tool_result must hold its own preview slot, not vanish from it.
+
+    The mirror of the case above, in the preview column: the first result is
+    the output of a command that printed nothing, so it yields no preview.
+    Before the fix this line rendered ``content_preview="No files found"`` -
+    one segment for two result blocks, so the second result's output read as
+    the FIRST result's.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        _CONSTRUCTED_PREVIEWLESS_FIRST_RESULT_LINE,
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    # Only tool_results on the line, so no block contributes a name at all and
+    # the column collapses to None rather than to a row of bare separators.
+    assert line.tool_name is None
+    previews = line.content_preview.split(_SEP)
+    assert previews == ["", "No files found"], (
+        f"blank first result lost its slot: {line.content_preview!r}"
+    )
+    _assert_every_tool_block_is_represented(result.value.lines)
+
+
+async def test_claude_tool_use_and_result_on_one_line_keep_matching_slot_counts(
+    mock_conversation_store,
+):
+    """Both columns split to the same length even when block kinds are mixed.
+
+    A ``tool_result`` never yields a name, so on a line mixing kinds the name
+    column used to be shorter than the preview column and the two could not be
+    read side by side at all. Now every block holds a slot in both.
+    """
+    mock_conversation_store.retrieve_session.return_value = [
+        '{"type": "assistant", "message": {"role": "assistant", "content": ['
+        '{"type": "tool_use", "id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", "name": "Bash", '
+        '"input": {"command": "pytest --version"}}, '
+        '{"type": "tool_result", "tool_use_id": "toolu_01Duj8L9PUh7xbAk8iBTQuJT", '
+        '"content": "pytest 8.3.4"}]}, '
+        '"uuid": "00000000-0000-0000-0000-000000000007"}',
+    ]
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import get_conversation_log
+
+        result = await get_conversation_log("claude-1")
+
+    assert isinstance(result, Ok)
+    line = result.value.lines[0]
+
+    names = line.tool_name.split(_SEP)
+    previews = line.content_preview.split(_SEP)
+    assert len(names) == len(previews) == 2, (
+        f"columns disagree: {line.tool_name!r} / {line.content_preview!r}"
+    )
+    assert names == ["Bash", ""]
+    assert previews == ["pytest --version", "pytest 8.3.4"]
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
