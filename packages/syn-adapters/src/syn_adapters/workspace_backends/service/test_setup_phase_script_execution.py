@@ -96,6 +96,28 @@ def _one_repo() -> SetupPhaseSecrets:
     )
 
 
+def _isolated_git_env(home: Path) -> dict[str, str]:
+    """A git environment that cannot reach outside the test, or block on input.
+
+    `GIT_TERMINAL_PROMPT=0` and an askpass that always fails are not belt and
+    braces - without them `git credential fill` for a path no helper matches
+    falls through to PROMPTING. On a machine with no terminal that fails fast
+    and the test passes; in an agent workspace it hung a full unit run at 77%
+    until the phase interrupted it and could not certify anything (#1136).
+
+    A unit test must not be able to wait on a human, whatever is attached to
+    its stdin.
+    """
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
+    }
+
+
 class TestGeneratedScriptBehavior:
     def test_script_succeeds_and_clones_then_inits_submodules(self, harness) -> None:
         run = harness(_one_repo())
@@ -252,7 +274,7 @@ class TestCredentialsAreScopedToTheirRepo:
     def _apply_credential_lines(tmp_path: Path, script: str) -> dict[str, str]:
         home = tmp_path / "home"
         home.mkdir()
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+        env = _isolated_git_env(home)
         lines = [
             ln
             for ln in script.splitlines()
@@ -311,7 +333,7 @@ class TestSshSubmoduleFormsAreRewritten:
     def test_both_ssh_spellings_rewrite_to_https(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir()
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+        env = _isolated_git_env(home)
         secrets = SetupPhaseSecrets(
             repositories=["https://github.com/org/repo-a"],
             repo_tokens={"https://github.com/org/repo-a": "tok-a"},
