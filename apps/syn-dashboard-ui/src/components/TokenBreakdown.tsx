@@ -7,6 +7,13 @@ interface TokenBreakdownProps {
   outputTokens: number
   cacheCreationTokens: number
   cacheReadTokens: number
+  /**
+   * Tokens counted in the total that no type has claimed yet.
+   *
+   * A running execution reports live totals before its per-type counts land,
+   * so this is what keeps the rows adding up to the headline meanwhile.
+   */
+  inProgressTokens?: number
 }
 
 interface TokenRow {
@@ -21,8 +28,10 @@ export function TokenBreakdown({
   outputTokens,
   cacheCreationTokens,
   cacheReadTokens,
+  inProgressTokens = 0,
 }: TokenBreakdownProps) {
-  const totalAllTokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+  const totalAllTokens =
+    inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens + inProgressTokens
 
   if (totalAllTokens === 0) return null
 
@@ -31,6 +40,7 @@ export function TokenBreakdown({
     { label: 'Cache Write', tokens: cacheCreationTokens, color: 'bg-amber-500', rateLabel: '1.25x rate' },
     { label: 'Output', tokens: outputTokens, color: 'bg-violet-500' },
     { label: 'Input', tokens: inputTokens, color: 'bg-indigo-500' },
+    { label: 'In Progress', tokens: inProgressTokens, color: 'bg-slate-500' },
   ]
     .filter(r => r.tokens > 0)
     .sort((a, b) => b.tokens - a.tokens)
