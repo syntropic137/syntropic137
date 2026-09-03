@@ -109,6 +109,62 @@ WHERE event_type = $1
 GROUP BY execution_id
 """
 
+# Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
+# set of execution ids instead of the N-most-recent (issue #1077). Used when
+# the caller already knows which executions it wants (e.g. one page of a
+# list endpoint) so the query returns exactly those rows in one round trip
+# instead of one round trip per id.
+_BY_IDS_FROM_SUMMARY_QUERY = """
+SELECT
+    a.execution_id,
+    a.data->>'model' as model,
+    SUM((a.data->>'total_input_tokens')::int) as total_input,
+    SUM((a.data->>'total_output_tokens')::int) as total_output,
+    SUM(COALESCE((a.data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((a.data->>'cache_read_tokens')::int, 0)) as cache_read,
+    SUM((a.data->>'total_cost_usd')::numeric) as sdk_cost,
+    SUM(COALESCE((a.data->>'duration_ms')::bigint, 0)) as duration_ms_val,
+    SUM(COALESCE((a.data->>'num_turns')::int, 0)) as total_turns,
+    COUNT(DISTINCT a.session_id) as session_count,
+    ARRAY_AGG(DISTINCT a.session_id) as session_ids,
+    MIN(a.time) as started_at,
+    MAX(a.time) as completed_at,
+    COUNT(*) as observation_count
+FROM agent_events a
+WHERE a.event_type = $1
+  AND a.execution_id = ANY($2::text[])
+GROUP BY a.execution_id, a.data->>'model', ((a.data->>'total_cost_usd') IS NULL)
+"""
+
+# Same shape as _LIST_ALL_FROM_TOKEN_USAGE_QUERY, scoped by id (issue #1077).
+_BY_IDS_FROM_TOKEN_USAGE_QUERY = """
+SELECT
+    execution_id,
+    data->>'model' as model,
+    SUM((data->>'input_tokens')::int) as total_input,
+    SUM((data->>'output_tokens')::int) as total_output,
+    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
+    COUNT(DISTINCT session_id) as session_count,
+    ARRAY_AGG(DISTINCT session_id) as session_ids,
+    MIN(time) as started_at,
+    MAX(time) as last_observation,
+    COUNT(*) as observation_count
+FROM agent_events
+WHERE event_type = $1
+  AND execution_id = ANY($2::text[])
+GROUP BY execution_id, data->>'model'
+"""
+
+# Same shape as _TOOL_COUNT_BY_EXECUTION_QUERY, scoped by id (issue #1077).
+_TOOL_COUNT_BY_EXECUTION_IDS_QUERY = """
+SELECT execution_id, COUNT(*) as cnt
+FROM agent_events
+WHERE event_type = $1
+  AND execution_id = ANY($2::text[])
+GROUP BY execution_id
+"""
+
 # Per-execution, per-phase cost breakdown.
 #
 # Carries model + token columns and groups on the null-cost flag so each
@@ -180,21 +236,49 @@ class ExecutionCostQueryService:
         """
         async with self._pool.acquire() as conn:
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
-            summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             tool_counts = await self._fetch_tool_counts(conn)
-            phase_map = await self._fetch_phase_cost_map(conn, list(summary_rows_by_execution))
+            return await self._assemble(conn, summary_rows, token_rows, tool_counts)
 
-            results: list[ExecutionCost] = []
-            for eid, rows in summary_rows_by_execution.items():
-                results.append(self._build_from_summary(eid, rows, tool_counts, phase_map))
+    async def list_for_ids(self, execution_ids: Iterable[str]) -> list[ExecutionCost]:
+        """Batch cost lookup for a caller-provided set of execution ids.
 
-            token_rows_by_execution = self._group_rows_by_execution(
-                token_rows, exclude=summary_rows_by_execution.keys()
-            )
-            for eid, rows in token_rows_by_execution.items():
-                results.append(self._build_from_token_usage(eid, rows, tool_counts))
-            return results
+        Same fixed-count query shape as ``list_all`` (4 round trips: summary,
+        token_usage, tool counts, phase costs), but scoped by id instead of
+        recency + limit, so it returns exactly the requested executions
+        regardless of how the caller selected them. Replaces one round trip
+        of up to 6 sequential queries *per execution id* (issue #1077).
+        """
+        ids = list(execution_ids)
+        if not ids:
+            return []
+        async with self._pool.acquire() as conn:
+            summary_rows = await conn.fetch(_BY_IDS_FROM_SUMMARY_QUERY, SESSION_SUMMARY, ids)
+            token_rows = await conn.fetch(_BY_IDS_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE, ids)
+            tool_counts = await self._fetch_tool_counts_for_ids(conn, ids)
+            return await self._assemble(conn, summary_rows, token_rows, tool_counts)
+
+    async def _assemble(
+        self,
+        conn: object,
+        summary_rows: list[asyncpg.Record],
+        token_rows: list[asyncpg.Record],
+        tool_counts: dict[str, int],
+    ) -> list[ExecutionCost]:
+        """Build ``ExecutionCost`` records from already-fetched summary/token rows."""
+        summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
+        phase_map = await self._fetch_phase_cost_map(conn, list(summary_rows_by_execution))
+
+        results: list[ExecutionCost] = []
+        for eid, rows in summary_rows_by_execution.items():
+            results.append(self._build_from_summary(eid, rows, tool_counts, phase_map))
+
+        token_rows_by_execution = self._group_rows_by_execution(
+            token_rows, exclude=summary_rows_by_execution.keys()
+        )
+        for eid, rows in token_rows_by_execution.items():
+            results.append(self._build_from_token_usage(eid, rows, tool_counts))
+        return results
 
     @staticmethod
     def _group_rows_by_execution(
@@ -214,6 +298,15 @@ class ExecutionCostQueryService:
     async def _fetch_tool_counts(self, conn: object) -> dict[str, int]:
         """Fetch tool call counts per execution."""
         rows = await conn.fetch(_TOOL_COUNT_BY_EXECUTION_QUERY, TOOL_EXECUTION_COMPLETED)  # type: ignore[union-attr]
+        return {row["execution_id"]: row["cnt"] for row in rows}  # type: ignore[index]
+
+    async def _fetch_tool_counts_for_ids(
+        self, conn: object, execution_ids: list[str]
+    ) -> dict[str, int]:
+        """Fetch tool call counts per execution, scoped to the given ids."""
+        rows = await conn.fetch(  # type: ignore[union-attr]
+            _TOOL_COUNT_BY_EXECUTION_IDS_QUERY, TOOL_EXECUTION_COMPLETED, execution_ids
+        )
         return {row["execution_id"]: row["cnt"] for row in rows}  # type: ignore[index]
 
     async def _fetch_phase_cost_map(

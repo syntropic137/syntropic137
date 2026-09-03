@@ -9,7 +9,14 @@ a `$1::jsonb` write, so the guard lives there and protects all projections.
 
 import json
 
+import pytest
+
 from syn_adapters.projection_stores.postgres_helpers import serialize
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 NUL = chr(0)  # the actual NUL character jsonb rejects
 ESCAPED_NUL = chr(92) + "u0000"  # 6 literal chars: backslash u 0 0 0 0

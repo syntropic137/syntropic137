@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.github._shared.event_availability import (
     EVENTS,
     DeliveryChannel,
@@ -13,6 +15,10 @@ from syn_domain.contexts.github._shared.event_availability import (
     webhook_only_by_category,
     webhook_only_events,
 )
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
 
 
 class TestEventRegistry:

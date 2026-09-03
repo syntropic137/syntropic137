@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
 from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
     map_events_api_to_normalized,
 )
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Push events
