@@ -5,6 +5,7 @@ Provides session event queries, timelines, cost summaries, and tool summaries.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
@@ -165,27 +166,155 @@ async def get_session_timeline(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
+@dataclass
+class _CallState:
+    """Tracks the single call a `tool_use_id` has already been counted under."""
+
+    tool_name: str
+    has_success: bool = False
+    has_duration: bool = False
+
+
+class _ToolStatsAccumulator:
+    """Folds tool operation rows into per-tool totals, counting each call once.
+
+    Rows arrive one per event, so a single logical call can show up more than
+    once - a start and its completion, or the same row replayed. Two rules
+    keep the totals honest, and `add` applies them in order: `_call_for`
+    decides which call a row belongs to, counting a call the first time its
+    identity appears; `_fold` then adds that row's outcome and duration to
+    the call, each at most once however many rows repeat them.
+
+    `totals` is keyed by tool name in first-seen order, each value holding
+    `call_count`, `success_count`, `error_count` and `total_duration_ms`.
+    """
+
+    def __init__(self) -> None:
+        self.totals: dict[str, dict[str, int | float]] = {}
+        self._calls: dict[str, _CallState] = {}
+
+    def add(self, op: AdapterToolOperation) -> None:
+        """Apply one operation row to the totals."""
+        self._fold(op, self._call_for(op))
+
+    def _call_for(self, op: AdapterToolOperation) -> _CallState:
+        """Return the call `op` belongs to, counting it if this is its first row.
+
+        Identity is `tool_use_id`, falling back to `observation_id` when the
+        row carries none; `_accumulate_tool_stats` explains why.
+        """
+        name = op.tool_name or "unknown"
+        identity = op.tool_use_id or op.observation_id
+
+        call = self._calls.get(identity)
+        if call is None:
+            call = _CallState(tool_name=name)
+            self._calls[identity] = call
+            self._stats_for(name)["call_count"] += 1
+        return call
+
+    def _fold(self, op: AdapterToolOperation, call: _CallState) -> None:
+        """Add `op`'s outcome and duration to `call`, each at most once.
+
+        A call is counted as a success or an error once, and its duration
+        added once, no matter how many of its rows carry either.
+        """
+        stats = self._stats_for(call.tool_name)
+
+        if not call.has_success and op.success is not None:
+            call.has_success = True
+            if op.success:
+                stats["success_count"] += 1
+            else:
+                stats["error_count"] += 1
+
+        if not call.has_duration and op.duration_ms is not None:
+            call.has_duration = True
+            stats["total_duration_ms"] += op.duration_ms
+
+    def _stats_for(self, name: str) -> dict[str, int | float]:
+        return self.totals.setdefault(
+            name,
+            {"call_count": 0, "success_count": 0, "error_count": 0, "total_duration_ms": 0.0},
+        )
+
+
 def _accumulate_tool_stats(
     operations: list[AdapterToolOperation],
 ) -> dict[str, dict[str, int | float]]:
-    """Aggregate tool operation stats by tool name."""
-    tool_stats: dict[str, dict[str, int | float]] = {}
+    """Aggregate tool operation stats by tool name.
+
+    `tool_execution_started` and `tool_execution_completed` are two rows for
+    the same logical call, so counting every row doubles `call_count`
+    (#1061). Counting only started rows undercounts instead (#1063):
+
+    - A completion can arrive with no matching start (Codex explicitly
+      supports this for a truncated stream, CodexStreamProcessor.py
+      `_handle_command_execution_completed`) and the query never requires a
+      pair, so that completion-only row would report `call_count=0` next to
+      `success_count=1` - an impossible summary.
+    - The projection rewrites an Agent/Task call's started row from
+      `tool_execution_started` to `subagent_started` before it reaches here
+      (session_tools_converters.py `row_to_subagent_operation`), so
+      `is_started` is false for it too. Counting on `is_started` alone drops
+      every subagent call to zero.
+
+    Fix: dedupe by identity. `tool_use_id` is the identity for a real tool
+    call and survives the subagent rewrite and completion-only rows. But
+    `tool_use_id` is `Optional` end to end - `ToolOperation.tool_use_id`,
+    the standard converter (`session_tools_dispatch.py`), and git-event rows
+    (`session_tools_converters.row_to_git_operation`, which always sets it to
+    `None`) all pass a missing id straight through. A prior version of this
+    function fell back to per-row, `is_started`-gated counting for rows with
+    no `tool_use_id`, which reintroduces the exact impossible-summary shape
+    for any no-id completion row - and git rows have no `tool_use_id` by
+    construction, so every git operation in every session hit it
+    unconditionally (verified: a lone `git_commit` row reported
+    `call_count=0, success_count=1`), not just the rarer Codex no-id case.
+
+    The invariant this function must hold for every row shape, matched or
+    not: `call_count >= success_count + error_count`. Gating call_count on
+    `is_started` for the no-id case cannot satisfy that, because a
+    completion can be the only row and `is_started` is always false for it.
+
+    Chosen fix: fall back to `observation_id` as the identity when
+    `tool_use_id` is absent, instead of a per-row counting rule. This is not
+    a new synthetic key - `observation_id` already exists on every
+    `ToolOperation` as the row's own stable identity (it's exposed to
+    clients as `operation_id` in `sessions.py`/`observability.py`), and it
+    is derived deterministically from row content the converters already
+    have (event type, tool_use_id, timestamp, or an explicit
+    `observation_id` in the event payload) - never from `uuid4()` at read
+    time. That determinism is what keeps replay safe: the event store can
+    deliver the same row twice, and a row replayed byte-for-byte produces
+    the same `observation_id` both times, so it collapses into the same
+    `_CallState` exactly like a duplicated `tool_use_id` row already did.
+    An upstream repair (making the converters synthesize a real
+    `tool_use_id`) was rejected here: it would duplicate the identity logic
+    that `observation_id` already implements correctly, for no benefit to a
+    caller of this function.
+
+    Cost: `observation_id`'s timestamp component is only as precise as the
+    stored `time` column. Two genuinely distinct no-id calls for the same
+    tool that land in the same timestamp bucket would collide and be
+    undercounted as one - the same accepted risk the `tool_use_id` path
+    already carries for a duplicate id, now extended to the no-id path
+    instead of guaranteeing an impossible summary on every such row.
+
+    That cost is not paid by tool events: no `tool_execution_started` or
+    `tool_execution_completed` row reaches the fallback, because both stream
+    processors carry the harness's own id through to the stored payload (a
+    production census of 48,011 such rows found zero missing it). The rows
+    that do arrive with no `tool_use_id` are git and subagent events, which
+    are single events with no second row to double-count.
+    `tests/test_tool_execution_identity.py` is what holds that true - it
+    fails if an unidentified tool_execution pair ever starts being produced,
+    which is the point at which this paragraph would need revisiting.
+    """
+    accumulator = _ToolStatsAccumulator()
     for op in operations:
-        name = op.tool_name or "unknown"
-        if name not in tool_stats:
-            tool_stats[name] = {
-                "call_count": 0,
-                "success_count": 0,
-                "error_count": 0,
-                "total_duration_ms": 0.0,
-            }
-        tool_stats[name]["call_count"] += 1
-        if op.success is True:
-            tool_stats[name]["success_count"] += 1
-        elif op.success is False:
-            tool_stats[name]["error_count"] += 1
-        tool_stats[name]["total_duration_ms"] += op.duration_ms or 0
-    return tool_stats
+        accumulator.add(op)
+    return accumulator.totals
 
 
 async def get_session_tool_summary(
