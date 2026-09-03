@@ -9,7 +9,7 @@ Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
@@ -19,6 +19,18 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
+
+
+class _CountsRecords(Protocol):
+    """The one method this projection needs that ESP's ProjectionStore predates.
+
+    Declared here as a PORT rather than reaching for the adapter package's
+    extended protocol, because the domain must not import from adapters. Both
+    store implementations satisfy it structurally; the cast at the call site is
+    the named, single place where that structural fact is asserted.
+    """
+
+    async def count(self, projection: str, filters: dict[str, str] | None = None) -> int: ...
 
 
 class WorkflowExecutionListProjection(AutoDispatchProjection):
@@ -251,6 +263,18 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
+
+    async def count(self, status_filter: str | None = None) -> int:
+        """How many executions exist, not how many this page holds (#1119).
+
+        `total` on the list endpoint used to be the page length, so a client
+        paging until `page * page_size >= total` stopped after page one - and
+        could not tell that from a genuinely small collection. The filter here
+        is the same one `get_all` applies, so the count describes the query it
+        accompanies.
+        """
+        filters = {"status": status_filter} if status_filter else None
+        return await cast("_CountsRecords", self._store).count(self.PROJECTION_NAME, filters)
 
     async def get_all(
         self,

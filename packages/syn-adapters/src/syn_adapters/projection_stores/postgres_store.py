@@ -133,6 +133,16 @@ class PostgresProjectionStore:
         table_name = self._table_name(projection)
         return await fetch_get_all(pool, table_name, self._deserialize)
 
+    async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
+        """Count records with the same filter semantics `query` uses."""
+        from syn_adapters.projection_stores.postgres_query_builder import build_count_query
+
+        await self._ensure_table(projection)
+        pool = await self._get_pool()
+        query, params = build_count_query(self._table_name(projection), filters)
+        async with pool.acquire() as conn:
+            return int(await conn.fetchval(query, *params) or 0)
+
     async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
         """Get all records whose key starts with the given prefix."""
         await self._ensure_table(projection)
