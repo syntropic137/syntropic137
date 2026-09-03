@@ -13,8 +13,8 @@ of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -81,6 +81,10 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+#: `owner` and `repo`: the two trailing path segments every accepted repo shape
+#: ends with, whatever prefix it carries.
+_OWNER_REPO_SEGMENTS: Final[int] = 2
 
 # Maps our phase provider values onto the vercel skills-cli --agent keys.
 # The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
@@ -172,7 +176,9 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
 
-async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
+async def _build_agent_env(
+    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str]
+) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
     Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
@@ -225,26 +231,77 @@ async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict
     # past GitHub's hard 1-hour installation token expiry.
     #
     # Mint a GitHub App installation token and inject as GITHUB_TOKEN so the
-    # workspace agent's `gh` CLI can read issues/PRs/comments. Picks the first
-    # configured installation (sufficient for single-org dogfood deployments;
-    # multi-installation routing belongs in #725's design).
-    gh_token = await _resolve_github_app_token()
+    # workspace agent's `gh` CLI can read issues/PRs/comments.
+    #
+    # ROUTED BY THE REPO UNDER WORK (issue #1129). This used to take
+    # `installations[0]`, with a comment saying that was "sufficient for
+    # single-org dogfood deployments". The deployment stopped being single-org:
+    # with two installations, index 0 was the WRONG one, and because `gh`
+    # prefers $GITHUB_TOKEN over the repo-scoped entry `setup_phase_secrets.py`
+    # writes to hosts.yml, injecting it actively BROKE a credential that
+    # already worked:
+    #
+    #   $ gh api /installation/repositories        # the injected token
+    #   {"total_count": 2,  "repos": ["AgentParadise/..."]}
+    #   $ GH_TOKEN=<hosts.yml> gh api /installation/repositories
+    #   {"total_count": 6,  "repos": ["syntropic137/syntropic137", ...]}
+    gh_token = await _resolve_github_app_token(repos)
     if gh_token:
         env[ENV_GITHUB_TOKEN] = gh_token
 
     return env
 
 
-async def _resolve_github_app_token() -> str | None:
-    """Mint a fresh GitHub App installation token for the agent's first installation.
+def _repo_full_names(repos: Sequence[str]) -> list[str]:
+    """`owner/repo` for each entry, first occurrence first, unparseable ones dropped.
 
-    Returns None silently if the GitHub App is not configured or no installations
-    are reachable — the agent will then fail any `gh` calls with auth errors,
-    which is the correct degraded behavior.
+    Accepts the shapes the platform stores: a full URL with or without `.git`,
+    an `owner/repo` shorthand, and `git@` / `ssh://` remotes.
+    """
+    names: list[str] = []
+    for repo in repos:
+        text = repo.strip().removesuffix(".git")
+        if "github.com" in text:
+            _, _, tail = text.partition("github.com")
+            text = tail.lstrip(":/")
+        parts = [part for part in text.split("/") if part]
+        if len(parts) >= _OWNER_REPO_SEGMENTS:
+            name = f"{parts[-2]}/{parts[-1]}"
+            if name not in names:
+                names.append(name)
+    return names
+
+
+async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
+    """Mint an installation token for the repo under work.
+
+    ASKS GITHUB WHICH INSTALLATION OWNS THE REPO, rather than listing every
+    installation and matching account logins. `GET /repos/{owner}/{repo}/
+    installation` is authoritative and is what `setup_phase_secrets.py` already
+    uses, so both credential paths now resolve the same way and cannot disagree.
+
+    The list-and-match version this replaced had the original bug back by
+    another route: `list_installations` issues one unpaginated request, GitHub
+    pages that endpoint at 30, and an owner sitting on page two matched nothing
+    (#1129, found in review).
+
+    NO REPOS IS NOT A ROUTING FAILURE. A `requires_repos: false` workflow has no
+    repo to route on, and nine in-tree workflows are that shape. Returning None
+    for them would remove GitHub access entirely - setup only writes hosts.yml
+    when it has repo tokens - so they keep the previous behaviour of the first
+    installation, with the arbitrariness stated rather than implied.
+
+    Returns None when the App is not configured, or when a repo IS named and no
+    installation owns it: a token from elsewhere cannot reach that repo and
+    would displace the repo-scoped hosts.yml credential `gh` would otherwise
+    use, which is strictly worse than no token at all.
     """
     try:
         from syn_adapters.github import GitHubAppClient
-        from syn_adapters.github.client_endpoints import list_installations
+        from syn_adapters.github.client_endpoints import (
+            get_installation_for_repo,
+            list_installations,
+        )
         from syn_adapters.github.client_token import get_installation_token
         from syn_shared.settings.github import GitHubAppSettings
 
@@ -252,12 +309,33 @@ async def _resolve_github_app_token() -> str | None:
         if not github_settings.is_configured:
             return None
 
+        repo_names = _repo_full_names(repos)
+
         async with GitHubAppClient(github_settings) as client:
-            installations = await list_installations(client)
-            if not installations:
-                return None
-            installation_id = str(installations[0]["id"])
-            return await get_installation_token(client, installation_id)
+            if not repo_names:
+                installations = await list_installations(client)
+                if not installations:
+                    return None
+                logger.info(
+                    "No repo to route the GitHub token on (repo-less workflow); "
+                    "using the first installation"
+                )
+                return await get_installation_token(client, str(installations[0]["id"]))
+
+            for name in repo_names:
+                try:
+                    installation_id = await get_installation_for_repo(client, name)
+                except Exception:
+                    logger.debug("No GitHub App installation owns %s", name, exc_info=True)
+                    continue
+                return await get_installation_token(client, installation_id)
+
+            logger.warning(
+                "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
+                "so the repo-scoped hosts.yml credential is used",
+                repo_names,
+            )
+            return None
     except Exception as exc:
         logger.warning("Could not mint GitHub App token for agent env: %s", exc)
         return None
@@ -579,7 +657,11 @@ class WorkspaceProvisionHandler:
             phase.agent_config.provider,
             phase.agent_config.allow_delegation,
         )
-        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
+        agent_env = (
+            await _build_agent_env(workspace, session_id, effective_repos)
+            if needs_claude_env
+            else {}
+        )
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,

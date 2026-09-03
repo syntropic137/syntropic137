@@ -9,12 +9,13 @@ Reports AgentExecutionCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    MISSING_TERMINAL_TURN_REASON,
     CodexStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -70,6 +71,30 @@ def _detect_exit_code(
             stream_result.line_count,
         )
     return 0
+
+
+#: The only directory a phase's work survives in (ADR-036). ArtifactCollector
+#: collects exactly this glob, so "did the phase produce anything" and "will
+#: anything be collected" are the same question, asked of the same path.
+_OUTPUT_ARTIFACT_GLOB: Final[str] = "artifacts/output/**/*"
+
+
+async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> bool:
+    """Whether the phase left any non-empty file in artifacts/output/.
+
+    Fails CLOSED: if the workspace cannot be read, the answer is "no", so a
+    phase is never completed on the strength of a check that did not run.
+    """
+    try:
+        collected = await workspace.collect_files(patterns=[_OUTPUT_ARTIFACT_GLOB])
+    except Exception:
+        logger.exception(
+            "Could not read artifacts/output/ to judge a broken codex stream "
+            "(phase=%s) - treating the phase as having produced nothing",
+            phase_id,
+        )
+        return False
+    return any(content for _, content in collected)
 
 
 def _resolve_final_totals(
@@ -234,7 +259,25 @@ class AgentExecutionHandler:
             # The codex parser reserves error_reason for a BROKEN stream
             # (malformed JSON / missing terminal turn.completed); force a
             # non-zero phase exit even when the process exit was 0.
-            exit_code = 1
+            #
+            # ONE exception (issue #1111): a stream that simply stopped before
+            # `turn.completed`, having produced the phase's deliverable, is a
+            # telemetry gap, not a failed phase. Failing it discards finished
+            # work and skips every downstream phase - three complete codex
+            # reviews were lost this way in twelve hours. An auth failure or a
+            # malformed line still fails here, because it carries a DIFFERENT
+            # reason and because a codex that never authenticated writes
+            # nothing to artifacts/output.
+            if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
+                await _produced_deliverable(workspace, todo.phase_id)
+            ):
+                logger.warning(
+                    "Codex stream ended without turn.completed but the phase produced "
+                    "a deliverable (phase=%s) - completing with ESTIMATED usage",
+                    todo.phase_id,
+                )
+            else:
+                exit_code = 1
 
         # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2).
         # The codex path already emits its summary inside CodexStreamProcessor

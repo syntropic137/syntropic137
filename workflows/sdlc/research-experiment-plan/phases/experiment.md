@@ -18,6 +18,46 @@ conclusions.
 
 $ARGUMENTS
 
+## First, check each unknown's premise, against the right revision
+
+An unknown usually asserts a fact on the way to asking a question. "No workflow
+besides `foo.yaml:94` declares X" contains a claim about `foo.yaml:94`. Before a
+subagent tests the question, open every file and line the unknown cites and
+confirm the cited text is there.
+
+**Check it against the revision the claim was made about, and say which revision
+that was.** This is the part that goes wrong. A working tree moves: another
+agent commits, a branch advances, a fix lands between the claim and the check.
+Reading `foo.yaml:94` in a tree that has already been changed tells you what is
+true there now, not whether the claim was true when it was written.
+
+This rule exists because of a real failure in this workflow's own first run
+(`exec-8d5b14716096`), and the failure was the CHECKER's, not the claim's. An
+unknown correctly cited `workflows/examples/implementation.yaml:94` as declaring
+`execution_type: human_in_loop`. A reviewer checked a different branch, where
+that exact line had already been changed to `sequential` by an unrelated fix,
+found `sequential`, and reported the citation fabricated. The claim was true.
+The check was run against the wrong tree and produced a confident false
+accusation.
+
+So, per unknown:
+
+- open every cited file and line, and record `git rev-parse HEAD` for the tree
+  you read
+- if a premise does not hold, the verdict is **PREMISE FALSE**. Write the
+  verdict file, quote what is actually at that location, and name the revision
+  you checked. Do not proceed to test the question as posed
+- if a premise does not hold and the file is one another agent may have touched,
+  check the same path at the revision the spec was written against before
+  calling it false
+
+A false premise is a finding, not an obstacle: a decision was about to be made
+on something untrue. A falsely-reported false premise is worse than either,
+because it discards a true finding and looks like diligence.
+
+Report the premise check in the summary as its own line: how many unknowns were
+checked, against which revision, and how many premises failed.
+
 ## Dispatch one subagent per unknown, in parallel
 
 Send them in a single message so they run concurrently. Give each one exactly

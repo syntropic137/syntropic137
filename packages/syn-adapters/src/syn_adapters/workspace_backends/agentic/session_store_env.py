@@ -107,8 +107,21 @@ SOURCE_SYNTROPIC137 = "syntropic137"
 DEPLOYMENT_SEPARATOR = "__"
 
 
-def deployment_identity(app_environment: str) -> str:
+def deployment_identity(app_environment: str, override: str = "") -> str:
     """``syntropic137__<app_environment>`` - which deployment produced a session.
+
+    `override` is the operator's `SYN_SESSION_STORE_DEPLOYMENT`, already
+    validated (see `syn_shared.settings.session_store.display_deployment`); ""
+    means unset and the identity is derived as below. It exists because
+    APP_ENVIRONMENT answers "what tier am I", which is NOT the same question as
+    "which install am I" - two selfhost installs migrating between hosts share
+    a tier and are still different deployments.
+
+    Callers MUST pass the same override to both the value injected into the
+    container and the value built into `CaptureExpectations`. They are compared
+    on every execution (`capture_result._mismatch`), so an override applied to
+    only one of them reports every capture as failed against the wrong
+    deployment.
 
     This is deliberately NOT the same question as the envelope's
     ``origin.environment``, which is the CLASS of runtime (``container``,
@@ -122,6 +135,8 @@ def deployment_identity(app_environment: str) -> str:
     ``development -> dev`` is a second source of truth that drifts from the enum
     the rest of the platform switches on, and buys nothing but four characters.
     """
+    if override:
+        return override
     return f"{SOURCE_SYNTROPIC137}{DEPLOYMENT_SEPARATOR}{app_environment}"
 
 

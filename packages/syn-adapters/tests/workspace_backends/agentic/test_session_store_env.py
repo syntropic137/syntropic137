@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.agentic.adapter import (
+    _EXECUTABLE_TMPDIR,
+    _WORKSPACE_CACHE_ENV,
+    AgenticIsolationAdapter,
+)
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     DEPLOYMENT_SEPARATOR,
     apply_session_store_env,
@@ -410,7 +414,23 @@ class TestAdapterIntegration:
         provider = await _create(_disabled_settings())
         ws_config = provider.create.await_args.args[0]
 
-        assert ws_config.environment == {"EXISTING_VAR": "kept"}
+        assert ws_config.environment == {
+            "EXISTING_VAR": "kept",
+            # Unconditional platform defaults, unrelated to the session store.
+            # Named explicitly rather than relaxed to a subset check, so an
+            # unrelated future addition still trips the self-hostability
+            # guarantee - which is exactly what happened when the cache
+            # variables below were added (#1133): this assertion caught them,
+            # and listing them here is the deliberate acknowledgement, not a
+            # workaround.
+            #
+            # TMPDIR: /tmp is noexec, so `just` cannot execute a shebang
+            # recipe without it (#1042).
+            # The caches: $HOME is a 128 MB tmpfs and every tool caches there
+            # by default, which exhausted it mid-gate (#1133).
+            "TMPDIR": _EXECUTABLE_TMPDIR,
+            **_WORKSPACE_CACHE_ENV,
+        }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
         assert ws_config.labels == {
             "syn.execution_id": "exec-abc",
@@ -474,7 +494,14 @@ class TestReservedKeys:
         provider = await _create(_disabled_settings(), caller_env)
         ws_config = provider.create.await_args.args[0]
 
-        assert ws_config.environment == {"EXISTING_VAR": "kept"}
+        assert ws_config.environment == {
+            "EXISTING_VAR": "kept",
+            # The unconditional platform defaults, spelled out for the same
+            # reason as in the sibling test: an unrelated future addition must
+            # trip this assertion rather than slip through a subset check.
+            "TMPDIR": _EXECUTABLE_TMPDIR,
+            **_WORKSPACE_CACHE_ENV,
+        }
         assert not (set(SESSION_STORE_CONTRACT_ENV_VARS) & set(ws_config.environment))
 
     @pytest.mark.asyncio
