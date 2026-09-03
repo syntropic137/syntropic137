@@ -173,20 +173,26 @@ class AgenticIsolationAdapter:
             # workspace across dev, beta and prod is indistinguishable in the
             # corpus: the envelope's own origin.environment is the runtime
             # CLASS, which is the same value for all of them.
-            deployment=self._deployment_identity(),
+            deployment=self._deployment_identity(),  # honours the operator override
         )
 
-    @staticmethod
-    def _deployment_identity() -> str:
-        """``syntropic137__<app_environment>`` for this deployment.
+    def _deployment_identity(self) -> str:
+        """``syntropic137__<app_environment>``, or the operator's override.
 
         Imported locally, matching how session-store settings are resolved above:
         syn_shared settings resolve 1Password at first construction, so importing
         at module scope would make that a side effect of importing the adapter.
+
+        Reads the override off `self._session_store` - the SAME settings object
+        `build_expectations` is handed - so the injected value and the expected
+        value cannot disagree.
         """
         from syn_shared.settings import get_settings
 
-        return deployment_identity(str(get_settings().app_environment))
+        return deployment_identity(
+            str(get_settings().app_environment),
+            self._session_store.display_deployment,
+        )
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an isolated workspace container.

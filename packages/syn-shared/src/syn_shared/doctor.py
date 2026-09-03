@@ -82,9 +82,11 @@ from syn_shared.settings.op_client import fetch_op_item, op_available
 from syn_shared.settings.op_resolver import _ENV_TO_VAULT, _OP_ITEM_TITLE
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_DEPLOYMENT,
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
+    usable_deployment,
     usable_label,
 )
 from syn_shared.settings.workspace_images import (
@@ -566,6 +568,12 @@ def build_report(sources: EnvSources) -> DoctorReport:
     store_url = resolve_variable(ENV_SYN_SESSION_STORE_URL, sources)
     store_token = resolve_variable(ENV_SYN_SESSION_STORE_AUTH_TOKEN, sources)
     store_label = resolve_variable(ENV_SYN_SESSION_STORE_LABEL, sources)
+    store_deployment = resolve_variable(ENV_SYN_SESSION_STORE_DEPLOYMENT, sources)
+
+    # Same rule as the label, applied for the same reason and independently of
+    # whether the rest of the settings built. "" means unset OR unusable, and
+    # both correctly fall back to the derived identity below.
+    deployment_override = usable_deployment(store_deployment.value)
 
     # Reuse the real settings object so OFF/WARN/OK and the label rule can never
     # drift from what the running system does.
@@ -594,7 +602,7 @@ def build_report(sources: EnvSources) -> DoctorReport:
         app_environment=app_environment,
         vault=vault,
         vault_consulted=sources.vault_consulted,
-        deployment=f"{_DEPLOYMENT_SOURCE}{_DEPLOYMENT_SEPARATOR}{tier}",
+        deployment=deployment_override or f"{_DEPLOYMENT_SOURCE}{_DEPLOYMENT_SEPARATOR}{tier}",
         store_url=store_url,
         store_token=store_token,
         store_label=store_label,
