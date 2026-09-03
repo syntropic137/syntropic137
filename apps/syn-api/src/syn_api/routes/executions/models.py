@@ -29,7 +29,11 @@ class PhaseExecutionInfo(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     total_tokens: int
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """``None`` means genuinely unknown. A ``running`` phase computes this live
+    at read time (``now - started_at``); other phases without a completion
+    event to record one have no duration to report.
+    """
     cost_usd: Decimal = Decimal("0")
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
@@ -63,7 +67,17 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, including any still
+    running. ``None`` means no phase had a resolvable duration -- unknown, not
+    zero.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
