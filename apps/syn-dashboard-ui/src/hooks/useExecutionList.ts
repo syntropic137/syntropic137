@@ -15,6 +15,7 @@ import { listAllExecutions } from '../api/executions'
 import { useResetView } from './useResetView'
 import type { ExecutionListItem, SSEEventFrame, TimeWindow } from '../types'
 import { sortExecutions } from '../utils/executionSort'
+import { isTerminalExecutionStatus } from '../utils/executionStatus'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
 import { useRefetchWhileRunning } from './useRefetchWhileRunning'
@@ -34,7 +35,6 @@ const EXECUTION_LIVE_EVENTS = new Set([
   'WorkflowCompleted',
   'WorkflowFailed',
 ])
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 export type ExecutionSortKey =
   | 'status'
@@ -53,7 +53,7 @@ const EXECUTION_SORT_CONFIG: SortConfig<ExecutionSortKey> = {
 }
 
 function isTerminalExecution(e: ExecutionListItem): boolean {
-  return TERMINAL_STATUSES.has(e.status)
+  return isTerminalExecutionStatus(e.status)
 }
 
 function matchesQuery(e: ExecutionListItem, query: string): boolean {

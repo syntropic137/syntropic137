@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
+import { isTerminalExecutionStatus } from '../utils/executionStatus'
 import { useExecutionStream } from './useExecutionStream'
 import { useLiveTimer } from './useLiveTimer'
+import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
 
@@ -29,6 +31,10 @@ const REFRESH_EVENT_TYPES = new Set([
 
 function isRefreshEvent(event: { type: string; event_type?: string }): boolean {
   return event.type === 'event' && !!event.event_type && REFRESH_EVENT_TYPES.has(event.event_type)
+}
+
+function isTerminal(execution: ExecutionDetailResponse): boolean {
+  return isTerminalExecutionStatus(execution.status)
 }
 
 function collectFulfilledArtifacts(results: PromiseSettledResult<ArtifactResponse>[]): Record<string, ArtifactResponse> {
@@ -67,6 +73,13 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
       if (isRefreshEvent(event)) refreshExecution()
     },
   })
+
+  // SSE above only fires on lifecycle transitions, but tokens and cost move
+  // continuously while the execution is live, so they would sit stale between
+  // transitions. Poll until the execution reaches a terminal status — the same
+  // mechanism the list view uses (#1048).
+  const liveItems = useMemo(() => (execution ? [execution] : []), [execution])
+  useRefetchWhileRunning({ items: liveItems, isTerminal, refetch: refreshExecution })
 
   useEffect(() => {
     if (!execution?.artifact_ids.length) return
