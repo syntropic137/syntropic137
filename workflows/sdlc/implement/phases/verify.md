@@ -35,9 +35,33 @@ like proof.
 
 ## Run the gates
 
-Run `just preflight-agent`, then `uv run pytest -m unit -q`. Paste the final
-lines of each. If either is not green, that is the finding and you should stop
-and report it rather than working around it.
+Run the gate as:
+
+```
+mkdir -p /workspace/.tmp
+TMPDIR=/workspace/.tmp just preflight-agent
+uv run pytest -m unit -q
+```
+
+Paste the final lines of each. If either is not green, that is the finding and
+you should stop and report it rather than working around it.
+
+**The `TMPDIR=` prefix is a temporary workaround, not decoration.** This
+workspace mounts `/tmp` `noexec` (deliberate hardening), and `just` materialises
+every shebang recipe into a temp directory before running it. With the default
+`TMPDIR` the gate dies on its FIRST recipe, before touching your change:
+
+```
+error: recipe `check-agent-docs` with shebang `#!/usr/bin/env bash`
+execution error: Permission denied (os error 13)
+```
+
+The real fix (#1100) sets `TMPDIR` in the workspace environment and is already
+merged, but the running deployment predates it. Set it on the command line for
+now. When the deployment carries #1100, this prefix should be deleted - tracked
+on #1120. Do not "fix" a Permission denied here by editing the justfile or
+running the recipes by hand: that hides the one condition this prefix exists to
+compensate for.
 
 **`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and `node`
 and nothing else, so seven of the gates in `just preflight` cannot run here at
