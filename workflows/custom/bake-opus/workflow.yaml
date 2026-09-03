@@ -1,0 +1,116 @@
+id: bake-implement-opus-v1
+name: "Bake-off: implement phase on opus"
+description: >
+  Take a well-specified issue to a reviewed pull request. Four phases: prepare
+  the workspace, make the change, verify it independently, open the PR. The
+  verification phase is separate on purpose.
+type: implementation
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS.
+#
+# The workflow that had been doing this work, `implement-from-plan-v1`, existed
+# only as database state - it appears nowhere in this repository, so its phase
+# budgets and prompts could not be reviewed, diffed or fixed in a pull request.
+# The same was true of `PR Review` (#1035). Both are the workflows that do the
+# actual SDLC work, and neither was under version control (#1031).
+#
+# WHY IMPLEMENT AND VERIFY ARE SEPARATE PHASES.
+#
+# Measured on 2026-08-30, four runs of the old three-phase shape whose single
+# `Implement` phase had to change the code AND verify it within 1800s:
+#
+#   exec-1717c4da51c8  completed  1113s
+#   exec-9dcfe2c87357  completed  1316s
+#   exec-e8cb453a850d  FAILED     exit_code=124 (hit 1800s)
+#   exec-1205971c9f13  FAILED     exit_code=124 (hit 1800s)
+#
+# Two of four exceeded the budget, and the successes used 62% and 73% of it. The
+# tasks that failed were the ones that asked for premise verification, pasted
+# command output and an integration test - which is to say, the ones asking for
+# the discipline that makes the output trustworthy.
+#
+# Raising the number alone treats a phase doing two jobs as a phase that is
+# merely slow. A phase that must finish a change AND prove it will shortchange
+# the proving, because the change feels like the deliverable. Splitting them
+# means verification starts from a finished diff and has its own budget, and a
+# run that fails is attributable to the job that ran out of room.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads the previous one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
+  - id: bootstrap
+    name: Prepare the workspace
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1200
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/bootstrap.md
+
+  - id: implement
+    name: Make the change
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/implement.md
+
+  - id: verify
+    name: Verify the change independently
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+    prompt_file: phases/verify.md
+
+  - id: open_pr
+    name: Open the pull request
+    order: 4
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 600
+    allowed_tools:
+      - Read
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/open_pr.md

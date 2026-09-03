@@ -5,7 +5,14 @@ Uses APP_ENVIRONMENT=test for in-memory adapters.
 
 import os
 
+import pytest
+
 from syn_api.types import Ok
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 

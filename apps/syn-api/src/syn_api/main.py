@@ -104,6 +104,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Per-route request-timing (Lane 2 observability - see #1070). Always on:
+    # in-process only, no event store or aggregate interaction, negligible cost.
+    from syn_api.middleware.request_timing import RequestTimingMiddleware
+
+    app.add_middleware(RequestTimingMiddleware)
+
     # Webhook recording middleware (opt-in via SYN_RECORD_WEBHOOKS=true)
     import os
 
