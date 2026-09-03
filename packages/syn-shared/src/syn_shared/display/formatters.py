@@ -8,9 +8,12 @@ See: docs/adrs/ADR-064-observability-monitor-ui.md
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 EM_DASH = "\u2014"
 
@@ -101,8 +104,13 @@ def _parse_timestamp(value: datetime | str | None) -> datetime | None:
 
     Handles the trailing ``Z`` suffix (RFC 3339) that ``fromisoformat`` rejects
     on Python <3.11. Returns ``None`` for anything unparseable rather than
-    raising, since a malformed timestamp is exactly as "unknown" as a missing
-    one to the caller.
+    raising: to the caller a malformed timestamp is exactly as unknown as a
+    missing one, and both must render as unknown rather than as a measurement.
+
+    They are not equally *normal*, though. A missing timestamp is an ordinary
+    state (nothing has started yet); a malformed one is a data defect that
+    nobody would otherwise see, because its only symptom is a duration quietly
+    going missing. So the malformed case is logged and the missing one is not.
     """
     if isinstance(value, datetime):
         return value
@@ -116,6 +124,7 @@ def _parse_timestamp(value: datetime | str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(raw)
     except ValueError:
+        logger.warning("Unparseable timestamp %r; reporting duration as unknown", value)
         return None
 
 
@@ -139,9 +148,9 @@ def compute_duration_seconds(
     six healthy workflow runs cancelled on 2026-09-01 after a frozen duration
     reading was misread as one.
 
-    Returns ``None`` when ``started_at`` is missing or unparseable -- a
-    genuinely unknown duration must never collapse to ``0.0``, which looks
-    exactly like a real measurement.
+    Returns ``None`` when ``started_at`` is missing, unparseable, or later than
+    the reference instant -- a genuinely unknown duration must never collapse to
+    ``0.0``, which looks exactly like a real measurement.
     """
     started = _parse_timestamp(started_at)
     if started is None:
@@ -157,7 +166,68 @@ def compute_duration_seconds(
         reference = reference.replace(tzinfo=UTC)
     if started.tzinfo is None:
         started = started.replace(tzinfo=UTC)
-    return max((reference - started).total_seconds(), 0.0)
+    elapsed = (reference - started).total_seconds()
+    if elapsed < 0:
+        # A start in the future means the clock that wrote it and the clock
+        # reading it disagree, so the elapsed time is not measurable. Clamping
+        # to 0.0 here (as this did) manufactured the exact value the rest of
+        # this module exists to stop emitting: a confident "just started" for
+        # something that may have been running for an hour.
+        logger.warning(
+            "started_at %r is after the reference instant %r; reporting duration as unknown",
+            started_at,
+            reference,
+        )
+        return None
+    return elapsed
+
+
+_IN_FLIGHT_STATUSES = frozenset({"running", "paused"})
+"""Statuses that mean "still accruing wall-clock time, no completion recorded"."""
+
+
+def resolve_duration_seconds(
+    status: str | None,
+    *,
+    started_at: datetime | str | None,
+    completed_at: datetime | str | None = None,
+    recorded_seconds: float | None = None,
+    now: datetime | str | None = None,
+) -> float | None:
+    """How long has this run, as every read surface must answer it.
+
+    One call answers the whole question for an execution, a phase or a session,
+    so no caller has to know (or re-derive) the rule. Before this existed each
+    surface open-coded its own version and they disagreed: the detail view
+    computed a live duration for a running phase while the list view of the
+    same phase reported ``None``, and a pending phase reported ``0.0`` -- a
+    number that reads as "finished instantly" and is really "never started".
+
+    The answer, in order:
+
+    1. **Still in flight** (``running``/``paused``): elapsed since
+       ``started_at``, computed at read time. There is no recorded duration yet
+       and there will not be one until it completes.
+    2. **Finished, with a duration recorded at completion**: that value. It was
+       measured by whoever observed the completion and beats anything derived
+       here. ``0.0`` is a legitimate answer -- a phase really can take under a
+       millisecond -- which is why "no record" must be ``None`` and not ``0.0``.
+    3. **Finished, no recorded duration, but start and end are both known**:
+       ``completed_at - started_at``.
+    4. **Anything else**: ``None``. Unknown. Never ``0.0``.
+
+    Case 4 covers a pending phase (nothing started), a run that ended without
+    anyone recording how long it took, and both timestamp defects
+    (unparseable, or a start after the end). Every one of them used to arrive
+    at some surface as ``0.0``.
+    """
+    if status in _IN_FLIGHT_STATUSES:
+        return compute_duration_seconds(started_at, now=now)
+    if recorded_seconds is not None:
+        return recorded_seconds
+    if completed_at is None:
+        return None
+    return compute_duration_seconds(started_at, now=completed_at)
 
 
 _UUID_RE = re.compile(

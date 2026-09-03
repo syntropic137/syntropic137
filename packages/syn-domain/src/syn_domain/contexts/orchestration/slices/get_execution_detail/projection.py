@@ -201,7 +201,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase["cache_creation_tokens"] = event_data.get("cache_creation_tokens", 0)
         phase["cache_read_tokens"] = event_data.get("cache_read_tokens", 0)
         phase["total_tokens"] = event_data.get("total_tokens", 0)
-        phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
+        # No default: a completion event that carried no elapsed time leaves the
+        # duration unknown, and writing 0.0 would record a measurement nobody
+        # made. The API boundary derives one from the timestamps instead.
+        phase["duration_seconds"] = event_data.get("duration_seconds")
         phase["completed_at"] = event_data.get("completed_at")
 
     @staticmethod

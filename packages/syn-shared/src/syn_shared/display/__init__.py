@@ -23,6 +23,7 @@ from syn_shared.display.formatters import (
     format_phase,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     "format_phase",
     "format_repos",
     "format_tokens",
+    "resolve_duration_seconds",
 ]

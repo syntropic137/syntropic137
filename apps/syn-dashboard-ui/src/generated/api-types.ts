@@ -2577,11 +2577,13 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Total Duration Seconds */
+            total_duration_seconds?: number | null;
             /**
-             * Total Duration Seconds
+             * Unknown Duration Phase Count
              * @default 0
              */
-            total_duration_seconds: number;
+            unknown_duration_phase_count: number;
             /** Artifact Ids */
             artifact_ids?: string[];
             /** Error Message */

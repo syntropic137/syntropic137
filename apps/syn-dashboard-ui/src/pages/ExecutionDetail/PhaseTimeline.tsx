@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
-import { formatCostWithCoverage, formatTokens } from '../../utils/formatters'
+import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
@@ -74,13 +74,17 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
     phase.output_tokens +
     (phase.cache_creation_tokens ?? 0) +
     (phase.cache_read_tokens ?? 0)
-  // `duration_seconds` is nullable in the generated API types: the server now
-  // returns null for a genuinely unknown duration rather than a 0.0 that looks
-  // like a real measurement. Without the guard this card throws on that null.
-  const duration =
-    phase.status === 'running' && phase.started_at
-      ? ((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)
-      : (phase.duration_seconds?.toFixed(1) ?? '—')
+  // `duration_seconds` is nullable: the server returns null for a genuinely
+  // unknown duration rather than a 0.0 that looks like a real measurement.
+  // `liveDurationSeconds` keeps the running case ticking between polls while
+  // deferring to that value whenever the live reading is not measurable.
+  const durationSeconds = liveDurationSeconds(
+    phase.status === 'running',
+    phase.started_at,
+    phase.duration_seconds,
+    now,
+  )
+  const duration = durationSeconds === null ? '—' : `${durationSeconds.toFixed(1)}s`
 
   return (
     <>
@@ -98,7 +102,7 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
           {formatCostWithCoverage(Number(phase.cost_usd), phase.unpriced_observation_count)}
         </span>
         <span className="text-[var(--color-border)]">&middot;</span>
-        <span>{duration}s</span>
+        <span>{duration}</span>
       </div>
       <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
         <PhaseTokenSegment
@@ -179,8 +183,13 @@ export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
   // UNKNOWN duration into a measured zero, so an execution whose phases all
   // report null would render a confident "0.0s" and a partly-known one would
   // read as complete. Count what is missing and say so instead.
-  const knownDurations = phases.filter((p) => p.duration_seconds != null)
-  const totalDuration = knownDurations.reduce((s, p) => s + (p.duration_seconds ?? 0), 0)
+  //
+  // Folded from exactly the values the cards below render (same helper, same
+  // `now`), so the header cannot disagree with the timeline underneath it.
+  const knownDurations = phases
+    .map((p) => liveDurationSeconds(p.status === 'running', p.started_at, p.duration_seconds, now))
+    .filter((d): d is number => d !== null)
+  const totalDuration = knownDurations.reduce((s, d) => s + d, 0)
   const unknownDurations = phases.length - knownDurations.length
 
   return (

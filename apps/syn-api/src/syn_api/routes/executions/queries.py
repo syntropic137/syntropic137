@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -24,11 +25,11 @@ from syn_api.types import (
     ToolOperation,
 )
 from syn_shared.display import (
-    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 from .models import (
@@ -40,6 +41,8 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
@@ -59,22 +62,41 @@ def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
 
 
-def _coerce_dt(value: object | None) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        with contextlib.suppress(ValueError):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return None
+@dataclass(frozen=True)
+class _DurationTotal:
+    """An execution's wall-clock total, with the coverage of that total.
+
+    Same shape as the unpriced-cost totals alongside it (#890): a bare number
+    cannot say whether it is the whole story. An execution whose phases report
+    10s, 10s and "unknown" is not a 20s execution, and rendering it as one is
+    the defect, not the missing phase.
+    """
+
+    seconds: float | None
+    """Sum of the phase durations we could resolve, or ``None`` if none could be."""
+
+    unknown_phase_count: int
+    """Phases that contributed nothing because their duration is unknown."""
+
+    @classmethod
+    def over(cls, durations: Iterable[float | None]) -> _DurationTotal:
+        """Fold per-phase durations into a total that admits what it is missing."""
+        resolved = list(durations)
+        known = [d for d in resolved if d is not None]
+        return cls(
+            seconds=math.fsum(known) if known else None,
+            unknown_phase_count=len(resolved) - len(known),
+        )
 
 
-def _duration_seconds(started: object | None, completed: object | None) -> float | None:
-    """Compute duration from start/end timestamps when both are present."""
-    s = _coerce_dt(started)
-    c = _coerce_dt(completed)
-    if s is None or c is None:
-        return None
-    return (c - s).total_seconds()
+def _phase_duration(phase: PhaseExecutionDetail) -> float | None:
+    """Resolve one domain phase's duration the way every read surface must."""
+    return resolve_duration_seconds(
+        phase.status,
+        started_at=phase.started_at,
+        completed_at=phase.completed_at,
+        recorded_seconds=phase.duration_seconds,
+    )
 
 
 @dataclass
@@ -136,7 +158,13 @@ def _build_execution_summary_response(
     from raw values via syn_shared.display so all clients (dashboard,
     CLI) share identical strings.
     """
-    duration_seconds = _duration_seconds(e.started_at, e.completed_at)
+    # Same rule the detail view applies, so a running execution no longer
+    # reports a live duration in one place and nothing in the other. This
+    # previously required both timestamps, and a running execution has no
+    # completed_at by definition.
+    duration_seconds = resolve_duration_seconds(
+        e.status, started_at=e.started_at, completed_at=e.completed_at
+    )
     totals = _merge_totals(e, enrichment)
     return ExecutionSummaryResponse(
         workflow_execution_id=e.workflow_execution_id,
@@ -237,14 +265,11 @@ async def _map_phase_detail(
     else:
         sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
 
-    # A running phase has no completed_at yet, so its stored duration_seconds
-    # is still the 0.0 the projection seeded it with -- read-time computed
-    # against the wall clock instead. Terminal phases keep the stored value
-    # as-is; store-on-completion is unaffected.
-    duration_seconds = (
-        compute_duration_seconds(phase.started_at)
-        if phase.status == "running"
-        else phase.duration_seconds
+    duration_seconds = resolve_duration_seconds(
+        phase.status,
+        started_at=phase.started_at,
+        completed_at=phase.completed_at,
+        recorded_seconds=phase.duration_seconds,
     )
 
     return PhaseExecution(
@@ -484,7 +509,11 @@ async def get(
     total_cache_creation = detail.total_cache_creation_tokens
     total_cache_read = detail.total_cache_read_tokens
     total_cost: Decimal | str = Decimal("0")
-    total_duration = detail.total_duration_seconds
+    # Derived from the phases rather than read from the projection's running
+    # sum, so the total and the phase list can never disagree: the sum only
+    # counts phases that have COMPLETED, which silently excluded the one still
+    # running and presented the shortfall as the final figure.
+    duration = _DurationTotal.over(_phase_duration(p) for p in detail.phases)
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -497,8 +526,6 @@ async def get(
             total_cache_creation = exec_cost.cache_creation_tokens or total_cache_creation
             total_cache_read = exec_cost.cache_read_tokens or total_cache_read
             total_cost = exec_cost.total_cost_usd
-            if exec_cost.duration_ms > 0:
-                total_duration = exec_cost.duration_ms / 1000.0
 
     return Ok(
         ExecutionDetail(
@@ -513,7 +540,8 @@ async def get(
             total_cache_creation_tokens=total_cache_creation,
             total_cache_read_tokens=total_cache_read,
             total_cost_usd=total_cost,
-            total_duration_seconds=total_duration,
+            total_duration_seconds=duration.seconds,
+            unknown_duration_phase_count=duration.unknown_phase_count,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
             repos=list(detail.repos),
@@ -586,6 +614,9 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     phases = [await _map_phase_detail(p, manager) for p in detail.phases]
+    # Folded from the phases this response already carries, so the header total
+    # and the timeline below it are the same numbers by construction.
+    duration = _DurationTotal.over(p.duration_seconds for p in phases)
 
     enriched = await _enrich_costs(
         execution_id,
@@ -614,7 +645,8 @@ async def get_detail(
             completed_at=detail.completed_at,
             error_message=detail.error_message,
             repos=list(detail.repos),
-            total_duration_seconds=detail.total_duration_seconds,
+            total_duration_seconds=duration.seconds,
+            unknown_duration_phase_count=duration.unknown_phase_count,
         )
     )
 
@@ -732,4 +764,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         error_message=detail.error_message,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
+        unknown_duration_phase_count=detail.unknown_duration_phase_count,
     )

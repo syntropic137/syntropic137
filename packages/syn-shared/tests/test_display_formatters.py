@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -15,6 +17,7 @@ from syn_shared.display import (
     format_phase,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 EM_DASH = "\u2014"
@@ -160,16 +163,143 @@ class TestComputeDurationSeconds:
         started = datetime(2026, 9, 1, 12, 0, 0)  # naive
         assert compute_duration_seconds(started, now=now) == 10.0
 
-    def test_advances_between_two_calls_without_a_fixed_now(self) -> None:
+    def test_tracks_the_start_it_was_given_rather_than_returning_a_constant(self) -> None:
         # No `now` override: this is what the route layer actually calls.
-        # A frozen or memoized value here is exactly the bug that got six
-        # healthy workflow runs cancelled on 2026-09-01.
+        #
+        # The regression to catch is a frozen or memoized value -- the bug that
+        # got six healthy workflow runs cancelled on 2026-09-01. This test used
+        # to assert `second >= first` for one start, which `return 42.0`
+        # satisfies, so it could not fail against the very thing it named. Two
+        # starts a known distance apart must come back a known distance apart:
+        # any implementation ignoring its argument returns the same number for
+        # both and the difference collapses to zero.
+        now = datetime.now(UTC)
+        recent = compute_duration_seconds(now - timedelta(seconds=5))
+        older = compute_duration_seconds(now - timedelta(seconds=305))
+        assert recent is not None
+        assert older is not None
+        assert recent == pytest.approx(5.0, abs=1.0)
+        assert older - recent == pytest.approx(300.0, abs=1.0)
+
+    def test_advances_between_two_calls_on_the_same_start(self) -> None:
+        # Complements the test above, which a per-argument cache would pass:
+        # the SAME start must give a strictly larger answer as time passes.
         started = datetime.now(UTC) - timedelta(seconds=5)
         first = compute_duration_seconds(started)
+        time.sleep(0.05)
         second = compute_duration_seconds(started)
         assert first is not None
         assert second is not None
-        assert second >= first
+        assert second > first
+
+    def test_start_after_the_reference_instant_is_unknown_not_zero(self) -> None:
+        # Clock skew, or a bad write. Clamping to 0.0 (which this did) reports
+        # "just started" for something that may have been running for an hour --
+        # a confident measurement manufactured out of a defect.
+        now = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+        started = datetime(2026, 9, 1, 13, 0, 0, tzinfo=UTC)
+        assert compute_duration_seconds(started, now=now) is None
+
+    def test_malformed_timestamp_is_logged_not_silently_dropped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The VALUE is unknown either way, but a malformed timestamp is a data
+        # defect whose only other symptom is a duration quietly going missing.
+        with caplog.at_level(logging.WARNING):
+            assert compute_duration_seconds("not-a-timestamp") is None
+        assert any("not-a-timestamp" in r.getMessage() for r in caplog.records)
+
+    def test_missing_timestamp_is_not_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Nothing started yet is an ordinary state, not a defect; logging it
+        # would bury the malformed case above in noise.
+        with caplog.at_level(logging.WARNING):
+            assert compute_duration_seconds(None) is None
+        assert caplog.records == []
+
+
+@pytest.mark.unit
+class TestResolveDurationSeconds:
+    """The one rule every read surface applies, so none of them can disagree.
+
+    Each case below arrives at some surface as a user-visible number; the
+    property under test is that an UNKNOWN duration is never one of them.
+    """
+
+    def test_running_is_computed_live_from_started_at(self) -> None:
+        now = datetime(2026, 9, 1, 12, 5, 0, tzinfo=UTC)
+        assert (
+            resolve_duration_seconds(
+                "running",
+                started_at="2026-09-01T12:00:00Z",
+                recorded_seconds=0.0,
+                now=now,
+            )
+            == 300.0
+        )
+
+    def test_paused_still_accrues_wall_clock_time(self) -> None:
+        now = datetime(2026, 9, 1, 12, 5, 0, tzinfo=UTC)
+        assert (
+            resolve_duration_seconds("paused", started_at="2026-09-01T12:00:00Z", now=now) == 300.0
+        )
+
+    def test_pending_is_unknown_not_zero(self) -> None:
+        # A pending phase has never started. 0.0 reads as "finished instantly",
+        # which is how every not-yet-run phase reported a duration it never had.
+        assert resolve_duration_seconds("pending", started_at=None, recorded_seconds=None) is None
+
+    def test_completed_prefers_the_duration_recorded_at_completion(self) -> None:
+        # Recorded beats derived: it was measured by whoever saw the completion.
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                completed_at="2026-09-01T12:05:00Z",
+                recorded_seconds=33.004841,
+            )
+            == 33.004841
+        )
+
+    def test_a_recorded_zero_is_a_measurement_and_survives(self) -> None:
+        # The other half of the contract: sub-millisecond phases are real, so
+        # 0.0 must pass through unchanged. That is exactly why "no measurement"
+        # has to be None -- the two are not interchangeable.
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                completed_at="2026-09-01T12:00:00Z",
+                recorded_seconds=0.0,
+            )
+            == 0.0
+        )
+
+    def test_completed_without_a_record_derives_from_the_timestamps(self) -> None:
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                completed_at="2026-09-01T12:00:45Z",
+            )
+            == 45.0
+        )
+
+    def test_terminal_without_a_record_or_an_end_is_unknown(self) -> None:
+        # A failed phase nobody timed. Not zero, and NOT a live duration that
+        # would keep growing forever for something already dead.
+        assert resolve_duration_seconds("failed", started_at="2026-09-01T12:00:00Z") is None
+
+    def test_malformed_started_at_is_unknown_for_a_running_phase(self) -> None:
+        assert resolve_duration_seconds("running", started_at="garbage") is None
+
+    def test_future_started_at_is_unknown_for_a_running_phase(self) -> None:
+        now = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+        assert (
+            resolve_duration_seconds(
+                "running", started_at="2026-09-01T13:00:00Z", recorded_seconds=0.0, now=now
+            )
+            is None
+        )
 
 
 @pytest.mark.unit

@@ -6946,9 +6946,20 @@
             "default": 0
           },
           "total_duration_seconds": {
-            "type": "number",
-            "title": "Total Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Duration Seconds"
+          },
+          "unknown_duration_phase_count": {
+            "type": "integer",
+            "title": "Unknown Duration Phase Count",
+            "default": 0
           },
           "artifact_ids": {
             "items": {
