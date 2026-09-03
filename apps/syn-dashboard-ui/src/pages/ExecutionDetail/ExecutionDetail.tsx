@@ -230,7 +230,7 @@ export function ExecutionDetail() {
         </section>
       )}
       <section id="phase-timeline">
-        <PhaseTimeline phases={execution.phases} now={now} />
+        <PhaseTimeline execution={execution} now={now} />
       </section>
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />

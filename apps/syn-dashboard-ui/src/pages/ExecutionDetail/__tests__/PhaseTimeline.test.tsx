@@ -1,10 +1,16 @@
 /**
- * The Phase Pipeline header must not report unpriced work as $0.0000 (#890).
+ * The Phase Pipeline header must not report unpriced work as $0.0000 (#890),
+ * and must not report a live run's tokens as 0 (#1048).
  *
  * The per-phase cards were fixed first; the header roll-up is a SECOND consumer
- * of the same coverage data and kept summing cost_usd alone. These cases pin
- * the aggregate specifically, because a suite that only checks the cards stays
+ * of the same data and kept deriving its own answer. These cases pin the
+ * aggregate specifically, because a suite that only checks the cards stays
  * green while the total above them lies.
+ *
+ * Every token fixture below sets `total_tokens` to a figure the per-phase
+ * fields cannot produce, so the assertions fail against a total summed from
+ * those fields. A self-consistent payload would pass either way and prove
+ * nothing.
  */
 
 import { render } from '@testing-library/react'
@@ -37,16 +43,50 @@ function phase(overrides: Partial<Phase> & { workflow_phase_id: string }): Phase
   } as Phase
 }
 
-function renderTimeline(phases: Phase[]) {
+/**
+ * An execution wrapping the given phases.
+ *
+ * The execution-level token fields default to 0 so a test that cares about
+ * them has to say so; `renderTimeline` is otherwise only exercising the cost
+ * and duration roll-ups, which are Lane 2 and live per phase already.
+ */
+function execution(
+  phases: Phase[],
+  overrides: Partial<ExecutionDetailResponse> = {},
+): ExecutionDetailResponse {
+  return {
+    workflow_execution_id: 'exec-1',
+    workflow_id: 'wf-1',
+    workflow_name: 'Run',
+    status: 'running',
+    started_at: null,
+    completed_at: null,
+    phases,
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    total_cache_creation_tokens: 0,
+    total_cache_read_tokens: 0,
+    total_tokens: 0,
+    total_cost_usd: 0,
+    unpriced_observation_count: 0,
+    artifact_ids: [],
+    error_message: null,
+    repos: [],
+    total_duration_seconds: 0,
+    ...overrides,
+  } as unknown as ExecutionDetailResponse
+}
+
+function renderTimeline(phases: Phase[], overrides: Partial<ExecutionDetailResponse> = {}) {
   return render(
     <MemoryRouter>
-      <PhaseTimeline phases={phases} now={Date.now()} />
+      <PhaseTimeline execution={execution(phases, overrides)} now={Date.now()} />
     </MemoryRouter>,
   )
 }
 
-/** The header total lives in the metrics strip above the phase cards. */
-function headerCost(): string {
+/** The header roll-up lives in the metrics strip above the phase cards. */
+function headerStrip(): string {
   const strip = document.querySelector('.flex.items-center.gap-4')
   return strip?.textContent ?? ''
 }
@@ -57,8 +97,8 @@ describe('PhaseTimeline header roll-up', () => {
       phase({ workflow_phase_id: 'plan', cost_usd: 1.5 }),
       phase({ workflow_phase_id: 'build', cost_usd: 2.5 }),
     ])
-    expect(headerCost()).toContain('$4.00')
-    expect(headerCost()).not.toContain('unpriced')
+    expect(headerStrip()).toContain('$4.00')
+    expect(headerStrip()).not.toContain('unpriced')
   })
 
   it('says unpriced, not $0.0000, when no phase could be priced', () => {
@@ -66,8 +106,8 @@ describe('PhaseTimeline header roll-up', () => {
       phase({ workflow_phase_id: 'plan', cost_usd: 0, unpriced_observation_count: 4 }),
       phase({ workflow_phase_id: 'build', cost_usd: 0, unpriced_observation_count: 7 }),
     ])
-    expect(headerCost()).toContain('unpriced')
-    expect(headerCost()).not.toContain('$0.0000')
+    expect(headerStrip()).toContain('unpriced')
+    expect(headerStrip()).not.toContain('$0.0000')
   })
 
   it('marks a mixed total as a lower bound rather than a complete figure', () => {
@@ -75,13 +115,98 @@ describe('PhaseTimeline header roll-up', () => {
       phase({ workflow_phase_id: 'plan', cost_usd: 3 }),
       phase({ workflow_phase_id: 'build', cost_usd: 0, unpriced_observation_count: 9 }),
     ])
-    const text = headerCost()
+    const text = headerStrip()
     expect(text).toContain('(partial)')
     expect(text).toContain('$3.00')
   })
 
   it('treats a genuinely free priced execution as $0, not unpriced', () => {
     renderTimeline([phase({ workflow_phase_id: 'plan', cost_usd: 0 })])
-    expect(headerCost()).not.toContain('unpriced')
+    expect(headerStrip()).not.toContain('unpriced')
+  })
+})
+
+describe('PhaseTimeline token roll-up while a phase is running', () => {
+  it('reports the live execution total, not the frozen sum of the phases', () => {
+    // The one phase is mid-run, so Lane 1 has written nothing to it. Summing
+    // the phases renders "0 tokens" under a headline reading 1,234,567.
+    renderTimeline(
+      [
+        phase({
+          workflow_phase_id: 'implement',
+          status: 'running',
+          input_tokens: 0,
+          output_tokens: 0,
+        }),
+      ],
+      { total_tokens: 1_234_567 },
+    )
+
+    expect(headerStrip()).toContain('1.2M tokens')
+    expect(headerStrip()).not.toContain('0 tokens')
+  })
+
+  it('reports the live total when only some phases have landed', () => {
+    // 300 attributed to the finished phase, 1000 actually counted: the roll-up
+    // must follow the execution, not the 300 it can see beneath it.
+    renderTimeline(
+      [
+        phase({ workflow_phase_id: 'plan' }),
+        phase({
+          workflow_phase_id: 'implement',
+          status: 'running',
+          input_tokens: 0,
+          output_tokens: 0,
+        }),
+      ],
+      { total_input_tokens: 100, total_output_tokens: 200, total_tokens: 1000 },
+    )
+
+    expect(headerStrip()).toContain('1.0K tokens')
+    expect(headerStrip()).not.toContain('300 tokens')
+  })
+})
+
+describe('PhaseTimeline per-phase token figures', () => {
+  it('does not present a running phase’s frozen 0 as a finished count', () => {
+    const { container } = renderTimeline(
+      [
+        phase({
+          workflow_phase_id: 'implement',
+          status: 'running',
+          input_tokens: 0,
+          output_tokens: 0,
+        }),
+      ],
+      { total_tokens: 1_234_567 },
+    )
+
+    expect(container.textContent).toContain('0 so far')
+  })
+
+  it('leaves a settled phase’s count unqualified', () => {
+    // 'so far' on every card would be as uninformative as never showing it:
+    // this pins the label to the phase's status, not to the component.
+    const { container } = renderTimeline([phase({ workflow_phase_id: 'plan' })])
+
+    expect(container.textContent).toContain('300')
+    expect(container.textContent).not.toContain('so far')
+  })
+
+  it('qualifies only the running phase when phases are mixed', () => {
+    const { container } = renderTimeline([
+      phase({ workflow_phase_id: 'plan' }),
+      phase({
+        workflow_phase_id: 'implement',
+        status: 'running',
+        input_tokens: 0,
+        output_tokens: 0,
+      }),
+      phase({ workflow_phase_id: 'review', status: 'pending', input_tokens: 0, output_tokens: 0 }),
+    ])
+
+    // A pending phase really has used no tokens, so its 0 is a reading and
+    // stays unqualified; only the running one is still being counted.
+    expect(container.textContent?.match(/so far/g)).toHaveLength(1)
   })
 })

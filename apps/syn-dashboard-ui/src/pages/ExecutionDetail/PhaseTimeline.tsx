@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
+import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
 import { formatCostWithCoverage, formatTokens } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
@@ -69,11 +70,7 @@ function PhaseTokenSegment({ label, total, rows, accentColor }: {
 
 function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   const Icon = phaseStatusIcons[phase.status] ?? Clock
-  const totalPhaseTokens =
-    phase.input_tokens +
-    phase.output_tokens +
-    (phase.cache_creation_tokens ?? 0) +
-    (phase.cache_read_tokens ?? 0)
+  const tokens = phaseTokenTotals(phase)
   const duration =
     phase.status === 'running' && phase.started_at
       ? ((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)
@@ -89,7 +86,15 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
         <PhaseModelBreakdown costByModel={phase.cost_by_model} />
       )}
       <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-        <span>{formatTokens(totalPhaseTokens)}</span>
+        {/*
+          A running phase's counts are a lower bound, not a reading: the API has
+          no live per-phase token field, so the figures below stay at 0 (or at a
+          part-substituted cache figure) until the phase lands. Saying "so far"
+          is the difference between an incomplete count and a claim of none.
+        */}
+        <span title={tokens.settled ? undefined : 'Counted so far; this phase is still running'}>
+          {tokens.settled ? formatTokens(tokens.total) : `${formatTokens(tokens.total)} so far`}
+        </span>
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>
           {formatCostWithCoverage(Number(phase.cost_usd), phase.unpriced_observation_count)}
@@ -100,24 +105,20 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
       <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
         <PhaseTokenSegment
           label="In"
-          total={phase.input_tokens + (phase.cache_read_tokens ?? 0)}
+          total={tokens.inputTokens + tokens.cacheReadTokens}
           accentColor="bg-indigo-500/10 text-indigo-400"
           rows={[
-            { label: 'Fresh', value: phase.input_tokens },
-            { label: 'Cache read', value: phase.cache_read_tokens ?? 0, color: 'text-emerald-400' },
+            { label: 'Fresh', value: tokens.inputTokens },
+            { label: 'Cache read', value: tokens.cacheReadTokens, color: 'text-emerald-400' },
           ]}
         />
         <PhaseTokenSegment
           label="Out"
-          total={phase.output_tokens + (phase.cache_creation_tokens ?? 0)}
+          total={tokens.outputTokens + tokens.cacheCreationTokens}
           accentColor="bg-violet-500/10 text-violet-400"
           rows={[
-            { label: 'Output', value: phase.output_tokens },
-            {
-              label: 'Cache write',
-              value: phase.cache_creation_tokens ?? 0,
-              color: 'text-amber-400',
-            },
+            { label: 'Output', value: tokens.outputTokens },
+            { label: 'Cache write', value: tokens.cacheCreationTokens, color: 'text-amber-400' },
           ]}
         />
       </div>
@@ -159,12 +160,23 @@ function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
 }
 
 interface PhaseTimelineProps {
-  phases: ExecutionDetailResponse['phases']
+  /**
+   * The whole payload, not just `phases`: the header's token roll-up has to
+   * come from the execution-level total, which the phases cannot produce.
+   * Passing the execution keeps that choice inside this component, so a caller
+   * cannot render the timeline against a total derived some other way.
+   */
+  execution: ExecutionDetailResponse
   now: number
 }
 
-export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
-  const totalTokens = phases.reduce((s, p) => s + p.input_tokens + p.output_tokens + (p.cache_creation_tokens ?? 0) + (p.cache_read_tokens ?? 0), 0)
+export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
+  const phases = execution.phases
+  // Read from the execution, not from the phases below. Lane 1 leaves a running
+  // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
+  // for the whole of a live run - directly under a headline card already
+  // showing the live figure (#1048). Both now read executionTokenTotals().
+  const totalTokens = executionTokenTotals(execution).total
   const totalCost = phases.reduce((s, p) => s + Number(p.cost_usd), 0)
   // The roll-up is its own consumer of coverage, not a side effect of fixing
   // the cards. Summing only cost_usd made the header report a confident

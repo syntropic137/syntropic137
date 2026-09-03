@@ -151,6 +151,20 @@ describe('ExecutionDetail token totals while a phase is running', () => {
     expect(card.subtitle).toBe('In: 100 / Out: 200 / 700 in progress')
   })
 
+  it('does not contradict its own headline in the Phase Pipeline below it', () => {
+    // The defect this case exists for: the headline read the live total while
+    // the roll-up one card down re-derived its own from the frozen per-phase
+    // fields, so the page showed 1,234,567 and "0 tokens" at the same time.
+    const { container } = renderExecution(midPhaseExecution())
+
+    expect(metricCard('Total Tokens').value).toBe('1,234,567')
+
+    const timeline = container.querySelector('#phase-timeline')
+    expect(timeline).not.toBeNull()
+    const rollUp = within(timeline as HTMLElement).getByText(/tokens$/)
+    expect(rollUp.textContent).toBe('1.2M tokens')
+  })
+
   it('shows no in-progress remainder once the parts account for the total', () => {
     renderExecution(
       midPhaseExecution({
