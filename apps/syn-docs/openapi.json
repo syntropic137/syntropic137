@@ -6946,9 +6946,20 @@
             "default": 0
           },
           "total_duration_seconds": {
-            "type": "number",
-            "title": "Total Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Duration Seconds"
+          },
+          "unknown_duration_phase_count": {
+            "type": "integer",
+            "title": "Unknown Duration Phase Count",
+            "default": 0
           },
           "artifact_ids": {
             "items": {
@@ -8652,9 +8663,15 @@
             "title": "Total Tokens"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "cost_usd": {
             "type": "string",
@@ -8775,9 +8792,15 @@
             "default": "0"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "artifact_count": {
             "type": "integer",
@@ -9260,9 +9283,15 @@
             "title": "Completed At"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "trigger_source": {
             "type": "string",

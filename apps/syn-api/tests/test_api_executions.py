@@ -1,7 +1,9 @@
 """Tests for syn_api.routes.executions — list, get, get_detail, list_active."""
 
+import asyncio
 import os
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -163,6 +165,352 @@ async def test_get_detail_not_found():
 
     result = await get_detail("nonexistent-id")
     assert isinstance(result, Err)
+
+
+async def _seed_execution_with_running_phase(
+    exec_id: str, workflow_id: str, phase_started_at: str
+) -> None:
+    """Seed an execution with a single RUNNING phase, exactly as the
+    projection would leave it mid-flight: duration_seconds still 0.0
+    (nothing has completed it yet) and no completed_at.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+
+    await manager.workflow_execution_detail._store.save(
+        "workflow_execution_details",
+        exec_id,
+        {
+            "execution_id": exec_id,
+            "workflow_execution_id": exec_id,
+            "workflow_id": workflow_id,
+            "workflow_name": "Workflow A",
+            "status": "running",
+            "started_at": phase_started_at,
+            "completed_at": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost_usd": "0",
+            "total_duration_seconds": 0.0,
+            "artifact_ids": [],
+            "error_message": None,
+            "phases": [
+                {
+                    "workflow_phase_id": "phase-1",
+                    "name": "Phase 1",
+                    "status": "running",
+                    "session_id": None,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "total_tokens": 0,
+                    "duration_seconds": 0.0,
+                    "started_at": phase_started_at,
+                    "completed_at": None,
+                    "error_message": None,
+                }
+            ],
+        },
+    )
+
+
+async def test_get_detail_running_phase_duration_advances_between_reads():
+    """A RUNNING phase's duration_seconds must be computed live, not read
+    back as the 0.0 the projection seeded it with.
+
+    Regression test for the 2026-09-01 incident: six healthy workflow runs
+    were cancelled because a running phase's duration looked frozen. A test
+    that only asserted ``duration_seconds is not None`` would already pass
+    today against the stored ``0.0`` -- so this asserts the value ADVANCES
+    between two reads of the same still-running phase, which is only
+    possible if it is computed against the wall clock at read time.
+    """
+    from syn_api.routes.executions import get_detail
+
+    started_at = (datetime.now(UTC) - timedelta(seconds=100)).isoformat()
+    await _seed_execution_with_running_phase("exec-running-phase", "wf-1", started_at)
+
+    first = await get_detail("exec-running-phase")
+    assert isinstance(first, Ok)
+    first_duration = first.value.phases[0].duration_seconds
+    assert first_duration is not None
+    assert first_duration > 0.0
+
+    await asyncio.sleep(0.05)
+
+    second = await get_detail("exec-running-phase")
+    assert isinstance(second, Ok)
+    second_duration = second.value.phases[0].duration_seconds
+    assert second_duration is not None
+    assert second_duration > first_duration
+
+
+async def _seed_execution_detail_with_phases(
+    exec_id: str,
+    phases: list[dict],
+    *,
+    status: str = "running",
+    started_at: str = "2026-03-23T10:00:00Z",
+    stored_total_duration: float = 0.0,
+) -> None:
+    """Seed only the DETAIL projection, with phases given verbatim.
+
+    ``stored_total_duration`` is the projection's own accumulated total, which
+    only ever counts phases that have COMPLETED. Tests below assert the API
+    total does NOT come from it.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+    await manager.workflow_execution_detail._store.save(
+        "workflow_execution_details",
+        exec_id,
+        {
+            "execution_id": exec_id,
+            "workflow_execution_id": exec_id,
+            "workflow_id": "wf-1",
+            "workflow_name": "Workflow A",
+            "status": status,
+            "started_at": started_at,
+            "completed_at": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost_usd": "0",
+            "total_duration_seconds": stored_total_duration,
+            "artifact_ids": [],
+            "error_message": None,
+            "phases": phases,
+        },
+    )
+
+
+def _phase(
+    phase_id: str,
+    status: str,
+    *,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+    duration_seconds: float | None = None,
+) -> dict:
+    """A phase row shaped exactly as the projection stores it."""
+    return {
+        "workflow_phase_id": phase_id,
+        "name": phase_id,
+        "status": status,
+        "session_id": None,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 0,
+        "duration_seconds": duration_seconds,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "error_message": None,
+    }
+
+
+async def test_list_reports_a_live_duration_for_a_running_execution():
+    """The LIST surface must answer "how long has this been running", not None.
+
+    It required BOTH timestamps, and a running execution has no completed_at by
+    definition -- so every running execution reported no duration in the list
+    while its detail view reported a live one. The two surfaces disagreed about
+    the same execution.
+    """
+    from syn_api.routes.executions import queries
+
+    started_at = (datetime.now(UTC) - timedelta(seconds=420)).isoformat()
+    await _seed_execution("exec-live-list", "wf-1", "Workflow A")
+    manager = queries.get_projection_mgr()
+    row = await manager.workflow_execution_list._store.get("workflow_executions", "exec-live-list")
+    row["started_at"] = started_at
+    await manager.workflow_execution_list._store.save("workflow_executions", "exec-live-list", row)
+
+    response = await queries.list_executions_endpoint(status=None, page=1, page_size=50)
+    summary = next(e for e in response.executions if e.workflow_execution_id == "exec-live-list")
+    assert summary.duration_seconds is not None
+    # ~420s could not have arisen from the old code, which returned None here,
+    # nor from any stored value: nothing in the fixture holds 420.
+    assert summary.duration_seconds == pytest.approx(420.0, abs=5.0)
+    assert summary.duration_display == "7m"
+
+
+async def test_list_reports_unknown_rather_than_zero_for_an_unstarted_execution():
+    """A pending execution has no start. Unknown, and it must say so."""
+    from syn_api.routes.executions import queries
+
+    await _seed_execution("exec-pending-list", "wf-1", "Workflow A")
+    manager = queries.get_projection_mgr()
+    row = await manager.workflow_execution_list._store.get(
+        "workflow_executions", "exec-pending-list"
+    )
+    row["status"] = "pending"
+    row["started_at"] = None
+    await manager.workflow_execution_list._store.save(
+        "workflow_executions", "exec-pending-list", row
+    )
+
+    response = await queries.list_executions_endpoint(status=None, page=1, page_size=50)
+    summary = next(e for e in response.executions if e.workflow_execution_id == "exec-pending-list")
+    assert summary.duration_seconds is None
+    assert summary.duration_display == "\u2014"
+
+
+async def test_pending_phase_duration_is_unknown_not_zero():
+    """A phase that has not started reported 0.0 -- "finished instantly"."""
+    from syn_api.routes.executions import get_detail
+
+    await _seed_execution_detail_with_phases("exec-pending-phase", [_phase("phase-1", "pending")])
+
+    result = await get_detail("exec-pending-phase")
+    assert isinstance(result, Ok)
+    assert result.value.phases[0].duration_seconds is None
+
+
+async def test_execution_total_includes_the_phase_still_running():
+    """The total is presented as final while excluding the live phase.
+
+    The projection's accumulated ``total_duration_seconds`` only grows when a
+    phase COMPLETES, so an execution 400 seconds into its second phase reported
+    the 10 seconds its first phase took. Seeded here as exactly that.
+    """
+    from syn_api.routes.executions import get_detail
+
+    started_at = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+    await _seed_execution_detail_with_phases(
+        "exec-live-total",
+        [
+            _phase(
+                "phase-1",
+                "completed",
+                started_at="2026-03-23T10:00:00Z",
+                completed_at="2026-03-23T10:00:10Z",
+                duration_seconds=10.0,
+            ),
+            _phase("phase-2", "running", started_at=started_at),
+        ],
+        stored_total_duration=10.0,
+    )
+
+    result = await get_detail("exec-live-total")
+    assert isinstance(result, Ok)
+    total = result.value.total_duration_seconds
+    assert total is not None
+    # 410 = the completed phase's 10s plus the running phase's live 400s. The
+    # stored total is 10.0, so this value cannot have been read from it.
+    assert total == pytest.approx(410.0, abs=5.0)
+    assert result.value.unknown_duration_phase_count == 0
+
+
+async def test_execution_total_says_how_many_phases_it_could_not_count():
+    """A total that silently omits phases is a lower bound wearing a total's
+    clothes -- the #890 cost defect, in the duration column."""
+    from syn_api.routes.executions import get_detail
+
+    await _seed_execution_detail_with_phases(
+        "exec-partial-total",
+        [
+            _phase(
+                "phase-1",
+                "completed",
+                started_at="2026-03-23T10:00:00Z",
+                completed_at="2026-03-23T10:00:10Z",
+                duration_seconds=10.0,
+            ),
+            # Failed mid-flight with nothing recorded: genuinely unknown.
+            _phase("phase-2", "failed", started_at="2026-03-23T10:00:10Z"),
+        ],
+        status="failed",
+        stored_total_duration=10.0,
+    )
+
+    result = await get_detail("exec-partial-total")
+    assert isinstance(result, Ok)
+    assert result.value.total_duration_seconds == 10.0
+    assert result.value.unknown_duration_phase_count == 1
+
+
+async def test_execution_total_is_unknown_when_no_phase_can_be_measured():
+    from syn_api.routes.executions import get_detail
+
+    await _seed_execution_detail_with_phases(
+        "exec-unknown-total", [_phase("phase-1", "pending"), _phase("phase-2", "pending")]
+    )
+
+    result = await get_detail("exec-unknown-total")
+    assert isinstance(result, Ok)
+    assert result.value.total_duration_seconds is None
+    assert result.value.unknown_duration_phase_count == 2
+
+
+async def test_http_response_carries_the_live_total_and_its_coverage():
+    """The hop that drops values: ExecutionDetailFull -> ExecutionDetailResponse.
+
+    Both fields are resolved two layers down and re-listed by hand at the
+    response constructor, which is exactly where a correct value gets left
+    behind. Asserted on the response model the endpoint actually returns.
+    """
+    from syn_api.routes.executions.queries import get_execution_endpoint
+
+    started_at = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+    await _seed_execution_detail_with_phases(
+        "exec-http-total",
+        [
+            _phase(
+                "phase-1",
+                "completed",
+                started_at="2026-03-23T10:00:00Z",
+                completed_at="2026-03-23T10:00:10Z",
+                duration_seconds=10.0,
+            ),
+            _phase("phase-2", "running", started_at=started_at),
+            _phase("phase-3", "pending"),
+        ],
+        stored_total_duration=10.0,
+    )
+
+    response = await get_execution_endpoint("exec-http-total")
+    assert response.total_duration_seconds is not None
+    assert response.total_duration_seconds == pytest.approx(410.0, abs=5.0)
+    assert response.unknown_duration_phase_count == 1
+    # And the phases the total was folded from agree with it, on this response.
+    assert response.phases[0].duration_seconds == 10.0
+    assert response.phases[1].duration_seconds == pytest.approx(400.0, abs=5.0)
+    assert response.phases[2].duration_seconds is None
+
+
+async def test_a_future_started_at_does_not_become_a_confident_zero():
+    """Clock skew produced 0.0 -- "just started" for a phase of unknown age."""
+    from syn_api.routes.executions import get_detail
+
+    started_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    await _seed_execution_detail_with_phases(
+        "exec-future-start", [_phase("phase-1", "running", started_at=started_at)]
+    )
+
+    result = await get_detail("exec-future-start")
+    assert isinstance(result, Ok)
+    assert result.value.phases[0].duration_seconds is None
+    assert result.value.total_duration_seconds is None
+    assert result.value.unknown_duration_phase_count == 1
+
+
+async def test_a_malformed_started_at_does_not_become_a_confident_zero():
+    from syn_api.routes.executions import get_detail
+
+    await _seed_execution_detail_with_phases(
+        "exec-bad-start", [_phase("phase-1", "running", started_at="not-a-timestamp")]
+    )
+
+    result = await get_detail("exec-bad-start")
+    assert isinstance(result, Ok)
+    assert result.value.phases[0].duration_seconds is None
+    assert result.value.unknown_duration_phase_count == 1
 
 
 async def test_list_active():

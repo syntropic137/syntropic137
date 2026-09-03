@@ -165,7 +165,7 @@ async def _get_testcontainer_infrastructure() -> tuple[TestInfrastructure, Any]:
     containers: list[Any] = []
 
     # Start containers (they pick random available ports)
-    postgres = PostgresContainer("timescale/timescaledb:latest-pg16")
+    postgres = PostgresContainer("timescale/timescaledb:2.29.2-pg16")
     postgres.start()
     containers.append(postgres)
 
