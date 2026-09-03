@@ -16,6 +16,11 @@ from syn_api.routes.artifacts import (
 )
 from syn_api.types import ArtifactDetail, ArtifactError, Err, Ok
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # --- create_artifact_endpoint ---
 
 

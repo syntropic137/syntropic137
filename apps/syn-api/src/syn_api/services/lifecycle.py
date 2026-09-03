@@ -33,6 +33,7 @@ from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_DEPLOYMENT,
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
@@ -419,7 +420,7 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         )
         return
 
-    deployment = deployment_identity(app_environment)
+    deployment = deployment_identity(app_environment, store.display_deployment)
     label = store.display_label
     destination = f"{deployment} (store: {label})" if label else deployment
 
@@ -434,6 +435,21 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
             "being ignored and is not repeated here in case it is not what you "
             "meant to set. Capture is unaffected.",
             ENV_SYN_SESSION_STORE_LABEL,
+        )
+
+    if store.has_unusable_deployment:
+        # Value-free for the same reason as the label warning above. Reported
+        # rather than ignored because an operator sets this precisely so their
+        # sessions are attributable, and silently using the derived identity
+        # defeats the reason they set it.
+        logger.warning(
+            "%s is set to something that is not a usable deployment identity "
+            "(ASCII letters, digits, dot, underscore and hyphen, up to 64 "
+            "characters). It is being ignored and is not repeated here in case "
+            "it is not what you meant to set. Sessions are being stamped %r "
+            "instead.",
+            ENV_SYN_SESSION_STORE_DEPLOYMENT,
+            deployment,
         )
 
     if store.is_unauthenticated:

@@ -43,6 +43,19 @@ requires_repos: true
 #
 # execution_type is declared sequential throughout because parallel is not
 # implemented (#1039). Do not declare parallel here expecting it to work.
+#
+# KNOWN GAP IN THIS SHAPE, and a correction to how it was first diagnosed.
+#
+# The only review phase sees the spec written by `research`. The FINAL unknowns
+# list is produced by `revise-spec` AFTER that review, so the artifact the
+# experiment phase works from is reviewed by nothing. That gap is real.
+#
+# It was first blamed for something it did not cause. In the first run
+# (exec-8d5b14716096) an unknown citing a file and line was reported here as a
+# fabricated citation. It was not: the citation was correct, and the reviewer
+# checked a branch where an unrelated fix had already changed that exact line.
+# The `experiment` phase's premise check therefore requires naming the revision
+# it checked, because a working tree moves while a workflow runs.
 
 phases:
   # Phase ids are load-bearing: a later phase reads an earlier one's output at
@@ -54,8 +67,7 @@ phases:
     input_artifacts: []
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Bash, Write]
-
+    allowed_tools: [Read, Grep, Glob, Bash]
     skills:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/software-complexity@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -87,8 +99,7 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Bash, Write]
-
+    allowed_tools: [Read, Grep, Glob, Bash]
     agent:
       provider: claude
       model: sonnet
@@ -116,8 +127,7 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Write]
-
+    allowed_tools: [Read, Grep, Glob]
     agent:
       provider: claude
       model: sonnet
@@ -130,8 +140,7 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Write]
-
+    allowed_tools: [Read, Grep, Glob]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -161,8 +170,7 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
-    allowed_tools: [Read, Grep, Glob, Write]
-
+    allowed_tools: [Read, Grep, Glob]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
