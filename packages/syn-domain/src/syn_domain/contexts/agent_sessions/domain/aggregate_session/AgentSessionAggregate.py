@@ -9,6 +9,7 @@ from uuid import uuid4
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import (
+    AgentLaunch,
     OperationRecord,
     SessionStatus,
     TokenMetrics,
@@ -111,14 +112,15 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         return len(self._operations)
 
     @property
-    def agent_launched(self) -> bool:
-        """True once the agent process for this session has been launched.
+    def agent_launch(self) -> AgentLaunch:
+        """What this session knows about whether its agent process started.
 
-        The sole domain fact that distinguishes a session that died before
-        its agent ever ran from one whose agent ran and later failed - both
-        can legitimately have zero recorded tokens (#1047, #1065).
+        Never UNKNOWN: an aggregate has replayed its own whole stream, so
+        the absence of an ``AgentLaunched`` event in it is a real negative,
+        not a gap. UNKNOWN exists for readers downstream of a stream that
+        predates the fact entirely (#1047, #1065).
         """
-        return self._agent_launched
+        return AgentLaunch.LAUNCHED if self._agent_launched else AgentLaunch.NOT_LAUNCHED
 
     @property
     def duration_seconds(self) -> float | None:
@@ -239,7 +241,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def mark_agent_launched(self, command: MarkAgentLaunchedCommand) -> None:  # noqa: ARG002
         """Handle MarkAgentLaunchedCommand.
 
-        Records the fact that this session's agent process was launched.
+        Records that an agent process demonstrably existed for this session.
         Idempotent: a session that emits this twice (defensive re-dispatch
         after a crash) still only recorded one true fact, so a second call
         is a no-op rather than an error - unlike record_operation/
@@ -291,6 +293,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             total_tokens=self._tokens.total_tokens,
             operation_count=len(self._operations),
             error_message=command.error_message,
+            agent_launch=self.agent_launch,
         )
 
         self._apply(event)

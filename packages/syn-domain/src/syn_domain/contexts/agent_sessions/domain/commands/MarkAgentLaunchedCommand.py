@@ -11,14 +11,16 @@ from pydantic import BaseModel, ConfigDict, Field
     "Records that a session's agent process was actually launched",
 )
 class MarkAgentLaunchedCommand(BaseModel):
-    """Command to record that the agent process for a session was launched.
+    """Command to record that an agent process existed for a session.
 
-    Call this once, right before the agent is invoked - after workspace
-    provisioning succeeds but before the CLI process is started. This is
-    the domain fact that distinguishes a session that died before its
-    agent ever ran (e.g. provisioning failure) from one whose agent ran
-    and later failed (#1047, #1065). Token counts cannot make that
-    distinction: both cases can legitimately have zero recorded tokens.
+    Issued at the first observable sign of the process itself - not when the
+    orchestrator decides to start one. Dispatch is an intention and can still
+    be falsified by anything between the decision and the process; the point
+    of this fact is that it cannot (#1047, #1065).
+
+    Its absence at completion time is what lets a failed session be reported
+    as never having run an agent, so recording it early would produce exactly
+    the false statement the fact exists to prevent, in the other direction.
     """
 
     model_config = ConfigDict(frozen=True)

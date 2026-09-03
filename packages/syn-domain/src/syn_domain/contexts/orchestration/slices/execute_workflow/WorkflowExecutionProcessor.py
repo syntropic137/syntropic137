@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    observer_for,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
@@ -646,14 +649,6 @@ class WorkflowExecutionProcessor:
             workspace_id=getattr(workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
-        # Record the launch fact before invoking the agent, not after: reaching
-        # this dispatch already means provisioning succeeded and the CLI is
-        # about to be started, so this is the true "agent ran" signal a later
-        # complete_failure/complete_cancelled can't reconstruct from tokens
-        # alone (#1047, #1065). A None session_mgr (repo disabled) is a no-op.
-        session_mgr = self._session_managers.get(todo.phase_id)
-        if session_mgr is not None:
-            await session_mgr.mark_launched()
         result = await self._get_agent_handler().handle(
             todo=todo,
             workspace=workspace,
@@ -664,6 +659,7 @@ class WorkflowExecutionProcessor:
             timeout_seconds=timeout,
             collector=collector,
             runner=runner,
+            on_launch=observer_for(self._session_managers.get(todo.phase_id)),
         )
 
         remember_leader_native_id(

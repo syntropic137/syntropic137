@@ -56,6 +56,14 @@ allowed_prefixes = [
 # path = { exempt_methods = ["method_name"], issue = "#NNN" }
 "packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py" = { exempt_methods = ["record_blocked", "record_dispatch_completed", "record_dispatch_failed"], issue = "#686" }
 
+# mark_agent_launched records a fact about the past - that an agent process
+# demonstrably existed - and a fact about the past is true whatever state the
+# session is in now. There is no invalid state to reject, so the handler is
+# idempotent instead: a second call is a no-op, not an error. It also runs
+# inside the live agent's output loop, where raising would kill a running
+# agent over a bookkeeping write.
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py" = { exempt_methods = ["mark_agent_launched"], issue = "#1047" }
+
 [error_propagation]
 # path = { issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { issue = "#664" }

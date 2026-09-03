@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
+
 
 @dataclass(frozen=True)
 class SubagentRecord:
@@ -240,12 +242,14 @@ class SessionSummary:
     error_message: str | None = None
     """Error message if the session failed."""
 
-    agent_launched: bool = False
-    """True once the agent process for this session has been launched.
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Whether an agent process ever started for this session.
 
     The discriminator between "never started" and "ran then failed" - token
     counts are zero on every failure path regardless of which case it is, so
-    they can't tell them apart (#1047, #1065).
+    they can't tell them apart (#1047, #1065). Defaults to UNKNOWN, never to
+    a negative: a row built from a stream that predates the fact has nothing
+    to say, and must not be read as saying "no".
     """
 
     @classmethod
@@ -286,7 +290,7 @@ class SessionSummary:
             num_turns=data.get("num_turns", 0),
             duration_api_ms=data.get("duration_api_ms"),
             error_message=data.get("error_message"),
-            agent_launched=data.get("agent_launched", False),
+            agent_launch=AgentLaunch.read(data.get("agent_launch")),
         )
 
     def to_dict(self) -> dict:
@@ -336,5 +340,5 @@ class SessionSummary:
             "num_turns": self.num_turns,
             "duration_api_ms": self.duration_api_ms,
             "error_message": self.error_message,
-            "agent_launched": self.agent_launched,
+            "agent_launch": self.agent_launch.value,
         }

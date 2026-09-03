@@ -15,6 +15,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_ABSENT_OBJECT_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "NoSuchVersion"})
+
+
+def _is_absent_object(error: Exception) -> bool:
+    """True only when the store answered, and its answer was "there is nothing here".
+
+    Everything else - the endpoint being down, credentials rejected, a socket
+    dying mid-body - is the store failing to answer at all, which is a
+    different fact and must not be flattened into this one (#1065).
+
+    ``minio`` is an optional extra, so the import is local: a deployment
+    without it can still call this and get False, which is the safe answer.
+    """
+    try:
+        from minio.error import S3Error
+    except ImportError:  # pragma: no cover - minio is installed in all real deployments
+        return False
+    return isinstance(error, S3Error) and error.code in _ABSENT_OBJECT_CODES
+
+
 async def retrieve_session(
     storage: MinioConversationStorage,
     session_id: str,
@@ -26,7 +46,14 @@ async def retrieve_session(
         session_id: Session identifier
 
     Returns:
-        List of JSONL lines, or None if not found
+        List of JSONL lines, or None if the object genuinely does not exist.
+
+    Raises:
+        Exception: whatever the store or the network raised. ``None`` is a
+            claim - "this session has no log" - and the caller turns it into a
+            statement to a user. An outage cannot support that claim, so it is
+            not allowed to produce it: a store that could not answer raises,
+            and the read path reports a failed query instead (#1065).
     """
     if not storage._initialized:
         await storage.initialize()
@@ -42,8 +69,15 @@ async def retrieve_session(
         response.release_conn()
         return content.strip().split("\n")
     except Exception as e:
-        logger.debug("Session not found: %s (%s)", session_id, e)
-        return None
+        if _is_absent_object(e):
+            logger.debug("Session log not stored: %s (%s)", session_id, e)
+            return None
+        logger.warning(
+            "Session log could not be read: %s (%s) — reporting a failed query, not absence",
+            session_id,
+            e,
+        )
+        raise
 
 
 async def get_session_metadata(

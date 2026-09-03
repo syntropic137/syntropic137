@@ -201,7 +201,12 @@ class MinioConversationStorage:
             session_id: Session identifier
 
         Returns:
-            List of JSONL lines, or None if not found
+            List of JSONL lines, or None if the object genuinely does not exist.
+
+        Raises:
+            Exception: if the store could not answer. ``None`` means "no log
+                was ever stored for this session" and callers state that to
+                users; an outage must not be able to produce it (#1065).
         """
         return await _retrieve_session(self, session_id)
 
