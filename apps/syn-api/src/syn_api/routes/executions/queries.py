@@ -673,7 +673,10 @@ async def list_executions_endpoint(
             )
             for s in domain_summaries
         ],
-        total=len(domain_summaries),
+        # The COLLECTION size, not this page's length (#1119). `total` is the
+        # only field a client can page on, and reporting the page length made
+        # it always say "you have them all".
+        total=await manager.workflow_execution_list.count(status),
         page=page,
         page_size=page_size,
     )
