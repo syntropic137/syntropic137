@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+    from syn_domain.contexts.github.slices.publish_review_verdict import (
+        PullRequestConversation,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
@@ -1153,6 +1156,22 @@ def _get_budget_checker() -> _BudgetChecker | None:
         return None
 
 
+def _get_pr_conversation() -> PullRequestConversation | None:
+    """Return the pull request comment port, or None if the App is unconfigured.
+
+    Without it a completed review still records its verdict as a to-do item; it
+    simply is not published until the App is configured (#1097).
+    """
+    from syn_shared.settings.github import get_github_settings
+
+    if not get_github_settings().is_configured:
+        logger.info("GitHub App not configured; review verdicts will not be published")
+        return None
+    from syn_adapters.github.pr_conversation import GitHubPullRequestConversation
+
+    return GitHubPullRequestConversation()
+
+
 def get_subscription_coordinator(
     realtime_projection: RealTimeProjection | None = None,
     execution_service: _ExecutionService | None = None,
@@ -1180,6 +1199,7 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        pr_conversation=_get_pr_conversation(),
     )
 
 

@@ -8,6 +8,20 @@ type: review
 classification: standard
 requires_repos: true
 
+# WHY pr_number IS DECLARED HERE.
+#
+# The verdict this workflow produces is published as a comment on the pull
+# request it judged (#1097), and the publisher learns which pull request that
+# is from this input - nothing else on the execution records it. A run that
+# omits pr_number still produces its artifact; it just reaches nobody, which is
+# the failure #1097 was opened about. Declaring it puts the field on the
+# dashboard's run form and in `syn workflow view`, so the omission is visible
+# before the run rather than after it.
+inputs:
+  - name: pr_number
+    description: "Number of the pull request under review. The verdict is posted there."
+    required: true
+
 # WHY THIS EXISTS, AND WHY THE BUDGETS LOOK LARGE.
 #
 # The previously installed "PR Review" workflow gave every phase 300 seconds. It

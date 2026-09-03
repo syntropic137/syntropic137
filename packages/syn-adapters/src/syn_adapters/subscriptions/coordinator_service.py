@@ -39,6 +39,9 @@ if TYPE_CHECKING:
         _BudgetChecker,
         _ExecutionService,
     )
+    from syn_domain.contexts.github.slices.publish_review_verdict import (
+        PullRequestConversation,
+    )
 
 logger = get_logger(__name__)
 
@@ -180,6 +183,7 @@ def create_coordinator_service(
     pool: asyncpg.Pool | None = None,
     budget_checker: _BudgetChecker | None = None,
     max_dispatches_per_hour: int = 50,
+    pr_conversation: PullRequestConversation | None = None,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -205,6 +209,8 @@ def create_coordinator_service(
             and read from the actual observability data source (Lane 2).
         budget_checker: Optional budget checker for pre-dispatch cost validation.
         max_dispatches_per_hour: Maximum dispatches per hour (0 to disable).
+        pr_conversation: Optional pull request comment port. None leaves review
+            verdicts recorded but unpublished (GitHub App not configured).
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -236,6 +242,9 @@ def create_coordinator_service(
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
+    )
+    from syn_domain.contexts.github.slices.publish_review_verdict import (
+        ReviewVerdictPublisher,
     )
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
@@ -282,7 +291,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
-    # Create all checkpointed projections (24 total - bumped for #772)
+    # Create all checkpointed projections (25 total - bumped for #1097)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -301,6 +310,8 @@ def create_coordinator_service(
                 max_dispatches_per_hour=max_dispatches_per_hour,
             ),
             TriggerQueryProjection(projection_store),
+            # Review verdicts reach the pull request they judged (#1097)
+            ReviewVerdictPublisher(projection_store, conversation=pr_conversation),
             # --- Agent sessions context ---
             SessionListProjection(projection_store),
             # --- Artifacts context ---

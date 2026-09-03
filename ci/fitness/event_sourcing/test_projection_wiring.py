@@ -60,6 +60,9 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (
         WorkflowDispatchProjection,
     )
+    from syn_domain.contexts.github.slices.publish_review_verdict import (
+        ReviewVerdictPublisher,
+    )
     from syn_domain.contexts.github.slices.trigger_history.projection import (
         TriggerHistoryProjection,
     )
@@ -131,6 +134,8 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         # GitHub — dispatch and trigger index
         WorkflowDispatchProjection(execution_service=None, store=dummy),
         TriggerQueryProjection(dummy),
+        # Review verdicts published to the pull request (#1097)
+        ReviewVerdictPublisher(dummy),
         # Organization — adapted namespace projections
         OrganizationListAdapter(OrganizationProjection(dummy)),
         SystemListAdapter(SystemProjection(dummy)),
@@ -155,7 +160,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 24
+_EXPECTED_COUNT = 25
 
 
 # ---------------------------------------------------------------------------
