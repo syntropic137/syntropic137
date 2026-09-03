@@ -175,6 +175,70 @@ class _CallState:
     has_duration: bool = False
 
 
+class _ToolStatsAccumulator:
+    """Folds tool operation rows into per-tool totals, counting each call once.
+
+    Rows arrive one per event, so a single logical call can show up more than
+    once - a start and its completion, or the same row replayed. Two rules
+    keep the totals honest, and `add` applies them in order: `_call_for`
+    decides which call a row belongs to, counting a call the first time its
+    identity appears; `_fold` then adds that row's outcome and duration to
+    the call, each at most once however many rows repeat them.
+
+    `totals` is keyed by tool name in first-seen order, each value holding
+    `call_count`, `success_count`, `error_count` and `total_duration_ms`.
+    """
+
+    def __init__(self) -> None:
+        self.totals: dict[str, dict[str, int | float]] = {}
+        self._calls: dict[str, _CallState] = {}
+
+    def add(self, op: AdapterToolOperation) -> None:
+        """Apply one operation row to the totals."""
+        self._fold(op, self._call_for(op))
+
+    def _call_for(self, op: AdapterToolOperation) -> _CallState:
+        """Return the call `op` belongs to, counting it if this is its first row.
+
+        Identity is `tool_use_id`, falling back to `observation_id` when the
+        row carries none; `_accumulate_tool_stats` explains why.
+        """
+        name = op.tool_name or "unknown"
+        identity = op.tool_use_id or op.observation_id
+
+        call = self._calls.get(identity)
+        if call is None:
+            call = _CallState(tool_name=name)
+            self._calls[identity] = call
+            self._stats_for(name)["call_count"] += 1
+        return call
+
+    def _fold(self, op: AdapterToolOperation, call: _CallState) -> None:
+        """Add `op`'s outcome and duration to `call`, each at most once.
+
+        A call is counted as a success or an error once, and its duration
+        added once, no matter how many of its rows carry either.
+        """
+        stats = self._stats_for(call.tool_name)
+
+        if not call.has_success and op.success is not None:
+            call.has_success = True
+            if op.success:
+                stats["success_count"] += 1
+            else:
+                stats["error_count"] += 1
+
+        if not call.has_duration and op.duration_ms is not None:
+            call.has_duration = True
+            stats["total_duration_ms"] += op.duration_ms
+
+    def _stats_for(self, name: str) -> dict[str, int | float]:
+        return self.totals.setdefault(
+            name,
+            {"call_count": 0, "success_count": 0, "error_count": 0, "total_duration_ms": 0.0},
+        )
+
+
 def _accumulate_tool_stats(
     operations: list[AdapterToolOperation],
 ) -> dict[str, dict[str, int | float]]:
@@ -247,37 +311,10 @@ def _accumulate_tool_stats(
     fails if an unidentified tool_execution pair ever starts being produced,
     which is the point at which this paragraph would need revisiting.
     """
-    tool_stats: dict[str, dict[str, int | float]] = {}
-    calls: dict[str, _CallState] = {}
-
-    def stats_for(name: str) -> dict[str, int | float]:
-        return tool_stats.setdefault(
-            name,
-            {"call_count": 0, "success_count": 0, "error_count": 0, "total_duration_ms": 0.0},
-        )
-
+    accumulator = _ToolStatsAccumulator()
     for op in operations:
-        name = op.tool_name or "unknown"
-        identity = op.tool_use_id or op.observation_id
-
-        call = calls.get(identity)
-        if call is None:
-            call = _CallState(tool_name=name)
-            calls[identity] = call
-            stats_for(name)["call_count"] += 1
-
-        if not call.has_success and op.success is not None:
-            call.has_success = True
-            if op.success:
-                stats_for(call.tool_name)["success_count"] += 1
-            else:
-                stats_for(call.tool_name)["error_count"] += 1
-
-        if not call.has_duration and op.duration_ms is not None:
-            call.has_duration = True
-            stats_for(call.tool_name)["total_duration_ms"] += op.duration_ms
-
-    return tool_stats
+        accumulator.add(op)
+    return accumulator.totals
 
 
 async def get_session_tool_summary(
