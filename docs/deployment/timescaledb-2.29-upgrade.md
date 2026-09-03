@@ -203,7 +203,7 @@ Then re-attempt the upgrade rather than leaving the platform on 16.11.
 
 ## Rehearsed
 
-Forward path only, against a throwaway restore of real `agent_events` data
+Forward path, against a throwaway restore of real `agent_events` data
 (1151 rows, 1 hypertable, 1 compressed chunk) on 2026-09-03:
 
 | | before | after |
@@ -218,6 +218,25 @@ Afterwards, reads against compressed chunks returned, an insert succeeded, and
 `decompress_chunk()` ran cleanly. No data loss, no policy loss, no manual chunk
 repair.
 
-**The rollback path has not been rehearsed.** That is the largest untested risk
-in this document. Rehearse a restore from the dump into a fresh volume before
-relying on the rollback section under pressure.
+The rollback path was then rehearsed separately, on 2026-09-03, using the real
+production dump (17 MB, 283 objects, validated with `pg_restore --list`)
+restored into a **fresh volume** on a clean 2.25.1-pg16 container via the
+documented `timescaledb_pre_restore()` / `pg_restore` / `timescaledb_post_restore()`
+sequence, without parallel `-j`:
+
+| | production | restored |
+|---|---|---|
+| PostgreSQL / extension | 16.11 / 2.25.1 | 16.11 / 2.25.1 |
+| hypertables | 1 | 1 |
+| compressed chunks | 9 | 9 |
+| `public.events` | 7980 | 7980 |
+| `public.agent_events` | 86855 | **86837** |
+| policy jobs | 3 | 3 |
+| continuous aggregates | 0 | 0 |
+
+Zero restore errors. Note the 18-row gap in `agent_events`, and do not dismiss
+it: the dump was taken while the consumers were still writing, so it was
+already stale relative to a read taken a minute later. That is exactly why
+step 2 stops the writers before step 3 backs up. A backup taken with writers
+live is a rollback target that silently loses whatever was written after the
+snapshot.
