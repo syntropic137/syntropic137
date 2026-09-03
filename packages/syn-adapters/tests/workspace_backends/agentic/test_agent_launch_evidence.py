@@ -218,6 +218,58 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
     assert lines == []
 
 
+async def test_a_missing_agent_binary_is_not_evidence_that_an_agent_ran(
+    fake_docker: Callable[[str], _FakeDocker],
+) -> None:
+    """The failure the announcement itself used to manufacture (#1065).
+
+    Everything about the transport succeeds here: the daemon accepts the exec
+    and a shell really runs inside the container. The only thing that never
+    happens is the agent - ``exec`` cannot replace the shell with a binary that
+    is not there. Announcing before ``exec`` made this byte-identical to a real
+    launch, so the exact case the marker exists to detect was the one it could
+    not see, and the API would tell a user their session ran and lost its log.
+    """
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    missing = "/definitely/missing/claude"
+
+    launched, lines = await _launched_and_lines(docker.adapter, [missing, "-p", "hello"])
+
+    assert docker.client_ran, "the fake client must really run, or this test cannot fail"
+    assert any(missing in line for line in lines), (
+        f"the shell must really have tried and failed to exec {missing}; without its "
+        f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
+    )
+    assert launched is False
+
+
+async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
+    fake_docker: Callable[[str], _FakeDocker],
+    tmp_path: Path,
+) -> None:
+    """The same lie told by a file that exists, which resolution alone misses.
+
+    A name that resolves is not a name that runs, and the shells disagree about
+    which is which: dash hands back any path containing a slash unchecked, bash
+    rejects it. A guard that only asked whether the name resolved would
+    therefore pass this case or not depending on which /bin/sh the workspace
+    image happens to ship, while ``exec`` fails 126 either way.
+    """
+    agent = tmp_path / "claude-without-the-bit"
+    agent.write_text("#!/bin/sh\necho 'never reached'\n")
+    agent.chmod(0o644)
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+
+    launched, lines = await _launched_and_lines(docker.adapter, [str(agent), "-p", "hello"])
+
+    assert docker.client_ran, "the fake client must really run, or this test cannot fail"
+    assert any(str(agent) in line for line in lines), (
+        f"the shell must really have tried and failed to exec {agent}; without its "
+        f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
+    )
+    assert launched is False
+
+
 def _announced_marker(exec_argv: list[str]) -> str:
     """The marker the adapter really put on the wire, read back out of the argv.
 

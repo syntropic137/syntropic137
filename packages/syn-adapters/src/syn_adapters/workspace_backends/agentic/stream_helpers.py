@@ -17,17 +17,43 @@ logger = logging.getLogger(__name__)
 
 #: Announce the launch from inside the container, then become the agent.
 #:
-#: This is the only thing in the system that can emit the marker: reaching it
-#: requires the daemon to have accepted the exec and created a process in the
-#: container, so a client that failed short of that - no such container, exec
-#: refused - cannot produce it however it fails. That is the whole point;
-#: `docker exec` merges its own diagnostics into this same stdout pipe, so
-#: nothing else arriving on it distinguishes the two (#1065).
+#: Two separate things must be true before the marker may be printed, and the
+#: script establishes both, in order.
+#:
+#: A process exists in the container at all. Reaching this script requires the
+#: daemon to have accepted the exec, so a client that failed short of that - no
+#: such container, exec refused - cannot produce the marker however it fails.
+#: That is load-bearing because `docker exec` merges its own diagnostics into
+#: this same stdout pipe, so nothing else arriving on it tells the two apart.
+#:
+#: The agent argv can become that process. ``exec`` replaces the shell only if
+#: the target resolves and is executable; when it does not, the shell carries on
+#: and exits 126/127 - having already printed the marker, which made a missing
+#: or non-executable agent binary byte-identical to a real launch, the one
+#: distinction the marker exists to draw (#1065). So the announcement is guarded
+#: by the questions the kernel is about to ask: does the name resolve, is it a
+#: regular file, is it executable. Both halves of the guard earn their place -
+#: dash hands back any path containing a slash unchecked where bash rejects it,
+#: so resolution alone would pass a non-executable file on some images and not
+#: others. A failure still reaches the stream as the shell's own diagnostic;
+#: only the false claim is withheld.
+#:
+#: This is a predicate, not a proof: an executable whose interpreter or loader
+#: is missing satisfies it and fails ``exec`` anyway. That residue errs the safe
+#: way - it over-reports a launch, which merely withholds the "never started"
+#: claim, where under-reporting would assert it falsely. Nothing portable does
+#: better. A shell cannot observe its own successful ``exec``, and the one
+#: after-the-fact signal that looks like it could - an EXIT trap, which runs
+#: only when ``exec`` failed - is honoured by dash and skipped by bash, so it
+#: would silently do nothing depending on which /bin/sh the image ships.
 #:
 #: ``exec`` then replaces the shell, so the agent inherits the pid the timeout
 #: path signals and the argv it was given. The marker is passed as an argument
 #: rather than interpolated, which keeps this script a constant.
-_ANNOUNCE_THEN_EXEC = 'printf "%s\\n" "$1"; shift; exec "$@"'
+_ANNOUNCE_RUNNABLE_THEN_EXEC = (
+    'agent=$(command -v "$2") && [ -f "$agent" ] && [ -x "$agent" ] '
+    '&& printf "%s\\n" "$1"; shift; exec "$@"'
+)
 
 
 def _build_exec_command(
@@ -36,13 +62,15 @@ def _build_exec_command(
     working_directory: str | None,
     environment: dict[str, str] | None,
 ) -> list[str]:
-    """Build the docker exec command list, wrapped so the process announces itself."""
+    """Build the docker exec command list, wrapped so a startable agent announces itself."""
     exec_cmd = ["docker", "exec", "-i", "-w", working_directory or "/workspace"]
     if environment:
         for key, value in environment.items():
             exec_cmd.extend(["-e", f"{key}={value}"])
     exec_cmd.append(container_name)
-    exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command])
+    exec_cmd.extend(
+        ["sh", "-c", _ANNOUNCE_RUNNABLE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command]
+    )
     return exec_cmd
 
 

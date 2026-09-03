@@ -41,6 +41,14 @@ emits this line first, and nothing else in the stream means a launch.
 ``observing_launch`` consumes it, so it never reaches a stream processor. An
 agent that echoed it would only be attesting its own existence, which is why
 no escaping or nonce is needed.
+
+The obligation runs the other way too, and it is the harder half: a transport
+must not emit this line for an agent it then fails to start. "Immediately
+before it execs" is not a description of the ordering, it is the whole claim -
+a wrapper that announces and then discovers it cannot run the agent has said
+something false, and said it in the one vocabulary this system treats as
+proof (#1065). How a transport keeps that promise is its own business; that it
+keeps it is the contract.
 """
 
 
