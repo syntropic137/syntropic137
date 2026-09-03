@@ -1,10 +1,13 @@
 """Tests for syn_api.routes.executions — list, get, get_detail, list_active."""
 
 import os
+from dataclasses import dataclass, field
+from decimal import Decimal
 
 import pytest
 
 from syn_api.types import Err, Ok
+from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -175,3 +178,111 @@ async def test_list_active():
     assert len(result.value) == 1
     assert result.value[0].workflow_execution_id == "exec-running"
     assert result.value[0].status == "running"
+
+
+# -- Regression tests for #1077 (list endpoint N+1 / duplicate enrichment) ----
+
+
+@dataclass
+class _CountingExecutionCostProjection:
+    """Stands in for the real execution_cost projection.
+
+    ``get_execution_cost`` raises so any code path that still loops per
+    execution id (the pre-#1077 behavior) fails loudly instead of silently
+    working via the slow path. ``list_costs_for_ids`` records every call it
+    receives so a test can assert it was called exactly once, covering every
+    requested id.
+    """
+
+    costs_by_id: dict[str, ExecutionCost]
+    list_calls: list[list[str]] = field(default_factory=list)
+
+    async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
+        raise AssertionError(
+            f"get_execution_cost({execution_id!r}) was called - the list path "
+            "must use the batched list_costs_for_ids instead of a per-execution "
+            "loop (issue #1077)"
+        )
+
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
+        self.list_calls.append(list(execution_ids))
+        return {eid: c for eid, c in self.costs_by_id.items() if eid in execution_ids}
+
+
+@dataclass
+class _StubProjectionManagerForEnrichment:
+    execution_cost: _CountingExecutionCostProjection
+
+
+async def test_load_execution_enrichment_batches_across_ids():
+    """Regression for #1077: enrichment must come from one batched call to
+    ``list_costs_for_ids`` covering every requested id, not one
+    ``get_execution_cost`` round trip per execution (up to ~6 sequential
+    queries each, per the issue's own investigation).
+    """
+    from syn_api.routes.executions.queries import _load_execution_enrichment
+
+    costs = {
+        "exec-a": ExecutionCost(
+            execution_id="exec-a",
+            total_cost_usd=Decimal("1.50"),
+            input_tokens=5,
+            output_tokens=5,
+        ),
+        "exec-b": ExecutionCost(
+            execution_id="exec-b",
+            total_cost_usd=Decimal("2.50"),
+            input_tokens=7,
+            output_tokens=3,
+        ),
+    }
+    stub = _CountingExecutionCostProjection(costs_by_id=costs)
+    manager = _StubProjectionManagerForEnrichment(execution_cost=stub)
+
+    enrichment = await _load_execution_enrichment(
+        manager,  # pyright: ignore[reportArgumentType] - structural stub
+        ["exec-a", "exec-b"],
+    )
+
+    assert len(stub.list_calls) == 1, (
+        f"expected exactly one batched call for both ids, got {len(stub.list_calls)}: "
+        f"{stub.list_calls}"
+    )
+    assert set(stub.list_calls[0]) == {"exec-a", "exec-b"}
+    assert enrichment["exec-a"].total_cost_usd == Decimal("1.50")
+    assert enrichment["exec-b"].total_cost_usd == Decimal("2.50")
+
+
+async def test_list_executions_endpoint_loads_enrichment_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for #1077: ``list_executions_endpoint`` fetched enrichment
+    for the same execution ids twice in one request - once inside
+    ``list_()``, once again directly - doubling every downstream cost
+    round trip. This drives the real endpoint end-to-end and counts
+    invocations of the enrichment loader: it must be called once per
+    request, not once per page plus once more.
+    """
+    from syn_api.routes.executions import queries as executions_queries
+
+    await _seed_execution("exec-once-a", "wf-1", "Workflow A")
+    await _seed_execution("exec-once-b", "wf-1", "Workflow A")
+
+    calls: list[list[str]] = []
+    original = executions_queries._load_execution_enrichment
+
+    async def _counting_enrichment(manager: object, execution_ids: list[str]) -> object:
+        calls.append(list(execution_ids))
+        return await original(manager, execution_ids)
+
+    monkeypatch.setattr(executions_queries, "_load_execution_enrichment", _counting_enrichment)
+
+    response = await executions_queries.list_executions_endpoint(status=None, page=1, page_size=50)
+
+    assert len(calls) == 1, (
+        f"expected exactly one enrichment fetch for the whole request, got {len(calls)}: {calls}"
+    )
+    assert {e.workflow_execution_id for e in response.executions} == {
+        "exec-once-a",
+        "exec-once-b",
+    }

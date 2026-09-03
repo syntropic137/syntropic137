@@ -293,6 +293,33 @@ class ExecutionCostProjection:
         query = TimescaleExecutionCostQuery(self._pool)
         return await query.calculate(execution_id)
 
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
+        """Batch cost lookup for multiple executions, keyed by execution id.
+
+        Issues a small fixed number of TimescaleDB queries for the whole
+        list via ``ExecutionCostQueryService.list_for_ids``, instead of the
+        ~6 sequential round trips per id that calling ``get_execution_cost``
+        in a loop costs (issue #1077). Falls back to the legacy per-id path
+        when no TimescaleDB pool is configured (offline/test environments).
+        """
+        if not execution_ids:
+            return {}
+        if self._pool is not None:
+            from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+                ExecutionCostQueryService,
+            )
+
+            query_svc = ExecutionCostQueryService(self._pool)
+            costs = await query_svc.list_for_ids(execution_ids)
+            return {c.execution_id: c for c in costs}
+
+        results: dict[str, ExecutionCost] = {}
+        for execution_id in execution_ids:
+            cost = await self.get_execution_cost(execution_id)
+            if cost is not None:
+                results[execution_id] = cost
+        return results
+
     async def get_all(self) -> list[ExecutionCost]:
         """Get all execution costs.
 
