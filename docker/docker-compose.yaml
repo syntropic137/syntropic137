@@ -161,6 +161,100 @@ services:
       # the settings layer can reject the second instead of silently
       # substituting the default image.
       SYN_WORKSPACE_DOCKER_IMAGE:
+      # --- Every other documented setting, forwarded from the operator's .env
+      #
+      # Compose puts a variable into a container ONLY if the service names it.
+      # .env.example is generated from the Settings classes, so it offers the
+      # operator ~100 settings; this block was hand-curated and listed ~27 of
+      # them. The other ~73 could be set, look documented, and do nothing.
+      #
+      # That is #1101: SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true was set in a
+      # selfhost .env, the API was restarted, and provisioning still refused
+      # the image the switch exists to allow. `docker exec syn137-api env |
+      # grep SYN_IMAGE_VERIFY` printed nothing. No error, no warning - the
+      # operator turned a security switch on and it stayed off.
+      #
+      # Bare `KEY:` for the same reason as SYN_WORKSPACE_DOCKER_IMAGE above:
+      # an unresolved bare key is removed entirely, so an unset variable
+      # leaves the Settings default in place rather than overriding it with
+      # an empty string.
+      #
+      # Do NOT curate this list by hand. `just check-env-forwarding` compares
+      # it against .env.example on every preflight; to drop a name, add it to
+      # HOST_ONLY in scripts/check_env_forwarding.py WITH A REASON.
+      OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV:
+      APP_NAME:
+      DATABASE_POOL_SIZE:
+      DATABASE_POOL_OVERFLOW:
+      EVENT_STORE_TENANT_ID:
+      EVENT_STORE_TIMEOUT_SECONDS:
+      EVENT_STORE_URL:
+      DEFAULT_AGENT_TIMEOUT_SECONDS:
+      DEFAULT_MAX_TOKENS:
+      ARTIFACT_STORAGE_TYPE:
+      S3_BUCKET_NAME:
+      S3_ENDPOINT_URL:
+      S3_ACCESS_KEY_ID:
+      S3_SECRET_ACCESS_KEY:
+      DEBUG:
+      ESP_EVENT_STORE_DB_URL:
+      SETUP_PHASE_TIMEOUT_SECONDS:
+      COLLECTOR_URL:
+      COLLECTOR_API_KEY:
+      HOOK_BACKEND_URL:
+      HOOK_BATCH_SIZE:
+      HOOK_FLUSH_INTERVAL_SECONDS:
+      DASHBOARD_PORT:
+      DASHBOARD_HOST:
+      DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED:
+      DEV__WORKFLOW_FAIL_ON_SKILL_NOT_REGISTERED:
+      SYN_WORKSPACE_ISOLATION_BACKEND:
+      SYN_WORKSPACE_POOL_SIZE:
+      SYN_WORKSPACE_MAX_CONCURRENT:
+      SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW:
+      SYN_WORKSPACE_CLOUD_PROVIDER:
+      SYN_WORKSPACE_CLOUD_API_KEY:
+      SYN_WORKSPACE_CLOUD_TEMPLATE:
+      SYN_WORKSPACE_DOCKER_RUNTIME:
+      SYN_WORKSPACE_DOCKER_NETWORK:
+      SYN_IMAGE_VERIFY_ENABLED:
+      SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP:
+      SYN_IMAGE_VERIFY_CERTIFICATE_OIDC_ISSUER:
+      SYN_IMAGE_VERIFY_NEW_BUNDLE_FORMAT:
+      SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES:
+      SYN_IMAGE_VERIFY_COSIGN_PATH:
+      SYN_IMAGE_VERIFY_TIMEOUT_SECONDS:
+      SYN_SECURITY_ALLOW_NETWORK:
+      SYN_SECURITY_ALLOWED_HOSTS:
+      SYN_SECURITY_READ_ONLY_ROOT:
+      SYN_SECURITY_MAX_WORKSPACE_SIZE:
+      SYN_SECURITY_MAX_MEMORY:
+      SYN_SECURITY_MAX_CPU:
+      SYN_SECURITY_MAX_PIDS:
+      SYN_SECURITY_MAX_EXECUTION_TIME:
+      SYN_GIT_USER_NAME:
+      SYN_GIT_USER_EMAIL:
+      SYN_GIT_TOKEN:
+      SYN_STORAGE_LOCAL_PATH:
+      SYN_STORAGE_BUCKET_NAME:
+      SYN_STORAGE_CLAUDE_PLUGIN_BUCKET_NAME:
+      SYN_STORAGE_SKILL_BUCKET_NAME:
+      SYN_STORAGE_MINIO_SECRET_KEY:
+      SYN_STORAGE_MAX_FILE_SIZE_MB:
+      SYN_STORAGE_PRESIGNED_URL_EXPIRY_SECONDS:
+      SYN_SESSION_STORE_READ_TOKEN:
+      SYN_SESSION_STORE_DEPLOYMENT:
+      SYN_SESSION_STORE_PROVIDER:
+      SYN_SESSION_STORE_SPOOL_DIR:
+      SYN_LOGGING_LEVEL:
+      SYN_LOGGING_FORMAT:
+      SYN_LOGGING_LOG_COMMANDS:
+      SYN_LOGGING_LOG_TOOL_CALLS:
+      SYN_LOGGING_LOG_API_CALLS:
+      SYN_LOGGING_REDACT_SECRETS:
+      SYN_LOGGING_REDACTION_PATTERNS:
+      SYN_LOGGING_LOG_FILE_PATH:
+      SYN_LOGGING_MAX_LOG_SIZE_MB:
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:

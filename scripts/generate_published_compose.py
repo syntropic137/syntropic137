@@ -90,7 +90,7 @@ FILE_HEADER = """\
 # =============================================================================
 
 
-def _env_to_dict(env: dict | list | None) -> dict[str, str | None]:
+def env_to_dict(env: dict | list | None) -> dict[str, str | None]:
     """Normalize environment (list or dict form) to dict.
 
     A ``None`` value is PRESERVED, not coerced to "". Compose treats a bare
@@ -127,8 +127,8 @@ def _deep_merge(base: dict, overlay: dict) -> dict:
 
 def _merge_service(base_svc: dict, overlay_svc: dict) -> dict:
     """Merge a base service with its overlay, normalizing environment."""
-    base_env = _env_to_dict(base_svc.get("environment"))
-    overlay_env = _env_to_dict(overlay_svc.get("environment"))
+    base_env = env_to_dict(base_svc.get("environment"))
+    overlay_env = env_to_dict(overlay_svc.get("environment"))
 
     merged = _deep_merge(base_svc, overlay_svc)
 
@@ -298,7 +298,7 @@ def _add_cloudflared(services: dict) -> None:
     # Only depend on gateway — api is a transitive dependency
     svc["depends_on"] = {"gateway": {"condition": "service_healthy"}}
     # Normalize env var to use :- default syntax
-    env = _env_to_dict(svc.get("environment"))
+    env = env_to_dict(svc.get("environment"))
     env["TUNNEL_TOKEN"] = "${CLOUDFLARE_TUNNEL_TOKEN:-}"
     svc["environment"] = env
     # Security hardening
@@ -375,7 +375,7 @@ def generate() -> dict:
 
     # Gateway environment: selfhost overlay uses list form, normalize to dict
     if "gateway" in merged_svcs:
-        env = _env_to_dict(merged_svcs["gateway"].get("environment"))
+        env = env_to_dict(merged_svcs["gateway"].get("environment"))
         if env:
             merged_svcs["gateway"]["environment"] = env
 

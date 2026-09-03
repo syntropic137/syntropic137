@@ -1023,7 +1023,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: check-agent-docs check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: check-agent-docs check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-env-forwarding check-plugin-schemas check-workflows
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1824,6 +1824,15 @@ check-compose:
 # the release actually supports.
 check-plugin-schemas:
     uv run python scripts/export_plugin_schemas.py --check
+
+# A documented setting the compose file does not forward is a setting an
+# operator can set, restart, and watch do nothing - no error, no warning. That
+# is #1101, where SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES was set on a selfhost box
+# and the security switch it governs stayed off. check-env-example above proves
+# .env.example matches the Settings classes; this proves the compose file
+# matches .env.example. Neither implies the other.
+check-env-forwarding:
+    @uv run python scripts/check_env_forwarding.py
 
 # .env.example is generated from the Settings classes. Drift means the file
 # operators copy documents values the code no longer uses - which is how a stale
