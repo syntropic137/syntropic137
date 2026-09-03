@@ -994,7 +994,10 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run architecture-fitness validate .
+    {{_aps_bin}} run architecture-fitness validate . --report .topology/fitness-report.json
+    # A waiver whose debt was already paid off still grants its headroom, and the
+    # tool reports those but exits 0 - so they ride along in green runs (#1084).
+    @uv run python scripts/check_stale_exceptions.py .topology/fitness-report.json
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
@@ -1020,10 +1023,70 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: check-agent-docs check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
+
+# The subset of `preflight` that RUNS inside an agent workspace container.
+#
+# WHY THIS EXISTS (issue #1109). The workspace image ships `just`, `uv` and
+# `node` and nothing else. Agents were told to gate their work on `just qa-ci`,
+# which cannot pass there: seven of preflight's gates need a binary the image
+# does not have, so every implement run failed at its own gate and opened no
+# PR. A gate an agent cannot run is not a gate, it is a wall.
+#
+# The split is MEASURED, not assumed. Every recipe below was run inside
+# omni-fable51:2.1.258 on a fresh clone with the public submodules initialised
+# and `uv sync --frozen` done (2026-09-03):
+#
+#   in this list                       exit 0
+#   check-submodules                   exit 1    private submodules, no token
+#   vsa-validate                       exit 127  no `vsa` (Rust, built in CI)
+#   fitness                            exit 127  no `cargo` (aps-build)
+#   codegen-check                      exit 127  no `pnpm`
+#   check-compose-overlays             exit 127  no docker CLI
+#   check-default-workspace-image      exit 127  no docker CLI
+#   check-pinned-image-channels        exit 1    no registry credentials
+#
+# Re-measure before moving a recipe across the line. "It should work" is how
+# a gate ends up passing because it never ran.
+#
+# THE COMPOSITION: `preflight` is defined as this list PLUS the host-only gates,
+# so a static gate added here is in both by construction. That direction is
+# deliberate - the failure mode worth preventing is a gate that runs in neither.
+# A gate that genuinely needs host tooling goes in `preflight`'s own list above,
+# where the comment table says why.
+#
+# WHAT THIS DOES NOT GUARANTEE. Composition only helps a gate that someone
+# already added to one of these lists. The mechanical guard meant to catch a
+# gate added to NEITHER - `test_every_declared_check_is_wired_into_preflight` -
+# discovers recipes by NAME (`check-*` / `*-check`), so a gate named anything
+# else escapes it entirely; `lint`, `typecheck` and `validate-domain-events`
+# are real gates that match neither pattern and are wired here by hand. That
+# hole is #1125, and it is stated here rather than left implied, because a
+# poka-yoke believed to be airtight is worse than one known to be partial.
+#
+# This is NOT a lighter standard. CI still runs everything; an agent that opens
+# a PR having passed this can still be failed by vsa or fitness on GitHub, and
+# that is the correct division of labour - CI has the toolchain, the workspace
+# does not.
+# Detect endpoint drift between the code and the committed OpenAPI spec.
+#
+# CI ran this as a raw `run:` step inside `python-qa`, marked BLOCKING, with no
+# `just` target at all - so it was reachable from no local command, and
+# `check_ci_parity.py` could not see it because that script compares JOBS, not
+# the steps inside them (#1124). It is portable, so it belongs in the agent
+# gate, not only in preflight.
+check-openapi-drift:
+    @uv run python scripts/check_openapi_drift.py
+
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift
+    @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
+    @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
+    @echo "   codegen-check, check-submodules, check-compose-overlays,"
+    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
 #

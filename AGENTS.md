@@ -512,6 +512,13 @@ just qa-ci           # Every PR-gating CI JOB that CAN run locally, using the
 just preflight       # The static half only (~1m). Faster inner loop; what the
                      # pre-push hook runs. A green preflight does NOT mean CI
                      # will pass - it runs no tests and no builds.
+
+just preflight-agent # The subset of preflight that runs INSIDE an agent
+                     # workspace container. Use this one only there: the image
+                     # ships just, uv and node and nothing else, so vsa,
+                     # cargo, pnpm, docker and registry credentials are all
+                     # absent and seven gates cannot run at all (#1109). On a
+                     # dev machine run the full `just preflight` instead.
 ```
 
 `scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that
