@@ -81,7 +81,7 @@ describe('useSessionData', () => {
       vi.useRealTimers()
     })
 
-    it('pauses polling while the tab is hidden (usePolling had no visibility handling)', async () => {
+    it('pauses while hidden and resumes with an immediate refetch when the tab becomes visible again', async () => {
       mockGetSession.mockResolvedValue(makeSession({ status: 'running' }) as never)
 
       const { result } = renderHook(() => useSessionData('sess-1'))
@@ -97,17 +97,40 @@ describe('useSessionData', () => {
 
       await vi.advanceTimersByTimeAsync(6000)
       expect(mockGetSession).toHaveBeenCalledTimes(1)
+
+      // Drive the actual hidden -> visible cycle via the real event the
+      // production listener subscribes to, rather than stopping at "hidden".
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.waitFor(() => expect(mockGetSession).toHaveBeenCalledTimes(2))
+
+      // And prove normal interval polling resumed too, not just the one-off
+      // resume fetch.
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(mockGetSession).toHaveBeenCalledTimes(3)
     })
 
-    it('stops polling once the session reaches a terminal status', async () => {
-      mockGetSession.mockResolvedValue(makeSession({ status: 'completed' }) as never)
+    it('stops polling once a running session actually transitions to terminal while mounted', async () => {
+      mockGetSession.mockResolvedValue(makeSession({ status: 'running' }) as never)
 
       const { result } = renderHook(() => useSessionData('sess-1'))
-      await vi.waitFor(() => expect(result.current.session?.status).toBe('completed'))
+      await vi.waitFor(() => expect(result.current.session?.status).toBe('running'))
       expect(mockGetSession).toHaveBeenCalledTimes(1)
 
-      await vi.advanceTimersByTimeAsync(6000)
-      expect(mockGetSession).toHaveBeenCalledTimes(1)
+      // Drive the real running -> terminal transition: the next poll tick
+      // resolves with a terminal status while the hook is still mounted.
+      mockGetSession.mockResolvedValue(makeSession({ status: 'completed' }) as never)
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.waitFor(() => expect(result.current.session?.status).toBe('completed'))
+      expect(mockGetSession).toHaveBeenCalledTimes(2)
+
+      // Now prove polling actually stopped, rather than merely not having
+      // started: further timer advances must not issue another request.
+      await vi.advanceTimersByTimeAsync(9000)
+      expect(mockGetSession).toHaveBeenCalledTimes(2)
     })
   })
 })
