@@ -317,3 +317,43 @@ async def test_cancel_with_no_reason_still_interrupts() -> None:
         "a cancel without a reason must still request interrupt (#918)"
     )
     assert result.interrupt_reason is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_turn_failed_reports_what_codex_said_not_the_missing_turn() -> None:
+    """Recorded from production (#1116).
+
+    A `verify` phase died and the platform reported "codex stream ended without
+    a terminal turn.completed event" while the stream's own last two lines said
+    the prompt had been refused by a content classifier. True, and unactionable:
+    it names the symptom and hides the cause. The fixture is that exact tail.
+    """
+    rec = _FIXTURES_DIR / "codex_turn_failed.jsonl"
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    result = await processor.process_stream(_lines(rec), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "flagged for possible cybersecurity risk" in result.error_reason
+    assert "without a terminal turn.completed" not in result.error_reason
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_turn_failed_reason_is_read_from_the_nested_error_too() -> None:
+    """A stream can end on `turn.failed` alone, with no preceding `error` line.
+
+    The two events spell the message differently - top-level `message` versus
+    `error.message` - so a parser that reads only the shape it happened to see
+    first still fails silently on the other.
+    """
+    rec = _FIXTURES_DIR / "codex_turn_failed_nested_only.jsonl"
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    result = await processor.process_stream(_lines(rec), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "stream disconnected before completion" in result.error_reason

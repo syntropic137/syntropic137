@@ -200,12 +200,20 @@ class _CodexUsage(TypedDict, total=False):
     reasoning_output_tokens: int
 
 
+class _CodexError(TypedDict, total=False):
+    """The ``error`` block on a codex ``turn.failed`` event."""
+
+    message: str
+
+
 class _CodexEvent(TypedDict, total=False):
     """A single codex ``--json`` stream event (typed JSON-boundary shape)."""
 
     type: str
     item: _CodexItem
     usage: _CodexUsage
+    error: _CodexError
+    message: str
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -523,6 +531,8 @@ class CodexStreamProcessor:
             await self._handle_item_completed(event)
         elif event_type == CodexStreamType.TURN_COMPLETED:
             await self._handle_turn_completed(event)
+        elif event_type in (CodexStreamType.TURN_FAILED, CodexStreamType.ERROR):
+            self._note_stream_fault(event)
         elif event_type == CodexStreamType.THREAD_STARTED:
             # Codex announces its OWN session id here, and it is the same id
             # the rollout file on disk is keyed by - verified same-run, not
@@ -542,6 +552,36 @@ class CodexStreamProcessor:
                 self._leader_native_session_id = announced
 
         # "turn.started": no observability call needed.
+
+    def _note_stream_fault(self, event: _CodexEvent) -> None:
+        """Record the reason codex itself gave for ending the turn.
+
+        WHY (issue #1116). When a turn fails, codex says why, in the stream:
+
+            {"type":"error","message":"This content was flagged for possible
+             cybersecurity risk..."}
+            {"type":"turn.failed","error":{"message": <the same text>}}
+
+        Neither event was dispatched, so the stream simply ended with no
+        `turn.completed` and the run was reported as
+        "codex stream ended without a terminal turn.completed event". True, and
+        useless: it names the symptom, hides an operator-actionable cause, and
+        makes an ordinary prompt rejection look like the same unexplained
+        failure as a stream that stopped for reasons nobody has established.
+
+        This is #891 again for a different event type, so it takes the same
+        shape: keep the FIRST fault, because a later generic one must not
+        overwrite the specific one that ended the run.
+        """
+        message = event.get("message")
+        if not message:
+            error = event.get("error")
+            message = error.get("message") if error else None
+        if not message:
+            return
+        reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+        logger.error("Codex turn failed: %s", message)
+        self._error_reason = self._error_reason or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.
