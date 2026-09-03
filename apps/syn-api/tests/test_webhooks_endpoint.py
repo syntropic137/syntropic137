@@ -12,6 +12,11 @@ from syn_api.routes.webhooks.endpoint import (
 )
 from syn_api.types import Err, GitHubError, WebhookResult
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # --- _handle_ping ---
 
 

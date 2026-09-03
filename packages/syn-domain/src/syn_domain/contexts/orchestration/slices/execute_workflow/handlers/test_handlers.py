@@ -22,6 +22,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    MISSING_TERMINAL_TURN_REASON,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
 )
@@ -300,13 +303,14 @@ class TestAgentExecutionHandler:
         handler = AgentExecutionHandler(controller=None)
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0
+        workspace.collect_files = AsyncMock(return_value=[])
         collector = AsyncMock()
         stream_result = StreamResult(
             line_count=1,
             interrupt_requested=False,
             interrupt_reason=None,
             agent_task_result=None,
-            error_reason="missing terminal turn.completed",
+            error_reason=MISSING_TERMINAL_TURN_REASON,
         )
 
         with patch(
@@ -330,6 +334,118 @@ class TestAgentExecutionHandler:
             )
 
         assert result.command.exit_code == 1
+
+    async def _run_broken_codex_stream(
+        self,
+        *,
+        error_reason: str,
+        collect_files: AsyncMock,
+    ) -> int:
+        """Drive a codex phase whose stream carried `error_reason`; return the phase exit code."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        workspace.collect_files = collect_files
+        stream_result = StreamResult(
+            line_count=43,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            error_reason=error_reason,
+        )
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.CodexStreamProcessor"
+        ) as mock_processor:
+            mock_processor.return_value.process_stream = AsyncMock(return_value=stream_result)
+            result = await handler.handle(
+                todo=TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="verify",
+                ),
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["codex", "exec", "--json", "review"],
+                session_id="sess-1",
+                agent_model="gpt-5.6",
+                timeout_seconds=300,
+                collector=AsyncMock(),
+                runner="codex",
+            )
+        return result.command.exit_code
+
+    @pytest.mark.anyio
+    async def test_missing_terminal_turn_completes_when_deliverable_exists(self) -> None:
+        """A finished review is not thrown away for a missing usage event (#1111).
+
+        This is the exact production shape: the codex stream ran 43 lines, wrote
+        artifacts/output/deliverable.md, and then stopped before turn.completed.
+        """
+        exit_code = await self._run_broken_codex_stream(
+            error_reason=MISSING_TERMINAL_TURN_REASON,
+            collect_files=AsyncMock(
+                return_value=[("artifacts/output/deliverable.md", b"## Verdict\nBlockers found.")]
+            ),
+        )
+        assert exit_code == 0
+
+    @pytest.mark.anyio
+    async def test_missing_terminal_turn_fails_when_output_is_empty(self) -> None:
+        """An empty file is not a deliverable - the phase produced nothing."""
+        exit_code = await self._run_broken_codex_stream(
+            error_reason=MISSING_TERMINAL_TURN_REASON,
+            collect_files=AsyncMock(return_value=[("artifacts/output/deliverable.md", b"")]),
+        )
+        assert exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_a_reported_turn_failure_still_fails_even_with_a_deliverable(self) -> None:
+        """A stream that SAID it failed must not be read as one that merely stopped.
+
+        This is the composition the cross-model review of #1112 found. The
+        completion path keys on the missing-terminal-turn reason being EXACTLY
+        the generic one; a genuine `turn.failed` carries its own reason (#1116),
+        so it is excluded. Before that reason existed, every reported failure
+        collapsed into the generic message and this deliverable would have
+        completed a run the stream had explicitly failed.
+
+        The two changes therefore depend on each other, and nothing in the type
+        system says so - which is precisely why this test exists rather than a
+        comment.
+        """
+        exit_code = await self._run_broken_codex_stream(
+            error_reason=(
+                "codex reported: This content was flagged for possible cybersecurity risk."
+            ),
+            collect_files=AsyncMock(
+                return_value=[("artifacts/output/deliverable.md", b"a partial review")]
+            ),
+        )
+        assert exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_auth_fault_still_fails_even_with_a_deliverable(self) -> None:
+        """#891 stays closed: a login failure fails the phase whatever is on disk.
+
+        A stale deliverable left by an earlier phase must never be able to
+        certify a run whose agent never authenticated.
+        """
+        exit_code = await self._run_broken_codex_stream(
+            error_reason="ERROR codex_login::auth::manager: Failed to refresh token: 401",
+            collect_files=AsyncMock(
+                return_value=[("artifacts/output/deliverable.md", b"stale content")]
+            ),
+        )
+        assert exit_code == 1
+
+    @pytest.mark.anyio
+    async def test_unreadable_workspace_fails_closed(self) -> None:
+        """If the deliverable check cannot run, the phase fails as it did before."""
+        exit_code = await self._run_broken_codex_stream(
+            error_reason=MISSING_TERMINAL_TURN_REASON,
+            collect_files=AsyncMock(side_effect=RuntimeError("workspace is gone")),
+        )
+        assert exit_code == 1
 
     @pytest.mark.anyio
     async def test_clean_codex_stream_keeps_zero_exit_and_one_summary(self) -> None:
@@ -609,7 +725,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", ["syntropic137/syntropic137"])
         assert env["CLAUDE_SESSION_ID"] == "sess-1"
         assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
@@ -637,7 +753,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", ["syntropic137/syntropic137"])
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-real-token"
         assert "ANTHROPIC_API_KEY" not in env
 
@@ -663,7 +779,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", ["syntropic137/syntropic137"])
         assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-real-key"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
@@ -692,7 +808,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", ["syntropic137/syntropic137"])
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-pref"
         assert "ANTHROPIC_API_KEY" not in env
 
@@ -704,7 +820,7 @@ class TestBuildAgentEnv:
         workspace = MagicMock()
         workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
-            await _build_agent_env(workspace, "sess-1")
+            await _build_agent_env(workspace, "sess-1", ["syntropic137/syntropic137"])
 
 
 # =========================================================================

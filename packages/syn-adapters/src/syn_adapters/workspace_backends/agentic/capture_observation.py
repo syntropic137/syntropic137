@@ -203,7 +203,7 @@ def build_expectations(
     # looking like it works.
     return CaptureExpectations(
         store_url=settings.url.strip(),
-        deployment=deployment_identity(app_environment),
+        deployment=deployment_identity(app_environment, settings.display_deployment),
         expect_sessions=expect_sessions,
     )
 

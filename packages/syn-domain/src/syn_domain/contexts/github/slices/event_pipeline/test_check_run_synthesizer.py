@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from syn_domain.contexts.github.slices.event_pipeline.check_run_synthesizer import (
     synthesize_check_run_event,
 )
 from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHA
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
 
 
 def _make_pending(
