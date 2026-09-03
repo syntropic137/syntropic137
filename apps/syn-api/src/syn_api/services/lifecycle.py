@@ -27,7 +27,11 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.services.credentials import validate_credentials
-from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
+from syn_api.services.reconciliation import (
+    cleanup_orphaned_containers,
+    reconcile_orphaned_executions,
+    reconcile_orphaned_sessions,
+)
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
@@ -186,6 +190,10 @@ async def _init_degradable_services(state: LifecycleState) -> None:
 
     await reconcile_orphaned_sessions()
     await cleanup_orphaned_containers()
+    # AFTER the reap, deliberately: only once every workspace container is gone
+    # is "this execution is still running" provably false rather than a guess
+    # about a container that might still be finishing (#1120).
+    await reconcile_orphaned_executions()
 
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
