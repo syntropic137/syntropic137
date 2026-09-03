@@ -123,6 +123,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_phases: int = 0
         self._completed_phases: int = 0
         self._current_phase_order: int = 0
+        #: The phase that has started and not yet completed, if any. Needed
+        #: because a failure has to name the phase it failed IN: a
+        #: WorkflowFailedEvent with no failed_phase_id leaves both phase read
+        #: models claiming the phase is still running forever, since
+        #: PhaseCompleted is their only other writer (#1036, #1120).
+        self._running_phase_id: str | None = None
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
@@ -139,6 +145,15 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def workflow_id(self) -> str | None:
         """Get the workflow ID being executed."""
         return self._workflow_id
+
+    @property
+    def running_phase_id(self) -> str | None:
+        """The phase that started and has not completed, or None.
+
+        Rebuilt from the event stream like every other piece of aggregate
+        state, so it survives a restart - which is the case that needs it.
+        """
+        return self._running_phase_id
 
     @property
     def status(self) -> ExecutionStatus:
@@ -239,6 +254,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             error_type=command.error_type,
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
+            failed_phase_duration_seconds=command.failed_phase_duration_seconds,
         )
         self._apply(event)
 
@@ -502,11 +518,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
         """Apply PhaseStartedEvent."""
         self._current_phase_order = _evt(event, "phase_order", 0)
+        self._running_phase_id = _evt(event, "phase_id")
 
     @event_sourcing_handler("PhaseCompleted")
     def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
+        self._running_phase_id = None
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:

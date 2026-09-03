@@ -2,7 +2,9 @@
 # Release Containers — Build, Scan, Sign, Publish to GHCR
 # =============================================================================
 #
-# Trigger: Called by release-create.yml (workflow_call) only.
+# Trigger: Called by release-create.yml (stable releases) and
+#          release-beta.yaml (prereleases cut from main), both via
+#          workflow_call.
 #          Manual dispatch (workflow_dispatch) is available for re-triggering
 #          a failed build — must be run from the `release` branch only.
 #          DO NOT add a release.published trigger — it bypasses the approval gate.
@@ -26,8 +28,10 @@
 name: Release Containers
 
 on:
-  # release.published intentionally omitted — direct release events bypass the
-  # approval gate in release-create.yml. See docs/release-process.md.
+  # release.published intentionally omitted here. A direct release event would
+  # bypass the approval gate in release-create.yml. Prereleases reach this
+  # workflow through release-beta.yaml, which guards on prerelease-only,
+  # version agreement with the tag, and reachability from main.
   workflow_call:
     inputs:
       version:

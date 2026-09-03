@@ -66,3 +66,28 @@ class WorkflowInterruptedError(Exception):
         self.partial_artifact_ids = partial_artifact_ids or []
         self.partial_input_tokens = partial_input_tokens
         self.partial_output_tokens = partial_output_tokens
+
+
+class UnsupportedToolPolicyForProviderError(ValueError):
+    """A phase declared allowed_tools for a provider that cannot honour them.
+
+    The domain-side twin of the command builder's `UnsupportedToolPolicyError`.
+    It exists separately because it fires EARLIER - at the execution boundary,
+    before a workspace is provisioned - and the builder's version cannot be
+    imported here without the domain depending on the composition layer.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        phase_id: str | None,
+        declared: list[str],
+    ) -> None:
+        where = f"Phase '{phase_id}': " if phase_id else ""
+        super().__init__(
+            f"{where}provider '{provider}' cannot honour allowed_tools "
+            f"({', '.join(declared)}). It enforces a filesystem sandbox, not a "
+            "tool vocabulary, so the list would be accepted and never applied. "
+            "Remove allowed_tools, or run this phase on 'claude'."
+        )

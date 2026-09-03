@@ -1226,3 +1226,179 @@ Worth noting separately: the **codex review phase costs about $0.55 in both
 runs**, roughly a sixth of a claude phase, while H3 says it is the phase that
 has caught the most real defects. That is the best cost-to-value ratio in the
 whole workflow, and it is stable across runs.
+
+---
+
+## H9 - does an experiment phase make a plan trustworthy?
+
+**Hypothesis.** Inserting an experiment phase between a reviewed spec and the
+plan produces a plan whose risky unknowns were REDUCED BY MEASUREMENT rather
+than reasoned about, and the extra phases cost less than one wrong
+implementation.
+
+**Method.** `sdlc-research-experiment-plan-v1` (8 phases: research, codex review,
+revise, experiment, revise, plan, codex review, final plan) run on issue #1039
+against this repository. `exec-8d5b14716096`. Compared against
+`sdlc-research-plan-v3` (4 phases) on cost, and against a peer agent working the
+same issue on the host with deployment access.
+
+**Cost.** ~$17.0 for 8 phases, against $2.65 and $3.43 for v3's two arms. Roughly
+5x. Phase 1 alone was $3.88, 27 percent of the run. The two codex phases
+together were $1.09, under 7 percent.
+
+**Result: NOT SUPPORTED, for a reason that is not about the design.**
+
+All five unknowns came back STILL UNKNOWN. Every one required querying the
+running platform, and a workspace cannot reach it: the API sits on a different
+docker network from `agent-net`, the `syn` CLI is absent from the workspace
+image, and no API URL or token is injected. Filed as #1053.
+
+Meanwhile a peer agent working the same issue ON THE HOST answered all five by
+measurement in a fraction of the time and found three classes nobody predicted,
+including four claude phases that historically used tools outside their own
+declaration. The measurements that decided the issue were available; they were
+just not available from inside a phase.
+
+**So the experiment phase is the right idea in the wrong place, for this class
+of question.** It works for questions answerable from the repository. It cannot
+work for questions about the deployment until #1053 changes.
+
+**What earned its cost anyway.** The two codex phases, at 7 percent of spend:
+- rejected the spec's shape and its principal measurement oracle
+- corrected `argument_hint`, which the plan and the handoff had both marked for
+  deletion, by finding its live dashboard consumer. That correction reached the
+  implementing agent before it shipped a deletion
+- on the peer's parallel review, found ghost executions and export laundering
+
+The expensive phases produced documents. The cheap phases produced the findings.
+
+**A methodological failure worth recording, mine.** I reported the experiment
+phase as having fabricated a verified control. It had not. Its citation was
+correct against `main`; I checked a worktree where a peer's commit had already
+changed that exact line, and reported the workflow had invented it. Retracted in
+`d0a75fe9`. The premise check now added to the experiment phase requires naming
+the revision a premise was checked against, because a shared tree moves while a
+workflow runs. That rule came from my error, not the workflow's.
+
+**Structural gap found in the shape itself.** The only review phase sees the
+first-draft spec. The FINAL unknowns list is written afterwards by `revise-spec`,
+so the artifact the experiment phase works from is reviewed by nothing. Recorded
+in the workflow header. The structural fix is a second review; the cheaper
+mitigation is the premise check.
+
+**What to do with v4.** Do not run it again on a deployment question until #1053
+is answered. It remains the right shape for a repository-scoped question, and
+the two codex gates are worth their cost on any shape.
+## H7 - does naming a known-bad fixture produce a validator that actually fails?
+
+**Hypothesis.** A task specified with a known-bad fixture that the deliverable
+must flag produces a plan whose tests actually catch defects. The same task
+specified only in prose produces one that passes vacuously.
+
+**Why this subject.** A validator is the purest case of the failure mode: one
+that finds nothing goes green beautifully and looks finished.
+
+**Method.** Two runs of `sdlc-research-plan-v3` against
+`syntropic137/syntropic137-marketplace`, same repo, same models, same hour.
+Sole variable: whether the task text named
+`plugins/sdlc-trunk/workflows/pr-review/workflow.yaml` and a mechanical
+acceptance criterion.
+
+- A (fixture named): `exec-9d0b22037806`, 4.2M tokens, **$2.65**
+- B (prose only): `exec-fc4a1e5f4bef`, 7.0M tokens, **$3.43**
+
+Predictions were recorded before dispatch, along with the scoring rule, so
+neither could be chosen to fit the outcome.
+
+**Result: NOT SUPPORTED. Three of four predictions refuted.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | A names a specific input the validator must reject | **held** |
+| 2 | B says "add tests" without naming an input that must fail | **refuted** |
+| 3 | B never finds the lowercase-tools defect | **refuted** |
+| 4 | costs land within 20 percent | **refuted** (29 percent on cost, 67 percent on tokens) |
+
+B found the defect unaided and reasoned about vacuity more explicitly than A
+did. Its own words: a check stubbed to `return []` "necessarily still passes
+every test whose expected result is an empty error list - it cannot possibly
+fail such a test". It then labelled each planned test by whether it could catch
+a stub, and cited the existing suite's own
+`test_passes_when_version_bumped` / `test_fails_when_version_not_bumped` pair
+as the illustration. Nobody asked it to do that.
+
+**B also found strictly more than A.** Both traced the defect to its source in
+the contributor docs and the scaffold command, which teach the broken tool
+triple; B cited one line A missed. B additionally went to the core repo, found
+the real `ToolName` enum has no git member (so removing `git` costs no
+capability, since `Bash` already grants shell), and found that
+`packages/syn-shared/src/syn_shared/tools.py` **404s at the pinned
+`v0.25.2`** - which bears directly on the schema-alignment gap the task was
+about. A found neither.
+
+**What the fixture actually bought: nothing but a discount.** It did not
+determine rigour. It saved 29 percent of the cost and 67 percent of the tokens
+that B spent rediscovering what A was handed.
+
+**The confound, stated rather than buried.** Both arms ran the same four-phase
+workflow, which includes a codex cross-model review. In BOTH runs that review
+materially improved the verification section: A's plan records accepting
+"BLOCKER 1" on fixture ordering, B's records "IMPROVEMENT 1" (a proposed
+`grep -rn '\bgit\b'` would also match `git log` inside phase prose and could
+never return zero) and "IMPROVEMENT 2" (a blanket mutation claim that a stubbed
+check would survive). So the anti-vacuity work may belong to the review phase
+rather than to the task specification, and H7 cannot separate them.
+
+**The better question this produced.** Run the same two arms with the
+cross-model review phase removed. If rigour survives without it, the
+specification was carrying it; if it collapses in both arms, the review phase
+is what produces it and H3 is a larger effect than H7 was ever testing.
+
+---
+
+## H10 - can a workflow's own failures be fed back into its prompt?
+
+**Hypothesis.** The prompts are now the dominant variable, not the platform. If
+each cross-model rejection is turned into a rule in the phase that should have
+caught it, the same failure will not recur.
+
+**Method.** Four issues dispatched to `sdlc-implement-v1`, every PR gated by a
+codex read-only pass. When a gate found a defect the phase should have caught,
+the rule went into the phase prompt rather than into the next task's text, and
+the workflow was reinstalled.
+
+**Result: three prompt generations, each fixing what the previous one revealed.**
+
+| generation | rule added | what the next gate found |
+|---|---|---|
+| 1 | none | 3 of 3 PRs blocked. All three: fixtures construct the inputs the author imagined, not what the write path emits |
+| 2 | "which production input shapes can your fixtures not construct?" | the named case gets CONSIDERED but not resolved. #1063 chose behaviour producing `call_count=0, success_count=1` and wrote a test asserting it was correct |
+| 3 | "prefer an invariant to a case list" | in flight |
+
+**The generation-2 finding is the sharp one.** Naming a case does not get it
+right. A test written for a named case can encode the wrong answer and then
+defend it, which is worse than no test: the defect is now pinned by an
+assertion. An invariant cannot be satisfied that way -
+`call_count >= success_count + error_count` fails on the bad output no matter
+which case produced it.
+
+**Strongest evidence the rules are aimed correctly.** #1066's second gate fixed
+all eight reported inputs and left exactly two blockers: a test calling
+`parseSource` directly while the bug lives one level up in the install handler
+(wrong layer), and a case list with no grammar invariant (no invariant). Those
+are precisely the two failure modes generations 2 and 3 name, on a PR written
+before either rule existed.
+
+**Economics, and this is the part worth carrying.** A codex gate costs about
+$0.30. The runs it reviews cost $6 to $9. Four gates produced four distinct
+actionable findings, including two that no amount of mutation testing inside the
+run could have surfaced, because mutating the code cannot reach a layer the
+fixture never touches.
+
+**What was NOT the problem.** Not honesty. Every verify phase ran real mutation
+tests, backed up with `cp` rather than `git checkout`, checked the implementing
+phase's reported SHA against the branch before trusting it, and published the
+gaps it found in its own work. One refused to open a PR at all because
+`codegen-check` would have failed, and said so. The agents graded themselves
+harshly and were still wrong, which is why the gate is load-bearing rather than
+ceremonial.

@@ -18,6 +18,11 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
     InstallOutcome,
 )
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # --- create_workflow_endpoint ---
 
 

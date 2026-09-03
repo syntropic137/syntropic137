@@ -1,0 +1,96 @@
+id: sdlc-pr-review-v1
+name: "SDLC: Verify a PR's central claim (v1)"
+description: >
+  Review a pull request by trying to falsify what it claims, not by reading its
+  diff. Three phases, each in its own workspace: investigate the change, verify
+  its claim end to end with commands, then write the verdict.
+type: review
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS, AND WHY THE BUDGETS LOOK LARGE.
+#
+# The previously installed "PR Review" workflow gave every phase 300 seconds. It
+# had ZERO executions in the platform's history, so nothing ever tested that
+# budget. Its first ever run (exec-8fa79618d42f, 2026-08-30) died in Deep
+# Analysis with exit_code=124 - a timeout - having produced no review (#1035).
+#
+# 300s is a sensible floor for a fetch-and-summarise phase and a trap for an
+# analysis one. Measured on this repo the same week: cross-model reviews of a
+# single PR took 5 to 25 minutes each, and every finding that mattered came from
+# tracing a call path across packages rather than from reading the diff. The
+# validated planning workflow uses 2400s per phase for the same reason.
+#
+# That prior workflow also existed only as database state, with no definition in
+# version control, so its budget could not be reviewed or fixed in a PR. This
+# one is a file.
+#
+# WHY THREE PHASES AND NOT ONE.
+#
+# Same reasoning as the planner: a phase that investigates AND judges starts
+# judging early, because forming a verdict feels like progress. Splitting them
+# means the verify phase begins from a written map rather than from a diff, and
+# each phase is separately observable, so a bad review can be attributed to the
+# phase that produced it.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads the previous one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
+  - id: investigate
+    name: Map what the change touches
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    # Read-only: this phase has no business editing the tree it is describing,
+    # and a review that modified the code under review would be unusable.
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/investigate.md
+
+  - id: verify
+    name: Try to falsify the claim
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 2400
+    # No allowed_tools: this phase runs on codex, which enforces a
+    # filesystem sandbox rather than a tool vocabulary. A tool list here
+    # would be accepted and never applied, so the validator refuses it.
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+    prompt_file: phases/verify.md
+
+  - id: report
+    name: Write the verdict
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    # Shorter deliberately: this phase composes findings that already exist. If
+    # it needs longer, the verify phase did not finish its job.
+    timeout_seconds: 900
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/report.md

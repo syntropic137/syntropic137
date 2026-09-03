@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseStatus,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
 )
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
 
 
 class TestPhaseResultBuilder:

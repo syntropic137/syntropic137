@@ -305,6 +305,10 @@ class TestTheROUTEActuallyCallsThePreflight:
         monkeypatch.setattr(commands, "ensure_connected", _connected)
         monkeypatch.setattr(commands, "get_workflow_repo", lambda: _StubRepo(workflow))
         monkeypatch.setattr(commands, "_check_phase_providers", lambda _w: None)
+        # Stubbed for the same reason as the provider check above: both are
+        # pure stored-template guards that run BEFORE this I/O-bound preflight
+        # (cheap checks first), and neither is what this test is about.
+        monkeypatch.setattr(commands, "_check_phase_declarations", lambda _w: None)
 
         with contextlib.suppress(Exception):
             # Later stages need more wiring than this test provides. The only

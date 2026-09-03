@@ -67,6 +67,19 @@ class InMemoryProjectionStore:
             return []
         return list(self._data[projection].values())
 
+    async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
+        """Count records, with the same equality semantics the Postgres store uses."""
+        records = self._data.get(projection)
+        if not records:
+            return 0
+        if not filters:
+            return len(records)
+        return sum(
+            1
+            for record in records.values()
+            if all(str(record.get(key)) == value for key, value in filters.items())
+        )
+
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
         if projection in self._data and key in self._data[projection]:

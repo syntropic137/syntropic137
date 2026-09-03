@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -27,12 +28,17 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.services.credentials import validate_credentials
-from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
+from syn_api.services.reconciliation import (
+    cleanup_orphaned_containers,
+    reconcile_orphaned_executions,
+    reconcile_orphaned_sessions,
+)
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_DEPLOYMENT,
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
@@ -176,15 +182,27 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     service is marked as degraded. A background recovery loop is spawned
     for any recoverable failures.
     """
+    # BEFORE the registry loop, deliberately (#1120). The registry starts the
+    # subscription coordinator and the GitHub pollers, and `coordinator.start()`
+    # returns as soon as it spawns its background task - so from that moment
+    # this process can dispatch NEW executions into `running`. Reconciling after
+    # that point means the reconcile query cannot tell work orphaned by the
+    # previous process from work this one just started. Resolving the old world
+    # before opening the door to a new one removes the race rather than
+    # narrowing it; the started_before cutoff below is defence in depth.
+    process_started_at = datetime.now(UTC)
+    await reconcile_orphaned_sessions()
+    cleanup = await cleanup_orphaned_containers()
+    # AFTER the reap, and only if the reap can say it finished: "this execution
+    # is still running" is provably false only once every container is gone.
+    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+
     for entry in _SERVICE_REGISTRY:
         try:
             await entry.init_fn(state)
         except Exception:
             logger.exception("%s initialization failed (degraded mode)", entry.reason)
             state.degraded_reasons.append(entry.reason)
-
-    await reconcile_orphaned_sessions()
-    await cleanup_orphaned_containers()
 
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
@@ -419,7 +437,7 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         )
         return
 
-    deployment = deployment_identity(app_environment)
+    deployment = deployment_identity(app_environment, store.display_deployment)
     label = store.display_label
     destination = f"{deployment} (store: {label})" if label else deployment
 
@@ -434,6 +452,21 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
             "being ignored and is not repeated here in case it is not what you "
             "meant to set. Capture is unaffected.",
             ENV_SYN_SESSION_STORE_LABEL,
+        )
+
+    if store.has_unusable_deployment:
+        # Value-free for the same reason as the label warning above. Reported
+        # rather than ignored because an operator sets this precisely so their
+        # sessions are attributable, and silently using the derived identity
+        # defeats the reason they set it.
+        logger.warning(
+            "%s is set to something that is not a usable deployment identity "
+            "(ASCII letters, digits, dot, underscore and hyphen, up to 64 "
+            "characters). It is being ignored and is not repeated here in case "
+            "it is not what you meant to set. Sessions are being stamped %r "
+            "instead.",
+            ENV_SYN_SESSION_STORE_DEPLOYMENT,
+            deployment,
         )
 
     if store.is_unauthenticated:

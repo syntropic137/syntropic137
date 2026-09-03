@@ -131,9 +131,6 @@ services:
       # Source mount for HMR. node_modules is shielded by the named volume below.
       - ../apps/syn-dashboard-ui:/workspace/apps/syn-dashboard-ui
       - dashboard_node_modules:/workspace/apps/syn-dashboard-ui/node_modules
-      # ui-feedback is a workspace dep; mount source so changes hot-reload too.
-      - ../lib/ui-feedback/packages/ui-feedback-react:/workspace/lib/ui-feedback/packages/ui-feedback-react
-      - ui_feedback_node_modules:/workspace/lib/ui-feedback/packages/ui-feedback-react/node_modules
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────
@@ -173,7 +170,6 @@ volumes:
   minio_data:
   redis_data:
   dashboard_node_modules:
-  ui_feedback_node_modules:
 
 networks:
   default:

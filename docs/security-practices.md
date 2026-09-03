@@ -38,7 +38,6 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 
 `--ignore-scripts` is applied to all package installs in CI to block `postinstall` hooks — the primary npm supply chain attack vector (event-stream, ua-parser-js style). Applied per-project:
 
-- **ui-feedback-react** (submodule, pnpm): `pnpm install --ignore-scripts`
 - **syn-dashboard-ui** (pnpm): `pnpm install --frozen-lockfile --ignore-scripts` — shares the root workspace lockfile
 - **syn-docs** (pnpm): `pnpm.onlyBuiltDependencies` allowlist in `package.json` restricts install scripts to explicitly reviewed packages (esbuild, sharp, @img/\*)
 

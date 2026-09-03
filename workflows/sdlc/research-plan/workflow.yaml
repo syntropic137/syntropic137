@@ -51,6 +51,7 @@ phases:
       - Grep
       - Glob
       - Bash
+      - Write
     # Lenses for SEEING structure, not for proposing changes.
     # architecture        - module boundaries, dependency direction,
     #                       bounded-context isolation. Its own scope line says
@@ -66,7 +67,7 @@ phases:
       - syntropic137/software-leverage-points/dependencies@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/research.md
 
   - id: plan
@@ -82,6 +83,7 @@ phases:
       - Read
       - Grep
       - Glob
+      - Write
     # Design lenses.
     # principles-and-patterns - carries SOLID.
     # purpose-and-scope       - keeps a change from sprawling.
@@ -96,7 +98,7 @@ phases:
       - syntropic137/software-leverage-points/dry@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/plan.md
 
   - id: cross-model-review
@@ -129,6 +131,7 @@ phases:
       - Read
       - Grep
       - Glob
+      - Write
     # The same design lenses as the plan phase. A revision accommodates review
     # findings, and the cheapest way to satisfy a finding is often to breach a
     # boundary the plan got right - so the lenses have to be present here too.
@@ -137,5 +140,5 @@ phases:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     prompt_file: phases/revise.md

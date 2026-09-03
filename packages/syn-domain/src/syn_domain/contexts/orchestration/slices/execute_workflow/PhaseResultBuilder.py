@@ -67,13 +67,19 @@ class PhaseResultBuilder:
         started_at: datetime,
         session_id: str,
         error_message: str,
+        completed_at: datetime | None = None,
     ) -> PhaseResult:
-        """Build a failed PhaseResult."""
+        """Build a failed PhaseResult.
+
+        ``completed_at`` is accepted so the caller can pass the SAME instant it
+        used to compute the phase's duration. Reading the clock again here made
+        ``completed_at - started_at`` disagree with the recorded duration.
+        """
         return PhaseResult(
             phase_id=phase_id,
             status=PhaseStatus.FAILED,
             started_at=started_at,
-            completed_at=datetime.now(UTC),
+            completed_at=completed_at or datetime.now(UTC),
             session_id=session_id,
             error_message=error_message,
         )
