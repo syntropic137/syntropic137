@@ -3390,11 +3390,8 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Artifact Count
              * @default 0
@@ -3642,11 +3639,8 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Trigger Source
              * @default

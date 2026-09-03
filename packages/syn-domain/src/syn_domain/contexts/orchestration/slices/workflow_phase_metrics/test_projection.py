@@ -51,11 +51,11 @@ class TestPhaseStarted:
         )
         phases = await projection.get_phase_metrics("wf-1")
         assert "p-1" in phases
-        assert phases["p-1"]["phase_name"] == "Build"
-        assert phases["p-1"]["status"] == "running"
-        assert phases["p-1"]["input_tokens"] == 0
+        assert phases["p-1"].phase_name == "Build"
+        assert phases["p-1"].status == "running"
+        assert phases["p-1"].input_tokens == 0
         # Cost is Lane 2 (#695) — projection no longer stores cost_usd
-        assert "cost_usd" not in phases["p-1"]
+        assert not hasattr(phases["p-1"], "cost_usd")
 
     async def test_does_not_overwrite_existing_stub(
         self, projection: WorkflowPhaseMetricsProjection
@@ -68,14 +68,14 @@ class TestPhaseStarted:
             {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "Build"}
         )
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-1"]["status"] == "running"  # not duplicated / reset
+        assert phases["p-1"].status == "running"  # not duplicated / reset
 
     async def test_falls_back_to_phase_id_when_name_missing(
         self, projection: WorkflowPhaseMetricsProjection
     ) -> None:
         await projection.on_phase_started({"workflow_id": "wf-1", "phase_id": "p-99"})
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-99"]["phase_name"] == "p-99"
+        assert phases["p-99"].phase_name == "p-99"
 
     async def test_ignores_event_missing_ids(
         self, projection: WorkflowPhaseMetricsProjection
@@ -107,12 +107,12 @@ class TestPhaseCompleted:
         )
         phases = await projection.get_phase_metrics("wf-1")
         p = phases["p-1"]
-        assert p["input_tokens"] == 100
-        assert p["output_tokens"] == 50
-        assert p["total_tokens"] == 150
+        assert p.input_tokens == 100
+        assert p.output_tokens == 50
+        assert p.total_tokens == 150
         # Cost is Lane 2 (#695) — not stored here
-        assert p["duration_seconds"] == 5.0
-        assert p["status"] == "completed"
+        assert p.duration_seconds() == 5.0
+        assert p.status == "completed"
 
     async def test_accumulates_across_multiple_completions(
         self, projection: WorkflowPhaseMetricsProjection
@@ -134,7 +134,7 @@ class TestPhaseCompleted:
                 }
             )
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-1"]["input_tokens"] == 20
+        assert phases["p-1"].input_tokens == 20
 
     async def test_sets_failed_status_on_failure(
         self, projection: WorkflowPhaseMetricsProjection
@@ -146,7 +146,7 @@ class TestPhaseCompleted:
             {"workflow_id": "wf-1", "phase_id": "p-1", "success": False}
         )
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-1"]["status"] == "failed"
+        assert phases["p-1"].status == "failed"
 
     async def test_increments_artifact_count(
         self, projection: WorkflowPhaseMetricsProjection
@@ -161,7 +161,7 @@ class TestPhaseCompleted:
             {"workflow_id": "wf-1", "phase_id": "p-1", "artifact_id": "art-002", "success": True}
         )
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-1"]["artifact_count"] == 2
+        assert phases["p-1"].artifact_count == 2
 
     async def test_no_artifact_increment_when_no_artifact_id(
         self, projection: WorkflowPhaseMetricsProjection
@@ -173,7 +173,7 @@ class TestPhaseCompleted:
             {"workflow_id": "wf-1", "phase_id": "p-1", "success": True}
         )
         phases = await projection.get_phase_metrics("wf-1")
-        assert phases["p-1"]["artifact_count"] == 0
+        assert phases["p-1"].artifact_count == 0
 
 
 @pytest.mark.unit
@@ -197,9 +197,9 @@ class TestMissedPhaseStarted:
         )
         phases = await projection.get_phase_metrics("wf-2")
         assert "p-orphan" in phases
-        assert phases["p-orphan"]["phase_name"] == "p-orphan"  # falls back to phase_id
-        assert phases["p-orphan"]["input_tokens"] == 42
-        assert phases["p-orphan"]["status"] == "completed"
+        assert phases["p-orphan"].phase_name == "p-orphan"  # falls back to phase_id
+        assert phases["p-orphan"].input_tokens == 42
+        assert phases["p-orphan"].status == "completed"
 
 
 @pytest.mark.unit
@@ -224,8 +224,8 @@ class TestMultiPhaseIsolation:
                 }
             )
         phases = await projection.get_phase_metrics("wf-3")
-        assert phases["p-1"]["input_tokens"] == 100
-        assert phases["p-2"]["input_tokens"] == 200
+        assert phases["p-1"].input_tokens == 100
+        assert phases["p-2"].input_tokens == 200
 
     async def test_separate_workflows_do_not_share_phases(
         self, projection: WorkflowPhaseMetricsProjection
@@ -240,8 +240,8 @@ class TestMultiPhaseIsolation:
         phases_a = await projection.get_phase_metrics("wf-A")
         phases_b = await projection.get_phase_metrics("wf-B")
         assert phases_a is not phases_b
-        assert phases_a["p-1"]["input_tokens"] == 10
-        assert phases_b["p-1"]["input_tokens"] == 10
+        assert phases_a["p-1"].input_tokens == 10
+        assert phases_b["p-1"].input_tokens == 10
 
 
 @pytest.mark.unit

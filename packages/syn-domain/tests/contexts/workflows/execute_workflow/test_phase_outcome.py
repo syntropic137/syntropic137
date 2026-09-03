@@ -244,8 +244,8 @@ async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it()
 
     metrics = await projection.get_phase_metrics("wf-1")
 
-    assert metrics["implement"]["duration_seconds"] == 13.0
-    assert metrics["implement"]["status"] == "failed"
+    assert metrics["implement"].duration_seconds() == 13.0
+    assert metrics["implement"].status == "failed"
 
 
 def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:

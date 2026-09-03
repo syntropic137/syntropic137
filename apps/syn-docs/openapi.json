@@ -8792,9 +8792,15 @@
             "default": "0"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "artifact_count": {
             "type": "integer",
@@ -9277,9 +9283,15 @@
             "title": "Completed At"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "trigger_source": {
             "type": "string",

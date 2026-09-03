@@ -199,5 +199,5 @@ class TestFailedPhaseDurationMetricsProjection:
         await metrics.on_workflow_failed(event_data)
 
         phases = await metrics.get_phase_metrics("wf-1")
-        assert phases["p-1"]["status"] == "failed"
-        assert phases["p-1"]["duration_seconds"] == pytest.approx(FIXTURE_DURATION_SECONDS, abs=1.0)
+        assert phases["p-1"].status == "failed"
+        assert phases["p-1"].duration_seconds() == pytest.approx(FIXTURE_DURATION_SECONDS, abs=1.0)

@@ -1201,7 +1201,13 @@ class RepoActivityEntryResponse(BaseModel):
     status: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Seconds this execution has run, or ``None`` when nothing knows.
+
+    Nullable for the reason every other duration on this API is: 0.0 is a
+    measurement. This field reported it for every running execution on the
+    repo, system-activity and system-history timelines.
+    """
     trigger_source: str = ""
 
 
