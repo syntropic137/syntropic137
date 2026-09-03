@@ -78,7 +78,7 @@ export async function synGetMetrics(
     sections.push("", "### Phase Breakdown");
     for (const p of m.phases) {
       sections.push(
-        `- **${p.phase_name}** (${p.status}) — ${p.total_tokens.toLocaleString()} tokens, $${p.cost_usd}, ${p.duration_seconds.toFixed(1)}s`,
+        `- **${p.phase_name}** (${p.status}) — ${p.total_tokens.toLocaleString()} tokens, $${p.cost_usd}, ${p.duration_seconds != null ? `${p.duration_seconds.toFixed(1)}s` : "\u2014"}`,
       );
     }
   }

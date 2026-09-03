@@ -44,7 +44,15 @@ class PhaseMetrics(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Accumulated seconds across every execution of this phase.
+
+    ``None`` while no execution of the phase has reported a duration. This
+    projection aggregates across executions, so unlike the per-execution
+    surfaces there is no single ``started_at`` to compute a live figure from --
+    but ``0.0`` would still read as "this phase takes no time", which is the
+    same false measurement.
+    """
     artifact_count: int = 0
 
 
@@ -130,7 +138,7 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
                 total_tokens=d.get("total_tokens", 0),
                 # Lane 2: phase cost is enriched at the endpoint from execution_cost (#695)
                 cost_usd=Decimal("0"),
-                duration_seconds=d.get("duration_seconds", 0.0),
+                duration_seconds=d.get("duration_seconds"),
                 artifact_count=d.get("artifact_count", 0),
             )
             for pid, d in phases_data.items()

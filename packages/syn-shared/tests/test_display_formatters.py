@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from syn_shared.display import (
-    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
     format_phase,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 EM_DASH = "\u2014"
@@ -121,55 +122,173 @@ class TestFormatDurationSeconds:
 
 
 @pytest.mark.unit
-class TestComputeDurationSeconds:
-    """The single read-time definition shared by the execution and session
-    routes -- both must agree on what "how long has this been running" means
-    for something that has not completed yet.
+class TestResolveDurationSeconds:
+    """The one definition of "how long did this run" shared by every read
+    surface -- execution list and detail, phases, sessions, repo and system
+    activity. They must agree about the same run at the same instant.
     """
 
-    def test_none_started_at_is_unknown_not_zero(self) -> None:
-        # A missing started_at is genuinely unknown; 0.0 would be a lie --
-        # indistinguishable from "just started this instant".
-        assert compute_duration_seconds(None) is None
+    # -- Not started ---------------------------------------------------------
 
-    def test_unparseable_string_is_unknown_not_zero(self) -> None:
-        assert compute_duration_seconds("not-a-timestamp") is None
-
-    def test_empty_string_is_unknown(self) -> None:
-        assert compute_duration_seconds("") is None
-
-    def test_computes_elapsed_from_iso_string(self) -> None:
-        now = datetime(2026, 9, 1, 12, 0, 30, tzinfo=UTC)
-        started = "2026-09-01T12:00:00+00:00"
-        assert compute_duration_seconds(started, now=now) == 30.0
-
-    def test_computes_elapsed_from_trailing_z_suffix(self) -> None:
-        # RFC 3339 'Z' suffix is what most of our stored timestamps use;
-        # datetime.fromisoformat() rejects it directly on Python < 3.11.
-        now = datetime(2026, 9, 1, 12, 1, 0, tzinfo=UTC)
-        started = "2026-09-01T12:00:00Z"
-        assert compute_duration_seconds(started, now=now) == 60.0
-
-    def test_computes_elapsed_from_datetime_object(self) -> None:
-        now = datetime(2026, 9, 1, 12, 0, 45, tzinfo=UTC)
+    @pytest.mark.parametrize("status", ["pending", "PENDING", " Pending ", "not_started"])
+    def test_pending_is_unknown_not_zero(self, status: str) -> None:
+        # A pending phase carries the execution's started_at in some stores, so
+        # a span IS computable -- it just is not this phase's duration. It has
+        # not run. Reporting 0.0 renders as "completed instantly" (#1076 review
+        # finding 3), and the case-varied spellings are here because the
+        # previous implementation matched `== "running"` exactly and so treated
+        # "PENDING" as finished.
         started = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
-        assert compute_duration_seconds(started, now=now) == 45.0
+        ended = datetime(2026, 9, 1, 12, 5, 0, tzinfo=UTC)
+        assert resolve_duration_seconds(status, started_at=started, ended_at=ended) is None
 
-    def test_naive_datetime_is_treated_as_utc(self) -> None:
-        now = datetime(2026, 9, 1, 12, 0, 10)  # naive
-        started = datetime(2026, 9, 1, 12, 0, 0)  # naive
-        assert compute_duration_seconds(started, now=now) == 10.0
+    # -- In flight -----------------------------------------------------------
 
-    def test_advances_between_two_calls_without_a_fixed_now(self) -> None:
-        # No `now` override: this is what the route layer actually calls.
-        # A frozen or memoized value here is exactly the bug that got six
-        # healthy workflow runs cancelled on 2026-09-01.
+    def test_running_measures_against_now_not_the_recorded_value(self) -> None:
+        # THE regression this function exists to prevent. A running phase has a
+        # stale recorded duration in the projection; reading it back reports a
+        # frozen number that looks like a hang. 100s of real elapsed time
+        # cannot be produced by returning the 7.5 that is stored.
+        started = datetime.now(UTC) - timedelta(seconds=100)
+        resolved = resolve_duration_seconds("running", started_at=started, recorded_seconds=7.5)
+        assert resolved is not None
+        assert resolved == pytest.approx(100.0, abs=5.0)
+
+    @pytest.mark.parametrize("status", ["running", "RUNNING", "Running", "paused"])
+    def test_in_flight_statuses_advance_between_two_reads(self, status: str) -> None:
+        # A frozen, cached or memoized value is exactly what got six healthy
+        # workflow runs cancelled on 2026-09-01: the duration stopped moving
+        # and was read as a hang.
+        #
+        # STRICTLY greater, and by at least the time actually slept. `>=` (the
+        # assertion this replaces) passes against `return 42.0`, against a
+        # memoized first result, and against any constant -- it cannot fail
+        # against the regression it was written to catch.
         started = datetime.now(UTC) - timedelta(seconds=5)
-        first = compute_duration_seconds(started)
-        second = compute_duration_seconds(started)
+        first = resolve_duration_seconds(status, started_at=started)
+        slept = 0.05
+        time.sleep(slept)
+        second = resolve_duration_seconds(status, started_at=started)
+
         assert first is not None
         assert second is not None
-        assert second >= first
+        assert second > first, (
+            f"{status!r} duration did not advance across a {slept}s sleep "
+            f"({first} -> {second}); it is frozen, cached or a constant"
+        )
+        assert second - first >= slept * 0.5
+
+    def test_running_accepts_an_explicit_now_for_deterministic_callers(self) -> None:
+        # The projection closes out a cancelled phase at the instant it ended,
+        # not at read time.
+        assert (
+            resolve_duration_seconds(
+                "running",
+                started_at="2026-09-01T12:00:00Z",
+                now="2026-09-01T12:00:30Z",
+            )
+            == 30.0
+        )
+
+    # -- Finished ------------------------------------------------------------
+
+    def test_finished_prefers_the_duration_measured_at_the_source(self) -> None:
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                ended_at="2026-09-01T12:05:00Z",
+                recorded_seconds=42.5,
+            )
+            == 42.5
+        )
+
+    def test_finished_without_a_recorded_value_uses_the_timestamp_span(self) -> None:
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                ended_at="2026-09-01T12:05:00Z",
+            )
+            == 300.0
+        )
+
+    def test_finished_recorded_zero_is_kept_as_a_real_measurement(self) -> None:
+        # The one place 0.0 is legitimate: something measured it and got zero.
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at="2026-09-01T12:00:00Z",
+                ended_at="2026-09-01T12:05:00Z",
+                recorded_seconds=0.0,
+            )
+            == 0.0
+        )
+
+    def test_unrecognised_status_is_treated_as_finished(self) -> None:
+        # A status added elsewhere can only ever under-report (None), never
+        # invent a live duration that grows forever.
+        assert resolve_duration_seconds("quiesced", started_at=datetime.now(UTC)) is None
+
+    def test_naive_datetimes_are_treated_as_utc(self) -> None:
+        assert (
+            resolve_duration_seconds(
+                "completed",
+                started_at=datetime(2026, 9, 1, 12, 0, 0),
+                ended_at=datetime(2026, 9, 1, 12, 0, 10),
+            )
+            == 10.0
+        )
+
+    # -- Unmeasurable --------------------------------------------------------
+
+    @pytest.mark.parametrize("started", [None, "", "   ", "not-a-timestamp", 12345])
+    def test_unusable_started_at_is_unknown_not_zero(self, started: object) -> None:
+        assert (
+            resolve_duration_seconds(
+                "running",
+                started_at=started,  # pyright: ignore[reportArgumentType] - hostile input
+            )
+            is None
+        )
+
+    def test_malformed_timestamp_is_logged_as_corruption(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # An unparseable stored timestamp is corruption, not an absent value.
+        # Silently returning 0.0 made the two indistinguishable downstream
+        # (#1076 review finding 4).
+        with caplog.at_level("WARNING"):
+            assert (
+                resolve_duration_seconds(
+                    "completed", started_at="2026-13-45T99:99:99Z", ended_at="2026-09-01T12:00:00Z"
+                )
+                is None
+            )
+        assert any("Unparseable timestamp" in r.getMessage() for r in caplog.records)
+
+    def test_future_started_at_is_unknown_not_zero(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Clock skew, or a started_at in the future. The old code clamped the
+        # negative span with max(..., 0.0), turning a broken clock into a
+        # confident measurement of "no time at all".
+        started = datetime.now(UTC) + timedelta(hours=1)
+        with caplog.at_level("WARNING"):
+            assert resolve_duration_seconds("running", started_at=started) is None
+        assert any("negative" in r.getMessage() for r in caplog.records)
+
+    def test_finished_without_an_end_timestamp_is_unknown(self) -> None:
+        assert resolve_duration_seconds("completed", started_at="2026-09-01T12:00:00Z") is None
+
+    def test_zero_is_never_returned_for_an_unknown(self) -> None:
+        # The whole premise: None is the only unknown. Every unmeasurable
+        # input above must not come back as a float at all.
+        unknowns = [
+            resolve_duration_seconds("pending", started_at="2026-09-01T12:00:00Z"),
+            resolve_duration_seconds("completed", started_at=None, ended_at=None),
+            resolve_duration_seconds("completed", started_at="garbage", ended_at="garbage"),
+            resolve_duration_seconds("running", started_at=datetime.now(UTC) + timedelta(days=1)),
+        ]
+        assert unknowns == [None, None, None, None]
 
 
 @pytest.mark.unit

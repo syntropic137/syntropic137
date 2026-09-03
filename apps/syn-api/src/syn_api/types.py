@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -479,7 +479,14 @@ class ExecutionDetail(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, or ``None`` when
+    nothing has been measured yet.
+
+    ``None`` is the only honest answer for a run whose phases have not reported
+    a duration; ``0.0`` here reads as "this execution took no time" and is
+    indistinguishable from the unknown it used to stand for (#969).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str]
@@ -784,8 +791,9 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
-    total_duration_seconds: float
-    """Wall-clock seconds across the execution's phases (#969).
+    total_duration_seconds: float | None
+    """Wall-clock seconds across the execution's phases, ``None`` when unknown
+    (#969).
 
     REQUIRED, deliberately. This model is internal, has exactly one construction
     site, and always has a source value. A default here would recreate the class
@@ -1184,8 +1192,26 @@ class RepoActivityEntryResponse(BaseModel):
     status: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Live while the execution runs, ``None`` when unknown.
+
+    This is the hop that used to drop it: the handler already resolved a real
+    duration and this model coerced the unknown case back to ``0.0``.
+    """
     trigger_source: str = ""
+
+    @field_validator("started_at", "completed_at", mode="before")
+    @classmethod
+    def _blank_timestamp_is_absent(cls, value: object) -> object:
+        """An empty timestamp means "not yet", not a malformed date.
+
+        ``RepoActivityEntry`` carries timestamps as strings and has no value to
+        put in ``completed_at`` until an execution ends. Without this, every
+        RUNNING execution raised a ValidationError here and took the whole repo
+        or system activity timeline down with it -- a 500 on exactly the runs a
+        reader opens the timeline to watch.
+        """
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class RepoActivityResponse(BaseModel):

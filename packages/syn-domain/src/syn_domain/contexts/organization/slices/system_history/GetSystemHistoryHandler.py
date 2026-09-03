@@ -4,8 +4,6 @@ Lazy handler: queries workflow executions filtered by system repo
 membership, sorted chronologically (oldest first).
 """
 
-from datetime import UTC
-
 from event_sourcing import ProjectionReadStore
 
 from syn_domain.contexts.organization._shared.projection_names import (
@@ -21,21 +19,7 @@ from syn_domain.contexts.organization.domain.read_models.repo_activity import (
 from syn_domain.contexts.organization.slices.list_repos.projection import (
     RepoProjection,
 )
-
-
-def _compute_duration(started_at: str, completed_at: str) -> float:
-    """Compute duration in seconds from ISO timestamps."""
-    if not started_at or not completed_at:
-        return 0.0
-    try:
-        from datetime import datetime
-
-        fmt = "%Y-%m-%dT%H:%M:%S"
-        start = datetime.strptime(started_at[:19], fmt).replace(tzinfo=UTC)
-        end = datetime.strptime(completed_at[:19], fmt).replace(tzinfo=UTC)
-        return max(0.0, (end - start).total_seconds())
-    except (ValueError, TypeError):
-        return 0.0
+from syn_shared.display import resolve_duration_seconds
 
 
 class GetSystemHistoryHandler:
@@ -71,8 +55,11 @@ class GetSystemHistoryHandler:
             ex_id = ex.get("workflow_execution_id", "")
             if ex_id not in execution_ids:
                 continue
-            started_at = str(ex.get("started_at", ""))
-            completed_at = str(ex.get("completed_at", ""))
+            # `or ""`, not a dict default: a running execution stores
+            # completed_at as None, and str(None) is the string "None" -- an
+            # unparseable timestamp rather than an absent one.
+            started_at = str(ex.get("started_at") or "")
+            completed_at = str(ex.get("completed_at") or "")
             entries.append(
                 RepoActivityEntry(
                     execution_id=ex_id,
@@ -81,7 +68,11 @@ class GetSystemHistoryHandler:
                     status=ex.get("status", ""),
                     started_at=started_at,
                     completed_at=completed_at,
-                    duration_seconds=_compute_duration(started_at, completed_at),
+                    duration_seconds=resolve_duration_seconds(
+                        ex.get("status", ""),
+                        started_at=started_at,
+                        ended_at=completed_at,
+                    ),
                     trigger_source="",
                 )
             )

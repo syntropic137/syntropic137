@@ -47,7 +47,7 @@ const showCommand: CommandDef = {
           formatStatus(ph.status),
           formatTokens(ph.total_tokens),
           formatCost(ph.cost_usd),
-          formatDuration(ph.duration_seconds * 1000),
+          ph.duration_seconds != null ? formatDuration(ph.duration_seconds * 1000) : "\u2014",
           String(ph.artifact_count),
         );
       }

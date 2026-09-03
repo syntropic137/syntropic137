@@ -45,8 +45,12 @@ class PhaseExecutionDetail:
     total_tokens: int = 0
     """Total tokens used."""
 
-    duration_seconds: float = 0.0
-    """Duration of phase execution."""
+    duration_seconds: float | None = None
+    """Seconds this phase took, or ``None`` when nothing has measured it yet.
+
+    A pending or running phase has no recorded duration; the read path computes
+    a live one for the latter. ``0.0`` is reserved for a real measurement.
+    """
 
     started_at: datetime | str | None = None
     """When the phase started."""
@@ -107,7 +111,7 @@ class PhaseExecutionDetail:
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
-            duration_seconds=data.get("duration_seconds", 0.0),
+            duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
@@ -151,8 +155,14 @@ class WorkflowExecutionDetail:
     total_cache_read_tokens: int = 0
     """Total cache read tokens across all phases."""
 
-    total_duration_seconds: float = 0.0
-    """Total duration of the execution."""
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, or ``None`` when
+    nothing has been measured yet.
+
+    ``None`` is the only honest answer for a run whose phases have not reported
+    a duration; ``0.0`` here reads as "this execution took no time" and is
+    indistinguishable from the unknown it used to stand for (#969).
+    """
 
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
@@ -187,7 +197,7 @@ class WorkflowExecutionDetail:
             total_output_tokens=data.get("total_output_tokens", 0),
             total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
             total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
-            total_duration_seconds=data.get("total_duration_seconds", 0.0),
+            total_duration_seconds=data.get("total_duration_seconds"),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             repos=tuple(data.get("repos", [])),

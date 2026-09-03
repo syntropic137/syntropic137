@@ -6946,9 +6946,15 @@
             "default": 0
           },
           "total_duration_seconds": {
-            "type": "number",
-            "title": "Total Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Duration Seconds"
           },
           "artifact_ids": {
             "items": {
@@ -8781,9 +8787,15 @@
             "default": "0"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "artifact_count": {
             "type": "integer",
@@ -9266,9 +9278,15 @@
             "title": "Completed At"
           },
           "duration_seconds": {
-            "type": "number",
-            "title": "Duration Seconds",
-            "default": 0.0
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
           },
           "trigger_source": {
             "type": "string",

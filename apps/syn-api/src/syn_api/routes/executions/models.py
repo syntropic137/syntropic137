@@ -67,7 +67,14 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, or ``None`` when
+    nothing has been measured yet.
+
+    ``None`` is the only honest answer for a run whose phases have not reported
+    a duration; ``0.0`` here reads as "this execution took no time" and is
+    indistinguishable from the unknown it used to stand for (#969).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)

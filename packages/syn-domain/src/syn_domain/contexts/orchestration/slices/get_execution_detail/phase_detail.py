@@ -24,7 +24,13 @@ class PhaseDetail:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     total_tokens: int = 0
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Seconds this phase took, or ``None`` when nothing has measured it yet.
+
+    Seeded ``None``, not ``0.0``: a phase that is pending or still running has
+    no duration, and a stored ``0.0`` is indistinguishable at every read
+    surface from a phase that genuinely completed instantly.
+    """
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
@@ -61,7 +67,7 @@ class PhaseDetail:
             cache_creation_tokens=event_data.get("cache_creation_tokens", 0),
             cache_read_tokens=event_data.get("cache_read_tokens", 0),
             total_tokens=event_data.get("total_tokens", 0),
-            duration_seconds=event_data.get("duration_seconds", 0.0),
+            duration_seconds=event_data.get("duration_seconds"),
             completed_at=event_data.get("completed_at"),
         )
 
@@ -98,7 +104,7 @@ class PhaseDetail:
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
-            duration_seconds=data.get("duration_seconds", 0.0),
+            duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),

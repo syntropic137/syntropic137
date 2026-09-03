@@ -2577,11 +2577,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
-            /**
-             * Total Duration Seconds
-             * @default 0
-             */
-            total_duration_seconds: number;
+            /** Total Duration Seconds */
+            total_duration_seconds?: number | null;
             /** Artifact Ids */
             artifact_ids?: string[];
             /** Error Message */
@@ -3388,11 +3385,8 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Artifact Count
              * @default 0
@@ -3640,11 +3634,8 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Trigger Source
              * @default

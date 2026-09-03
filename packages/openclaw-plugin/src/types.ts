@@ -83,7 +83,7 @@ export interface PhaseExecutionInfo {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
-  duration_seconds: number;
+  duration_seconds: number | null;
   cost_usd: string;
   started_at: string | null;
   completed_at: string | null;
@@ -103,7 +103,7 @@ export interface ExecutionDetail {
   total_output_tokens: number;
   total_tokens: number;
   total_cost_usd: string;
-  total_duration_seconds: number;
+  total_duration_seconds: number | null;
   artifact_ids: string[];
   error_message: string | null;
 }
@@ -229,7 +229,7 @@ export interface PhaseMetrics {
   output_tokens: number;
   total_tokens: number;
   cost_usd: string;
-  duration_seconds: number;
+  duration_seconds: number | null;
   artifact_count: number;
 }
 

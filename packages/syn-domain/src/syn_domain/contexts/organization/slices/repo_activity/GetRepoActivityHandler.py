@@ -13,20 +13,7 @@ from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
 from syn_domain.contexts.organization.domain.read_models.repo_activity import (
     RepoActivityEntry,
 )
-
-
-def _compute_duration(started_at: str, completed_at: str) -> float:
-    """Compute duration in seconds from ISO timestamps."""
-    if not started_at or not completed_at:
-        return 0.0
-    try:
-        from datetime import datetime
-
-        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
-        return max(0.0, (end - start).total_seconds())
-    except (ValueError, TypeError):
-        return 0.0
+from syn_shared.display import resolve_duration_seconds
 
 
 class GetRepoActivityHandler:
@@ -55,8 +42,11 @@ class GetRepoActivityHandler:
             ex_id = ex.get("workflow_execution_id", "")
             if ex_id not in execution_id_set:
                 continue
-            started_at = str(ex.get("started_at", ""))
-            completed_at = str(ex.get("completed_at", ""))
+            # `or ""`, not a dict default: a running execution stores
+            # completed_at as None, and str(None) is the string "None" -- an
+            # unparseable timestamp rather than an absent one.
+            started_at = str(ex.get("started_at") or "")
+            completed_at = str(ex.get("completed_at") or "")
             entries.append(
                 RepoActivityEntry(
                     execution_id=ex_id,
@@ -65,7 +55,11 @@ class GetRepoActivityHandler:
                     status=ex.get("status", ""),
                     started_at=started_at,
                     completed_at=completed_at,
-                    duration_seconds=_compute_duration(started_at, completed_at),
+                    duration_seconds=resolve_duration_seconds(
+                        ex.get("status", ""),
+                        started_at=started_at,
+                        ended_at=completed_at,
+                    ),
                     trigger_source="",
                 )
             )

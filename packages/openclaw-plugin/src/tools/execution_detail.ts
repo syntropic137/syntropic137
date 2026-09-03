@@ -12,7 +12,7 @@ export interface GetExecutionArgs {
 }
 
 function formatPhaseLine(p: PhaseExecutionInfo): string {
-  const dur = p.duration_seconds > 0 ? ` · ${p.duration_seconds.toFixed(1)}s` : "";
+  const dur = p.duration_seconds != null ? ` · ${p.duration_seconds.toFixed(1)}s` : "";
   const cost = p.cost_usd !== "0" ? ` · $${p.cost_usd}` : "";
   return `  - **${p.name}** — ${p.status}${dur}${cost}`;
 }
@@ -24,7 +24,7 @@ function buildExecutionRows(d: ExecutionDetail): [string, string][] {
     ["Status", d.status],
     ["Tokens", `${d.total_tokens.toLocaleString()} (in: ${d.total_input_tokens.toLocaleString()}, out: ${d.total_output_tokens.toLocaleString()})`],
     ["Cost", `$${d.total_cost_usd}`],
-    ["Duration", `${d.total_duration_seconds.toFixed(1)}s`],
+    ["Duration", d.total_duration_seconds != null ? `${d.total_duration_seconds.toFixed(1)}s` : "\u2014"],
   ];
   if (d.started_at) rows.push(["Started", d.started_at]);
   if (d.completed_at) rows.push(["Completed", d.completed_at]);

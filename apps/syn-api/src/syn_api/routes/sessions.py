@@ -39,13 +39,13 @@ from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
 )
 from syn_shared.display import (
     EM_DASH,
-    compute_duration_seconds,
     format_cost,
     format_duration_seconds,
     format_model_compact,
     format_phase,
     format_repos,
     format_tokens,
+    resolve_duration_seconds,
 )
 
 if TYPE_CHECKING:
@@ -524,12 +524,14 @@ async def get_session(
     # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
     cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
     # A running session has no completed_at, so Lane 2's duration_ms is unset
-    # and this reported None for the whole run. Computed against the wall clock
-    # instead. Terminal sessions keep whatever Lane 2 recorded.
-    duration_seconds = (
-        compute_duration_seconds(session.started_at)
-        if session.status == "running"
-        else cd.duration_seconds
+    # and this reported None for the whole run. Same rule as every other
+    # surface: live while running, Lane 2's measurement once it has finished,
+    # and the timestamp span if Lane 2 never recorded one.
+    duration_seconds = resolve_duration_seconds(
+        session.status,
+        started_at=session.started_at,
+        ended_at=session.completed_at,
+        recorded_seconds=cd.duration_seconds,
     )
 
     # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
@@ -602,8 +604,11 @@ def _build_session_summary_response(
     total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
     # Same rule as get_session above. Applied here too because the LIST and the
     # DETAIL of one running session previously disagreed with each other.
-    duration_seconds = (
-        compute_duration_seconds(s.started_at) if s.status == "running" else info.duration_seconds
+    duration_seconds = resolve_duration_seconds(
+        s.status,
+        started_at=s.started_at,
+        ended_at=s.completed_at,
+        recorded_seconds=info.duration_seconds,
     )
     return SessionSummaryResponse(
         id=s.id,

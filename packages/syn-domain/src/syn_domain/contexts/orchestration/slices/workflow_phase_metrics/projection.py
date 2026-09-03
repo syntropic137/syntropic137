@@ -25,7 +25,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_phase_metrics"
-    VERSION = 3  # Bumped: #1036 adds on_workflow_failed, needs a rebuild to apply
+    VERSION = 4  # Bumped: an unmeasured phase duration is None, never 0.0
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -70,7 +70,10 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
-                "duration_seconds": 0.0,
+                # None, not 0.0: a phase that has started has no measured
+                # time yet, and a stored zero renders as a real measurement
+                # of an instantaneous phase.
+                "duration_seconds": None,
                 "artifact_count": 0,
                 "status": "running",
             }
@@ -98,7 +101,10 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
-                "duration_seconds": 0.0,
+                # None, not 0.0: a phase that has started has no measured
+                # time yet, and a stored zero renders as a real measurement
+                # of an instantaneous phase.
+                "duration_seconds": None,
                 "artifact_count": 0,
                 "status": "running",
             }
@@ -107,9 +113,9 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         entry["input_tokens"] = entry.get("input_tokens", 0) + event_data.get("input_tokens", 0)
         entry["output_tokens"] = entry.get("output_tokens", 0) + event_data.get("output_tokens", 0)
         entry["total_tokens"] = entry.get("total_tokens", 0) + event_data.get("total_tokens", 0)
-        entry["duration_seconds"] = entry.get("duration_seconds", 0.0) + event_data.get(
-            "duration_seconds", 0.0
-        )
+        phase_duration = event_data.get("duration_seconds")
+        if phase_duration is not None:
+            entry["duration_seconds"] = (entry.get("duration_seconds") or 0.0) + phase_duration
 
         if event_data.get("artifact_id"):
             entry["artifact_count"] = entry.get("artifact_count", 0) + 1
@@ -123,8 +129,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
 
         A failed phase never gets a PhaseCompleted event -- the only other
         writer of these fields -- so without this it stays "running" with
-        duration_seconds stuck at the 0.0 PhaseStarted seeded it with,
-        forever (#1036).
+        duration_seconds never measured at all, forever (#1036).
         """
         workflow_id = event_data.get("workflow_id", "")
         phase_id = event_data.get("failed_phase_id")
@@ -146,7 +151,7 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
         # failed run's time.
         duration = event_data.get("failed_phase_duration_seconds")
         if duration is not None:
-            entry["duration_seconds"] = entry.get("duration_seconds", 0.0) + duration
+            entry["duration_seconds"] = (entry.get("duration_seconds") or 0.0) + duration
 
         await self._save_workflow_data(workflow_id, data)
 

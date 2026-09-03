@@ -20,7 +20,9 @@ class RepoActivityEntry:
         status: Execution status (started, completed, failed).
         started_at: ISO timestamp of execution start.
         completed_at: ISO timestamp of execution completion (empty if running).
-        duration_seconds: Duration in seconds (0 if still running).
+        duration_seconds: Duration in seconds; live while the execution runs,
+            and None when it is genuinely unknown (never 0.0, which reads as
+            a real measurement of an execution that took no time).
         trigger_source: What triggered the execution (webhook, manual, schedule).
     """
 
@@ -30,7 +32,7 @@ class RepoActivityEntry:
     status: str = ""
     started_at: str = ""
     completed_at: str = ""
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
     trigger_source: str = ""
 
     @classmethod
@@ -43,7 +45,7 @@ class RepoActivityEntry:
             status=data.get("status", ""),
             started_at=data.get("started_at", ""),
             completed_at=data.get("completed_at", ""),
-            duration_seconds=data.get("duration_seconds", 0.0),
+            duration_seconds=data.get("duration_seconds"),
             trigger_source=data.get("trigger_source", ""),
         )
 
