@@ -145,3 +145,38 @@ async def test_the_warning_does_not_claim_the_process_is_hung(
     assert "no complete stdout line" in text
     for overclaim in ("hung", "not a slow command", "wrote nothing", "alive but silent"):
         assert overclaim not in text, f"log must not assert {overclaim!r}"
+
+
+async def test_the_deadline_warning_does_not_overclaim_either(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The SAME no-overclaim property, on the deadline path (#1074 re-gate).
+
+    The test above drives only the silence path - it passes `stream_timeout=None`,
+    so the deadline branch never runs. A cross-model gate caught that: the claim
+    that the overclaim "cannot return" was pinned for one of the two log sites,
+    and the deadline warning is where the overclaim originally lived.
+
+    Reaching the deadline says exactly one more thing than a stall does: that the
+    budget is gone. It still cannot distinguish a hang from a long tool call, so
+    the wording constraint is identical.
+
+    The clock is consumed TWICE per iteration - once for `now`, once inside
+    `_is_stream_timed_out` - so the script pairs each value. Silence must already
+    be stalled when the deadline lands, or `_log_deadline_reached` stays quiet.
+    """
+    _patch(
+        monkeypatch,
+        [b"", b"", b""],
+        [0.0, 0.0, WARN + 10.0, WARN + 10.0, 4000.0, 4000.0],
+    )
+    outcome = stream_reader.StreamOutcome()
+
+    with caplog.at_level(logging.WARNING):
+        await _drain(stream_reader.read_lines(_FakeProc(), 3600.0, 0.0, outcome))
+
+    text = " ".join(r.getMessage() for r in caplog.records).lower()
+    assert "deadline reached" in text, "the deadline path did not log; the test proves nothing"
+    for overclaim in ("hung", "not a slow command", "wrote nothing", "alive but silent"):
+        assert overclaim not in text, f"deadline log must not assert {overclaim!r}"
+    assert outcome.timed_out is True
