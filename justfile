@@ -994,7 +994,10 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run architecture-fitness validate .
+    {{_aps_bin}} run architecture-fitness validate . --report .topology/fitness-report.json
+    # A waiver whose debt was already paid off still grants its headroom, and the
+    # tool reports those but exits 0 - so they ride along in green runs (#1084).
+    @uv run python scripts/check_stale_exceptions.py .topology/fitness-report.json
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
