@@ -7,7 +7,9 @@ Usage:
     python scripts/workflows/bump_version.py --current        # Print current version
     python scripts/workflows/bump_version.py --check-release  # Validate version is bumped vs release branch
 
-This script updates the 11 tracked version files. Submodule versions
+This script updates the 11 tracked version files, then regenerates the
+artifacts that derive from the version (see DERIVED_ARTIFACTS) so the bump
+leaves a tree that is internally consistent. Submodule versions
 (event-sourcing-platform, agentic-primitives, openclaw-plugin) are
 intentionally excluded - they have independent versioning.
 
@@ -52,6 +54,22 @@ PACKAGE_JSON_FILES = [
     ROOT / "apps/syn-cli-node/package.json",
     ROOT / "apps/syn-dashboard-ui/package.json",
     ROOT / "apps/syn-docs/package.json",
+]
+
+# Tracked artifacts that are GENERATED from the version rather than edited.
+# Bumping invalidates every one of them, and this script is the only thing that
+# knows the version moved - so it regenerates them instead of reporting success
+# on a tree the next gate rejects (#1091).
+#
+# Each entry delegates to the tool that owns the artifact. Never re-derive the
+# content here: the schema `$id` stamping lives in export_plugin_schemas.py and
+# the lock format belongs to uv. A second copy of either would drift silently
+# the moment the original moved.
+DERIVED_ARTIFACTS: list[tuple[str, list[str]]] = [
+    # uv.lock records a version for each of the 8 workspace members.
+    ("uv.lock", ["uv", "lock", "--quiet"]),
+    # schemas/plugin/*.schema.json stamp the version into their "$id" URL.
+    ("plugin JSON schemas", ["uv", "run", "python", "scripts/export_plugin_schemas.py"]),
 ]
 
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
@@ -211,8 +229,38 @@ def check_consistency() -> bool:
     return False
 
 
+def regenerate_derived_artifacts() -> None:
+    """Regenerate the artifacts that stamp the version into their contents.
+
+    Ordering is load-bearing: every generator reads the version back off disk,
+    so this must run AFTER the version files are written. Running it first
+    re-stamps the OLD version and leaves the tree exactly as stale as before.
+
+    Exits non-zero if a generator is unavailable or fails. The version files
+    are already written at that point, so silence would hand back a
+    half-bumped tree that only fails later, on the release critical path.
+    """
+    print("\nRegenerating version-stamped artifacts...")
+
+    for label, cmd in DERIVED_ARTIFACTS:
+        try:
+            subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=True)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            stderr = getattr(exc, "stderr", None)
+            print(f"\nERROR: could not regenerate {label}: {exc}", file=sys.stderr)
+            if stderr:
+                print(stderr, file=sys.stderr)
+            print(
+                f"\nVersion files are updated, but {label} is still stale.\n"
+                "Run 'just codegen' before committing.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"  ✓ {label}")
+
+
 def bump(target: str) -> None:
-    """Update all 11 files to the target version.
+    """Update all 11 files to the target version, then regenerate what derives from it.
 
     Pre-validates all files before writing any changes. If any file
     is missing a version field, fails without modifying anything.
@@ -262,7 +310,11 @@ def bump(target: str) -> None:
         print(f"  ✓ {path.relative_to(ROOT)}")
 
     print(f"\nDone. Updated {len(pending)} files to v{target}.")
-    print(f"Next: git add -A && git commit -m 'chore: bump version to v{target}'")
+
+    # Only now is the new version readable from disk by the generators below.
+    regenerate_derived_artifacts()
+
+    print(f"\nNext: git add -A && git commit -m 'chore: bump version to v{target}'")
 
 
 def main() -> None:

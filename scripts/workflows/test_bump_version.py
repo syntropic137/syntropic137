@@ -132,6 +132,34 @@ def _make_version_files(tmp_path: Path, version: str) -> None:
         p.write_text(json.dumps({"name": "placeholder", "version": version}, indent=2) + "\n")
 
 
+def _record_regeneration(
+    monkeypatch: pytest.MonkeyPatch, pyproject: Path
+) -> list[tuple[list[str], str]]:
+    """Stub the derived-artifact generators, recording what each one would have seen.
+
+    Returns (command, pyproject-contents-at-call-time) per invocation. The
+    second element is the point: the generators read the version back off
+    disk, so it is the only evidence that they ran late enough to see it.
+    """
+    import bump_version as bv
+
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_run(
+        cmd: list[str],
+        *,
+        cwd: Path | None = None,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((cmd, pyproject.read_text()))
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(bv.subprocess, "run", fake_run)
+    return calls
+
+
 class TestCheckConsistency:
     def test_all_match(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make_version_files(tmp_path, "0.24.2")
@@ -288,6 +316,7 @@ class TestBump:
             "PACKAGE_JSON_FILES",
             [tmp_path / "apps/syn-cli-node/package.json"],
         )
+        _record_regeneration(monkeypatch, tmp_path / "pyproject.toml")
 
         bump("0.25.0")
 
@@ -319,3 +348,94 @@ class TestBump:
 
         with pytest.raises(SystemExit):
             bump("not-a-version")
+
+
+# =============================================================================
+# Derived artifacts - the version is generated INTO these, not edited in them
+# =============================================================================
+
+
+class TestRegenerateDerivedArtifacts:
+    """A bump that leaves generated artifacts stale is a half-finished bump (#1091).
+
+    These assert on what CONSUMES the version - the generators - rather than on
+    the eleven files the bump obviously rewrites.
+    """
+
+    def _bump_in(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make_version_files(tmp_path, "0.24.2")
+        import bump_version as bv
+
+        monkeypatch.setattr(bv, "ROOT", tmp_path)
+        monkeypatch.setattr(bv, "PYPROJECT_FILES", [tmp_path / "pyproject.toml"])
+        monkeypatch.setattr(bv, "PACKAGE_JSON_FILES", [])
+
+    def test_every_registered_artifact_is_regenerated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import bump_version as bv
+
+        self._bump_in(tmp_path, monkeypatch)
+        calls = _record_regeneration(monkeypatch, tmp_path / "pyproject.toml")
+
+        bump("0.25.0")
+
+        assert [cmd for cmd, _ in calls] == [cmd for _, cmd in bv.DERIVED_ARTIFACTS]
+
+    def test_generators_see_the_new_version_on_disk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ordering hop: generators read the version back off disk.
+
+        Regenerating before the write re-stamps 0.24.2 and leaves the tree
+        exactly as stale as it was - which no assertion on the eleven version
+        files would ever notice.
+        """
+        self._bump_in(tmp_path, monkeypatch)
+        calls = _record_regeneration(monkeypatch, tmp_path / "pyproject.toml")
+
+        bump("0.25.0")
+
+        assert calls, "bump regenerated nothing - derived artifacts left stale"
+        for cmd, pyproject_at_call_time in calls:
+            assert 'version = "0.25.0"' in pyproject_at_call_time, (
+                f"{cmd} ran before the version was written; it re-stamped the old version"
+            )
+
+    def test_failed_generator_fails_the_bump_with_an_instruction(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A generator that cannot run must not be reported as a clean bump."""
+        import bump_version as bv
+
+        self._bump_in(tmp_path, monkeypatch)
+
+        def failing_run(
+            cmd: list[str],
+            *,
+            cwd: Path | None = None,
+            capture_output: bool = False,
+            text: bool = False,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            raise subprocess.CalledProcessError(1, cmd, stderr="boom")
+
+        monkeypatch.setattr(bv.subprocess, "run", failing_run)
+
+        with pytest.raises(SystemExit) as exc:
+            bump("0.25.0")
+
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "just codegen" in err
+
+    def test_registry_covers_the_lockfile_and_the_plugin_schemas(self) -> None:
+        """Both artifacts measured stale after a real bump must stay covered.
+
+        uv.lock is the one the issue did not name; it is only caught today
+        because `uv run` silently re-locks, which is not a guarantee.
+        """
+        import bump_version as bv
+
+        labels = {label for label, _ in bv.DERIVED_ARTIFACTS}
+        assert labels == {"uv.lock", "plugin JSON schemas"}
