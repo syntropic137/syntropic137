@@ -14,6 +14,8 @@ import { Table } from "../../output/table.js";
 import type { InstalledWorkflowRef, PackageFormat, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
 import {
   detectFormat,
+  isGitHubShorthand,
+  isHomeRelative,
   loadInstalled,
   parseSource,
   recordInstallation,
@@ -41,6 +43,7 @@ export function isBarePluginName(source: string): boolean {
     !source.startsWith("http") &&
     !source.startsWith("git@") &&
     !source.startsWith("ssh://") &&
+    !isHomeRelative(source) &&
     !fs.existsSync(source)
   );
 }
@@ -404,12 +407,25 @@ export const packagesCommand: CommandDef = {
 
     // Filter out entries whose local source path no longer exists.
     // Remote sources (URLs, git@, GitHub shorthand, marketplace bare names) are always shown.
+    // Reuses resolver.ts's isGitHubShorthand rather than a second, divergent
+    // check - this used its own regex (with a `#fragment` allowance nothing
+    // ever produces, since `source` is always the raw CLI argument and a ref
+    // is stored separately as `sourceRef`) that could disagree with the
+    // parser actually used to resolve the source.
+    //
+    // WHY parseSource here (issue #1066): `source` is the raw CLI argument
+    // (e.g. `~/foo`), stored verbatim so the table can display it and so
+    // re-expanding against a different $HOME later (a synced registry file,
+    // a container rebuild) stays correct. The liveness check must resolve it
+    // through the exact same function `install`/`update` use to turn that
+    // raw string into a filesystem path - parseSource's `expandHome` - rather
+    // than a second, ad-hoc `path.resolve`, which does not know `~` and
+    // silently drops every home-relative install from this list.
     const liveInstallations = registry.installations.filter((r) => {
       const src = r.source;
-      const isGitHubShorthand = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#.+)?$/.test(src);
-      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand;
+      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand(src);
       if (isRemote) return true;
-      return fs.existsSync(path.resolve(src));
+      return fs.existsSync(path.resolve(parseSource(src).resolved));
     });
 
     if (liveInstallations.length === 0) {

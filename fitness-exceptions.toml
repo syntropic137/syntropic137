@@ -8,23 +8,21 @@
 # Maximum Cognitive Complexity (function-level, threshold: 15)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- syn-api routes ---
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
-value = 20
-issue = "#317"
-
-# --- syn-api services ---
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.credentials::validate_credentials"]
-value = 20
-issue = "#316"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.reconciliation::_docker_rm"]
-value = 20
-issue = "#316"
-
-# --- dashboard-ui ---
+# Three waivers were REMOVED here. The tool had been reporting them as
+# `NowPassing` stale exceptions for an unknown number of green runs:
+#
+#   get_execution_status_endpoint  cognitive 11, waiver 20  (#317)
+#   validate_credentials           cognitive  8, waiver 20  (#316)
+#   _docker_rm                     cognitive  7, waiver 20  (#316)
+#
+# The global cognitive limit is 15. Each function was already well under it,
+# so the waiver was not covering debt - it was standing permission to add
+# 9 to 13 points of complexity back to code somebody had already fixed, and
+# the next author to do so would have been waved through.
+#
+# A waiver outlives the debt it was granted for unless something deletes it.
+# `just fitness-check` now fails when the tool reports a stale exception, so
+# this cannot silently accumulate again.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)

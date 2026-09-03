@@ -87,18 +87,56 @@ change, not the object you just edited.
 A fixture value must be one that could not have arisen without your change. A
 default asserted in its default direction proves nothing.
 
+## Start from current main
+
+**Before you write anything, merge `origin/main` into your working branch** (or
+branch from it, if you are starting fresh):
+
+```
+git fetch origin
+git merge origin/main
+```
+
+Never rebase, and never force push - this repository merges main into feature
+branches, in that direction, always.
+
+This is not hygiene. The gate you are required to run in the next phase lives in
+`main`'s justfile, and a branch that predates it does not have the recipe at all:
+
+```
+just preflight-agent
+error: Justfile does not contain recipe `preflight-agent`
+```
+
+That happened on a real rework: the implement phase branched from the PR's old
+base, pushed correct work, and the verify phase then refused to certify it
+because the mandated gate did not exist in the revision it checked out. The work
+was fine; it was unverifiable. If the merge conflicts, resolve it - a rework that
+cannot be verified against current main is not finished.
+
+## If you are reworking an existing PR, use its branch
+
+When the task names a PR to rework, **check out that PR's head branch and push
+back to it**, so the review, its findings, and your fix stay on one thread:
+
+```
+gh pr checkout <number>
+```
+
+Opening a second branch for the same change splits the discussion, leaves the
+original PR looking untouched, and gives the reviewer two heads to choose
+between. Only start a new branch when the task asks for new work.
+
 ## Commit AND push the branch
 
-Commit on a new branch, then **push that branch to origin**. Do not open a PR -
-that is the last phase's job.
+Commit, then **push that branch to origin**. Do not open a PR - that is the last
+phase's job (and for a rework there is already one).
 
 Pushing is not optional. **Every phase runs in its own fresh workspace with its
 own clone**, so nothing on this filesystem survives into the next phase; only
 your artifact does. A branch left local is destroyed when this phase ends, the
 verify phase would check the default branch while believing it checked your work,
 and the final phase would have nothing to open a PR from.
-
-Never force push, never rebase.
 
 **Record in your artifact, exactly:** the branch name and the full commit SHA you
 pushed. The next phase checks out that SHA by name. If it is missing or wrong,

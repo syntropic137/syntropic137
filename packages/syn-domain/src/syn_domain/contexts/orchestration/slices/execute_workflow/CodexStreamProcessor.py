@@ -46,7 +46,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
@@ -80,6 +80,17 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: The reason recorded when a codex stream carries no fault of its own and
+#: simply stops before `turn.completed`. It is a TELEMETRY gap - the run has no
+#: authoritative usage - and it is deliberately distinguishable from every other
+#: value `error_reason` can take, all of which name a real fault (a login
+#: failure, a malformed line). AgentExecutionHandler relies on that distinction:
+#: it will let a phase that reached this state complete IF the phase actually
+#: produced a deliverable, and only this state (issue #1111).
+MISSING_TERMINAL_TURN_REASON: Final[str] = (
+    "codex stream ended without a terminal turn.completed event (no authoritative usage)"
+)
 
 # This processor drives a CODEX primary, so its declared delegate is claude -p.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
@@ -200,12 +211,20 @@ class _CodexUsage(TypedDict, total=False):
     reasoning_output_tokens: int
 
 
+class _CodexError(TypedDict, total=False):
+    """The ``error`` block on a codex ``turn.failed`` event."""
+
+    message: str
+
+
 class _CodexEvent(TypedDict, total=False):
     """A single codex ``--json`` stream event (typed JSON-boundary shape)."""
 
     type: str
     item: _CodexItem
     usage: _CodexUsage
+    error: _CodexError
+    message: str
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -336,6 +355,9 @@ class CodexStreamProcessor:
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
+        #: A fault codex reported on `error` / `turn.failed`, held until
+        #: end-of-stream so a recovered turn is not failed by it (#1117).
+        self._turn_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -372,13 +394,14 @@ class CodexStreamProcessor:
             await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
+            # Order is deliberate, most specific first: a fault codex itself
+            # reported beats an inferred auth fault, which beats the generic
+            # "it just stopped".
             self._error_reason = (
                 self._error_reason
+                or self._turn_fault_candidate
                 or self._auth_fault_candidate
-                or (
-                    "codex stream ended without a terminal turn.completed event "
-                    "(no authoritative usage)"
-                )
+                or MISSING_TERMINAL_TURN_REASON
             )
 
         total_cost_usd = self._estimate_cost()
@@ -523,6 +546,8 @@ class CodexStreamProcessor:
             await self._handle_item_completed(event)
         elif event_type == CodexStreamType.TURN_COMPLETED:
             await self._handle_turn_completed(event)
+        elif event_type in (CodexStreamType.TURN_FAILED, CodexStreamType.ERROR):
+            self._note_stream_fault(event)
         elif event_type == CodexStreamType.THREAD_STARTED:
             # Codex announces its OWN session id here, and it is the same id
             # the rollout file on disk is keyed by - verified same-run, not
@@ -542,6 +567,55 @@ class CodexStreamProcessor:
                 self._leader_native_session_id = announced
 
         # "turn.started": no observability call needed.
+
+    def _note_stream_fault(self, event: _CodexEvent) -> None:
+        """Record the reason codex itself gave for ending the turn.
+
+        WHY (issue #1116). When a turn fails, codex says why, in the stream:
+
+            {"type":"error","message":"This content was flagged for possible
+             cybersecurity risk..."}
+            {"type":"turn.failed","error":{"message": <the same text>}}
+
+        Neither event was dispatched, so the stream simply ended with no
+        `turn.completed` and the run was reported as
+        "codex stream ended without a terminal turn.completed event". True, and
+        useless: it names the symptom, hides an operator-actionable cause, and
+        makes an ordinary prompt rejection look like the same unexplained
+        failure as a stream that stopped for reasons nobody has established.
+
+        This is #891 again for a different event type, so it takes the same
+        shape: keep the FIRST fault, because a later generic one must not
+        overwrite the specific one that ended the run.
+
+        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
+        directly would be worse than the bug it fixes. `AgentExecutionHandler`
+        forces a non-zero phase exit whenever a codex stream carries ANY
+        `error_reason`, and it does not consult `saw_terminal_turn`. So an
+        `error` event the CLI then recovers from - `error` ... `turn.completed`
+        - would fail a phase that finished cleanly, and would report the
+        mid-turn hiccup as its cause. That does not mask a failure; it invents
+        one. This module's own comment already names that class as the worse
+        defect (an early #891 draft "would have failed SUCCESSFUL codex
+        phases"), and the sibling `_note_non_json_fault` holds its result as a
+        candidate for exactly this reason.
+
+        So the message is held and promoted at end-of-stream only when no
+        `turn.completed` arrived. A turn that genuinely failed emits no terminal
+        turn, so the reason still surfaces; a turn that recovered keeps its
+        success. Found by the cross-model review of #1117.
+        """
+        message = event.get("message")
+        if not message:
+            error = event.get("error")
+            message = error.get("message") if error else None
+        if not message:
+            return
+        reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+        logger.error("Codex turn failed: %s", message)
+        # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
+        # terminal turn arrived. See the class comment above for why.
+        self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.

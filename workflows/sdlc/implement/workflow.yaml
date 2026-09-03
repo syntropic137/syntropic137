@@ -47,7 +47,7 @@ phases:
     input_artifacts: []
     output_artifacts:
       - markdown
-    timeout_seconds: 1200
+    timeout_seconds: 1800
     allowed_tools:
       - Read
       - Grep
@@ -67,7 +67,7 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 2400
+    timeout_seconds: 3600
     allowed_tools:
       - Read
       - Grep
@@ -88,7 +88,7 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 1800
+    timeout_seconds: 3600
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
