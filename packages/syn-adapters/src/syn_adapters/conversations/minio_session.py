@@ -19,15 +19,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_ABSENT_OBJECT_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "NoSuchVersion"})
+#: The codes that describe ONE object. ``NoSuchBucket`` is deliberately not
+#: among them: it says the conversation store itself is not there, which is a
+#: fact about the deployment and about every session in it, not an answer
+#: about the session being asked after. This repo creates the bucket eagerly at
+#: startup (ADR-012), so seeing this at read time means that invariant broke -
+#: the same class of fault as the endpoint being down, and it is reported the
+#: same way (#1065).
+_ABSENT_OBJECT_CODES = frozenset({"NoSuchKey", "NoSuchVersion"})
 
 
 def _is_absent_object(error: Exception) -> bool:
     """True only when the store answered, and its answer was "there is nothing here".
 
-    Everything else - the endpoint being down, credentials rejected, a socket
-    dying mid-body - is the store failing to answer at all, which is a
-    different fact and must not be flattened into this one (#1065).
+    Everything else - the endpoint being down, credentials rejected, the bucket
+    itself missing, a socket dying mid-body - is the store failing to answer at
+    all, which is a different fact and must not be flattened into this one
+    (#1065).
 
     ``minio`` is an optional extra, so the import is local: a deployment
     without it can still call this and get False, which is the safe answer.

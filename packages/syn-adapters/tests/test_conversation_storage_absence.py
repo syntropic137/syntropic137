@@ -64,7 +64,7 @@ async def test_a_stored_log_is_returned() -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("code", ["NoSuchKey", "NoSuchBucket"])
+@pytest.mark.parametrize("code", ["NoSuchKey", "NoSuchVersion"])
 async def test_a_missing_object_is_absence(code: str) -> None:
     """The store answered, and the answer was that there is nothing there."""
     assert await retrieve_session(_storage(_s3_error(code)), "sess-1") is None
@@ -84,8 +84,16 @@ async def test_a_missing_object_is_absence(code: str) -> None:
             request_id="q",
             host_id="h",
         ),
+        S3Error(
+            response=MagicMock(),
+            code="NoSuchBucket",
+            message="NoSuchBucket",
+            resource="r",
+            request_id="q",
+            host_id="h",
+        ),
     ],
-    ids=["outage", "timeout", "credentials"],
+    ids=["outage", "timeout", "credentials", "missing bucket"],
 )
 async def test_a_store_that_could_not_answer_raises(failure: Exception) -> None:
     """An outage must not be able to say "this session has no log".
@@ -95,6 +103,12 @@ async def test_a_store_that_could_not_answer_raises(failure: Exception) -> None:
     each other and from a genuine absence at that point, so the only place the
     difference survives is here, and the only way to keep it is to raise. The
     caller already maps a raised error to a failed query (#1065).
+
+    ``NoSuchBucket`` belongs in this list and not in the absence one above,
+    and the distinction is the whole point: the bucket is created eagerly at
+    startup (ADR-012), so its absence at read time is a broken deployment,
+    which is a fact about every session rather than an answer about this one.
+    Put it back among the absence codes and this fails.
     """
     with pytest.raises(type(failure)):
         await retrieve_session(_storage(failure), "sess-1")

@@ -1,21 +1,28 @@
-"""Evidence that an agent process existed, taken from the stream itself.
+"""Evidence that an agent process existed, taken from that process.
 
-The fact "an agent ran" is only worth recording if it cannot be wrong, because
-the whole point of it is to license a claim to a user - that a session never
-started - which is otherwise indistinguishable from a log we simply cannot
-read (#1047, #1065).
+The fact "an agent ran" licenses one specific statement to a user - that a
+session never started, so its missing log is not lost data (#1047, #1065). A
+claim that strong may only rest on evidence nothing but the process itself can
+produce.
 
-Deciding to start a process is not evidence that one started. Everything
-between the decision and the process can still fail: the container is gone,
-the image has no such binary, the exec is refused. So the signal is taken from
-the one place that can only happen after creation succeeded - the stream
-advancing.
+Deciding to start a process is not that evidence, and neither is the transport
+that was asked to. `docker exec` merges its own stderr into the agent's stdout,
+so a client-side "No such container" arrives as an ordinary line; a refused
+exec ends the stream at once. From outside, both are indistinguishable from an
+agent that ran and said nothing, so a signal taken from the stream advancing
+proves only that a docker exec client started - the one thing never in doubt.
 
-An advance that returns, whether it carries a line or ends the stream, means
-the subprocess was created and its output pipe was read to completion. An
-advance that raises means it was not. An agent that starts and dies before
-printing anything therefore still counts as launched, which is exactly the
-case a line-counting signal would get wrong.
+So the process speaks for itself. The transport wraps the phase command so that
+a process created INSIDE the workspace prints ``AGENT_LAUNCH_MARKER`` before it
+becomes the agent, and that line is the only thing counted here. A client that
+never reached the container ran nothing that could print it, and an agent that
+dies before its first output has already announced itself - which is the case a
+signal counted from agent output would get wrong.
+
+A transport that creates no process - a replayed recording, an in-memory double
+- emits no marker and leaves the session UNKNOWN. That is right rather than a
+gap: it has no standing to attest a launch, and UNKNOWN is the state that
+exists for having no evidence.
 """
 
 from __future__ import annotations
@@ -24,6 +31,17 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+
+AGENT_LAUNCH_MARKER = "__syn_agent_launched__"
+"""Printed by a process inside the workspace, immediately before it execs the agent.
+
+Part of the event stream contract: a transport that really creates a process
+emits this line first, and nothing else in the stream means a launch.
+``observing_launch`` consumes it, so it never reaches a stream processor. An
+agent that echoed it would only be attesting its own existence, which is why
+no escaping or nonce is needed.
+"""
 
 
 class AgentLaunchObserver(Protocol):
@@ -41,30 +59,22 @@ async def observing_launch(
     stream: AsyncIterator[str],
     observer: AgentLaunchObserver | None,
 ) -> AsyncIterator[str]:
-    """Yield from ``stream``, notifying ``observer`` once it first advances.
+    """Yield from ``stream``, notifying ``observer`` when the agent announces itself.
 
-    Transparent otherwise: lines pass through untouched and every exception
-    propagates unchanged, including one raised by the first advance - which is
-    precisely the case where nothing is reported, because nothing started.
+    Transparent otherwise: every other line passes through untouched and every
+    exception propagates unchanged. A stream that ends without the marker
+    reports nothing at all, which is what keeps a failed exec distinguishable
+    from a silent agent.
     """
-    iterator = stream.__aiter__()
     launched = False
-    while True:
-        try:
-            line: str | None = await iterator.__anext__()
-        except StopAsyncIteration:
-            # The stream ended without producing anything, which is still an
-            # advance that returned: the process ran and printed nothing.
-            line = None
-
+    async for line in stream:
+        if line != AGENT_LAUNCH_MARKER:
+            yield line
+            continue
         if not launched:
             launched = True
             if observer is not None:
                 await observer()
-
-        if line is None:
-            return
-        yield line
 
 
 class SupportsMarkLaunched(Protocol):

@@ -1,7 +1,7 @@
 """Tests for syn_api.routes.conversations — conversation log retrieval."""
 
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -298,6 +298,66 @@ async def test_a_storage_outage_is_never_reported_as_a_session_that_never_ran(
         result = await get_conversation_log("outage-session-1")
         with pytest.raises(HTTPException) as exc_info:
             await get_conversation_log_endpoint("outage-session-1")
+
+    assert isinstance(result, Err)
+    assert result.error == ObservabilityError.QUERY_FAILED
+    assert exc_info.value.status_code == 500
+    assert "never started" not in str(exc_info.value.detail).lower()
+
+
+async def test_a_missing_bucket_is_never_reported_as_a_session_that_never_ran(
+    mock_conversation_store,
+):
+    """The same rule for the fault that looks most like absence.
+
+    A missing bucket is the conversation store itself not being there. It is
+    created eagerly at startup (ADR-012), so meeting it on a read means the
+    deployment is broken - a fact about every session, and about this one only
+    incidentally. Classified as absence it produces the worst available
+    answer, because this session really did complete without launching an
+    agent, so the classifier says NEVER_STARTED with total confidence.
+
+    Deliberately driven through the REAL ``retrieve_session`` rather than a
+    mock that raises: the defect lives in which S3 codes that function calls
+    absence, and a mock chosen to raise would assert the classification this
+    test exists to check. Move ``NoSuchBucket`` back among the absent-object
+    codes and this fails.
+    """
+    from functools import partial
+
+    from fastapi import HTTPException
+    from minio.error import S3Error
+
+    from syn_adapters.conversations.minio_session import retrieve_session
+
+    await _seed_session("missing-bucket-1", launched=False, completed=True)
+
+    client = AsyncMock()
+    client.get_object = MagicMock(
+        side_effect=S3Error(
+            response=MagicMock(),
+            code="NoSuchBucket",
+            message="The specified bucket does not exist",
+            resource="sessions/missing-bucket-1/conversation.jsonl",
+            request_id="req-1",
+            host_id="host-1",
+        )
+    )
+    store_with_no_bucket = MagicMock()
+    store_with_no_bucket._initialized = True
+    store_with_no_bucket._client = client
+    store_with_no_bucket.BUCKET_NAME = "conversations"
+    mock_conversation_store.retrieve_session = partial(retrieve_session, store_with_no_bucket)
+
+    with _patch_store(mock_conversation_store):
+        from syn_api.routes.conversations import (
+            get_conversation_log,
+            get_conversation_log_endpoint,
+        )
+
+        result = await get_conversation_log("missing-bucket-1")
+        with pytest.raises(HTTPException) as exc_info:
+            await get_conversation_log_endpoint("missing-bucket-1")
 
     assert isinstance(result, Err)
     assert result.error == ObservabilityError.QUERY_FAILED

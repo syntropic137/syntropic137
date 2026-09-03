@@ -11,7 +11,25 @@ import asyncio
 import logging
 import time
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    AGENT_LAUNCH_MARKER,
+)
+
 logger = logging.getLogger(__name__)
+
+#: Announce the launch from inside the container, then become the agent.
+#:
+#: This is the only thing in the system that can emit the marker: reaching it
+#: requires the daemon to have accepted the exec and created a process in the
+#: container, so a client that failed short of that - no such container, exec
+#: refused - cannot produce it however it fails. That is the whole point;
+#: `docker exec` merges its own diagnostics into this same stdout pipe, so
+#: nothing else arriving on it distinguishes the two (#1065).
+#:
+#: ``exec`` then replaces the shell, so the agent inherits the pid the timeout
+#: path signals and the argv it was given. The marker is passed as an argument
+#: rather than interpolated, which keeps this script a constant.
+_ANNOUNCE_THEN_EXEC = 'printf "%s\\n" "$1"; shift; exec "$@"'
 
 
 def _build_exec_command(
@@ -20,13 +38,13 @@ def _build_exec_command(
     working_directory: str | None,
     environment: dict[str, str] | None,
 ) -> list[str]:
-    """Build the docker exec command list."""
+    """Build the docker exec command list, wrapped so the process announces itself."""
     exec_cmd = ["docker", "exec", "-i", "-w", working_directory or "/workspace"]
     if environment:
         for key, value in environment.items():
             exec_cmd.extend(["-e", f"{key}={value}"])
     exec_cmd.append(container_name)
-    exec_cmd.extend(command)
+    exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command])
     return exec_cmd
 
 

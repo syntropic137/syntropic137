@@ -3,13 +3,19 @@
 The fact licenses one specific statement to a user - "this session never
 started an agent, so there is no log" - so it may only be recorded by
 something that can actually tell. These tests pin it to the process boundary:
-the agent's own stream, consumed by the real handler, reporting into a real
-SessionLifecycleManager.
+the agent's own announcement, carried on its stream, consumed by the real
+handler and recorded through a real SessionLifecycleManager.
 
 The distinction they exist to hold is between an agent that was *dispatched*
 and one that *existed*. Everything between those two - a dead container, a
-missing binary, a refused exec - used to be invisible, because the launch was
-recorded by the code that decided to dispatch.
+missing binary, a refused exec - is invisible to anything that watches the
+transport rather than the process.
+
+These are the domain half of that boundary, and they take the announcement as
+given. That the real `docker exec` transport emits it exactly when a process
+was created, and that its own failure diagnostics do not, is the adapter's
+half: ``syn-adapters/tests/workspace_backends/agentic/test_agent_launch_evidence.py``
+drives the real adapter against real `docker exec` failure shapes to prove it.
 """
 
 from __future__ import annotations
@@ -23,6 +29,9 @@ from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    AGENT_LAUNCH_MARKER,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
@@ -43,6 +52,12 @@ _PROCESSOR_PATH = (
     "syn_domain.contexts.orchestration.slices.execute_workflow"
     ".handlers.AgentExecutionHandler.EventStreamProcessor"
 )
+
+#: What the client prints when the container it was pointed at is gone. It
+#: reaches the handler as an ordinary line, because `docker exec` merges its
+#: own stderr into the agent's stdout - which is what made "a line arrived"
+#: unusable as evidence.
+_CLIENT_DIAGNOSTIC = "Error response from daemon: No such container: agentic-ws-abc123"
 
 
 class _ConsumingStreamProcessor:
@@ -68,14 +83,12 @@ class _ConsumingStreamProcessor:
         )
 
 
-def _workspace(*, lines: list[str] | None = None, fails: bool = False) -> MagicMock:
-    """A workspace whose stream either starts a process or cannot."""
+def _workspace(*, lines: list[str] | None = None, raises: bool = False) -> MagicMock:
+    """A workspace whose stream produces the given lines, or cannot start at all."""
 
     async def _stream(*_args: object, **_kwargs: object) -> AsyncIterator[str]:
-        if fails:
-            # Raised where the real adapter raises: at create_subprocess_exec,
-            # before anything is yielded and before any exit code exists.
-            raise RuntimeError("container is gone")
+        if raises:
+            raise RuntimeError("docker is not installed")
         for line in lines or []:
             yield line
 
@@ -85,9 +98,8 @@ def _workspace(*, lines: list[str] | None = None, fails: bool = False) -> MagicM
     return workspace
 
 
-async def _run_phase(workspace: MagicMock) -> SessionLifecycleManager:
-    """Run one phase through the real handler and return its session manager."""
-    session_mgr = SessionLifecycleManager(
+def _session_manager() -> SessionLifecycleManager:
+    return SessionLifecycleManager(
         repository=AsyncMock(),
         session_id="sess-1",
         workflow_id="wf-1",
@@ -96,9 +108,15 @@ async def _run_phase(workspace: MagicMock) -> SessionLifecycleManager:
         agent_provider="claude",
         agent_model="claude-haiku",
     )
-    await session_mgr.start()
 
-    with patch(_PROCESSOR_PATH, _ConsumingStreamProcessor):
+
+async def _run_phase(
+    workspace: MagicMock,
+    session_mgr: SessionLifecycleManager,
+    processor: type[_ConsumingStreamProcessor] = _ConsumingStreamProcessor,
+) -> None:
+    """Run one phase through the real handler, reporting into ``session_mgr``."""
+    with patch(_PROCESSOR_PATH, processor):
         await AgentExecutionHandler(controller=None).handle(
             todo=TodoItem(
                 execution_id="exec-1",
@@ -114,74 +132,71 @@ async def _run_phase(workspace: MagicMock) -> SessionLifecycleManager:
             timeout_seconds=300,
             on_launch=session_mgr.mark_launched,
         )
-    return session_mgr
+
+
+def _launch_of(session_mgr: SessionLifecycleManager) -> AgentLaunch:
+    session = session_mgr.session
+    assert session is not None
+    return session.agent_launch
 
 
 @pytest.mark.anyio
-async def test_a_stream_that_never_starts_a_process_records_no_launch() -> None:
-    """The break: dispatching an agent was treated as evidence one existed.
+@pytest.mark.parametrize(
+    "lines",
+    [[], [_CLIENT_DIAGNOSTIC]],
+    ids=["nothing at all", "a client diagnostic"],
+)
+async def test_a_stream_with_no_announcement_records_no_launch(lines: list[str]) -> None:
+    """The break: something arriving on the stream was treated as a process.
 
-    Here the handler is reached, the command is built, the workspace is asked
-    to stream - and the process is never created. The session must be able to
-    say so, because this is the only shape that may be reported to a user as
-    never having started.
-
-    Move the signal back to the caller and this fails: the session is marked
-    launched before the handler is ever entered, so nothing downstream can
-    tell this case from an agent that ran.
+    Both of these are a transport reporting its own failure. One says so and
+    one does not, and neither ran anything inside the container - so neither
+    may license the statement that gets made to a user about a session that
+    did not launch.
     """
-    session_mgr = SessionLifecycleManager(
-        repository=AsyncMock(),
-        session_id="sess-1",
-        workflow_id="wf-1",
-        execution_id="exec-1",
-        phase_id="p-1",
-        agent_provider="claude",
-        agent_model="claude-haiku",
-    )
+    session_mgr = _session_manager()
     await session_mgr.start()
 
-    with patch(_PROCESSOR_PATH, _ConsumingStreamProcessor), pytest.raises(RuntimeError):
-        await AgentExecutionHandler(controller=None).handle(
-            todo=TodoItem(
-                execution_id="exec-1",
-                action=TodoAction.RUN_AGENT,
-                phase_id="p-1",
-                session_id="sess-1",
-            ),
-            workspace=_workspace(fails=True),
-            agent_env={},
-            claude_cmd=["claude", "-p"],
-            session_id="sess-1",
-            agent_model="claude-haiku",
-            timeout_seconds=300,
-            on_launch=session_mgr.mark_launched,
-        )
+    await _run_phase(_workspace(lines=lines), session_mgr)
 
-    session = session_mgr.session
-    assert session is not None
-    assert session.agent_launch is AgentLaunch.NOT_LAUNCHED
+    assert _launch_of(session_mgr) is AgentLaunch.NOT_LAUNCHED
+
+
+@pytest.mark.anyio
+async def test_a_stream_that_cannot_start_records_no_launch() -> None:
+    """Nothing was reached at all, and the failure still has to reach the caller."""
+    session_mgr = _session_manager()
+    await session_mgr.start()
+
+    with pytest.raises(RuntimeError):
+        await _run_phase(_workspace(raises=True), session_mgr)
+
+    assert _launch_of(session_mgr) is AgentLaunch.NOT_LAUNCHED
 
 
 @pytest.mark.anyio
 async def test_an_agent_that_dies_before_printing_anything_still_launched() -> None:
     """The mirror-image error: counting output instead of the process.
 
-    An agent that starts and exits before its first line produces an empty
-    stream, and calling that "never started" would be the same false statement
-    in the other direction. The stream advancing at all is the evidence, not
-    what it carried.
+    An agent that starts and exits before its first line produces a stream
+    carrying nothing but its own announcement, and calling that "never
+    started" would be the same false statement in the other direction.
     """
-    session_mgr = await _run_phase(_workspace(lines=[]))
+    session_mgr = _session_manager()
+    await session_mgr.start()
 
-    session = session_mgr.session
-    assert session is not None
-    assert session.agent_launch is AgentLaunch.LAUNCHED
+    await _run_phase(_workspace(lines=[AGENT_LAUNCH_MARKER]), session_mgr)
+
+    assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
 
 
 @pytest.mark.anyio
 async def test_a_streaming_agent_is_launched_and_its_output_is_untouched() -> None:
-    """The wrapper is transparent: every line still reaches the processor."""
+    """Transparent otherwise: every real line reaches the processor, the marker does not.
+
+    The announcement is evidence, not content. Leaving it in the stream would
+    hand a line of non-JSON to a JSONL parser on every single phase.
+    """
     processors: list[_ConsumingStreamProcessor] = []
 
     class _Recording(_ConsumingStreamProcessor):
@@ -189,36 +204,14 @@ async def test_a_streaming_agent_is_launched_and_its_output_is_untouched() -> No
             super().__init__(**kwargs)
             processors.append(self)
 
-    session_mgr = SessionLifecycleManager(
-        repository=AsyncMock(),
-        session_id="sess-1",
-        workflow_id="wf-1",
-        execution_id="exec-1",
-        phase_id="p-1",
-        agent_provider="claude",
-        agent_model="claude-haiku",
-    )
+    session_mgr = _session_manager()
     await session_mgr.start()
 
-    with patch(_PROCESSOR_PATH, _Recording):
-        result = await AgentExecutionHandler(controller=None).handle(
-            todo=TodoItem(
-                execution_id="exec-1",
-                action=TodoAction.RUN_AGENT,
-                phase_id="p-1",
-                session_id="sess-1",
-            ),
-            workspace=_workspace(lines=['{"a": 1}', '{"b": 2}']),
-            agent_env={},
-            claude_cmd=["claude", "-p"],
-            session_id="sess-1",
-            agent_model="claude-haiku",
-            timeout_seconds=300,
-            on_launch=session_mgr.mark_launched,
-        )
+    await _run_phase(
+        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"a": 1}', '{"b": 2}']),
+        session_mgr,
+        processor=_Recording,
+    )
 
-    session = session_mgr.session
-    assert session is not None
-    assert session.agent_launch is AgentLaunch.LAUNCHED
+    assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
     assert processors[0].lines == ['{"a": 1}', '{"b": 2}']
-    assert result.stream_result.line_count == 2
