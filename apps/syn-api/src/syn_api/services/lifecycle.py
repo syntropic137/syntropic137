@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -181,19 +182,27 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     service is marked as degraded. A background recovery loop is spawned
     for any recoverable failures.
     """
+    # BEFORE the registry loop, deliberately (#1120). The registry starts the
+    # subscription coordinator and the GitHub pollers, and `coordinator.start()`
+    # returns as soon as it spawns its background task - so from that moment
+    # this process can dispatch NEW executions into `running`. Reconciling after
+    # that point means the reconcile query cannot tell work orphaned by the
+    # previous process from work this one just started. Resolving the old world
+    # before opening the door to a new one removes the race rather than
+    # narrowing it; the started_before cutoff below is defence in depth.
+    process_started_at = datetime.now(UTC)
+    await reconcile_orphaned_sessions()
+    cleanup = await cleanup_orphaned_containers()
+    # AFTER the reap, and only if the reap can say it finished: "this execution
+    # is still running" is provably false only once every container is gone.
+    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+
     for entry in _SERVICE_REGISTRY:
         try:
             await entry.init_fn(state)
         except Exception:
             logger.exception("%s initialization failed (degraded mode)", entry.reason)
             state.degraded_reasons.append(entry.reason)
-
-    await reconcile_orphaned_sessions()
-    await cleanup_orphaned_containers()
-    # AFTER the reap, deliberately: only once every workspace container is gone
-    # is "this execution is still running" provably false rather than a guess
-    # about a container that might still be finishing (#1120).
-    await reconcile_orphaned_executions()
 
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
