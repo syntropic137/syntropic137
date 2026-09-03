@@ -143,14 +143,15 @@ class ObservabilityError(StrEnum):
     NOT_FOUND = "not_found"
     QUERY_FAILED = "query_failed"
     NOT_IMPLEMENTED = "not_implemented"
-    #: A session never started an agent, so no conversation log ever existed
-    #: for it. Distinct from NOT_FOUND, which means a log should exist but
-    #: could not be located (issue #1047).
+    #: A session is KNOWN to have started no agent process, so no conversation
+    #: log ever existed for it. Requires positive evidence of the negative -
+    #: a session we simply know nothing about is NOT_FOUND, which means a log
+    #: should exist but could not be located (issues #1047, #1065).
     NEVER_STARTED = "never_started"
-    #: The session's agent has been launched but has not yet produced a
-    #: conversation log - it is still running. Distinct from NEVER_STARTED
-    #: (agent never launched) and NOT_FOUND (terminal but unexplained)
-    #: (issue #1047).
+    #: The session is still running and has not yet produced a conversation
+    #: log - regardless of what is known about its agent process. Distinct
+    #: from NEVER_STARTED (no agent process, terminal) and NOT_FOUND
+    #: (terminal but unexplained) (issue #1047).
     PENDING = "pending"
 
 

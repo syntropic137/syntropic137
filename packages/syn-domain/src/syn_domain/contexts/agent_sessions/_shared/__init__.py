@@ -1,6 +1,7 @@
 """Shared components for sessions bounded context."""
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import (
+    AgentLaunch,
     OperationRecord,
     OperationType,
     SessionStatus,
@@ -11,6 +12,7 @@ from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAgg
 )
 
 __all__ = [
+    "AgentLaunch",
     "AgentSessionAggregate",
     "OperationRecord",
     "OperationType",

@@ -9,13 +9,18 @@ from event_sourcing import DomainEvent, event
 
 @event("AgentLaunched", "v1")
 class AgentLaunchedEvent(DomainEvent):
-    """Event emitted when a session's agent process is actually launched.
+    """Event emitted once an agent process is observed running for a session.
 
-    This is the sole Lane-1 fact that distinguishes "no agent ever ran"
-    from "an agent ran and later failed" - both leave zero recorded
-    tokens on the failure path, so token counts cannot make that call
-    (#1047, #1065). Sessions with no ``AgentLaunched`` event never had
-    their agent process started, regardless of how they ended.
+    Carries the launch fact for a session that is still in flight, so it is
+    visible before the session ends and survives a reload of the aggregate.
+    The durable answer a reader consumes is on ``SessionCompletedEvent``,
+    which the aggregate stamps from this fact on every path a session can
+    end by (#1047, #1065).
+
+    Absence of this event in a stream is NOT by itself evidence that no
+    agent ran: streams written before this event existed cannot contain it.
+    Only the aggregate, which has replayed a whole stream it also wrote, may
+    read absence as a negative.
     """
 
     session_id: str

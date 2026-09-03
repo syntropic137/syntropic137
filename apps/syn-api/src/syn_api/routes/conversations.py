@@ -26,6 +26,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
@@ -312,13 +313,18 @@ async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
     itself mean "never started" - the caller already resolved this session_id
     against that same projection to get this far.
 
-    ``agent_launched`` is the domain fact set by ``AgentLaunchedEvent``,
-    recorded the moment ``WorkflowExecutionProcessor`` actually dispatches the
-    agent CLI (``SessionLifecycleManager.mark_launched``). It is the only
-    thing that discriminates "no agent ever ran" from "an agent ran and later
-    failed/was cancelled": both leave ``total_tokens == 0`` on every
-    failure/cancellation path, so status and tokens alone can't tell them
-    apart (issue #1047, #1065).
+    ``agent_launch`` is the domain fact carried by ``AgentLaunchedEvent`` and
+    ``SessionCompletedEvent``, reported by the agent's own output stream once
+    the process is known to exist. It is the only thing that discriminates "no
+    agent ever ran" from "an agent ran and later failed/was cancelled": both
+    leave ``total_tokens == 0`` on every failure/cancellation path, so status
+    and tokens alone can't tell them apart (issue #1047, #1065).
+
+    Only ``NOT_LAUNCHED`` earns NEVER_STARTED. ``UNKNOWN`` - a row from a
+    stream written before the fact existed, or one whose launch write has not
+    landed yet - says nothing, and a row that says nothing must not be quoted
+    as saying no. It falls through to the generic NOT_FOUND, which is what
+    every such session got before the fact existed at all.
 
     A session still ``running`` is neither of those - it may not have
     produced a log yet regardless of whether the agent has launched, so it
@@ -333,7 +339,7 @@ async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
     if data.get("status") == "running":
         return ObservabilityError.PENDING
 
-    if not data.get("agent_launched", False):
+    if AgentLaunch.read(data.get("agent_launch")) is AgentLaunch.NOT_LAUNCHED:
         return ObservabilityError.NEVER_STARTED
 
     return ObservabilityError.NOT_FOUND

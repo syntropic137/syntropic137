@@ -39,6 +39,7 @@ Usage:
 """
 
 from syn_domain.contexts.agent_sessions._shared import (
+    AgentLaunch,
     AgentSessionAggregate,
     OperationRecord,
     OperationType,
@@ -112,6 +113,7 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "AgentLaunch",
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
     "BilledUsage",

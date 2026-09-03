@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING, Final
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    observing_launch,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     MISSING_TERMINAL_TURN_REASON,
     CodexStreamProcessor,
@@ -35,6 +38,9 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+        AgentLaunchObserver,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
@@ -150,11 +156,16 @@ class AgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         runner: AgentRunner = AgentRunner.CLAUDE,
+        on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
         """Run agent in workspace and stream output.
 
         Streams `claude_cmd` (claude -p or codex exec) through the
         workspace and parses stream-json into Lane-2 events.
+
+        ``on_launch`` is notified once the agent process is known to exist -
+        from here, not from the caller, because this is the first frame that
+        can tell the difference (#1047, #1065).
         """
         assert todo.phase_id is not None
 
@@ -173,6 +184,7 @@ class AgentExecutionHandler:
             collector=collector,
             tokens=tokens,
             subagents=subagents,
+            on_launch=on_launch,
         )
 
     def _select_stream_processor(
@@ -227,6 +239,7 @@ class AgentExecutionHandler:
         collector: ObservabilityCollector | None,
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
+        on_launch: AgentLaunchObserver | None,
     ) -> AgentExecutionResult:
         """Stream a headless (claude -p / codex exec) phase and build its result."""
         assert todo.phase_id is not None
@@ -242,10 +255,13 @@ class AgentExecutionHandler:
         )
 
         stream_result = await processor.process_stream(
-            workspace.stream(
-                claude_cmd,
-                timeout_seconds=timeout_seconds,
-                environment=agent_env,
+            observing_launch(
+                workspace.stream(
+                    claude_cmd,
+                    timeout_seconds=timeout_seconds,
+                    environment=agent_env,
+                ),
+                on_launch,
             ),
             workspace,
         )

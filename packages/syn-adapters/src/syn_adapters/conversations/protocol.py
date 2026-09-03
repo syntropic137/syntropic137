@@ -56,6 +56,18 @@ class SessionContext:
         }
 
 
+class ConversationStoreUnavailable(RuntimeError):
+    """The store could not answer, so nothing was learned about the session.
+
+    Distinct from every "nothing here" answer this port can give - ``None``
+    for a log, ``None`` for metadata, ``[]`` for a listing. Those are facts
+    about a session, and callers state them to users: no log was ever
+    recorded, this session has no metadata, this execution ran nothing. A
+    store that is down, unreachable or unconfigured supports none of those
+    statements, so it must not be able to produce them (#1065).
+    """
+
+
 @runtime_checkable
 class ConversationStoragePort(Protocol):
     """Port for storing full conversation logs.
@@ -92,7 +104,12 @@ class ConversationStoragePort(Protocol):
             session_id: Session identifier
 
         Returns:
-            List of JSONL lines, or None if not found
+            List of JSONL lines, or None if the object genuinely does not exist.
+
+        Raises:
+            Exception: if the store could not answer. ``None`` means "no log
+                was ever stored for this session" and callers state that to
+                users; an outage must not be able to produce it (#1065).
         """
         ...
 
@@ -106,7 +123,13 @@ class ConversationStoragePort(Protocol):
             session_id: Session identifier
 
         Returns:
-            Session metadata dict, or None if not found
+            Session metadata dict, or None if the index genuinely holds no
+            row for this session.
+
+        Raises:
+            ConversationStoreUnavailable: if the index could not be queried.
+                ``None`` is reported to users as "no metadata for this
+                session", which an outage does not establish (#1065).
         """
         ...
 
@@ -120,6 +143,11 @@ class ConversationStoragePort(Protocol):
             execution_id: Execution identifier
 
         Returns:
-            List of session IDs
+            Session IDs for the execution; empty when it genuinely has none.
+
+        Raises:
+            ConversationStoreUnavailable: if the index could not be queried.
+                An empty list says the execution recorded no sessions, and an
+                outage cannot support that either (#1065).
         """
         ...

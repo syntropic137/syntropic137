@@ -111,14 +111,19 @@ class TestAgentRunnerSelection:
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
 
     @pytest.mark.anyio
-    async def test_handle_run_agent_marks_session_launched_before_dispatch(self) -> None:
-        """_handle_run_agent must call mark_launched() on the phase's session
-        manager before invoking the agent handler - this is the real signal
-        that distinguishes "the agent never ran" from "it ran and later
-        failed" (#1047, #1065). If provisioning fails, RUN_AGENT is never
-        dispatched, so mark_launched() correctly never fires; once RUN_AGENT
-        does dispatch, the session is marked launched regardless of what the
-        agent handler does next.
+    async def test_handle_run_agent_does_not_itself_mark_the_session_launched(self) -> None:
+        """Dispatching an agent is an intention, not evidence one existed.
+
+        This frame has decided to run an agent and nothing more; everything
+        between here and a process - a dead container, a missing binary, a
+        refused exec - can still falsify it. So it hands the observer down to
+        the stream, which can tell, and reports nothing itself.
+
+        The agent handler fails before touching the observer, standing in for
+        every one of those failures. Move the call back up here and this test
+        fails, which is the point: at that ordering the session is already
+        marked launched and no reader downstream can tell the difference
+        (#1047, #1065).
         """
         from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
             TodoAction,
@@ -161,7 +166,10 @@ class TestAgentRunnerSelection:
                 MagicMock(workflow_id="wf-1"),
             )
 
-        session_mgr.mark_launched.assert_awaited_once()
+        session_mgr.mark_launched.assert_not_awaited()
+        # Handed down rather than called: the fact is still recordable, just
+        # not from here.
+        assert handler.handle.await_args.kwargs["on_launch"] is session_mgr.mark_launched
 
     @pytest.mark.anyio
     async def test_handle_run_agent_tolerates_missing_session_manager(self) -> None:

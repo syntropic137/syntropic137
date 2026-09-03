@@ -20,6 +20,50 @@ class SessionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class AgentLaunch(StrEnum):
+    """What is known about whether a session's agent process ever started.
+
+    Three states rather than a boolean, because "we have no evidence either
+    way" and "we have evidence it did not happen" justify very different
+    statements to a user, and only the second one justifies telling them the
+    session never ran (#1047, #1065).
+
+    A boolean has no room for the first state, so every source that cannot
+    speak - a session whose event stream predates this field, a write that
+    never landed, a storage read that failed - is forced to answer "no", and
+    the read path cannot tell that answer apart from a real one. Absence of
+    evidence is not evidence of absence, and the type is what enforces it.
+    """
+
+    UNKNOWN = "unknown"
+    """Nothing is known. Says nothing about the session; claim nothing from it."""
+
+    LAUNCHED = "launched"
+    """An agent process demonstrably existed for this session."""
+
+    NOT_LAUNCHED = "not_launched"
+    """The session ended and no agent process was ever started for it."""
+
+    @classmethod
+    def read(cls, value: object) -> AgentLaunch:
+        """Interpret a stored or serialised value, defaulting to UNKNOWN.
+
+        The one place absence is given a meaning. Every reader goes through
+        here so that no caller can turn "the field was not there" into "the
+        agent did not run" by picking a different default - which is exactly
+        how a projection rebuild came to relabel the entire session archive
+        as never-started (#1065).
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value)
+            except ValueError:
+                return cls.UNKNOWN
+        return cls.UNKNOWN
+
+
 class OperationType(StrEnum):
     """Type of operation recorded in a session.
 
