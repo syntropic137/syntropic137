@@ -1023,10 +1023,51 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: check-agent-docs check-submodules lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-ci-parity check-test-debt check-docs-content check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
+
+# The subset of `preflight` that RUNS inside an agent workspace container.
+#
+# WHY THIS EXISTS (issue #1109). The workspace image ships `just`, `uv` and
+# `node` and nothing else. Agents were told to gate their work on `just qa-ci`,
+# which cannot pass there: seven of preflight's gates need a binary the image
+# does not have, so every implement run failed at its own gate and opened no
+# PR. A gate an agent cannot run is not a gate, it is a wall.
+#
+# The split is MEASURED, not assumed. Every recipe below was run inside
+# omni-fable51:2.1.258 on a fresh clone with the public submodules initialised
+# and `uv sync --frozen` done (2026-09-03):
+#
+#   in this list                       exit 0
+#   check-submodules                   exit 1    private submodules, no token
+#   vsa-validate                       exit 127  no `vsa` (Rust, built in CI)
+#   fitness                            exit 127  no `cargo` (aps-build)
+#   codegen-check                      exit 127  no `pnpm`
+#   check-compose-overlays             exit 127  no docker CLI
+#   check-default-workspace-image      exit 127  no docker CLI
+#   check-pinned-image-channels        exit 1    no registry credentials
+#
+# Re-measure before moving a recipe across the line. "It should work" is how
+# a gate ends up passing because it never ran.
+#
+# THE POKA-YOKE: `preflight` is defined as this list PLUS the host-only gates,
+# so a new static gate added here is automatically in both. That direction is
+# deliberate - the failure mode worth preventing is a gate that runs in neither.
+# A gate that genuinely needs host tooling goes in `preflight`'s own list above,
+# where the comment table says why.
+#
+# This is NOT a lighter standard. CI still runs everything; an agent that opens
+# a PR having passed this can still be failed by vsa or fitness on GitHub, and
+# that is the correct division of labour - CI has the toolchain, the workspace
+# does not.
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows
+    @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
+    @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
+    @echo "   codegen-check, check-submodules, check-compose-overlays,"
+    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
 #
