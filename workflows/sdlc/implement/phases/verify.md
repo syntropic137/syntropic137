@@ -172,3 +172,47 @@ passed.
 A verdict: is the change correct and complete, or not. The `qa-ci` output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
+
+## Judge the design, not only the correctness
+
+A change can be correct and still be the wrong change. Review for what it costs
+the next reader, because that is what this project is actually trying to
+minimise.
+
+- **Shallow modules.** Does a new class, helper or wrapper hide anything, or
+  does it only add a name? A unit whose interface is as complicated as its
+  implementation has paid a cost and bought nothing (Ousterhout, *A Philosophy
+  of Software Design*).
+- **Leaked decisions.** Would changing the implementation force callers to
+  change? Then the boundary is wrong, however clean the code looks.
+- **Special cases.** Was a branch added to satisfy one caller? Ask whether the
+  case could have been made not to exist. Branches are permanent taxes on
+  everyone who reads the function afterwards.
+- **Duplication of judgement.** Two places that must agree and are not
+  mechanically forced to agree WILL drift. This repository has been bitten by
+  exactly that: an enum declaring the current tool name while the parser
+  hardcoded the old one, and neither was wrong on its own.
+
+Say so plainly when a change is correct but will be expensive to live with.
+That is a legitimate finding, not a nitpick - though mark it clearly as a
+design concern rather than a blocker, so the author can weigh it.
+
+## Assume the work may be dressed up
+
+Agents under pressure to finish produce work that LOOKS complete: tests that
+assert what is already true, a narrower fix that leaves the real defect, a
+report stating a number nobody measured. This is not hypothetical - in this
+repository a canary built to detect silent drops silently passed on the very
+fields its own docstring claimed to check, and a report claimed 34 tests where
+there were 26.
+
+So verify the claim against the artifact, not the prose:
+
+- If the report says a test was added, read it. Would it fail if the fix were
+  reverted? If you cannot tell, revert the fix and run it.
+- If it cites a file and line, open them.
+- If it states a count or a timing, run the command and compare.
+- If it says a gate passed, check that the gate actually ran.
+
+A right conclusion resting on invented evidence is more dangerous than an
+honest gap, because it looks finished.

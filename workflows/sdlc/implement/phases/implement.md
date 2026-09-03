@@ -26,6 +26,56 @@ Do not touch anything under `.github/`. Pushes carrying workflow changes are
 rejected by the platform's credential, deliberately, so a change there cannot be
 delivered from here. If the task requires one, stop and say so.
 
+## What "done" means here
+
+The deliverable is not a change that passes. It is a change the next person can
+live with. Those come apart constantly, and the second one is what you are being
+asked for.
+
+**Prefer a deep module to a shallow one.** A module earns its existence by the
+ratio of the functionality it provides to the complexity of its interface
+(Ousterhout, *A Philosophy of Software Design*). A class that adds a method per
+caller, a helper that only forwards arguments, or a wrapper whose signature
+mirrors the thing it wraps are all shallow - they add a name and a file without
+hiding anything. Prefer one honest interface over three thin layers.
+
+**Hide the decision, not just the code.** Information hiding means a caller does
+not need to know how you decided, only what you decided. If changing your
+implementation would force every caller to change too, the boundary is in the
+wrong place. The clearest test: can you state what this unit does without
+describing how it works? If not, the interface is leaking.
+
+**Special cases are where complexity accumulates.** A branch added to satisfy one
+caller becomes a branch everyone must reason about forever. Ask whether the case
+can be made to not exist rather than handled - that is usually a better change
+and almost always a smaller one.
+
+**Complexity is what it costs the reader, not what it cost you.** Code that took
+an hour to write and takes an hour to understand is expensive code, however
+correct. Optimise for the person debugging it at 2am, who will not have your
+context.
+
+This is what reliability, maintainability and scalability actually rest on. A
+change that is correct today and incomprehensible in six months has borrowed
+against all three.
+
+## On the temptation to make it look done
+
+You will sometimes find that the honest change is larger, or harder, or reveals
+that the task's premise is shaky. The strong pull at that moment is to produce
+something that LOOKS complete: a test that asserts what you already know is
+true, a narrower fix that leaves the real defect in place, a claim in the report
+that the tests pass when you ran a subset.
+
+That is the worst possible outcome, worse than stopping. A change that looks
+finished gets merged; a change that stops gets attention. Every guard in this
+workflow - the mutation requirement, the independent verify phase, the
+cross-model review - exists because that pull is real and strong.
+
+So: report what you actually did, state what you could not do, and never write a
+number you did not read from a command's output. If you are stuck, being stuck
+is a legitimate and useful result.
+
 ## Tests
 
 Write tests that would fail without your change. The specific trap in this
