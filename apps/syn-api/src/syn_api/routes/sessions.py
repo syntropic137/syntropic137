@@ -52,9 +52,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
         SessionCost,
     )
-    from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
-        SessionCostQueryService,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -272,37 +269,28 @@ def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
     )
 
 
-async def _fetch_one_session_cost(
-    query_svc: SessionCostQueryService, sid: str
-) -> _SummaryEnrichment | None:
-    """Fetch one session's enrichment; returns None on miss or transient failure."""
-    try:
-        cost = await query_svc.get(sid)
-    except Exception:
-        logger.debug("Failed to load cost for session %s", sid, exc_info=True)
-        return None
-    return _enrichment_from_cost(cost) if cost is not None else None
-
-
 async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnrichment]:
     """Load per-session enrichment from the Lane 2 session_cost projection (#695).
 
     Returns cost, agent model, and duration so the list endpoint can populate
     display fields without a second round-trip.
+
+    One batched lookup for the whole page. This used to call ``get`` once per
+    session, and ``get`` costs up to four sequential queries and a pool
+    connection each - roughly 80 round trips for a 20-session page, paid again
+    on every dashboard poll (issue #1077; #1087 fixed the same defect on
+    ``/api/v1/executions``). Concurrency would not have fixed it: 80 round
+    trips issued at once are still 80, and they exhaust the pool the polling
+    dashboard shares with everything else.
     """
     if not session_ids:
         return {}
     try:
-        query_svc = get_session_cost_query()
+        costs = await get_session_cost_query().list_for_ids(session_ids)
     except Exception:
-        logger.debug("Session cost query service unavailable", exc_info=True)
+        logger.debug("Session cost enrichment unavailable", exc_info=True)
         return {}
-    enriched: dict[str, _SummaryEnrichment] = {}
-    for sid in session_ids:
-        info = await _fetch_one_session_cost(query_svc, sid)
-        if info is not None:
-            enriched[sid] = info
-    return enriched
+    return {sid: _enrichment_from_cost(cost) for sid, cost in costs.items()}
 
 
 async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:

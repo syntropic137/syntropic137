@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     import asyncpg
 
@@ -144,6 +144,28 @@ class SessionCostQueryService:
         """
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate(session_id)
+
+    async def list_for_ids(self, session_ids: Iterable[str]) -> dict[str, SessionCost]:
+        """Cost data for a caller-supplied set of sessions, keyed by session id.
+
+        The batch answer to what ``get`` answers for one session, and the same
+        answer: both run the same pricing and assembly, so a session's cost does
+        not depend on how many sessions were asked for. Costs the same fixed
+        handful of round trips whether the caller passes one id or a hundred,
+        which is what makes it safe for a list endpoint - calling ``get`` in a
+        loop cost up to four round trips *per session* and a pool connection
+        each (issue #1077; #1087 fixed the same defect on the execution side).
+
+        Keyed by session id rather than returned as a list because the caller's
+        next move is always a lookup by id. Handing back a list would make
+        re-keying the caller's job, and mis-keying it - attributing one
+        session's cost to another - the caller's bug.
+
+        Sessions with no cost data are absent from the result, matching ``get``
+        returning ``None`` for them.
+        """
+        query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
+        return await query.calculate_many(list(session_ids))
 
     async def list_all(self, limit: int = 500) -> list[SessionCost]:
         """List cost data for all sessions.
