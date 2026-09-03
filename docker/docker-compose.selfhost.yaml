@@ -294,10 +294,15 @@ services:
     ports:
       - "${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80"
     environment:
-      # Optional basic auth — protects UI and API, webhooks bypass.
-      # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
+      # Basic auth — protects UI and API, webhooks bypass. Optional while the
+      # gateway is bound to loopback; mandatory once it is not, and the
+      # container refuses to start without it (#1022).
       - SYN_API_PASSWORD=${SYN_API_PASSWORD:-}
       - SYN_API_USER=${SYN_API_USER:-admin}
+      # The same expression as the host_ip above, and it must stay the same:
+      # a container cannot see its own port mapping, so this is the only way
+      # the entrypoint learns whether port 80 is reachable off this host.
+      - SYN_GATEWAY_BIND=${SYN_GATEWAY_BIND:-127.0.0.1}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s

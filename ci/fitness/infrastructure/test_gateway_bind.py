@@ -9,6 +9,18 @@ as happily on the hand-edit that `setup update` overwrote.
 `preflight` already requires docker (check-default-workspace-image pulls and
 runs the pinned image), so these do not skip when it is absent: a check that
 skips is a check that cannot fail.
+
+Scope: this file is about docker's interpolation of the PUBLISHED file, and
+nothing else. Two neighbouring properties that it cannot see, and which would
+otherwise have no owner, are covered where they can actually be exercised:
+
+* that the source overlay and the published file agree, and that the address is
+  handed to the container at all, is in
+  ``infra/scripts/tests/test_gateway_auth_binding.py`` -- it reads the compose
+  YAML rather than ``docker compose config``, because it asserts the two
+  *expressions* match, which interpolation destroys by resolving them;
+* that binding off loopback demands the authenticated path is in the same file,
+  by running the gateway entrypoint.
 """
 
 from __future__ import annotations
@@ -51,7 +63,9 @@ def _gateway_host_ip(env: dict[str, str] | None = None) -> str:
 
     config = json.loads(result.stdout)
     ports = config["services"]["gateway"]["ports"]
-    published = [p for p in ports if str(p.get("published")) and p.get("target") == 80]
+    # `str(p.get("published"))` was the predicate here and filtered nothing:
+    # str(None) is "None", which is truthy. Only `target` ever narrowed the list.
+    published = [p for p in ports if p.get("published") is not None and p.get("target") == 80]
     assert len(published) == 1, f"expected exactly one gateway port mapping, got {ports}"
     return str(published[0]["host_ip"])
 

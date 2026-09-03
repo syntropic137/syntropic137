@@ -154,8 +154,10 @@ services:
       # white-screens. Mount an empty file over the strict policy in dev.
       - /dev/null:/etc/nginx/conf.d/security-headers.conf:ro
     environment:
-      # Dev gateway is unauthenticated; the entrypoint generates an empty
-      # auth.conf when SYN_API_PASSWORD is empty.
+      # Dev gateway is unauthenticated; the entrypoint generates "auth_basic
+      # off" stanzas when SYN_API_PASSWORD is empty. It leaves SYN_GATEWAY_BIND
+      # unset, so port 80 stays in its unauthenticated loopback mode — which is
+      # what nginx.conf.dev, mounted over the baked config below, assumes.
       SYN_API_PASSWORD: ""
       SYN_API_USER: admin
     depends_on:

@@ -318,6 +318,7 @@ services:
     environment:
       SYN_API_PASSWORD: ${SYN_API_PASSWORD:-}
       SYN_API_USER: ${SYN_API_USER:-admin}
+      SYN_GATEWAY_BIND: ${SYN_GATEWAY_BIND:-127.0.0.1}
     healthcheck:
       test:
       - CMD

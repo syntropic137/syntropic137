@@ -217,9 +217,10 @@ class InfraSettings(BaseSettings):
         description=(
             "Host address the gateway binds to. Defaults to 127.0.0.1, which"
             " reaches the API from the host only. Set it to a LAN or Tailscale"
-            " address (or 0.0.0.0) to reach the stack from other machines."
-            " Anything other than 127.0.0.1 exposes the API to that network, so"
-            " set SYN_API_PASSWORD as well."
+            " address (or 0.0.0.0) to reach the stack from other machines. Any"
+            " address outside 127.0.0.0/8 and ::1 exposes the dashboard and API"
+            " to that network, so the gateway requires SYN_API_PASSWORD and"
+            " refuses to start without one."
         ),
     )
 
