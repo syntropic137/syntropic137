@@ -10,9 +10,12 @@ cannot read must never be indistinguishable from a report with nothing in it.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from scripts.check_stale_exceptions import main, stale_from_report
 
 pytestmark = pytest.mark.unit
@@ -36,7 +39,9 @@ class TestVerdict:
         payload = {"stale_exceptions": [_stale("python:a.b::c")]}
         assert main(["prog", _report(tmp_path, payload)]) == 1
 
-    def test_every_stale_entity_is_named(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_every_stale_entity_is_named(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Naming only the first would leave the others to be found one CI round at a time."""
         entities = ["python:a::one", "python:b::two", "tsx:c/d::Three"]
         payload = {"stale_exceptions": [_stale(e) for e in entities]}
