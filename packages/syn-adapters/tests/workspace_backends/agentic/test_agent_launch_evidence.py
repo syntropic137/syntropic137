@@ -29,6 +29,10 @@ import pytest
 from syn_adapters.workspace_backends.agentic.stream_adapter import (
     AgenticEventStreamAdapter,
 )
+from syn_adapters.workspace_backends.agentic.stream_helpers import _build_exec_command
+from syn_domain.contexts.orchestration import (
+    AGENT_LAUNCH_MARKER as PUBLISHED_LAUNCH_MARKER,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
 )
@@ -38,7 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
@@ -212,3 +216,55 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
 
     assert launched is True
     assert lines == []
+
+
+def _announced_marker(exec_argv: list[str]) -> str:
+    """The marker the adapter really put on the wire, read back out of the argv.
+
+    Taken positionally, from what a container would be handed, rather than by
+    importing the constant a third time - an assertion that re-imports the
+    value it is checking cannot see the two halves disagree.
+    """
+    return exec_argv[exec_argv.index("syn-launch") + 1]
+
+
+async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
+    """Put lines through the real observer; report what it concluded."""
+    launched = False
+
+    async def observer() -> None:
+        nonlocal launched
+        launched = True
+
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    survived = [line async for line in observing_launch(stream(), observer)]
+    return launched, survived
+
+
+async def test_the_marker_the_adapter_announces_is_the_one_the_domain_counts() -> None:
+    """The hop between the two halves of the launch contract (#1065).
+
+    ``_build_exec_command`` bakes the marker into a container-side argv and
+    reaches it through the orchestration context's public API;
+    ``observing_launch`` decides what counts as evidence and defines it. Both
+    ends are exercised above, but only against each other - so a public export
+    that drifted from the constant it re-exports would leave the adapter
+    announcing a string the observer ignores, every session would report
+    never-started, and every other test here would still pass.
+    """
+    argv = _build_exec_command(_CONTAINER, ["claude", "-p", "hello"], None, None)
+    announced = _announced_marker(argv)
+
+    launched, survived = await _observed([announced, '{"type":"result"}'])
+
+    assert launched is True, (
+        f"the observer does not count {announced!r}, the line the adapter really prints"
+    )
+    assert survived == ['{"type":"result"}'], "the marker is consumed, not forwarded"
+    assert announced == PUBLISHED_LAUNCH_MARKER, (
+        "the context publishes this constant as the wire contract; the adapter "
+        "must be announcing exactly what it publishes"
+    )

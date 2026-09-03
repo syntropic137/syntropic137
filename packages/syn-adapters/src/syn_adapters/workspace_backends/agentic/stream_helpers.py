@@ -11,9 +11,7 @@ import asyncio
 import logging
 import time
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    AGENT_LAUNCH_MARKER,
-)
+from syn_domain.contexts.orchestration import AGENT_LAUNCH_MARKER
 
 logger = logging.getLogger(__name__)
 

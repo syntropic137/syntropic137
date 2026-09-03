@@ -102,6 +102,9 @@ from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveW
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    AGENT_LAUNCH_MARKER,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
@@ -144,8 +147,9 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 )
 
 __all__ = [
-    "RESERVED_INPUT_NAMES",
     # Constants
+    "AGENT_LAUNCH_MARKER",
+    "RESERVED_INPUT_NAMES",
     "SYN_WORKSPACE_PROMPT",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
