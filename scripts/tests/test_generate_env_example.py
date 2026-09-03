@@ -94,8 +94,19 @@ def test_round_trips_through_the_real_dotenv_loader(tmp_path: Path) -> None:
 
     # Record/unit separators, so a value containing newlines, quotes or shell
     # metacharacters cannot forge the framing of the output being asserted on.
+    #
+    # OCTAL, not \xHH. `just` runs a recipe line through `/bin/sh`, and that is
+    # dash in the agent workspace image, whose printf emits `\x1e` literally:
+    #
+    #   $ sh -c 'printf %s\\x1e END' | od -c   ->  E N D \ x 1 e
+    #   $ sh -c 'printf %s\\036 END' | od -c   ->  E N D 036
+    #
+    # With the hex form the separators never appear, the split finds no
+    # records, and the test dies on `KeyError: 'V0'` - which reads exactly like
+    # a dotenv parsing failure and is not one. POSIX only requires `\0NNN`, so
+    # octal is what works in dash, bash and busybox alike (#1136).
     recipe = ["set dotenv-load := true", "", "show:"]
-    recipe += [f'    @printf "%s\\x1e%s\\x1f" "V{i}" "$V{i}"' for i in range(len(_VALUES))]
+    recipe += [f'    @printf "%s\\036%s\\037" "V{i}" "$V{i}"' for i in range(len(_VALUES))]
     (tmp_path / "justfile").write_text("\n".join(recipe) + "\n")
 
     result = subprocess.run(

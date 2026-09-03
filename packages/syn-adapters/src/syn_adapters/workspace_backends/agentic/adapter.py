@@ -13,7 +13,7 @@ import logging
 import os
 import shlex
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from agentic_isolation import (
     SecurityConfig,
@@ -83,18 +83,39 @@ __all__ = ["AgenticIsolationAdapter", "WorkspaceProvisionError"]
 #: `/workspace` is writable and executable; `/var/tmp` and `/dev/shm` are not.
 _EXECUTABLE_TMPDIR = "/workspace/.tmp"
 
+#: Where tool caches go instead of `$HOME`.
+#:
+#: WHY (issue #1133). The workspace mounts `/home/agent` as a 128 MB tmpfs
+#: (`agentic_isolation/config.py`), and that is `$HOME` - where uv, ruff, npm
+#: and node all cache by default. A real verify phase died there:
+#:
+#:   the workspace's 128 MiB /home/agent tmpfs ran out of space
+#:   error: recipe `lint` failed on line 932 with exit code 1
+#:
+#: `/workspace` is on the container filesystem, which had 157 GB free on the
+#: same host. A prompt-level `export` cannot fix this reliably: it lasts for
+#: one shell, and the command that fills the disk is usually a dependency
+#: install the agent runs before the command carrying the export.
+_WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
+    "XDG_CACHE_HOME": "/workspace/.cache",
+    "UV_CACHE_DIR": "/workspace/.cache/uv",
+    "npm_config_cache": "/workspace/.cache/npm",
+}
+
 
 def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
-    """Point TMPDIR at an executable directory, unless the caller set one.
+    """Point TMPDIR and the tool caches somewhere with room, unless told otherwise.
 
-    A caller-supplied TMPDIR wins: this is a default for the common case, not a
-    policy. It does not create the directory - `just` and `mktemp` both create
-    what they need, and doing it here would mean a filesystem side effect in a
-    function whose job is to build a dict.
+    A caller-supplied value always wins: these are defaults for the common
+    case, not policy. Nothing is created here - `just`, `mktemp`, `uv` and
+    `npm` all create their own directories, and doing it here would mean a
+    filesystem side effect in a function whose job is to build a dict.
     """
-    if environment.get("TMPDIR"):
-        return dict(environment)
-    return {**environment, "TMPDIR": _EXECUTABLE_TMPDIR}
+    resolved = dict(environment)
+    for key, value in ({"TMPDIR": _EXECUTABLE_TMPDIR} | _WORKSPACE_CACHE_ENV).items():
+        if not resolved.get(key):
+            resolved[key] = value
+    return resolved
 
 
 class AgenticIsolationAdapter:
