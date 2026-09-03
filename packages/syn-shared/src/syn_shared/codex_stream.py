@@ -27,6 +27,12 @@ class CodexStreamType(StrEnum):
     ITEM_COMPLETED = "item.completed"
     TURN_COMPLETED = "turn.completed"
     TURN_FAILED = "turn.failed"
+    ERROR = "error"
+    """A standalone fault the CLI reports mid-turn.
+
+    Observed carrying the same message that the following ``turn.failed``
+    carries, but it arrives first and a stream can end on it.
+    """
 
 
 class CodexItemType(StrEnum):

@@ -399,6 +399,31 @@ class TestAgentExecutionHandler:
         assert exit_code == 1
 
     @pytest.mark.anyio
+    async def test_a_reported_turn_failure_still_fails_even_with_a_deliverable(self) -> None:
+        """A stream that SAID it failed must not be read as one that merely stopped.
+
+        This is the composition the cross-model review of #1112 found. The
+        completion path keys on the missing-terminal-turn reason being EXACTLY
+        the generic one; a genuine `turn.failed` carries its own reason (#1116),
+        so it is excluded. Before that reason existed, every reported failure
+        collapsed into the generic message and this deliverable would have
+        completed a run the stream had explicitly failed.
+
+        The two changes therefore depend on each other, and nothing in the type
+        system says so - which is precisely why this test exists rather than a
+        comment.
+        """
+        exit_code = await self._run_broken_codex_stream(
+            error_reason=(
+                "codex reported: This content was flagged for possible cybersecurity risk."
+            ),
+            collect_files=AsyncMock(
+                return_value=[("artifacts/output/deliverable.md", b"a partial review")]
+            ),
+        )
+        assert exit_code == 1
+
+    @pytest.mark.anyio
     async def test_auth_fault_still_fails_even_with_a_deliverable(self) -> None:
         """#891 stays closed: a login failure fails the phase whatever is on disk.
 

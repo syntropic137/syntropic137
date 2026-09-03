@@ -165,6 +165,79 @@ def qa_ci_dependencies(justfile: str) -> set[str]:
     return seen
 
 
+#: Scripts a PR-gating workflow runs directly that deliberately have no `just`
+#: target, with the reason. Empty today, and that is the point: an entry here is
+#: a decision someone wrote down, not a gap nobody noticed.
+SCRIPT_STEPS_WITHOUT_A_TARGET: Final[dict[str, str]] = {
+    "e2e_agent_in_container_test.py": (
+        "e2e-container.yml only, gated on the run_full_e2e workflow_dispatch "
+        "input; it provisions a real container and is already excluded at the "
+        "job level for the same reason"
+    ),
+}
+
+_SCRIPT_STEP_RE: Final = re.compile(r"scripts/([a-z0-9_]+\.py)")
+
+
+def script_steps(document: dict[str, object]) -> set[str]:
+    """Every `scripts/*.py` a workflow invokes from a `run:` block.
+
+    WHY THIS EXISTS (issue #1124). The job mapping above compares JOBS. A gate
+    added as a raw step inside an existing job is invisible to it, and one
+    already was: `scripts/check_openapi_drift.py` runs as a step in `python-qa`,
+    is marked BLOCKING there, and had no `just` target at all - so it was
+    reachable from neither `preflight` nor `preflight-agent` while the parity
+    check reported full coverage.
+
+    Steps are not jobs and this does not pretend otherwise: it answers one
+    narrow question - does every script CI runs have a local way to run it -
+    which is the question the job-level check structurally cannot ask.
+    """
+    found: set[str] = set()
+    jobs = document.get("jobs")
+    if not isinstance(jobs, dict):
+        return found
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
+                found.update(_SCRIPT_STEP_RE.findall(step["run"]))
+    return found
+
+
+def script_step_problems(workflows: dict[str, dict[str, object]], justfile: str) -> list[str]:
+    """Scripts CI runs that no `just` target reachable from `qa-ci` runs."""
+    reachable = qa_ci_dependencies(justfile)
+    bodies = "\n".join(
+        match.group(0)
+        for target in reachable
+        for match in [
+            re.search(
+                rf"^{re.escape(target)}:.*?(?=\n[a-z0-9_-]+\s*:|\Z)",
+                justfile,
+                re.MULTILINE | re.DOTALL,
+            )
+        ]
+        if match
+    )
+    problems: list[str] = []
+    for filename, document in workflows.items():
+        for script in sorted(script_steps(document)):
+            if script in SCRIPT_STEPS_WITHOUT_A_TARGET:
+                continue
+            if f"scripts/{script}" not in bodies:
+                problems.append(
+                    f"{filename} runs scripts/{script} as a step, but no target "
+                    f"reachable from `just {QA_CI_TARGET}` runs it. Add one, or "
+                    f"record it in SCRIPT_STEPS_WITHOUT_A_TARGET with a reason."
+                )
+    return problems
+
+
 def ci_python_version(workflow: str) -> str | None:
     """The Python minor version CI pins, or None if it pins none."""
     match = re.search(r'python-version:\s*"?(\d+\.\d+)"?', workflow)
@@ -226,7 +299,9 @@ def main() -> int:
         print("❌ no pull_request-triggered workflows found; refusing to report parity")
         return 1
 
-    problems, covered, total = find_problems(workflows, JUSTFILE.read_text())
+    justfile = JUSTFILE.read_text()
+    problems, covered, total = find_problems(workflows, justfile)
+    problems.extend(script_step_problems(workflows, justfile))
 
     if problems:
         print("❌ local QA has drifted from CI:")
