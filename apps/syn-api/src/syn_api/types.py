@@ -458,6 +458,13 @@ class ExecutionSummary(BaseModel):
     error_message: str | None = None
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
+    models: list[str] = Field(default_factory=list)
+    """Distinct models that actually ran, in sorted order (issue #1094).
+
+    A set rather than a single value because a run is deliberately
+    mixed-model now - sonnet for mechanical phases, opus for reasoning - so
+    naming one model would misreport the rest.
+    """
 
 
 class ExecutionDetail(BaseModel):
@@ -768,6 +775,14 @@ class PhaseExecution(BaseModel):
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    provider: str | None = None
+    """Harness that ran this phase's leader session, e.g. ``claude``/``codex``.
+
+    The LEADER's harness specifically. Since #895 a phase can contain more
+    than one session, and a delegate may run on a different harness - so this
+    answers "what was this phase launched as", while ``cost_by_model`` below
+    accounts for every model that actually spent, delegates included.
+    """
     model: str | None = None
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)

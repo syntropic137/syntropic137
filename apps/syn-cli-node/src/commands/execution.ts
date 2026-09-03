@@ -53,6 +53,10 @@ const listCommand: CommandDef = {
     table.addColumn("Tokens", { align: "right" });
     table.addColumn("Cost", { align: "right" });
     table.addColumn("Repos");
+    // Which models actually ran (issue #1094). Last column because it is the
+    // widest and the least often the reason you ran `list`, but present because
+    // a run on the wrong model is otherwise invisible until you open it.
+    table.addColumn("Models");
 
     for (const ex of executions) {
       const repos = ex.repos ?? [];
@@ -70,6 +74,7 @@ const listCommand: CommandDef = {
         formatTokens(ex.total_tokens),
         formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
         reposCell,
+        ex.models_display ?? "",
       );
     }
     table.print();
@@ -117,6 +122,10 @@ const showCommand: CommandDef = {
       const table = new Table({ title: "Phases" });
       table.addColumn("#", { align: "right", style: DIM });
       table.addColumn("Name");
+      // Harness/model the phase was launched as (issue #1094). Beside the name
+      // because a mixed-model workflow is read row by row: "which phase ran on
+      // the wrong thing" is the question, and the phase name is the answer key.
+      table.addColumn("Model");
       table.addColumn("Status");
       table.addColumn("Started");
       table.addColumn("Tokens", { align: "right" });
@@ -127,6 +136,7 @@ const showCommand: CommandDef = {
         table.addRow(
           String(i + 1),
           ph.name,
+          [ph.provider, ph.model_display].filter(Boolean).join("/"),
           formatStatus(ph.status),
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),

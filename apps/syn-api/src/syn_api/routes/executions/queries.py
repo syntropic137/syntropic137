@@ -23,9 +23,14 @@ from syn_api.types import (
     Result,
     ToolOperation,
 )
+from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
+    SessionListProjection,
+)
 from syn_shared.display import (
     format_cost,
     format_duration_seconds,
+    format_model_compact,
+    format_models,
     format_repos,
     format_tokens,
 )
@@ -161,6 +166,8 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
+        models=list(e.models),
+        models_display=format_models(e.models),
     )
 
 
@@ -224,6 +231,28 @@ async def _load_session_cost(
     return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
 
 
+async def _load_phase_provider(manager: ProjectionManager, session_id: str) -> str | None:
+    """Which harness ran this phase, e.g. ``claude`` or ``codex`` (issue #1094).
+
+    Read from the session projection rather than the cost projection because
+    ``SessionCost`` records what a model spent and never records what launched
+    it. A workflow is deliberately heterogeneous now, so the model alone does
+    not identify the harness.
+
+    Returns ``None`` when the session is not (yet) projected; a missing label
+    is better than a guessed one, and the phase renders without it.
+    """
+    try:
+        data = await manager.store.get(SessionListProjection.PROJECTION_NAME, session_id)
+    except Exception:
+        logger.debug("Failed to load provider for session %s", session_id, exc_info=True)
+        return None
+    if not isinstance(data, dict):
+        return None
+    agent_type = data.get("agent_type")
+    return agent_type if isinstance(agent_type, str) and agent_type else None
+
+
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
@@ -233,8 +262,10 @@ async def _map_phase_detail(
 
     if phase.session_id:
         sc = await _load_session_cost(manager, phase.session_id, phase)
+        provider = await _load_phase_provider(manager, phase.session_id)
     else:
         sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
+        provider = None
 
     return PhaseExecution(
         phase_id=phase.workflow_phase_id,
@@ -251,6 +282,7 @@ async def _map_phase_detail(
         duration_seconds=phase.duration_seconds,
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
+        provider=provider,
         model=sc.agent_model,
         cost_by_model=sc.cost_by_model,
         operations=ops,
@@ -290,7 +322,9 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         unpriced_observation_count=phase.unpriced_observation_count,
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
+        provider=phase.provider,
         model=phase.model,
+        model_display=format_model_compact(phase.model),
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         operations=operations,
     )
@@ -313,6 +347,15 @@ class _ExecutionEnrichment:
     cache_creation_tokens: int | None = None
     cache_read_tokens: int | None = None
     total_tokens: int | None = None
+    models: tuple[str, ...] = ()
+    """Distinct models that spent on this execution, sorted (issue #1094).
+
+    These are the keys of ``ExecutionCost.cost_by_model``, which this request
+    already loads for the dollar figure - so naming what ran costs no extra
+    round trip. Sentinel keys such as ``UNATTRIBUTED_MODEL`` are kept rather
+    than filtered: they are real spend whose model we could not name, and
+    dropping them would let the list claim it knows every model that ran.
+    """
 
 
 def _enrichment_for(
@@ -355,6 +398,7 @@ async def _load_execution_enrichment(
             cache_creation_tokens=ec.cache_creation_tokens,
             cache_read_tokens=ec.cache_read_tokens,
             total_tokens=total,
+            models=tuple(sorted(ec.cost_by_model)),
         )
     return out
 
@@ -441,6 +485,7 @@ def _to_execution_summary(
         tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
         error_message=s.error_message,
         repos=list(s.repos),
+        models=list(enrichment.models),
     )
 
 

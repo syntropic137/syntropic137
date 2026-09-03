@@ -172,3 +172,24 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     if len(items) == 1:
         return first
     return f"{first} +{len(items) - 1}"
+
+
+def format_models(models: list[str] | tuple[str, ...] | None) -> str | None:
+    """Render the set of models that ran as a compact label.
+
+    Every model is listed, unlike :func:`format_repos` which elides after the
+    first. The point of the field is to answer "what ran?" at a glance, and
+    ``"Sonnet 4.5 +1"`` hides exactly the second model that would tell an
+    operator a mixed-model workflow drifted onto the wrong one (issue #1094).
+
+    Each id goes through :func:`format_model_compact`, so
+    ``["claude-opus-4-5", "claude-sonnet-4-5"] -> "Opus 4.5, Sonnet 4.5"``.
+    Order is the caller's; empty or ``None`` returns ``None``.
+    """
+    if not models:
+        return None
+    labels = [format_model_compact(m) for m in models]
+    kept = [label for label in labels if label]
+    if not kept:
+        return None
+    return ", ".join(kept)

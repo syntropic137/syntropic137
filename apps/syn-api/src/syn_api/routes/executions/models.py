@@ -39,7 +39,14 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    provider: str | None = None
+    """Harness the phase ran on, e.g. ``claude`` / ``codex`` (issue #1094).
+
+    Paired with ``model`` this is the ``claude/opus`` label an operator needs
+    to see that a heterogeneous run drifted onto the wrong harness or model.
+    """
     model: str | None = None
+    model_display: str | None = None
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
 
@@ -106,6 +113,14 @@ class ExecutionSummaryResponse(BaseModel):
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
+    models: list[str] = Field(default_factory=list)
+    """Distinct models that ran, sorted (issue #1094).
+
+    The list is the screen an operator scans, and until this field existed it
+    could not say what ran: a workflow meant for opus spent a long time on
+    sonnet and nothing on this row disagreed.
+    """
+    models_display: str | None = None
 
 
 class ExecutionListResponse(BaseModel):

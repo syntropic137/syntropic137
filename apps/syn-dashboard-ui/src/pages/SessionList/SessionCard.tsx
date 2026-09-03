@@ -33,7 +33,7 @@ export function SessionCard({ session }: { session: SessionSummary }) {
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-2">
           <StatusBadge status={session.status} size="sm" />
-          <AgentBadge provider={session.agent_provider} />
+          <AgentBadge provider={session.agent_provider} modelDisplay={session.agent_model_display} />
           <span
             className="truncate text-sm font-medium text-[var(--color-text-primary)]"
             title={workflowLabel}

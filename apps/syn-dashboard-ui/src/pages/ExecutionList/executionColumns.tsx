@@ -52,6 +52,23 @@ const REPOS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   render: (e) => e.repos_display ?? EM_DASH,
 }
 
+/**
+ * Which models actually ran (issue #1094).
+ *
+ * Unsortable on purpose: a set has no order to sort by, and the column exists
+ * to be *scanned* - a run that should have been opus showing "Sonnet 4.5" is
+ * the thing you want to catch without opening it. Full ids go in the tooltip
+ * because the cell shows the compact label.
+ */
+const MODELS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
+  key: 'models',
+  label: 'Models',
+  align: 'left',
+  cellClassName: 'text-xs text-[var(--color-text-secondary)]',
+  cellTitle: (e) => e.models.join('\n') || undefined,
+  render: (e) => e.models_display ?? EM_DASH,
+}
+
 const TOKENS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   key: 'tokens',
   label: 'Tokens',
@@ -94,6 +111,7 @@ export const EXECUTION_COLUMNS: ColumnDef<ExecutionListItem, ExecutionSortKey>[]
   WORKFLOW,
   PROGRESS,
   REPOS,
+  MODELS,
   TOKENS,
   COST,
   DURATION,

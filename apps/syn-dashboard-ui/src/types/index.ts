@@ -121,6 +121,8 @@ export interface SessionResponse {
   milestone_id: string | null
   agent_provider: string | null
   agent_model: string | null
+  /** Server-rendered model label, e.g. "Opus 4.5" (issue #1094). */
+  agent_model_display: string | null
   status: string
   input_tokens: number
   output_tokens: number
@@ -272,6 +274,9 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** Distinct models that ran, sorted (issue #1094). */
+  models: string[]
+  models_display: string | null
 }
 
 export interface ExecutionListResponse {
@@ -304,7 +309,11 @@ export interface PhaseExecutionDetail {
   unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
+  /** Harness the phase ran on, e.g. "claude" / "codex" (issue #1094). */
+  provider: string | null
   model: string | null
+  /** Server-rendered model label, e.g. "Opus 4.5" (issue #1094). */
+  model_display: string | null
   cost_by_model: Record<string, string>
 }
 

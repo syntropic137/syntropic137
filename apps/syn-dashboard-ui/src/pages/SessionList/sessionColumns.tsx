@@ -28,8 +28,16 @@ const AGENT: ColumnDef<SessionSummary, SortKey> = {
   key: 'agent',
   label: 'Agent',
   align: 'left',
-  cellTitle: (s) => s.agent_provider ?? undefined,
-  render: (s) => (s.agent_provider ? <AgentBadge provider={s.agent_provider} /> : EM_DASH),
+  // Provider AND model: a sessions list that shows only the harness cannot
+  // answer "did this run on the model I asked for" (issue #1094). Tooltip
+  // carries the raw model id the badge renders compactly.
+  cellTitle: (s) => [s.agent_provider, s.agent_model].filter(Boolean).join(' / ') || undefined,
+  render: (s) =>
+    s.agent_provider || s.agent_model_display ? (
+      <AgentBadge provider={s.agent_provider} modelDisplay={s.agent_model_display} />
+    ) : (
+      EM_DASH
+    ),
 }
 
 const WORKFLOW: ColumnDef<SessionSummary, SortKey> = {

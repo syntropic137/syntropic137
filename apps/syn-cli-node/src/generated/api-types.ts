@@ -2781,6 +2781,10 @@ export interface components {
             repos?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            /** Models */
+            models?: string[];
+            /** Models Display */
+            models_display?: string | null;
         };
         /**
          * ExportManifestResponse
@@ -3351,8 +3355,12 @@ export interface components {
             completed_at?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Provider */
+            provider?: string | null;
             /** Model */
             model?: string | null;
+            /** Model Display */
+            model_display?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;

@@ -7383,6 +7383,24 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "models_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models Display"
           }
         },
         "type": "object",
@@ -8700,6 +8718,17 @@
             ],
             "title": "Error Message"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "model": {
             "anyOf": [
               {
@@ -8710,6 +8739,17 @@
               }
             ],
             "title": "Model"
+          },
+          "model_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display"
           },
           "cost_by_model": {
             "additionalProperties": {

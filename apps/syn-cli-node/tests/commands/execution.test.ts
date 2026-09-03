@@ -58,6 +58,35 @@ describe("execution commands", () => {
       expect(out).toContain("3/3");
     });
 
+    // Issue #1094: the list is where a run on the wrong model has to be
+    // visible. Two models, so a rendering that prints only the first fails.
+    it("names every model the run used", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          executions: [
+            {
+              workflow_execution_id: "exec-001",
+              workflow_name: "my-workflow",
+              status: "completed",
+              started_at: "2026-01-01T00:00:00Z",
+              completed_phases: 3,
+              total_phases: 3,
+              total_tokens: 5000,
+              total_cost_usd: "0.05",
+              models: ["claude-opus-4-5", "claude-sonnet-4-5"],
+              models_display: "Opus 4.5, Sonnet 4.5",
+            },
+          ],
+          total: 1,
+        }),
+      );
+
+      await handler({ positionals: [], values: {} });
+      const out = stdout();
+      expect(out).toContain("Models");
+      expect(out).toContain("Opus 4.5, Sonnet 4.5");
+    });
+
     it("shows empty message when no executions", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
       await handler({ positionals: [], values: {} });
@@ -89,6 +118,48 @@ describe("execution commands", () => {
       expect(out).toContain("exec-001");
       expect(out).toContain("test-wf");
       expect(out).toContain("phase-1");
+    });
+
+    // Issue #1094: per-phase harness AND model. The two phases run on
+    // different harnesses, so a hardcoded "claude" cannot pass.
+    it("labels each phase with the harness and model it ran as", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          workflow_execution_id: "exec-001",
+          workflow_name: "test-wf",
+          status: "completed",
+          started_at: "2026-01-01T00:00:00Z",
+          total_tokens: 10000,
+          total_cost_usd: "0.10",
+          phases: [
+            {
+              name: "implement",
+              status: "completed",
+              started_at: "2026-01-01T00:00:00Z",
+              total_tokens: 5000,
+              cost_usd: "0.05",
+              provider: "claude",
+              model: "claude-opus-4-5",
+              model_display: "Opus 4.5",
+            },
+            {
+              name: "verify",
+              status: "completed",
+              started_at: "2026-01-01T00:30:00Z",
+              total_tokens: 5000,
+              cost_usd: "0.05",
+              provider: "codex",
+              model: "gpt-5.6-sol",
+              model_display: "gpt-5.6-sol",
+            },
+          ],
+        }),
+      );
+
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("claude/Opus 4.5");
+      expect(out).toContain("codex/gpt-5.6-sol");
     });
 
     it("throws on missing execution-id", async () => {

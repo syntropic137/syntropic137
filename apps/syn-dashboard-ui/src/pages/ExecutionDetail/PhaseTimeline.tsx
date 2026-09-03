@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader } from '../../components'
+import { agentProviderLabel, Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
 import { formatCostWithCoverage, formatTokens } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
@@ -37,6 +37,26 @@ function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, stri
 }
 
 type Phase = ExecutionDetailResponse['phases'][number]
+
+/**
+ * What this phase ran as: harness and model (issue #1094).
+ *
+ * The cost breakdown below already names every model that *spent*, delegates
+ * included. This names what the phase was *launched* as, which is the thing
+ * you compare against the workflow definition when a run looks wrong - and
+ * the harness half was previously not on the wire at all.
+ *
+ * Renders whichever half is known; a phase with no session has neither.
+ */
+function PhaseHarness({ phase }: { phase: Phase }) {
+  const label = [agentProviderLabel(phase.provider), phase.model_display]
+    .filter(Boolean)
+    .join(' / ')
+  if (!label) return null
+  return (
+    <div className="mt-1 font-mono text-[11px] text-[var(--color-text-muted)]">{label}</div>
+  )
+}
 
 const statusIconColors: Record<string, string> = {
   completed: 'text-emerald-400',
@@ -85,6 +105,7 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
         <Icon className={clsx('h-4 w-4', statusIconColors[phase.status] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
       </div>
+      <PhaseHarness phase={phase} />
       {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
         <PhaseModelBreakdown costByModel={phase.cost_by_model} />
       )}

@@ -51,6 +51,10 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <MetricCell label="Repos" value={exec.repos_display ?? EM_DASH} />
+        {/* Same column as the desktop table - the mobile card is the whole list
+            on a phone, and omitting it here would just move the blind spot
+            (issue #1094). */}
+        <MetricCell label="Models" value={exec.models_display ?? EM_DASH} />
         <MetricCell label="Tokens" value={exec.total_tokens_display} />
         <MetricCell label="Cost" value={exec.total_cost_display} />
         <MetricCell label="Duration" value={exec.duration_display} />

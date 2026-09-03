@@ -1,19 +1,8 @@
-import { Activity, Bot, Container, FileText } from 'lucide-react'
+import { Activity, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { AGENT_PROVIDER_LABELS, StatusBadge } from '../../components'
+import { AgentBadge, StatusBadge } from '../../components'
 import type { SessionResponse } from '../../types'
 import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
-
-function AgentProviderBadge({ provider }: { provider: string | null }) {
-  if (!provider) return null
-  const label = AGENT_PROVIDER_LABELS[provider.toLowerCase()] ?? provider
-  return (
-    <span className="flex items-center gap-1.5 rounded-full bg-[var(--color-accent)]/15 px-2.5 py-0.5 font-medium text-[var(--color-accent)]">
-      <Bot className="h-3.5 w-3.5" />
-      Agent: {label}
-    </span>
-  )
-}
 
 function WorkspaceEnvironmentBadge({ provider }: { provider: string | null }) {
   if (!provider) return null
@@ -50,6 +39,13 @@ export function SessionHeader({
                 {session.workflow_name ?? session.id.slice(0, 16) + '...'}
               </h1>
               <StatusBadge status={session.status} size="lg" pulse />
+              {/* What ran, beside the status - a headline fact about a
+                  session, not a footnote (issue #1094). */}
+              <AgentBadge
+                provider={session.agent_provider}
+                modelDisplay={session.agent_model_display}
+                size="lg"
+              />
             </div>
             <div className="mt-2 flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
               <span className="font-mono">{session.id.slice(0, 12)}</span>
@@ -64,7 +60,6 @@ export function SessionHeader({
               {session.phase_id && <span>Phase: {session.phase_id}</span>}
             </div>
             <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-              <AgentProviderBadge provider={session.agent_provider} />
               <WorkspaceEnvironmentBadge provider={session.agent_provider} />
             </div>
           </div>
