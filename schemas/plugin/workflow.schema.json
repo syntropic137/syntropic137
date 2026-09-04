@@ -34,6 +34,23 @@
           "default": null,
           "title": "Model"
         },
+        "sandbox": {
+          "anyOf": [
+            {
+              "enum": [
+                "read-only",
+                "workspace-write",
+                "full-access"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sandbox"
+        },
         "allow_delegation": {
           "default": false,
           "title": "Allow Delegation",
