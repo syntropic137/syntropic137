@@ -83,6 +83,7 @@ class DegradedReason(StrEnum):
     CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     PROJECTION_CATCHUP = "projection_catchup"
+    PROJECTION_STALLED = "projection_stalled"
     EVENT_POLLER = "event_poller"
     CHECK_RUN_POLLER = "check_run_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
@@ -583,12 +584,20 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
     "rebuild in progress" from "the platform lost my execution", and /health is
     where they look. See `read_model_lag` for what "catching up" means and why.
 
-    A replay is reported through the EXISTING degraded machinery — mode plus a
-    DegradedReason — rather than by changing top-level `status`. `status` is what
-    liveness probes read, and the process is alive and accepting writes during a
-    rebuild; taking it out of rotation would turn a stale read path into an
-    outage. `subscription.status` DOES gain a third value, because that field's
-    job is to describe the read path and "healthy" was the lie.
+    TWO WAYS TO BE BEHIND, reported separately, because they need opposite
+    responses from the operator reading this: a rebuild (`catching_up`) ends by
+    itself and the answer is to wait, while a stalled projection does not and the
+    answer is to intervene. Both degrade, so neither is answered with "healthy";
+    they are distinguished by `subscription.status` and by which DegradedReason
+    appears. A replay that has itself wedged sets both reasons — that is two true
+    facts about one read path, not a conflict.
+
+    Being behind is reported through the EXISTING degraded machinery — mode plus
+    a DegradedReason — rather than by changing top-level `status`. `status` is
+    what liveness probes read, and the process is alive and accepting writes in
+    both cases; taking it out of rotation would turn a stale read path into an
+    outage. `subscription.status` DOES gain the extra values, because that
+    field's job is to describe the read path and "healthy" was the lie.
 
     Never raises. A lag probe that can take /health down is worse than no probe,
     so any failure degrades to reporting the subscription as unknown.
@@ -607,8 +616,14 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
         lag = await _state.subscription_service.describe_read_model_lag()
 
         catching_up = lag is not None and lag.is_catching_up
+        stalled = lag is not None and lag.is_stalled
+        # Stalled outranks catching_up in the single `status` slot: when both are
+        # true the one needing a human is the one to lead with. Both still appear
+        # in degraded_reasons, so neither is lost to the ordering.
         if not sub_healthy:
             status = "degraded"
+        elif stalled:
+            status = "stalled"
         elif catching_up:
             status = "catching_up"
         else:
@@ -624,6 +639,8 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
             _degrade(DegradedReason.SUBSCRIPTION_COORDINATOR)
         if catching_up:
             _degrade(DegradedReason.PROJECTION_CATCHUP)
+        if stalled:
+            _degrade(DegradedReason.PROJECTION_STALLED)
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
         response["subscription"] = {"status": "unknown"}

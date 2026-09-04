@@ -13,22 +13,41 @@ function reasonsOf(value: unknown): string[] {
   return [];
 }
 
-/** The lagging projection furthest behind — the answer to "which one is holding
- * this up" — plus how far behind it is, in the unit the API names. */
-function catchUpLine(subscription: Record<string, unknown>): string | null {
-  if (subscription["is_catching_up"] !== true) return null;
+function projectionName(entry: Record<string, unknown> | undefined): string {
+  return String(entry?.["projection"] ?? "unknown");
+}
 
-  const lag = subscription["lag"];
-  const unit = subscription["lag_unit"] ?? "events";
-  const behind = typeof lag === "number" ? `${lag} ${unit} behind` : "lag unknown";
-
+/** What the read-model block means for whoever is staring at a 404: which
+ * projection is behind, how far, and — the part that decides what they do next —
+ * whether it is a rebuild that will finish by itself or a projection that has
+ * stopped moving and needs them. The API reports those as two independent flags
+ * and a wedged rebuild sets both, so this returns a line per condition rather
+ * than picking one. */
+function readModelLines(subscription: Record<string, unknown>): string[] {
   const lagging = subscription["lagging_projections"];
-  const worst =
-    Array.isArray(lagging) && lagging.length > 0
-      ? ((lagging[0] as Record<string, unknown>)["projection"] ?? "unknown")
-      : "unknown";
+  const entries = Array.isArray(lagging) ? (lagging as Record<string, unknown>[]) : [];
+  const lines: string[] = [];
 
-  return `  Rebuilding read models: ${worst} is ${behind}. Recently dispatched executions may 404 until this finishes.`;
+  if (subscription["is_catching_up"] === true) {
+    const lag = subscription["lag"];
+    const unit = subscription["lag_unit"] ?? "events";
+    const behind = typeof lag === "number" ? `${lag} ${unit} behind` : "lag unknown";
+    lines.push(
+      `  Rebuilding read models: ${projectionName(entries[0])} is ${behind}. Recently dispatched executions may 404 until this finishes.`,
+    );
+  }
+
+  if (subscription["is_stalled"] === true) {
+    const stuck = entries.filter((entry) => entry["stalled"] === true);
+    const names = stuck.length > 0 ? stuck.map(projectionName).join(", ") : "unknown";
+    const age = stuck[0]?.["checkpoint_age_seconds"];
+    const since = typeof age === "number" ? `, no progress for ${age}s` : "";
+    lines.push(
+      `  Stalled read models: ${names}${since}. This will NOT clear on its own — check that projection's logs.`,
+    );
+  }
+
+  return lines;
 }
 
 export const healthCommand: CommandDef = {
@@ -61,8 +80,7 @@ export const healthCommand: CommandDef = {
       const subStatus = isObject ? (record["status"] ?? "unknown") : subscription;
       print(style(`  Subscription: ${subStatus}`, DIM));
 
-      const catchUp = catchUpLine(record);
-      if (catchUp) print(style(catchUp, YELLOW));
+      for (const line of readModelLines(record)) print(style(line, YELLOW));
     }
   },
 };

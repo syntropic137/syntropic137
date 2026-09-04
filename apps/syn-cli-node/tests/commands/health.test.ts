@@ -122,6 +122,96 @@ describe("health command", () => {
     expect(output).not.toContain("Rebuilding read models");
   });
 
+  // #1172: a stalled projection needs the opposite response from a rebuild —
+  // intervene rather than wait — so `syn health` has to say which it is. This
+  // state used to arrive as "Healthy — all systems operational".
+  it("names the stalled projection and says waiting will not help", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        status: "healthy",
+        mode: "degraded",
+        degraded_reasons: ["projection_stalled"],
+        subscription: {
+          status: "stalled",
+          running: true,
+          is_catching_up: false,
+          is_stalled: true,
+          lag: 4584,
+          lag_unit: "events",
+          head_position: 8726,
+          lagging_projections: [
+            {
+              projection: "session_summaries",
+              position: 4142,
+              lag: 4584,
+              checkpoint_age_seconds: 900,
+              stalled: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    await healthCommand.handler(emptyArgs);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    expect(output).toContain("Subscription: stalled");
+    expect(output).toContain("Stalled read models: session_summaries");
+    expect(output).toContain("900s");
+    expect(output).toContain("NOT clear on its own");
+    // Not a rebuild: telling the operator to wait here would be wrong.
+    expect(output).not.toContain("Rebuilding read models");
+  });
+
+  // The two flags are independent, and a rebuild that wedges sets both. The
+  // operator needs both facts: it is replaying AND it has stopped.
+  it("reports a wedged rebuild as both rebuilding and stalled", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        status: "healthy",
+        mode: "degraded",
+        degraded_reasons: ["projection_catchup", "projection_stalled"],
+        subscription: {
+          status: "stalled",
+          running: true,
+          is_catching_up: true,
+          is_stalled: true,
+          lag: 4584,
+          lag_unit: "events",
+          head_position: 8726,
+          lagging_projections: [
+            {
+              projection: "session_summaries",
+              position: 4142,
+              lag: 4584,
+              checkpoint_age_seconds: 600,
+              stalled: true,
+            },
+            {
+              projection: "workflow_executions",
+              position: 8722,
+              lag: 4,
+              checkpoint_age_seconds: 1,
+              stalled: false,
+            },
+          ],
+        },
+      }),
+    );
+
+    await healthCommand.handler(emptyArgs);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    expect(output).toContain("Rebuilding read models: session_summaries");
+    expect(output).toContain("Stalled read models: session_summaries");
+    // Only the stuck one is named as stalled; the moving peer is not.
+    expect(output).not.toContain("Stalled read models: session_summaries, workflow_executions");
+  });
+
   it("throws CLIError on unhealthy status", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ status: "unhealthy", mode: "full" }),

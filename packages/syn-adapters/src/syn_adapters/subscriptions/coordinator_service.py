@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import asyncpg
@@ -26,6 +27,7 @@ from event_sourcing import (
 )
 
 from syn_adapters.subscriptions.read_model_lag import (
+    CheckpointState,
     ReadModelLag,
     measure_read_model_lag,
 )
@@ -135,8 +137,14 @@ class CoordinatorSubscriptionService:
         if head_events and head_events[0].metadata.global_nonce is not None:
             head_position = head_events[0].metadata.global_nonce
 
+        # updated_at comes along with the position: a checkpoint that is behind
+        # the head tells you nothing about whether the projection is working
+        # until you know whether it is still moving.
         checkpoints = {
-            checkpoint.projection_name: checkpoint.global_position
+            checkpoint.projection_name: CheckpointState(
+                position=checkpoint.global_position,
+                updated_at=checkpoint.updated_at,
+            )
             for checkpoint in await checkpoint_store.get_all_checkpoints()
         }
 
@@ -148,6 +156,7 @@ class CoordinatorSubscriptionService:
             checkpoints=checkpoints,
             projection_names=coordinator.projections.keys(),
             replaying=coordinator.is_catching_up,
+            now=datetime.now(UTC),
         )
 
     async def start(self) -> None:
