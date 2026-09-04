@@ -69,33 +69,13 @@ def _ref_response(ref: PhaseRefDetail) -> PhaseRefResponse:
     )
 
 
-class PhaseDefinition(BaseModel):
-    phase_id: str
-    name: str
-    order: int = 0
-    description: str | None = None
-    agent_type: str = ""
-    prompt_template: str | None = None
-    timeout_seconds: int = 300
-    allowed_tools: list[str] = Field(default_factory=list)
-    argument_hint: str | None = None
-    model: str | None = None
-    provider: str | None = None
-    # Stored since #1012, readable since #1013. `allow_delegation` is
-    # security-relevant -- it stages both agent auths -- so a caller must be
-    # able to see it.
-    allow_delegation: bool = False
-    claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
-    skills: list[PhaseRefResponse] = Field(default_factory=list)
-
-
 class WorkflowResponse(BaseModel):
     id: str
     name: str
     description: str | None = None
     workflow_type: str
     classification: str
-    phases: list[PhaseDefinition] = Field(default_factory=list)
+    phases: list[PhaseDefinitionResponse] = Field(default_factory=list)
     input_declarations: list[InputDeclarationModel] = Field(default_factory=list)
     created_at: str | None = None
     runs_count: int = 0
@@ -729,28 +709,18 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         description=detail.description,
         workflow_type=detail.workflow_type,
         classification=detail.classification,
-        phases=[
-            PhaseDefinition(
-                phase_id=p.phase_id,
-                name=p.name,
-                order=p.order,
-                description=p.description,
-                agent_type=p.agent_type,
-                prompt_template=p.prompt_template,
-                timeout_seconds=p.timeout_seconds,
-                allowed_tools=list(p.allowed_tools),
-                argument_hint=p.argument_hint,
-                model=p.model,
-                provider=p.provider,
-                allow_delegation=p.allow_delegation,
-                # Already PhaseRefResponse here: `get_workflow()` mapped the
-                # read model at the first build site, so converting again
-                # would be a second translation of the same value.
-                claude_plugins=list(p.claude_plugins),
-                skills=list(p.skills),
-            )
-            for p in detail.phases
-        ],
+        # Passed through, not re-copied. This used to rebuild every phase into
+        # a second, near-identical model that named fourteen of the eighteen
+        # fields; the four it omitted -- `input_artifact_types`,
+        # `output_artifact_types`, `execution_type` and `max_tokens` -- were
+        # absent from the JSON entirely (#1176). Absent reads as `None`
+        # through `.get()`, so the endpoint said "declares no outputs" and
+        # "declares nothing" in the same breath, and a reader concluded the
+        # artifact wiring of `sdlc-implement-v1` was empty when the YAML
+        # declares it on all four phases. Two hand-maintained models meant
+        # every field added to one and not the other drifted silently; there
+        # is now one, so there is nothing left to drift.
+        phases=detail.phases,
         input_declarations=[
             InputDeclarationModel(
                 name=d.name,

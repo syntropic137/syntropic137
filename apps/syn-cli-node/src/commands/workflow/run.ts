@@ -15,7 +15,7 @@ import { parseInputs } from "./models.js";
 import type { components } from "../../generated/api-types.js";
 
 type InputDeclaration = components["schemas"]["InputDeclarationModel"];
-type PhaseDefinition = components["schemas"]["PhaseDefinition"];
+type PhaseDefinition = components["schemas"]["PhaseDefinitionResponse"];
 
 /**
  * Names referenced via `{{name}}` in any phase's prompt template. An -i key
