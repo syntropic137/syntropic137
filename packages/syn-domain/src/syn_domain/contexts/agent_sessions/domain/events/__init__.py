@@ -4,6 +4,10 @@ from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     AgentObservationEvent,
     ObservationType,
 )
+from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
+    SessionSummaryData,
+    TokenUsageData,
+)
 from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
     OperationRecordedEvent,
 )
@@ -18,4 +22,6 @@ __all__ = [
     "OperationRecordedEvent",
     "SessionCompletedEvent",
     "SessionStartedEvent",
+    "SessionSummaryData",
+    "TokenUsageData",
 ]

@@ -58,6 +58,10 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
+from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
+    SessionSummaryData,
+    TokenUsageData,
+)
 from syn_domain.contexts.agent_sessions.import_ledger import (
     BilledUsage,
     ImportLedger,
@@ -137,11 +141,13 @@ __all__ = [
     "SessionStartedEvent",
     "SessionStatus",
     "SessionStorePort",
+    "SessionSummaryData",
     "StartSessionCommand",
     "StartSessionHandler",
     "StoredSession",
     "StoredTranscript",
     "TokenMetrics",
+    "TokenUsageData",
     "import_phase_delegates",
     "price_canonical_row",
     "record_error",

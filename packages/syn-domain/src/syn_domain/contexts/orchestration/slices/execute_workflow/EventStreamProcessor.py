@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
@@ -176,6 +176,44 @@ def _extract_error_reason(raw: str) -> str:
     return text[:_MAX_ERROR_REASON_LEN].rsplit(" ", 1)[0] + "..."
 
 
+class ClaudeUsageBlock(TypedDict, total=False):
+    """The cumulative usage block a claude CLI ``result`` line carries.
+
+    Harness knowledge, and it stays here rather than in the domain vocabulary:
+    these are the CLI's key names, and they change when Anthropic ships a new
+    CLI, not when we decide what usage means. ``total=False`` because a result
+    event may omit any of them and the reader defaults each to zero.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+
+
+class ClaudeResultLine(TypedDict, total=False):
+    """The fields this processor reads off a claude CLI ``result`` line.
+
+    A line of someone else's stream, deliberately not named ``...Event``: it is
+    not a domain event, has no aggregate and is never stored or replayed.
+
+    Not the whole event - only what is consumed here, which is what makes the
+    declaration worth checking: a key renamed upstream now fails the type
+    checker at the read instead of silently returning ``None`` at runtime.
+
+    The value arrives from ``json.loads``, so this is an assertion about the
+    stream rather than a validated parse. Every field is optional and every
+    read is defaulted, so a stream that disagrees degrades rather than raises.
+    """
+
+    usage: ClaudeUsageBlock
+    result: str
+    is_error: bool
+    total_cost_usd: float
+    duration_ms: int
+    num_turns: int
+
+
 @dataclass(frozen=True)
 class ReportedUsage:
     """A harness's OWN cumulative token totals, from the terminal event it emits.
@@ -200,7 +238,7 @@ class ReportedUsage:
     cache_read: int
 
     @classmethod
-    def from_claude_result(cls, cli_event: dict[str, Any]) -> ReportedUsage:
+    def from_claude_result(cls, cli_event: ClaudeResultLine) -> ReportedUsage:
         """Read the usage block off a claude CLI ``result`` event.
 
         Call this ONLY where a terminal event was actually parsed: constructing
@@ -567,7 +605,7 @@ class EventStreamProcessor:
             logger.debug("Could not parse TASK_RESULT block")
             return None
 
-    def _capture_result_tokens(self, cli_event: dict[str, Any]) -> None:
+    def _capture_result_tokens(self, cli_event: ClaudeResultLine) -> None:
         """Store authoritative cumulative token counts from a result event.
 
         Reached only from `_handle_result_event`, i.e. only on a real terminal
@@ -589,7 +627,7 @@ class EventStreamProcessor:
             self._reported_usage.cache_creation,
         )
 
-    async def _handle_result_event(self, cli_event: dict[str, Any]) -> dict[str, Any] | None:
+    async def _handle_result_event(self, cli_event: ClaudeResultLine) -> dict[str, Any] | None:
         """Handle a result event — extract task result and token usage."""
         result_text = cli_event.get("result", "")
         task_result = self._parse_task_result(result_text) if result_text else None

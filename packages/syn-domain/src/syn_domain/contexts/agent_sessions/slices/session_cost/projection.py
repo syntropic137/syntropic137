@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     import asyncpg
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
+        SessionSummaryData,
+        TokenUsageData,
+    )
+
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
@@ -56,15 +61,17 @@ def _set_linkage(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
         session_cost.workspace_id = event_data["workspace_id"]
 
 
-def _reported[N: (int, float)](data: dict[str, Any], key: str, current: N) -> N:
-    """The summary's value for ``key``, or ``current`` when it did not report one.
+def _reported[N: (int, float)](value: N | None, current: N) -> N:
+    """``value`` when the summary actually reported one, else ``current``.
 
-    ``dict.get(key, default)`` is not enough: a harness that was killed still
-    emits the key, carrying ``None``. Absent and null mean the same thing here -
-    nobody counted this - and neither is a reason to discard what the
-    observations already counted.
+    Takes the value rather than the payload and a key so that the caller's
+    ``.get`` collapses "absent" into ``None`` before this ever sees it, leaving
+    one rule here: null means nobody counted this, and nobody counting is not a
+    reason to discard what the observations already counted.
+
+    ``dict.get(key, default)`` alone would not do: a harness that was killed
+    still emits the key, carrying ``None``, so the default never fires.
     """
-    value = data.get(key)
     return current if value is None else value
 
 
@@ -176,7 +183,7 @@ class SessionCostProjection:
 
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 
-    def _handle_token_usage(self, session_cost: SessionCost, data: dict[str, Any]) -> None:
+    def _handle_token_usage(self, session_cost: SessionCost, data: TokenUsageData) -> None:
         """Handle TOKEN_USAGE observation data.
 
         Updates token counts, calculates cost, and tracks per-model breakdown.
@@ -263,21 +270,26 @@ class SessionCostProjection:
         session_cost = _get_or_create_session_cost(existing, session_id)
         _set_linkage(session_cost, event_data)
 
-        data = event_data.get("data", {})
+        # The payload arrives from the event store as an untyped JSON object;
+        # naming its shape here is what lets the type checker catch a key that
+        # the producer does not write.
+        data: SessionSummaryData = event_data.get("data", {})
 
-        session_cost.input_tokens = _reported(data, "total_input_tokens", session_cost.input_tokens)
+        session_cost.input_tokens = _reported(
+            data.get("total_input_tokens"), session_cost.input_tokens
+        )
         session_cost.output_tokens = _reported(
-            data, "total_output_tokens", session_cost.output_tokens
+            data.get("total_output_tokens"), session_cost.output_tokens
         )
         session_cost.cache_creation_tokens = _reported(
-            data, "cache_creation_tokens", session_cost.cache_creation_tokens
+            data.get("cache_creation_tokens"), session_cost.cache_creation_tokens
         )
         session_cost.cache_read_tokens = _reported(
-            data, "cache_read_tokens", session_cost.cache_read_tokens
+            data.get("cache_read_tokens"), session_cost.cache_read_tokens
         )
-        session_cost.tool_calls = _reported(data, "tool_count", session_cost.tool_calls)
-        session_cost.turns = _reported(data, "num_turns", session_cost.turns)
-        session_cost.duration_ms = _reported(data, "duration_ms", session_cost.duration_ms)
+        session_cost.tool_calls = _reported(data.get("tool_count"), session_cost.tool_calls)
+        session_cost.turns = _reported(data.get("num_turns"), session_cost.turns)
+        session_cost.duration_ms = _reported(data.get("duration_ms"), session_cost.duration_ms)
 
         if data.get("model"):
             session_cost.agent_model = data["model"]
