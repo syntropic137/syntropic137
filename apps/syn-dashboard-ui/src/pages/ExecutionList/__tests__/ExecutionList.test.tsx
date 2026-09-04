@@ -1,31 +1,32 @@
 /**
  * Executions page against a server that really filters and pages (#1159).
  *
- * These assertions are all about the page an operator sees, not about the
- * hook's return value, because every one of the bugs they cover was a value
- * that existed correctly one hop earlier: the server sent `total` and
- * `status_counts`, and the browser rendered `rows.length` instead.
+ * These assertions are all about the page an operator sees and the request the
+ * browser issued to get it, not about the hook's return value, because every
+ * one of the bugs they cover was a value that existed correctly one hop
+ * earlier: the server sent `total` and `status_counts` and the browser
+ * rendered `rows.length`; the hook held a page number that never reached a
+ * query string. So the double here is mounted over `fetch` and the requests it
+ * receives are the subject.
  */
 
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { answerListQuery } from '../../../test/fakeListServer'
-import type { ListQuery } from '../../../api/listQuery'
+import { serveListEndpoint } from '../../../test/fakeListServer'
+import { LIST_PAGE_SIZE } from '../../../hooks/useServerList'
 import { ExecutionList } from '../ExecutionList'
 
-vi.mock('../../../api/executions', () => ({ listAllExecutions: vi.fn() }))
 vi.mock('../../../hooks/useActivityStream', () => ({
   useActivityStream: vi.fn(() => ({ connected: true, lastEventAt: null })),
 }))
 
-import { listAllExecutions } from '../../../api/executions'
-
-const mockList = vi.mocked(listAllExecutions)
+type User = ReturnType<typeof userEvent.setup>
 
 const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
 
 interface FakeExecution {
   workflow_execution_id: string
@@ -78,26 +79,32 @@ function makeExecution(index: number, hoursAgo: number, status: string): FakeExe
 }
 
 /**
- * 360 executions, newest first, laid out so each window sees a different set:
- *   0-39     within the last 24h  (the default window)
- *   40-199   1-7 days old         (visible at 7d, not at 24h)
- *   200-359  older than 7 days    (visible only at "All")
- * Statuses are dealt so `completed` dominates by far more than one page holds.
+ * 120 executions, newest first, shaped like a real installation rather than
+ * like an easy assertion:
+ *   000-029   within the last 24h   (the default window)
+ *   030-079   1-7 days old          (so 7d holds 80: more than one page)
+ *   080-119   older than 7 days     (so All holds 120: also more than one page)
+ *
+ * Both of the windows the widening test uses therefore overflow a page. That
+ * is the production shape and it is the whole difficulty: widening a lower
+ * bound on a newest-first list CANNOT change the first page, so a fixture
+ * where the narrow window fits on one page quietly dodges the case (#1159).
+ * Statuses are dealt so `completed` alone exceeds a page.
  */
-const COLLECTION: FakeExecution[] = Array.from({ length: 360 }, (_, i) => {
-  const hoursAgo = i < 40 ? (i + 1) * 0.5 : i < 200 ? 25 + i : 200 + i * 2
+const COLLECTION: FakeExecution[] = Array.from({ length: 120 }, (_, i) => {
+  const hoursAgo = i < 30 ? (i + 1) * 0.5 : i < 80 ? 25 + (i - 30) * 2 : 200 + (i - 80) * 24
   const status = i % 5 === 0 ? 'failed' : i % 17 === 0 ? 'cancelled' : 'completed'
   return makeExecution(i, hoursAgo, status)
 })
 
-const WITHIN_24H = COLLECTION.filter(
-  (e) => e.started_at >= new Date(Date.now() - 24 * HOUR_MS).toISOString(),
-).length
-const COMPLETED_IN_24H = COLLECTION.filter(
-  (e) =>
-    e.status === 'completed' &&
-    e.started_at >= new Date(Date.now() - 24 * HOUR_MS).toISOString(),
-).length
+const TOTAL = COLLECTION.length
+const within = (ms: number) =>
+  COLLECTION.filter((e) => e.started_at >= new Date(Date.now() - ms).toISOString())
+const WITHIN_24H = within(DAY_MS).length
+const WITHIN_7D = within(7 * DAY_MS).length
+const COMPLETED_IN_24H = within(DAY_MS).filter((e) => e.status === 'completed').length
+/** The oldest row: reachable only under "All", and only past the first page. */
+const OLDEST = COLLECTION[TOTAL - 1]
 
 function matchesSearch(row: FakeExecution, term: string): boolean {
   const needle = term.toLowerCase()
@@ -108,16 +115,18 @@ function matchesSearch(row: FakeExecution, term: string): boolean {
   )
 }
 
-function renderPage() {
+const server = serveListEndpoint({
+  path: '/api/v1/executions',
+  collection: COLLECTION,
+  matchesSearch,
+})
+
+function renderPage(url = '/executions') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[url]}>
       <ExecutionList />
     </MemoryRouter>,
   )
-}
-
-function queriesSent(): ListQuery[] {
-  return mockList.mock.calls.map(([query]) => query)
 }
 
 /**
@@ -133,75 +142,83 @@ function renderedWorkflowNames(): string[] {
   return Array.from(rows, (row) => row.querySelectorAll('td')[2]?.textContent ?? '')
 }
 
-describe('ExecutionList paging and filters', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockList.mockImplementation(async (query) => {
-      const answer = answerListQuery(COLLECTION, query, matchesSearch)
-      return {
-        executions: answer.rows,
-        total: answer.total,
-        page: query.page,
-        page_size: query.page_size,
-        status_counts: answer.status_counts,
-      }
-    })
-  })
+/** Walk to the last page of `total` rows, one Next at a time. */
+async function pageToLast(user: User, total: number): Promise<void> {
+  const lastPage = Math.ceil(total / LIST_PAGE_SIZE)
+  for (let page = 2; page <= lastPage; page += 1) {
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText(`Page ${page} of ${lastPage}`)
+  }
+}
 
-  it('sends the time window to the server and re-renders on a wider one', async () => {
-    const user = userEvent.setup()
+describe('ExecutionList paging and filters', () => {
+  it('puts the time window on the request as a bound the API will accept', async () => {
     renderPage()
 
     await screen.findByText(`Showing 1-${WITHIN_24H} of ${WITHIN_24H} executions`)
 
-    const first = queriesSent()[0]
-    expect(first.started_after).toBeDefined()
+    const { params } = server.requests[0]
+    expect(params.get('page')).toBe('1')
+    expect(params.get('page_size')).toBe(String(LIST_PAGE_SIZE))
     // The API rejects a bound with no offset (422), so it must carry one.
-    expect(first.started_after).toMatch(/(Z|[+-]\d{2}:\d{2})$/)
-    const narrowRows = renderedWorkflowNames()
-    expect(narrowRows).toHaveLength(WITHIN_24H)
-
-    await user.click(screen.getByRole('radio', { name: '7d' }))
-
-    // A new request, carrying a bound that reaches further back than the last.
-    await waitFor(() => expect(queriesSent().length).toBeGreaterThan(1))
-    const widened = queriesSent().at(-1)!
-    expect(widened.started_after).toBeDefined()
-    expect(widened.started_after! < first.started_after!).toBe(true)
-
-    // And the rows on screen actually changed.
-    await waitFor(() => {
-      expect(renderedWorkflowNames()).toHaveLength(50)
-    })
-    expect(renderedWorkflowNames()).not.toEqual(narrowRows)
+    expect(params.get('started_after')).toMatch(/(Z|[+-]\d{2}:\d{2})$/)
+    expect(renderedWorkflowNames()).toHaveLength(WITHIN_24H)
   })
+
+  it('widening the window to All raises the total and reaches history no 7d page held', async () => {
+    const user = userEvent.setup()
+
+    // The case only bites when both windows overflow a page; assert the
+    // fixture is that shape rather than trusting it to stay that way.
+    expect(WITHIN_7D).toBeGreaterThan(LIST_PAGE_SIZE)
+    expect(TOTAL).toBeGreaterThan(WITHIN_7D)
+    expect(OLDEST.started_at < new Date(Date.now() - 7 * DAY_MS).toISOString()).toBe(true)
+
+    renderPage('/executions?timeWindow=7d')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${WITHIN_7D} executions`)
+    const firstPageUnder7d = renderedWorkflowNames()
+
+    // Page to the end of the 7d window: its oldest row is still inside it.
+    await pageToLast(user, WITHIN_7D)
+    await screen.findByText(`Showing 51-${WITHIN_7D} of ${WITHIN_7D} executions`)
+    expect(screen.queryByText(OLDEST.workflow_name)).toBeNull()
+
+    await user.click(screen.getByRole('radio', { name: 'All' }))
+
+    // The total changes, and the affordance reports the new one.
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
+    // The rows do NOT change, and must not be expected to: these are the
+    // newest 50 either way. "More rows are visible after widening" is the
+    // intuitive criterion and it is wrong - it would fail correct software.
+    expect(renderedWorkflowNames()).toEqual(firstPageUnder7d)
+
+    // What widening actually buys is reach, so page all the way in.
+    await pageToLast(user, TOTAL)
+    await screen.findByText(`Showing 101-${TOTAL} of ${TOTAL} executions`)
+    expect(screen.getByText(OLDEST.workflow_name)).not.toBeNull()
+
+    // And that reach is on the wire: the last page, with the bound dropped.
+    expect(server.lastRequest.params.get('page')).toBe('3')
+    expect(server.lastRequest.params.has('started_after')).toBe(false)
+  }, 30_000)
 
   it('reaches the oldest execution by paging, over more rows than one page', async () => {
     const user = userEvent.setup()
     renderPage()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
-    await screen.findByText('Showing 1-50 of 360 executions')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
+    expect(screen.queryByText(OLDEST.workflow_name)).toBeNull()
 
-    const oldest = [...COLLECTION].sort((a, b) =>
-      a.started_at.localeCompare(b.started_at),
-    )[0]
-    expect(screen.queryByText(oldest.workflow_name)).toBeNull()
+    await pageToLast(user, TOTAL)
 
-    for (let hop = 0; hop < 7; hop += 1) {
-      await user.click(screen.getByRole('button', { name: 'Next' }))
-      await waitFor(() =>
-        expect(screen.getByText(/^Page \d+ of 8$/).textContent).toBe(`Page ${hop + 2} of 8`),
-      )
-    }
-
-    await screen.findByText('Showing 351-360 of 360 executions')
-    expect(screen.getByText(oldest.workflow_name)).not.toBeNull()
+    await screen.findByText(`Showing 101-${TOTAL} of ${TOTAL} executions`)
+    expect(screen.getByText(OLDEST.workflow_name)).not.toBeNull()
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Next' }).disabled).toBe(true)
 
     await user.click(screen.getByRole('button', { name: 'Previous' }))
-    await screen.findByText('Showing 301-350 of 360 executions')
-    // Eight renders of a fifty-row table; slower than the 5s default allows.
+    await screen.findByText(`Showing 51-100 of ${TOTAL} executions`)
+    expect(server.lastRequest.params.get('page')).toBe('2')
   }, 30_000)
 
   it('labels the chips from the server facet counts, not the rows it holds', async () => {
@@ -216,17 +233,17 @@ describe('ExecutionList paging and filters', () => {
     // until the true figure cannot fit on a page and check it again.
     const user = userEvent.setup()
     await user.click(screen.getByRole('radio', { name: 'All' }))
-    await screen.findByText('Showing 1-50 of 360 executions')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
 
     const completedInAll = COLLECTION.filter((e) => e.status === 'completed').length
-    expect(completedInAll).toBeGreaterThan(50)
+    expect(completedInAll).toBeGreaterThan(LIST_PAGE_SIZE)
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^Completed/ }).textContent).toContain(
         String(completedInAll),
       ),
     )
     // The page holds 50 rows; the chip must not be reporting those.
-    expect(renderedWorkflowNames()).toHaveLength(50)
+    expect(renderedWorkflowNames()).toHaveLength(LIST_PAGE_SIZE)
   })
 
   it('reports the server total in "showing N of M", not the page length', async () => {
@@ -234,10 +251,10 @@ describe('ExecutionList paging and filters', () => {
     renderPage()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
-    await screen.findByText('Showing 1-50 of 360 executions')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
 
-    expect(renderedWorkflowNames()).toHaveLength(50)
-    expect(screen.queryByText('Showing 1-50 of 50 executions')).toBeNull()
+    expect(renderedWorkflowNames()).toHaveLength(LIST_PAGE_SIZE)
+    expect(screen.queryByText(`Showing 1-50 of ${LIST_PAGE_SIZE} executions`)).toBeNull()
   })
 
   it('narrows on the server when a status chip is selected, and returns to page 1', async () => {
@@ -245,21 +262,22 @@ describe('ExecutionList paging and filters', () => {
     renderPage()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
-    await screen.findByText('Showing 1-50 of 360 executions')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
 
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    await screen.findByText('Showing 51-100 of 360 executions')
+    await screen.findByText(`Showing 51-100 of ${TOTAL} executions`)
+    expect(server.lastRequest.params.get('page')).toBe('2')
 
     await user.click(screen.getByRole('button', { name: /^Failed/ }))
 
     const failedInAll = COLLECTION.filter((e) => e.status === 'failed').length
     await waitFor(() => {
-      const latest = queriesSent().at(-1)!
-      expect(latest.statuses).toEqual(['failed'])
-      expect(latest.page).toBe(1)
+      const { params } = server.lastRequest
+      expect(params.get('statuses')).toBe('failed')
+      expect(params.get('page')).toBe('1')
     })
     await screen.findByText(
-      `Showing 1-${Math.min(50, failedInAll)} of ${failedInAll} executions`,
+      `Showing 1-${Math.min(LIST_PAGE_SIZE, failedInAll)} of ${failedInAll} executions`,
     )
   })
 
@@ -268,13 +286,13 @@ describe('ExecutionList paging and filters', () => {
     renderPage()
 
     await user.click(screen.getByRole('radio', { name: 'All' }))
-    await screen.findByText('Showing 1-50 of 360 executions')
+    await screen.findByText(`Showing 1-${LIST_PAGE_SIZE} of ${TOTAL} executions`)
 
-    await user.type(screen.getByPlaceholderText('Search executions...'), 'Run 359')
+    await user.type(screen.getByPlaceholderText('Search executions...'), OLDEST.workflow_name)
 
-    await waitFor(() => expect(queriesSent().at(-1)!.q).toBe('Run 359'))
-    // Run 359 is the oldest row and was on no page the browser held.
+    await waitFor(() => expect(server.lastRequest.params.get('q')).toBe(OLDEST.workflow_name))
+    // The oldest row was on no page the browser held.
     await screen.findByText('Showing 1-1 of 1 execution')
-    expect(screen.getByText('Run 359')).not.toBeNull()
+    expect(screen.getByText(OLDEST.workflow_name)).not.toBeNull()
   })
 })
