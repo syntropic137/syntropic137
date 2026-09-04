@@ -217,7 +217,7 @@ def _phase_declares_anything(
     `allowed_tools` a release. For `sandbox` the same bug would run a phase
     with authority it explicitly declined.
     """
-    return bool(model or provider or allow_delegation or allowed_tools or sandbox)
+    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
 
 
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
@@ -281,7 +281,12 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
         model=phase_model,
         allow_delegation=allow_delegation,
         allowed_tools=allowed_tools,
-        sandbox=sandbox or defaults.sandbox,
+        # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
+        # invalid input, and `or` would quietly widen it to the write-capable
+        # default before _resolve_sandbox could reject it. Preserve every
+        # non-None value so the execution boundary sees what was actually
+        # persisted and refuses it.
+        sandbox=sandbox if sandbox is not None else defaults.sandbox,
     )
 
 

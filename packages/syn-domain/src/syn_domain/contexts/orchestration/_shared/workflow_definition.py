@@ -208,14 +208,18 @@ class AgentYamlDefinition(BaseModel):
     sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
     """How much authority this phase's agent gets. Provider-neutral.
 
-    Omitted means ``read-only`` (``DEFAULT_PHASE_SANDBOX``): least privilege
-    unless the phase asks for more. A phase that edits files needs
-    ``workspace-write``; ``full-access`` is for a phase that must also write
-    outside the workspace.
+    Omitted means ``workspace-write`` (``DEFAULT_PHASE_SANDBOX``), NOT
+    ``read-only``: a phase publishes its deliverable by writing under
+    ``artifacts/output/``, so a read-only phase produces no artifact and
+    starves the phase after it.
 
-    A review or verify phase must leave this at the default. That is what
+    A review or verify phase must therefore declare ``read-only``
+    EXPLICITLY - leaving it out grants write access. That declaration is what
     makes "the verifier does not modify what it certifies" enforced rather
-    than merely instructed (#1157, #1161)."""
+    than merely instructed (#1157, #1161).
+
+    Steers codex phases only. Claude phases scope authority through
+    ``allowed_tools`` and ignore this field."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the

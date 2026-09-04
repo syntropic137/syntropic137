@@ -87,3 +87,73 @@ class TestUnknownLevelIsRefusedNotDowngraded:
 
     def test_none_falls_back_to_the_default(self) -> None:
         assert _resolve_sandbox(None, phase_id="verify") is DEFAULT_PHASE_SANDBOX
+
+
+class TestStoredValuesAreNotWidened:
+    """A stored template is rehydrated straight from a historical event.
+
+    It never sees the YAML validator, so the execution boundary is the only
+    place an invalid level can be refused. Widening one to the write-capable
+    default is the failure this class exists to prevent.
+    """
+
+    @pytest.mark.parametrize("stored", ["", "Read-Only", " read-only ", "readonly"])
+    def test_an_invalid_stored_level_is_refused_not_widened(self, stored: str) -> None:
+        with pytest.raises(UnsupportedPhaseSandboxError):
+            _resolve_sandbox(stored, phase_id="verify")
+
+    def test_empty_string_survives_config_construction_as_itself(self) -> None:
+        """``or`` would turn "" into the default here and lose the refusal."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            _build_agent_config_from_phase,
+        )
+
+        class _StoredPhase:
+            phase_id = "verify"
+            model = None
+            provider = "codex"
+            allow_delegation = False
+            allowed_tools: tuple[str, ...] = ()
+            sandbox = ""
+
+        config = _build_agent_config_from_phase(_StoredPhase())
+        assert config.sandbox == ""
+        with pytest.raises(UnsupportedPhaseSandboxError):
+            _resolve_sandbox(config.sandbox, phase_id="verify")
+
+
+class TestTheWholePathFromYaml:
+    """The unit tests above call the builder directly and would not notice
+    ``sandbox`` being dropped between YAML and the command line. This one
+    walks the hops that actually carry it."""
+
+    def test_yaml_read_only_reaches_the_codex_argv(self) -> None:
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        definition = WorkflowDefinition.from_yaml(
+            """
+id: sandbox-path
+name: sandbox-path
+description: verify that a declared level survives every hop
+phases:
+  - id: verify
+    name: Verify
+    order: 1
+    prompt_template: check the work
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+      sandbox: read-only
+"""
+        )
+        phase = definition.phases[0].to_domain()
+        assert phase.sandbox == "read-only", "dropped between YAML and PhaseDefinition"
+
+        argv = _build_codex_command(
+            "check the work",
+            phase.model,
+            _resolve_sandbox(phase.sandbox, phase_id=phase.phase_id),
+        )
+        assert _sandbox_arg(argv) == "read-only"

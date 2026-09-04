@@ -30,11 +30,11 @@ class AgentProvider(StrEnum):
 class PhaseSandbox(StrEnum):
     """How much authority a phase's agent process is granted.
 
-    Provider-neutral on purpose: the same declaration must mean the same
-    thing whichever harness runs the phase, so a workflow author does not
-    have to know that codex spells this ``--sandbox`` and claude spells it
-    ``--allowedTools``. Mapping to a specific CLI flag belongs in the
-    command builder, not in the workflow definition.
+    Named provider-neutrally so the same declaration can mean the same thing
+    on any harness, but TODAY it steers ``codex exec --sandbox`` only. Claude
+    phases scope authority through ``allowed_tools`` and ignore this field -
+    declaring ``read-only`` on a claude phase does not restrict it. Do not
+    read a level here as a guarantee on a claude phase.
 
     Ordered least to most authority. Prefer the least a phase can finish
     with: a phase that cannot write cannot invent work it was asked to
@@ -44,7 +44,12 @@ class PhaseSandbox(StrEnum):
     READ_ONLY = "read-only"
     """Read and search only. The correct level for any review, verify or
     audit phase - it makes "the verifier does not modify what it certifies"
-    an enforced property rather than a sentence in a prompt."""
+    an enforced property rather than a sentence in a prompt.
+
+    Must be declared explicitly; it is not the default (see
+    ``DEFAULT_PHASE_SANDBOX`` for why). A phase at this level cannot write
+    its deliverable either, so a verify phase moves here only once it has
+    another way to publish."""
 
     WORKSPACE_WRITE = "workspace-write"
     """Read, write and run commands inside the workspace. No network. The
