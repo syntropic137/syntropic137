@@ -17,43 +17,27 @@ logger = logging.getLogger(__name__)
 
 #: Announce the launch from inside the container, then become the agent.
 #:
-#: Two separate things must be true before the marker may be printed, and the
-#: script establishes both, in order.
+#: Reaching this script at all requires the daemon to have accepted the exec,
+#: so a client that failed short of that - no such container, exec refused -
+#: cannot produce the marker however it fails. That is load-bearing because
+#: `docker exec` merges its own diagnostics into this same stdout pipe, so
+#: nothing else arriving on it tells the two apart.
 #:
-#: A process exists in the container at all. Reaching this script requires the
-#: daemon to have accepted the exec, so a client that failed short of that - no
-#: such container, exec refused - cannot produce the marker however it fails.
-#: That is load-bearing because `docker exec` merges its own diagnostics into
-#: this same stdout pipe, so nothing else arriving on it tells the two apart.
-#:
-#: The agent argv can become that process. ``exec`` replaces the shell only if
-#: the target resolves and is executable; when it does not, the shell carries on
-#: and exits 126/127 - having already printed the marker, which made a missing
-#: or non-executable agent binary byte-identical to a real launch, the one
-#: distinction the marker exists to draw (#1065). So the announcement is guarded
-#: by the questions the kernel is about to ask: does the name resolve, is it a
-#: regular file, is it executable. Both halves of the guard earn their place -
-#: dash hands back any path containing a slash unchecked where bash rejects it,
-#: so resolution alone would pass a non-executable file on some images and not
-#: others. A failure still reaches the stream as the shell's own diagnostic;
-#: only the false claim is withheld.
-#:
-#: This is a predicate, not a proof: an executable whose interpreter or loader
-#: is missing satisfies it and fails ``exec`` anyway. That residue errs the safe
-#: way - it over-reports a launch, which merely withholds the "never started"
-#: claim, where under-reporting would assert it falsely. Nothing portable does
-#: better. A shell cannot observe its own successful ``exec``, and the one
-#: after-the-fact signal that looks like it could - an EXIT trap, which runs
-#: only when ``exec`` failed - is honoured by dash and skipped by bash, so it
-#: would silently do nothing depending on which /bin/sh the image ships.
+#: What the marker cannot say is that the agent itself started: it is printed
+#: before ``exec``, and ``exec`` can still fail. Nothing asked here would fix
+#: that. Every pre-exec predicate is a prediction of what the kernel is about
+#: to do, and the kernel checks more than a shell can - a script that resolves,
+#: is a regular file and carries the executable bit still fails ``exec`` with
+#: 127 when its shebang interpreter is missing. So the script makes no
+#: prediction and the claim is settled afterwards instead, from the status this
+#: shell returns: ``exec`` replaces it on success, so a 126 or 127 coming back
+#: is the shell still being here to report that the agent never replaced it
+#: (see ``AgentLaunchEvidence``, #1065).
 #:
 #: ``exec`` then replaces the shell, so the agent inherits the pid the timeout
 #: path signals and the argv it was given. The marker is passed as an argument
 #: rather than interpolated, which keeps this script a constant.
-_ANNOUNCE_RUNNABLE_THEN_EXEC = (
-    'agent=$(command -v "$2") && [ -f "$agent" ] && [ -x "$agent" ] '
-    '&& printf "%s\\n" "$1"; shift; exec "$@"'
-)
+_ANNOUNCE_THEN_EXEC = 'printf "%s\\n" "$1"; shift; exec "$@"'
 
 
 def _build_exec_command(
@@ -68,20 +52,44 @@ def _build_exec_command(
         for key, value in environment.items():
             exec_cmd.extend(["-e", f"{key}={value}"])
     exec_cmd.append(container_name)
-    exec_cmd.extend(
-        ["sh", "-c", _ANNOUNCE_RUNNABLE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command]
-    )
+    exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command])
     return exec_cmd
 
 
+#: How long a process whose output has already ended is given to be reaped on
+#: its own before it is signalled. Generous: the stream reaching EOF means the
+#: process has closed stdout, so its status is normally in hand within a
+#: millisecond, and nothing waits on this but the phase that just finished.
+_SELF_EXIT_GRACE_SECONDS = 0.5
+
+
 async def _cleanup_process(proc: asyncio.subprocess.Process) -> int | None:
-    """Terminate/kill process and return exit code."""
-    if proc.returncode is None:
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except (TimeoutError, ProcessLookupError):
-            proc.kill()
+    """Wait for the process to finish, signalling it only if it will not.
+
+    Waiting FIRST is what makes the status trustworthy, and the old order
+    corrupted it. ``proc.returncode`` is filled in by asyncio's child watcher
+    thread, so it is still None for the moment between a process exiting and
+    that thread being scheduled - the exact moment this runs, because the
+    stream ended when the process did. Terminating on that reading sends
+    ``Popen.send_signal`` down a path that calls ``poll()`` first, which reaps
+    the child itself; the watcher's own ``waitpid`` then fails and asyncio
+    substitutes 255. A failed exec is the fastest exit there is, so the status
+    that says so was the one most likely to be replaced by a fiction - and it
+    is now the status that decides whether an agent ever launched (#1065).
+
+    A process that is genuinely still running is unaffected: it does not exit
+    within the grace window, `poll()` finds it alive, and the terminate/kill
+    escalation proceeds as before.
+    """
+    try:
+        return await asyncio.wait_for(proc.wait(), timeout=_SELF_EXIT_GRACE_SECONDS)
+    except TimeoutError:
+        pass
+    try:
+        proc.terminate()
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except (TimeoutError, ProcessLookupError):
+        proc.kill()
     if proc.returncode is None:
         await proc.wait()
     return proc.returncode

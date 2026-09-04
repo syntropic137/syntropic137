@@ -59,6 +59,12 @@ _PROCESSOR_PATH = (
 #: unusable as evidence.
 _CLIENT_DIAGNOSTIC = "Error response from daemon: No such container: agentic-ws-abc123"
 
+#: What the wrapper shell prints when the announcement it just made turns out
+#: to be false. It arrives on the same stream as agent output and cannot be
+#: told apart from it by looking, which is why the exit status rather than the
+#: line decides.
+_EXEC_FAILED = "syn-launch: 1: exec: /usr/local/bin/claude: not found"
+
 
 class _ConsumingStreamProcessor:
     """Stream processor double that actually drains the stream.
@@ -83,8 +89,15 @@ class _ConsumingStreamProcessor:
         )
 
 
-def _workspace(*, lines: list[str] | None = None, raises: bool = False) -> MagicMock:
-    """A workspace whose stream produces the given lines, or cannot start at all."""
+def _workspace(
+    *, lines: list[str] | None = None, raises: bool = False, exit_code: int = 0
+) -> MagicMock:
+    """A workspace whose stream produces the given lines, or cannot start at all.
+
+    ``exit_code`` is what the process carrying the stream reports afterwards -
+    the wrapper shell's own status when it never managed to exec the agent, and
+    the agent's own status once it did.
+    """
 
     async def _stream(*_args: object, **_kwargs: object) -> AsyncIterator[str]:
         if raises:
@@ -94,7 +107,7 @@ def _workspace(*, lines: list[str] | None = None, raises: bool = False) -> Magic
 
     workspace = MagicMock()
     workspace.stream = _stream
-    workspace.last_stream_exit_code = 0
+    workspace.last_stream_exit_code = exit_code
     return workspace
 
 
@@ -215,3 +228,85 @@ async def test_a_streaming_agent_is_launched_and_its_output_is_untouched() -> No
 
     assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
     assert processors[0].lines == ['{"a": 1}', '{"b": 2}']
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exit_code", [126, 127], ids=["not executable", "not found"])
+async def test_an_announcement_the_exec_did_not_follow_records_no_launch(
+    exit_code: int,
+) -> None:
+    """The hop the whole fix hangs on (#1065).
+
+    The wrapper announces immediately before ``exec``, so this stream carries a
+    perfectly genuine marker - and then the exec failed, and the shell that
+    announced is still there to say so with the status only it can return. The
+    handler has to carry that status into the launch fact; a version that
+    settled on the marker alone, or that read the status and dropped it before
+    the session manager, passes every other test in this file.
+    """
+    session_mgr = _session_manager()
+    await session_mgr.start()
+
+    await _run_phase(
+        _workspace(lines=[AGENT_LAUNCH_MARKER, _EXEC_FAILED], exit_code=exit_code),
+        session_mgr,
+    )
+
+    assert _launch_of(session_mgr) is AgentLaunch.NOT_LAUNCHED
+
+
+@pytest.mark.anyio
+async def test_an_agent_that_ran_and_failed_is_still_launched() -> None:
+    """The line the retraction must not cross.
+
+    Agents fail. An agent that started, worked and exited non-zero has
+    demonstrably existed, and reporting it as never-started is the same false
+    statement as #1047, just reached from the other side. Only the two statuses
+    that mean the exec itself did not happen retract, and this is not one.
+    """
+    session_mgr = _session_manager()
+    await session_mgr.start()
+
+    await _run_phase(
+        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"type": "result"}'], exit_code=1),
+        session_mgr,
+    )
+
+    assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
+
+
+@pytest.mark.anyio
+async def test_a_cancelled_phase_keeps_the_launch_its_agent_earned() -> None:
+    """The stream nobody drained, which is where deferring the answer could lose it.
+
+    Cancellation breaks out of the processor's loop mid-stream, so the process
+    is never waited on and the status still on the workspace belongs to some
+    earlier phase - here a failed exec's 127, the worst thing it could be. A
+    settle that read it anyway would tell the user this session never started
+    an agent that it had just interrupted.
+    """
+    session_mgr = _session_manager()
+    await session_mgr.start()
+
+    class _StopsAtTheFirstLine(_ConsumingStreamProcessor):
+        async def process_stream(
+            self, stream: AsyncIterator[str], workspace: object
+        ) -> StreamResult:
+            del workspace
+            async for line in stream:
+                self.lines.append(line)
+                break
+            return StreamResult(
+                line_count=len(self.lines),
+                interrupt_requested=True,
+                interrupt_reason="cancelled",
+                agent_task_result=None,
+            )
+
+    await _run_phase(
+        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"a": 1}', '{"b": 2}'], exit_code=127),
+        session_mgr,
+        processor=_StopsAtTheFirstLine,
+    )
+
+    assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED

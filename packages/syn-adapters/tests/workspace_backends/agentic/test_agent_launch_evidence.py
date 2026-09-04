@@ -16,6 +16,14 @@ and exits non-zero long after the observer has fired.
 The daemon is faked, not the transport: a ``docker`` on PATH reproduces the
 observable behaviour of the real client, and everything from
 ``_build_exec_command`` inwards is production code.
+
+The marker alone is not the answer either, and the failures below are why. It
+is printed immediately BEFORE the ``exec`` that would make its announcer into
+the agent, so at the moment it arrives it is a prediction; when the exec then
+fails, a shell has attested a launch that never happened (#1065). So each case
+here is run to the end and settled against the status the adapter really
+reported - a real one, produced by a real ``sh`` failing a real ``exec``, not
+a number chosen by the test.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
-    observing_launch,
+    AgentLaunchEvidence,
 )
 
 if TYPE_CHECKING:
@@ -53,8 +61,8 @@ _CONTAINER = "agentic-ws-abc123"
 #: three cases are entirely silent, so without it a client that failed to run
 #: at all would look identical to one that ran and refused the exec - and the
 #: tests below would pass having exercised nothing. Deliberately NOT the
-#: process exit code: a fast-exiting child is reported as 255 by asyncio's
-#: child watcher often enough to make that control flaky.
+#: process exit code, which says whether the WRAPPER ran, not the client: the
+#: two are different questions and each case below asks both.
 _RECEIPT = 'open(sys.argv[0] + ".ran", "w").close()\n'
 
 #: The daemon rejects the exec and the CLIENT reports it - on stderr, which the
@@ -123,20 +131,30 @@ def fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[st
     return _install
 
 
-async def _launched_and_lines(
+async def _launches_and_lines(
     adapter: AgenticEventStreamAdapter, command: list[str]
-) -> tuple[bool, list[str]]:
-    """Stream one phase through the real observer; report what it concluded."""
-    launched = False
+) -> tuple[int, list[str]]:
+    """Stream one phase through the real observer; report how often it recorded a launch.
+
+    Settled with the status the adapter really reported for this stream, which
+    is what turns the marker's "about to exec" into a fact or discards it.
+
+    Settled TWICE on purpose. The handler settles from a ``finally``, so a
+    second call is reachable in production, and counting rather than flagging
+    means no test here can be satisfied by a launch recorded once per call.
+    """
+    launches = 0
 
     async def observer() -> None:
-        nonlocal launched
-        launched = True
+        nonlocal launches
+        launches += 1
 
     handle = IsolationHandle(isolation_id="container-abc123", isolation_type="docker")
-    stream = observing_launch(adapter.stream(handle, command), observer)
-    lines = [line async for line in stream]
-    return launched, lines
+    evidence = AgentLaunchEvidence(observer)
+    lines = [line async for line in evidence.observing(adapter.stream(handle, command))]
+    await evidence.settle(adapter.last_exit_code)
+    await evidence.settle(adapter.last_exit_code)
+    return launches, lines
 
 
 async def test_a_client_diagnostic_is_not_evidence_that_an_agent_ran(
@@ -152,12 +170,12 @@ async def test_a_client_diagnostic_is_not_evidence_that_an_agent_ran(
     """
     docker = fake_docker(_NO_SUCH_CONTAINER)
 
-    launched, lines = await _launched_and_lines(docker.adapter, ["claude", "-p", "hello"])
+    launches, lines = await _launches_and_lines(docker.adapter, ["claude", "-p", "hello"])
 
     assert lines == [f"Error response from daemon: No such container: {_CONTAINER}"], (
         "the fake client must really emit its diagnostic, or this test cannot fail"
     )
-    assert launched is False
+    assert launches == 0
 
 
 async def test_a_refused_exec_is_not_evidence_that_an_agent_ran(
@@ -171,11 +189,11 @@ async def test_a_refused_exec_is_not_evidence_that_an_agent_ran(
     """
     docker = fake_docker(_EXEC_REFUSED)
 
-    launched, lines = await _launched_and_lines(docker.adapter, ["claude", "-p", "hello"])
+    launches, lines = await _launches_and_lines(docker.adapter, ["claude", "-p", "hello"])
 
     assert docker.client_ran, "the fake client must really run, or this test cannot fail"
     assert lines == []
-    assert launched is False
+    assert launches == 0
 
 
 async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouched(
@@ -186,14 +204,20 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
     Drop the announce-then-exec wrapper from ``_build_exec_command`` and this
     fails: nothing else in the stream can attest a launch. The marker must also
     stay out of the stream - a processor parsing JSONL would choke on it.
+
+    The agent then exits 0, which is the ordinary end of every successful
+    phase. Settling reads that status, so this is also where a retraction rule
+    that keyed on the stream ENDING rather than on how it ended would show
+    itself: the launch has to survive the process finishing.
     """
     docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
 
-    launched, lines = await _launched_and_lines(
+    launches, lines = await _launches_and_lines(
         docker.adapter, ["python3", "-c", 'print("{\\"type\\":\\"result\\"}")']
     )
 
-    assert launched is True
+    assert launches == 1, "recorded once, and not once per settle"
+    assert docker.adapter.last_exit_code == 0, "the agent must really have exited normally"
     assert lines == ['{"type":"result"}']
     assert AGENT_LAUNCH_MARKER not in lines
 
@@ -210,12 +234,15 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
     """
     docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
 
-    launched, lines = await _launched_and_lines(
+    launches, lines = await _launches_and_lines(
         docker.adapter, ["python3", "-c", "raise SystemExit(3)"]
     )
 
-    assert launched is True
+    assert launches == 1
     assert lines == []
+    assert docker.adapter.last_exit_code == 3, (
+        "an agent choosing its own non-zero status is not a shell reporting a failed exec"
+    )
 
 
 async def test_a_missing_agent_binary_is_not_evidence_that_an_agent_ran(
@@ -233,14 +260,14 @@ async def test_a_missing_agent_binary_is_not_evidence_that_an_agent_ran(
     docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
     missing = "/definitely/missing/claude"
 
-    launched, lines = await _launched_and_lines(docker.adapter, [missing, "-p", "hello"])
+    launches, lines = await _launches_and_lines(docker.adapter, [missing, "-p", "hello"])
 
     assert docker.client_ran, "the fake client must really run, or this test cannot fail"
     assert any(missing in line for line in lines), (
         f"the shell must really have tried and failed to exec {missing}; without its "
         f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
     )
-    assert launched is False
+    assert launches == 0
 
 
 async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
@@ -260,14 +287,55 @@ async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
     agent.chmod(0o644)
     docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
 
-    launched, lines = await _launched_and_lines(docker.adapter, [str(agent), "-p", "hello"])
+    launches, lines = await _launches_and_lines(docker.adapter, [str(agent), "-p", "hello"])
 
     assert docker.client_ran, "the fake client must really run, or this test cannot fail"
     assert any(str(agent) in line for line in lines), (
         f"the shell must really have tried and failed to exec {agent}; without its "
         f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
     )
-    assert launched is False
+    assert launches == 0
+
+
+async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
+    fake_docker: Callable[[str], _FakeDocker],
+    tmp_path: Path,
+) -> None:
+    """The case that defeats every check a wrapper could make before ``exec``.
+
+    This file resolves, is a regular file, and carries the executable bit, so
+    the three questions a shell can ask about it all answer yes. The kernel
+    asks a fourth - can the interpreter on line one be loaded - and answers no,
+    reporting ENOENT for a path that plainly exists. ``exec`` fails 127 with
+    the marker already on the wire.
+
+    An earlier fix guarded the announcement with exactly those three questions
+    and was rejected on this counterexample, which is why it is pinned here:
+    the point is not that these three checks were the wrong three, it is that
+    predicting ``exec`` cannot be done from before it. The launch is settled
+    from the status afterwards instead, and only that is proof against a
+    counterexample nobody has thought of yet.
+    """
+    agent = tmp_path / "claude-with-a-missing-interpreter"
+    agent.write_text("#!/definitely/missing/interpreter\nprint('never reached')\n")
+    agent.chmod(0o755)
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+
+    launches, lines = await _launches_and_lines(docker.adapter, [str(agent), "-p", "hello"])
+
+    assert agent.is_file() and os.access(agent, os.X_OK), (
+        "the file must really resolve and really be executable, or this test is "
+        "not the case that defeats a pre-exec guard"
+    )
+    assert docker.adapter.last_exit_code == 127, (
+        "the real status must reach the observer; a cleanup path that reaped the "
+        "child early would substitute 255 and this retraction would not fire"
+    )
+    assert any(str(agent) in line for line in lines), (
+        f"the shell must really have tried and failed to exec {agent}; without its "
+        f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
+    )
+    assert launches == 0
 
 
 def _announced_marker(exec_argv: list[str]) -> str:
@@ -281,7 +349,7 @@ def _announced_marker(exec_argv: list[str]) -> str:
 
 
 async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
-    """Put lines through the real observer; report what it concluded."""
+    """Put lines through the real observer, settled as a clean exit would settle it."""
     launched = False
 
     async def observer() -> None:
@@ -292,7 +360,9 @@ async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
         for line in lines:
             yield line
 
-    survived = [line async for line in observing_launch(stream(), observer)]
+    evidence = AgentLaunchEvidence(observer)
+    survived = [line async for line in evidence.observing(stream())]
+    await evidence.settle(exit_code=0)
     return launched, survived
 
 
@@ -301,7 +371,7 @@ async def test_the_marker_the_adapter_announces_is_the_one_the_domain_counts() -
 
     ``_build_exec_command`` bakes the marker into a container-side argv and
     reaches it through the orchestration context's public API;
-    ``observing_launch`` decides what counts as evidence and defines it. Both
+    ``AgentLaunchEvidence`` decides what counts as evidence and defines it. Both
     ends are exercised above, but only against each other - so a public export
     that drifted from the constant it re-exports would leave the adapter
     announcing a string the observer ignores, every session would report

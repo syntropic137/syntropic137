@@ -15,7 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     AgentExecutionCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    observing_launch,
+    AgentLaunchEvidence,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     MISSING_TERMINAL_TURN_REASON,
@@ -254,17 +254,25 @@ class AgentExecutionHandler:
             collector=collector,
         )
 
-        stream_result = await processor.process_stream(
-            observing_launch(
-                workspace.stream(
-                    claude_cmd,
-                    timeout_seconds=timeout_seconds,
-                    environment=agent_env,
+        # The launch fact is settled AFTER the stream, not while it runs: the
+        # marker is announced before the exec it predicts, so only the status
+        # the process finally returns says whether that exec happened (#1065).
+        # `finally`, because an agent that announced itself and then blew up
+        # mid-stream still existed, and the exception must not swallow that.
+        launch = AgentLaunchEvidence(on_launch)
+        try:
+            stream_result = await processor.process_stream(
+                launch.observing(
+                    workspace.stream(
+                        claude_cmd,
+                        timeout_seconds=timeout_seconds,
+                        environment=agent_env,
+                    ),
                 ),
-                on_launch,
-            ),
-            workspace,
-        )
+                workspace,
+            )
+        finally:
+            await launch.settle(workspace.last_stream_exit_code)
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
         if (
