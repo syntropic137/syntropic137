@@ -1,10 +1,15 @@
 """Regression tests for provider-specific agent command construction.
 
-These assertions named ``danger-full-access`` until #1157. That was not a
-choice any workflow made - it was hardcoded for every codex phase, and a
-verify phase used it to push the change it then certified (#1161). The level
-is now per-phase and these pin the DEFAULT. A phase wanting more must declare
-it; see test_codex_sandbox_least_privilege.py for the level mapping.
+These pin the DEFAULT sandbox level, which is currently ``danger-full-access``.
+
+That value is unchanged from before #1157, but it is no longer hardcoded: it is
+now a per-phase declaration that merely defaults here. A phase wanting LESS
+authority declares it and gets it today.
+
+The default stays permissive as a stopgap. ``workspace-write`` was tried in
+v0.28.0-beta.5 and broke every codex phase - the deliverable write under
+``artifacts/output/`` was denied, so no artifact was produced and the phase
+still reported ``completed`` (#1167). See test_codex_sandbox_least_privilege.py.
 """
 
 from __future__ import annotations
@@ -48,7 +53,7 @@ def test_codex_command_passes_actual_model_and_prompt_as_individual_args() -> No
         "exec",
         "--json",
         "--sandbox",
-        "workspace-write",
+        "danger-full-access",
         "--skip-git-repo-check",
         "--model",
         "gpt-5.6",
@@ -62,7 +67,7 @@ def test_codex_command_omits_model_option_when_model_is_not_provided() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "workspace-write",
+        "danger-full-access",
         "--skip-git-repo-check",
         "do the thing",
     ]
@@ -108,7 +113,7 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "workspace-write",
+        "danger-full-access",
         "--skip-git-repo-check",
         "do the thing",
     ]
