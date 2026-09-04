@@ -39,6 +39,7 @@ Usage:
 """
 
 from syn_domain.contexts.agent_sessions._shared import (
+    AgentLaunch,
     AgentSessionAggregate,
     OperationRecord,
     OperationType,
@@ -73,6 +74,13 @@ from syn_domain.contexts.agent_sessions.slices.complete_session import (
 from syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler import (
     CompleteSessionHandler,
 )
+from syn_domain.contexts.agent_sessions.slices.mark_agent_launched import (
+    AgentLaunchedEvent,
+    MarkAgentLaunchedCommand,
+)
+from syn_domain.contexts.agent_sessions.slices.mark_agent_launched.MarkAgentLaunchedHandler import (
+    MarkAgentLaunchedHandler,
+)
 from syn_domain.contexts.agent_sessions.slices.record_operation import (
     OperationRecordedEvent,
     RecordOperationCommand,
@@ -105,6 +113,8 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "AgentLaunch",
+    "AgentLaunchedEvent",
     "AgentSessionAggregate",
     "BilledUsage",
     "CanonicalTotals",
@@ -114,6 +124,8 @@ __all__ = [
     "CostCalculator",
     "ImportLedger",
     "ImportLedgerPort",
+    "MarkAgentLaunchedCommand",
+    "MarkAgentLaunchedHandler",
     "ObservationType",
     "OperationRecord",
     "OperationRecordedEvent",

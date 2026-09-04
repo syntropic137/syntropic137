@@ -29,11 +29,13 @@ from syn_adapters.conversations.minio import (
 )
 from syn_adapters.conversations.protocol import (
     ConversationStoragePort,
+    ConversationStoreUnavailable,
     SessionContext,
 )
 
 __all__ = [
     "ConversationStoragePort",
+    "ConversationStoreUnavailable",
     "MinioConversationStorage",
     "SessionContext",
     "get_conversation_storage",

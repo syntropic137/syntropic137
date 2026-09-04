@@ -17,7 +17,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-from syn_api._wiring import ensure_connected, get_conversation_store
+from syn_api._wiring import ensure_connected, get_conversation_store, get_projection_mgr
 from syn_api.types import (
     ConversationLine,
     ConversationLog,
@@ -27,6 +27,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
@@ -614,6 +615,46 @@ def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
     )
 
 
+async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
+    """Classify why a conversation log is missing for this session.
+
+    A ``session_summaries`` row exists once ``StartSessionCommand`` succeeds
+    (SessionListProjection.on_session_started), so its absence here doesn't
+    itself mean "never started" - the caller already resolved this session_id
+    against that same projection to get this far.
+
+    ``agent_launch`` is the domain fact carried by ``AgentLaunchedEvent`` and
+    ``SessionCompletedEvent``, reported by the agent's own output stream once
+    the process is known to exist. It is the only thing that discriminates "no
+    agent ever ran" from "an agent ran and later failed/was cancelled": both
+    leave ``total_tokens == 0`` on every failure/cancellation path, so status
+    and tokens alone can't tell them apart (issue #1047, #1065).
+
+    Only ``NOT_LAUNCHED`` earns NEVER_STARTED. ``UNKNOWN`` - a row from a
+    stream written before the fact existed, or one whose launch write has not
+    landed yet - says nothing, and a row that says nothing must not be quoted
+    as saying no. It falls through to the generic NOT_FOUND, which is what
+    every such session got before the fact existed at all.
+
+    A session still ``running`` is neither of those - it may not have
+    produced a log yet regardless of whether the agent has launched, so it
+    gets its own PENDING classification rather than being folded into either
+    terminal case.
+    """
+    mgr = get_projection_mgr()
+    data = await mgr.store.get("session_summaries", session_id)
+    if data is None:
+        return ObservabilityError.NOT_FOUND
+
+    if data.get("status") == "running":
+        return ObservabilityError.PENDING
+
+    if AgentLaunch.read(data.get("agent_launch")) is AgentLaunch.NOT_LAUNCHED:
+        return ObservabilityError.NEVER_STARTED
+
+    return ObservabilityError.NOT_FOUND
+
+
 async def get_conversation_log(
     session_id: str,
     offset: int = 0,
@@ -635,6 +676,23 @@ async def get_conversation_log(
         raw_lines = await storage.retrieve_session(session_id)
 
         if raw_lines is None:
+            classification = await _classify_missing_conversation(session_id)
+            if classification == ObservabilityError.NEVER_STARTED:
+                return Err(
+                    ObservabilityError.NEVER_STARTED,
+                    message=(
+                        f"Session {session_id} never started an agent, so no "
+                        "conversation was ever recorded."
+                    ),
+                )
+            if classification == ObservabilityError.PENDING:
+                return Err(
+                    ObservabilityError.PENDING,
+                    message=(
+                        f"Session {session_id} is still running; no conversation "
+                        "log has been recorded yet."
+                    ),
+                )
             return Err(
                 ObservabilityError.NOT_FOUND,
                 message=f"Conversation log not found for session {session_id}",
@@ -726,7 +784,11 @@ async def get_conversation_log_endpoint(
     )
 
     if isinstance(result, Err):
-        if "not found" in (result.message or "").lower():
+        if result.error == ObservabilityError.NEVER_STARTED:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.PENDING:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.NOT_FOUND:
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation log not found for session: {session_id}",

@@ -121,6 +121,7 @@ class ManagedWorkspace:
         timeout_seconds: int | None = None,
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream stdout from a command.
 
@@ -129,6 +130,9 @@ class ManagedWorkspace:
             timeout_seconds: Override timeout
             working_directory: Override working directory
             environment: Additional environment variables
+            wrapper_name: The ``$0`` a transport that really creates a process
+                announces itself under, from ``AgentLaunchEvidence.wrapper_name``.
+                None when the caller is not collecting launch evidence.
 
         Yields:
             Individual stdout lines
@@ -139,6 +143,7 @@ class ManagedWorkspace:
             timeout_seconds=timeout_seconds,
             working_directory=working_directory,
             environment=environment,
+            wrapper_name=wrapper_name,
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line

@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from syn_domain.contexts.agent_sessions import AgentLaunch
+from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+    SessionCompletedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
@@ -53,6 +57,87 @@ class TestStart:
         await mgr.start()
 
         assert mgr.session is None
+
+
+class TestMarkLaunched:
+    """Tests for mark_launched - the discriminator fact for #1047/#1065."""
+
+    @pytest.mark.asyncio
+    async def test_records_agent_launched_on_session(self) -> None:
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+        repo.save.reset_mock()
+
+        await mgr.mark_launched()
+
+        session = mgr.session
+        assert session is not None
+        assert session.agent_launch is AgentLaunch.LAUNCHED
+        repo.save.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_noop_when_no_session(self) -> None:
+        mgr = SessionLifecycleManager(
+            repository=None,
+            session_id="s",
+            workflow_id="w",
+            execution_id="e",
+            phase_id="p",
+            agent_provider="claude",
+            agent_model="m",
+        )
+
+        # Should not raise
+        await mgr.mark_launched()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_launch_write_still_reaches_the_completion_event(self) -> None:
+        """Swallowing the save must cost promptness, never the answer.
+
+        The store is down for exactly the launch write and healthy again by
+        completion - the shape that used to lose the fact outright, because
+        it was only ever recorded by that one write. Asserting "no exception
+        escaped" would have passed then too, so this asserts the consumer:
+        the SessionCompleted event that outlives the aggregate and feeds every
+        rebuilt projection still says LAUNCHED (#1065).
+        """
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+        repo.save.side_effect = RuntimeError("db down")
+
+        await mgr.mark_launched()
+
+        repo.save.side_effect = None
+        await mgr.complete_failure(error_message="agent crashed mid-run")
+
+        session = mgr.session
+        assert session is not None
+        completed = [
+            e.event
+            for e in session.get_uncommitted_events()
+            if isinstance(e.event, SessionCompletedEvent)
+        ]
+        assert len(completed) == 1
+        assert completed[0].agent_launch is AgentLaunch.LAUNCHED
+
+    @pytest.mark.asyncio
+    async def test_agent_launched_survives_subsequent_complete_failure(self) -> None:
+        """An agent that launched and then failed must still read as LAUNCHED
+        after complete_failure runs - complete_failure only sets terminal
+        status, it must never clear the launch fact (#1047, #1065).
+        """
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+
+        await mgr.mark_launched()
+        await mgr.complete_failure(error_message="agent crashed mid-run")
+
+        session = mgr.session
+        assert session is not None
+        assert session.agent_launch is AgentLaunch.LAUNCHED
 
 
 class TestCompleteSuccess:

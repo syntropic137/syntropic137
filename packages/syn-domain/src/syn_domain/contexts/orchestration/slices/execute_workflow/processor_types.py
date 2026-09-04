@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+        AgentLaunchObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
         AgentExecutionResult,
     )
@@ -124,6 +127,7 @@ class AgentHandlerProtocol(Protocol):
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
+        on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult: ...
 
 
