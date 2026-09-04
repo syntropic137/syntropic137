@@ -1,4 +1,16 @@
-"""Regression tests for provider-specific agent command construction."""
+"""Regression tests for provider-specific agent command construction.
+
+These pin the DEFAULT sandbox level, which is currently ``danger-full-access``.
+
+That value is unchanged from before #1157, but it is no longer hardcoded: it is
+now a per-phase declaration that merely defaults here. A phase wanting LESS
+authority declares it and gets it today.
+
+The default stays permissive as a stopgap. ``workspace-write`` was tried in
+v0.28.0-beta.5 and broke every codex phase - the deliverable write under
+``artifacts/output/`` was denied, so no artifact was produced and the phase
+still reported ``completed`` (#1167). See test_codex_sandbox_least_privilege.py.
+"""
 
 from __future__ import annotations
 

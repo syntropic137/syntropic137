@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
@@ -168,6 +169,13 @@ def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None
         existing["num_turns"] = event_data["num_turns"]
     if "duration_api_ms" in event_data:
         existing["duration_api_ms"] = event_data["duration_api_ms"]
+    launch = AgentLaunch.read(event_data.get("agent_launch"))
+    if launch is not AgentLaunch.UNKNOWN:
+        # A completion event written before this field existed says nothing,
+        # so it must leave the row as it found it. Overwriting with UNKNOWN
+        # would be harmless today and wrong the moment a live AgentLaunched
+        # has already landed on the row (#1047, #1065).
+        existing["agent_launch"] = launch.value
 
 
 def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
@@ -206,7 +214,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 3  # Bumped: unified token counting - cache tokens (#695)
+    VERSION = 4  # Bumped: agent_launch fact for never-started detection (#1047, #1065)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -248,8 +256,25 @@ class SessionListProjection(AutoDispatchProjection):
             parent_session_id=event_data.get("parent_session_id"),
             root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
+            agent_launch=AgentLaunch.UNKNOWN,
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
+
+    async def on_agent_launched(self, event_data: dict) -> None:
+        """Handle AgentLaunched - an agent process exists for this session.
+
+        Makes the fact visible while the session is still running. The
+        durable answer arrives again on SessionCompleted, which is what a
+        terminal session is read from (#1047, #1065).
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        if existing:
+            existing["agent_launch"] = AgentLaunch.LAUNCHED.value
+            await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_operation_recorded(self, event_data: dict) -> None:
         """Handle OperationRecorded - update token counts and store operation."""

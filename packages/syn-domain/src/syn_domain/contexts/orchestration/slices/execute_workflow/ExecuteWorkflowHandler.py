@@ -200,6 +200,26 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
             )
 
 
+def _phase_declares_anything(
+    *,
+    model: str | None,
+    provider: str | None,
+    allow_delegation: bool,
+    allowed_tools: tuple[str, ...],
+    sandbox: str | None,
+) -> bool:
+    """True when the phase set any agent field at all.
+
+    EVERY field a phase can declare must be named here, not only in the
+    constructor (#1039). A phase declaring exactly one of them takes the
+    early-return branch, so a field missing from this predicate is silently
+    dropped for precisely the author who asked for it - that cost
+    `allowed_tools` a release. For `sandbox` the same bug would run a phase
+    with authority it explicitly declined.
+    """
+    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -220,6 +240,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
     # Canonicalise here, not just in the YAML validator: a stored template
     # never saw that validator. Unknown names are refused rather than
@@ -247,13 +268,25 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     # exactly the author who asked for it, while passing any test that also
     # sets a model. Pinned by
     # test_tools_survive_when_they_are_the_only_thing_declared.
-    if not (phase_model or phase_provider or allow_delegation or allowed_tools):
+    if not _phase_declares_anything(
+        model=phase_model,
+        provider=phase_provider,
+        allow_delegation=allow_delegation,
+        allowed_tools=allowed_tools,
+        sandbox=sandbox,
+    ):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
         allowed_tools=allowed_tools,
+        # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
+        # invalid input, and `or` would quietly widen it to the write-capable
+        # default before _resolve_sandbox could reject it. Preserve every
+        # non-None value so the execution boundary sees what was actually
+        # persisted and refuses it.
+        sandbox=sandbox if sandbox is not None else defaults.sandbox,
     )
 
 

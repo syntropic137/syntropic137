@@ -27,7 +27,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -165,6 +165,11 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 allow_delegation=_as_bool(
                     _agent_field(p, "allow_delegation", False), "allow_delegation"
                 ),
+                # Dropping this silently downgrades a phase's declared
+                # authority to the default, which for a review phase means it
+                # can write the code it certifies (#1161). Caught by the
+                # roundtrip assertion in test_phase_create_carries_every_field.
+                sandbox=_agent_field(p, "sandbox", DEFAULT_PHASE_SANDBOX),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
             )

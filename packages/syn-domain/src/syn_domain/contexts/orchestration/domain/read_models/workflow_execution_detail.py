@@ -45,8 +45,14 @@ class PhaseExecutionDetail:
     total_tokens: int = 0
     """Total tokens used."""
 
-    duration_seconds: float = 0.0
-    """Duration of phase execution."""
+    duration_seconds: float | None = None
+    """Seconds this phase took, or ``None`` when nothing has measured it yet.
+
+    Mirrors ``PhaseDetail.duration_seconds`` in the projection that writes this
+    read model: unknown must stay distinguishable from a measured zero all the
+    way to the API boundary, which is the only place that can decide what to
+    show for a phase still in flight.
+    """
 
     started_at: datetime | str | None = None
     """When the phase started."""
@@ -107,7 +113,7 @@ class PhaseExecutionDetail:
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
-            duration_seconds=data.get("duration_seconds", 0.0),
+            duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),

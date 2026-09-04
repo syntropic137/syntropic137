@@ -1,0 +1,20 @@
+# The first YAML-aware version of this gate probed for hostile operator
+# overrides by substituting a marker per variable and keeping only the markers
+# that landed INSIDE the parsed host-IP field. A variable that supplies the
+# whole mapping, or a leading run of it that spans the field boundary, never
+# produces such a marker, so it chose the host interface invisibly: both
+# entries below reported no host-IP variables at all and exited 0.
+#
+# Both bind loopback with the variable unset - which is why the defaults-only
+# check alone passes them - and both bind every interface for an operator who
+# exports it. That is exactly the surface DECLARED_OPERATOR_BINDS exists to
+# force into review.
+services:
+  whole_value_interpolation:
+    image: postgres
+    ports:
+      - "${PUBLISH:-127.0.0.1:15432:5432}"
+  partial_value_interpolation:
+    image: postgres
+    ports:
+      - "${DB_BIND:-127.0.0.1:15432}:5432"

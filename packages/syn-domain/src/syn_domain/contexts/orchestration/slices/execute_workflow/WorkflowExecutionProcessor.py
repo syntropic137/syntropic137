@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    observer_for,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
@@ -656,6 +659,7 @@ class WorkflowExecutionProcessor:
             timeout_seconds=timeout,
             collector=collector,
             runner=runner,
+            on_launch=observer_for(self._session_managers.get(todo.phase_id)),
         )
 
         remember_leader_native_id(

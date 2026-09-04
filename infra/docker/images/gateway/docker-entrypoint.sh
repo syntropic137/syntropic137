@@ -2,24 +2,101 @@
 set -e
 
 # Generate nginx auth config and shared locations from env vars.
-# When SYN_API_PASSWORD is set: basic auth on port 8081 (tunnel).
-# Port 80 (localhost) is always unauthenticated.
-AUTH_DIR="/tmp/nginx-auth"
+#
+# Two listeners, one rule: a listener that is reachable from beyond this host
+# requires Basic Auth.
+#
+#   Port 8081 is the tunnel listener. It is never host-published, but
+#     cloudflared reaches it from the internet, so its auth follows
+#     SYN_API_PASSWORD exactly as before.
+#
+#   Port 80 is the listener the host publishes, at SYN_GATEWAY_BIND. While
+#     that is a loopback address the port is reachable from this host only,
+#     so auth stays off and local dev/testing/Playwright is unaffected. Bound
+#     anywhere else it is reachable from that network, so a password becomes
+#     mandatory: without one this script exits non-zero and nginx never
+#     starts (#1022). That is the whole point - before this, binding off
+#     loopback published an unauthenticated API while SYN_API_PASSWORD sat
+#     set in the operator's .env, protecting a port nothing published.
+#
+# A container cannot observe its own host port mapping, so the compose file
+# has to pass SYN_GATEWAY_BIND in alongside the `ports:` entry that uses it.
+# Forgetting that wiring would silently disarm the check, so it is enforced by
+# ci/fitness/infrastructure/test_gateway_bind.py.
+AUTH_DIR="${AUTH_DIR:-/tmp/nginx-auth}"
 mkdir -p "$AUTH_DIR"
 
-# --- Auth config (included by port 8081 server block) ---
+GATEWAY_BIND="${SYN_GATEWAY_BIND:-127.0.0.1}"
+
+# 127.0.0.0/8, ::1 (docker accepts it bracketed or bare), and the name that
+# resolves to them. Docker also treats an empty host IP as "every interface",
+# which is emphatically not loopback and falls through to the default branch.
+# `127.foo.example` is a hostname that merely starts with 127, so it is
+# rejected before the numeric branch: guessing wrong there would fail open.
+is_loopback() {
+    case "$1" in
+        localhost|::1|"[::1]") return 0 ;;
+        127.*[!0-9.]*)         return 1 ;;
+        127.*)                 return 0 ;;
+        *)                     return 1 ;;
+    esac
+}
+
+if ! is_loopback "$GATEWAY_BIND" && [ -z "${SYN_API_PASSWORD:-}" ]; then
+    cat >&2 <<ERROR
+gateway: refusing to start.
+
+  SYN_GATEWAY_BIND=${GATEWAY_BIND} publishes the dashboard and the API to that
+  network, and SYN_API_PASSWORD is empty, so nothing would ask a caller for
+  credentials.
+
+  Either set SYN_API_PASSWORD (generate one with: openssl rand -hex 32), or
+  leave SYN_GATEWAY_BIND at 127.0.0.1 and reach the stack over a VPN or
+  tunnel.
+ERROR
+    exit 1
+fi
+
+# --- Auth stanzas, one per listener ---
+# Written unconditionally so nginx's `include` always resolves; "off" is a
+# stanza too. The host listener also carries the brute-force backstop when it
+# is exposed - the tunnel listener gets its equivalent at server scope in
+# nginx.conf, which is left alone so an unauthenticated tunnel keeps today's
+# throttling.
+AUTH_USER="${SYN_API_USER:-admin}"
 if [ -n "${SYN_API_PASSWORD:-}" ]; then
-    USER="${SYN_API_USER:-admin}"
-    htpasswd -cb "$AUTH_DIR/.htpasswd" "$USER" "$SYN_API_PASSWORD"
-    cat > "$AUTH_DIR/auth.conf" <<EOF
+    htpasswd -cb "$AUTH_DIR/.htpasswd" "$AUTH_USER" "$SYN_API_PASSWORD"
+fi
+
+write_auth_off() {
+    cat > "$AUTH_DIR/$1" <<EOF
+auth_basic off;
+EOF
+}
+
+write_auth_on() {
+    cat > "$AUTH_DIR/$1" <<EOF
 auth_basic "Syntropic137";
 auth_basic_user_file ${AUTH_DIR}/.htpasswd;
 EOF
-    echo "nginx: basic auth enabled on port 8081 (user: ${USER})"
+}
+
+if [ -n "${SYN_API_PASSWORD:-}" ]; then
+    write_auth_on auth-tunnel.conf
+    echo "nginx: basic auth enabled on port 8081 (user: ${AUTH_USER})"
 else
-    cat > "$AUTH_DIR/auth.conf" <<EOF
-auth_basic off;
+    write_auth_off auth-tunnel.conf
+fi
+
+if is_loopback "$GATEWAY_BIND"; then
+    write_auth_off auth-host.conf
+else
+    write_auth_on auth-host.conf
+    cat >> "$AUTH_DIR/auth-host.conf" <<EOF
+limit_req zone=auth burst=20 nodelay;
+limit_req_status 429;
 EOF
+    echo "nginx: basic auth enabled on port 80 (user: ${AUTH_USER}, bind: ${GATEWAY_BIND})"
 fi
 
 # --- Shared locations (included by both server blocks) ---
@@ -133,9 +210,11 @@ location /assets/ {
 }
 
 
-# SPA routing (dashboard — root). The brute-force backstop is applied at the
-# 8081 server scope (nginx.conf), so it covers this and every other Basic-Auth
-# path without also throttling the loopback-only port 80. Nothing to add here.
+# SPA routing (dashboard — root). The brute-force backstop is applied at server
+# scope for whichever listener is authenticated (8081 in nginx.conf, port 80 via
+# auth-host.conf when it is bound off loopback), so it covers this and every
+# other Basic-Auth path without throttling a loopback-only port 80. Nothing to
+# add here.
 location / {
     try_files $uri $uri/ /index.html;
 }

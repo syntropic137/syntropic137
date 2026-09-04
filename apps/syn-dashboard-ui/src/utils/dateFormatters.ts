@@ -36,7 +36,11 @@ export function formatTimestamp(ts: string | null | undefined): string {
  * Format a duration in seconds as "Xh Ym Zs" or shorter forms.
  */
 export function formatDurationSeconds(seconds: number | null | undefined): string {
-  if (seconds == null || seconds < 0) return '\u2014'
+  // Non-finite covers the NaN that `new Date('garbage').getTime()` propagates
+  // into every arithmetic caller below; negative covers a start recorded after
+  // the end. Both are unknown durations, and both used to render as literal
+  // "NaNh NaNm" or a minus sign rather than saying so.
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '\u2014'
   if (seconds < 60) return `${Math.round(seconds)}s`
   const mins = Math.floor(seconds / 60)
   const secs = Math.round(seconds % 60)
@@ -44,6 +48,31 @@ export function formatDurationSeconds(seconds: number | null | undefined): strin
   const hours = Math.floor(mins / 60)
   const remainMins = mins % 60
   return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+}
+
+/**
+ * The duration to show for something that may still be running.
+ *
+ * The server already resolves this (`resolve_duration_seconds` in
+ * `syn_shared.display`) and its answer is authoritative. The only thing the
+ * client adds is a value that ticks between polls, so a live phase visibly
+ * advances instead of stepping once per refetch. When that live reading is not
+ * a usable measurement -- an unparseable or future `startedAt` -- the server's
+ * value is used, so the two never disagree about a defect.
+ *
+ * Returns null for a genuinely unknown duration. Never 0.
+ */
+export function liveDurationSeconds(
+  isRunning: boolean,
+  startedAt: string | null | undefined,
+  recordedSeconds: number | null | undefined,
+  now: number,
+): number | null {
+  if (isRunning && startedAt) {
+    const elapsed = (now - new Date(startedAt).getTime()) / 1000
+    if (Number.isFinite(elapsed) && elapsed >= 0) return elapsed
+  }
+  return recordedSeconds ?? null
 }
 
 /**

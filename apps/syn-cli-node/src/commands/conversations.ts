@@ -18,16 +18,20 @@ const showCommand: CommandDef = {
   options: {
     offset: { type: "string", description: "Line offset for pagination", default: "0" },
     limit: { type: "string", description: "Max lines to show (max 500)", default: "100" },
+    json: { type: "boolean", description: "Emit the underlying lines unmodified as JSON, instead of a table", default: false },
   },
   handler: async (parsed: ParsedArgs) => {
     const sessionId = parsed.positionals[0];
     if (!sessionId) { printError("Missing session-id"); throw new CLIError("Missing argument", 1); }
     const offset = parseInt((parsed.values["offset"] as string) ?? "0", 10);
     const limit = parseInt((parsed.values["limit"] as string) ?? "100", 10);
+    const asJson = parsed.values["json"] === true;
 
     const data = unwrap(await api.GET("/conversations/{session_id}", {
       params: { path: { session_id: sessionId }, query: { offset, limit } },
     }), "Fetch conversation log");
+
+    if (asJson) { print(JSON.stringify(data, null, 2)); return; }
 
     if (data.lines.length === 0) { printDim("No conversation lines found."); return; }
 

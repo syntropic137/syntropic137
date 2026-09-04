@@ -6,7 +6,7 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -293,6 +293,11 @@ class TestAgentExecutionHandler:
             ["codex", "exec", "--json", "do work"],
             timeout_seconds=300,
             environment={"CODEX_HOME": "/home/agent/.codex"},
+            # Minted per phase, so there is no value to write down here. That
+            # it is the same name the observer listens for is what makes a
+            # launch recordable at all, and is pinned where it decides
+            # something: test_agent_launch_boundary.py.
+            wrapper_name=ANY,
         )
         assert result.command.input_tokens == 12
         assert result.command.output_tokens == 7

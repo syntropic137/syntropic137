@@ -395,6 +395,24 @@ class SetupPhaseSecrets:
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
+        # NO HOOKS during setup (issue #1150). The workspace image composes a set
+        # of developer git hooks at /home/agent/.git-hooks, and every one of them
+        # begins `#!/usr/bin/env python3` while the image has no `python3` on PATH -
+        # only /opt/venv/bin/python3, which `env` never sees. So `post-checkout`
+        # fails and git exits 127 even though the tree landed:
+        #
+        #   $ git clone --depth 1 https://github.com/syntropic137/syntropic137 /tmp/c1
+        #   Cloning into '/tmp/c1'...
+        #   /usr/bin/env: 'python3': No such file or directory
+        #   CLONE_RC=127          # and /tmp/c1 is a complete checkout
+        #
+        # The script runs under `set -e`, so that 127 fails the whole setup phase
+        # and the execution never starts. Hooks are a developer convenience and
+        # have no business running in an ephemeral provisioning clone, so they are
+        # disabled for these commands rather than depended upon.
+        lines.append(
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null"
+        )
         # Submodules are frequently declared with the SSH spelling. The workspace has
         # no SSH key -- auth is an HTTPS installation token -- so those would fail, and
         # the transport pin below rejects them earlier still. Rewriting to HTTPS makes

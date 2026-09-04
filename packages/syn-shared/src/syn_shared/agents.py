@@ -27,6 +27,94 @@ class AgentProvider(StrEnum):
     """Headless ``codex exec`` docker-exec path (the codex bridge)."""
 
 
+class PhaseSandbox(StrEnum):
+    """How much authority a phase's agent process is granted.
+
+    Named provider-neutrally so the same declaration can mean the same thing
+    on any harness, but TODAY it steers ``codex exec --sandbox`` only. Claude
+    phases scope authority through ``allowed_tools`` and ignore this field -
+    declaring ``read-only`` on a claude phase does not restrict it. Do not
+    read a level here as a guarantee on a claude phase.
+
+    Ordered least to most authority. Prefer the least a phase can finish
+    with: a phase that cannot write cannot invent work it was asked to
+    check (#1157, #1161).
+    """
+
+    READ_ONLY = "read-only"
+    """Read and search only. The correct level for any review, verify or
+    audit phase - it makes "the verifier does not modify what it certifies"
+    an enforced property rather than a sentence in a prompt.
+
+    Must be declared explicitly; it is not the default (see
+    ``DEFAULT_PHASE_SANDBOX`` for why). A phase at this level cannot write
+    its deliverable either, so a verify phase moves here only once it has
+    another way to publish."""
+
+    WORKSPACE_WRITE = "workspace-write"
+    """Read, write and run commands inside the workspace.
+
+    NOT "no network" - network egress was measured as available at every
+    level (see ``DEFAULT_PHASE_SANDBOX``). Also NOT usable by a phase that
+    publishes a deliverable: this was the v0.28.0-beta.5 default and the
+    write under ``artifacts/output/`` was denied (#1167)."""
+
+    FULL_ACCESS = "full-access"
+    """Unrestricted filesystem access AND network egress. Required only by a
+    phase that must reach the network (pushing a branch, calling the GitHub
+    API). Never appropriate for a phase whose job is to check other work."""
+
+
+#: Provider-neutral level -> the value `codex exec --sandbox` expects.
+CODEX_SANDBOX_FLAGS: dict[PhaseSandbox, str] = {
+    PhaseSandbox.READ_ONLY: "read-only",
+    PhaseSandbox.WORKSPACE_WRITE: "workspace-write",
+    PhaseSandbox.FULL_ACCESS: "danger-full-access",
+}
+
+
+DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.FULL_ACCESS
+"""What a phase gets when it declares nothing: today's behaviour, unchanged.
+
+This is deliberately the MOST permissive level, and that is a stopgap rather
+than a judgement that it is correct.
+
+``WORKSPACE_WRITE`` was tried as the default in v0.28.0-beta.5 and broke every
+codex phase in production: a phase publishes its deliverable by WRITING under
+``artifacts/output/``, the write was denied, no artifact was produced, and the
+phase still reported ``completed`` - silently removing the verify gate from
+every run (#1167). Rolled back after ~70 minutes.
+
+``READ_ONLY`` is the level a verify phase should run at and is unusable for the
+same reason: a read-only phase publishes nothing.
+
+So the default stays where it is until a phase can publish its deliverable
+WITHOUT a filesystem write (#1167). That change is what makes ``READ_ONLY``
+viable for verify phases, which is the actual goal of #1157 - and it closes
+#1161 at the same time, since a verifier that cannot write cannot push the
+change it certifies.
+
+What this module still buys today: the level is DECLARED PER PHASE and mapped
+at the command builder, instead of a constant hardcoded for every codex phase.
+A phase that wants less can ask for less right now.
+
+Levels measured against codex 0.147.0 on macOS. Note the caveat below - these
+were NOT measured on Linux, and the sandbox is implemented by the host's native
+engine (Seatbelt on macOS, Landlock/seccomp on Linux), so they are indicative
+rather than authoritative for the workspace image:
+
+===================  ==========  ==============  =========
+level                write file  ``git commit``  network
+===================  ==========  ==============  =========
+``workspace-write``  yes         yes             yes
+``read-only``        no          no              **yes**
+===================  ==========  ==============  =========
+
+Network egress survives every level, so the sandbox is a FILESYSTEM control
+only. Restricting egress is the workspace container's job, not a flag's.
+"""
+
+
 REMOVED_INTERACTIVE_PROVIDER: str = "claude-interactive"
 """The provider value of the REMOVED interactive-tmux path.
 
@@ -38,6 +126,28 @@ completion heuristic, and empty observability timelines - and was excised in
 favour of the headless docker-exec substrate (``claude -p`` / ``codex exec``).
 Do not reintroduce it as a provider.
 """
+
+
+class UnsupportedPhaseSandboxError(ValueError):
+    """A phase names a sandbox level that is not a known ``PhaseSandbox``.
+
+    Rejected rather than defaulted. Defaulting an unrecognised level would
+    hand the phase whatever the fallback happens to be, which is how a typo
+    in a workflow definition becomes a silent authority change - the same
+    class of failure as remapping an unknown provider.
+    """
+
+    def __init__(self, sandbox: object, *, phase_id: str | None = None) -> None:
+        self.sandbox = sandbox
+        self.phase_id = phase_id
+        where = f"Phase {phase_id!r}" if phase_id else "This phase"
+        known = ", ".join(repr(str(m)) for m in PhaseSandbox)
+        super().__init__(
+            f"{where} declares agent.sandbox={sandbox!r}, which is not a known "
+            f"sandbox level. Known levels, least to most authority: {known}. "
+            "A review or verify phase should declare "
+            f"'{PhaseSandbox.READ_ONLY}'."
+        )
 
 
 class UnsupportedAgentProviderError(ValueError):

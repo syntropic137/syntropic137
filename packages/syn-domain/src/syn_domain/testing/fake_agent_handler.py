@@ -33,6 +33,9 @@ from syn_shared.agents import AgentRunner
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
+    from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+        AgentLaunchObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
@@ -61,10 +64,12 @@ class FakeAgentExecutionHandler:
         interrupt: bool = False,
         exit_code: int = 0,
         interrupt_reason: str | None = "Cancelled by user",
+        launches: bool = True,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
+        self._launches = launches
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -83,9 +88,16 @@ class FakeAgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
+        on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.runners.append(runner)
+        # Every factory below except ``never_launched`` describes a run whose
+        # process existed, so the double reports it the way the real handler
+        # does. A fake that stayed silent would leave every session in a test
+        # looking like one that never started (#1047, #1065).
+        if self._launches and on_launch is not None:
+            await on_launch()
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
@@ -139,6 +151,18 @@ class FakeAgentExecutionHandler:
     def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code."""
         return cls(interrupt=False, exit_code=exit_code)
+
+    @classmethod
+    def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
+        """Simulates a phase whose agent process was never created.
+
+        The handler was dispatched and returned a failure, but nothing ever
+        ran - a missing container, an image with no such binary, an exec
+        refused. This is the only shape that may end up reported to a user as
+        a session that never started, and the only one where ``on_launch``
+        stays silent (#1047, #1065).
+        """
+        return cls(interrupt=False, exit_code=exit_code, launches=False)
 
 
 # ---------------------------------------------------------------------------

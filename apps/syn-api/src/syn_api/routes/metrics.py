@@ -44,7 +44,14 @@ class PhaseMetrics(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Seconds this phase has run in total, or ``None`` when nothing knows.
+
+    Nullable for the same reason every other duration on this API is: 0.0 is a
+    measurement, and a phase that just started, never started, or ended without
+    anyone recording an elapsed time has not been measured. This field reported
+    0.0 for a phase it simultaneously reported as ``running``.
+    """
     artifact_count: int = 0
 
 
@@ -119,21 +126,25 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
     await ensure_connected()
     try:
         manager = get_projection_mgr()
-        phases_data = await manager.workflow_phase_metrics.get_phase_metrics(workflow_id)
+        phases = await manager.workflow_phase_metrics.get_phase_metrics(workflow_id)
         return [
             PhaseMetrics(
-                phase_id=pid,
-                phase_name=d.get("phase_name", pid),
-                status=d.get("status", "completed"),
-                input_tokens=d.get("input_tokens", 0),
-                output_tokens=d.get("output_tokens", 0),
-                total_tokens=d.get("total_tokens", 0),
+                phase_id=phase.phase_id,
+                phase_name=phase.phase_name,
+                status=phase.status,
+                input_tokens=phase.input_tokens,
+                output_tokens=phase.output_tokens,
+                total_tokens=phase.total_tokens,
                 # Lane 2: phase cost is enriched at the endpoint from execution_cost (#695)
                 cost_usd=Decimal("0"),
-                duration_seconds=d.get("duration_seconds", 0.0),
-                artifact_count=d.get("artifact_count", 0),
+                # Resolved at read time, by the phase itself: a running phase
+                # has no recorded duration to read back, and the 0.0 this used
+                # to pass through was the projection's seed value, not a
+                # measurement of anything.
+                duration_seconds=phase.duration_seconds(),
+                artifact_count=phase.artifact_count,
             )
-            for pid, d in phases_data.items()
+            for phase in phases.values()
         ]
     except Exception:
         logger.debug("Could not build phase metrics for workflow %s", workflow_id, exc_info=True)

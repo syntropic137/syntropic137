@@ -143,6 +143,16 @@ class ObservabilityError(StrEnum):
     NOT_FOUND = "not_found"
     QUERY_FAILED = "query_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    #: A session is KNOWN to have started no agent process, so no conversation
+    #: log ever existed for it. Requires positive evidence of the negative -
+    #: a session we simply know nothing about is NOT_FOUND, which means a log
+    #: should exist but could not be located (issues #1047, #1065).
+    NEVER_STARTED = "never_started"
+    #: The session is still running and has not yet produced a conversation
+    #: log - regardless of what is known about its agent process. Distinct
+    #: from NEVER_STARTED (no agent process, terminal) and NOT_FOUND
+    #: (terminal but unexplained) (issue #1047).
+    PENDING = "pending"
 
 
 class TriggerError(StrEnum):
@@ -479,7 +489,17 @@ class ExecutionDetail(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, including any still
+    running. ``None`` means no phase had a resolvable duration -- unknown, not
+    zero.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str]
@@ -784,13 +804,20 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
-    total_duration_seconds: float
-    """Wall-clock seconds across the execution's phases (#969).
+    total_duration_seconds: float | None
+    """Wall-clock seconds across the execution's phases, including any still
+    running (#969). ``None`` means no phase had a resolvable duration.
 
     REQUIRED, deliberately. This model is internal, has exactly one construction
     site, and always has a source value. A default here would recreate the class
     of bug this field exists to fix: an omitted argument silently becoming 0.0,
     which pyright cannot see because omitting a defaulted field is legal.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
     """
     """Observations that carried no usable rate and so added nothing to the total.
 
@@ -1184,7 +1211,13 @@ class RepoActivityEntryResponse(BaseModel):
     status: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Seconds this execution has run, or ``None`` when nothing knows.
+
+    Nullable for the reason every other duration on this API is: 0.0 is a
+    measurement. This field reported it for every running execution on the
+    repo, system-activity and system-history timelines.
+    """
     trigger_source: str = ""
 
 

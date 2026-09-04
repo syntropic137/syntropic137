@@ -1,0 +1,17 @@
+# An entry that names only a container port gets a RANDOM host port on every
+# interface. The old gate rejected these too - correctly, but by accident,
+# because they have fewer than two colons rather than because anything asked
+# what they bind.
+services:
+  bare_integer:
+    image: postgres
+    ports:
+      - 5432
+  bare_string_with_protocol:
+    image: postgres
+    ports:
+      - "5432/udp"
+  host_port_but_no_interface:
+    image: postgres
+    ports:
+      - "15432:5432"

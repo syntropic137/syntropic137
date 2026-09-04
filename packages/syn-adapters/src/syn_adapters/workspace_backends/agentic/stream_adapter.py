@@ -97,6 +97,7 @@ class AgenticEventStreamAdapter:
         timeout_seconds: int | None = None,
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream stdout lines from command execution.
 
@@ -106,6 +107,12 @@ class AgenticEventStreamAdapter:
             timeout_seconds: Max execution time
             working_directory: Working directory override
             environment: Additional environment variables
+            wrapper_name: The ``$0`` the container-side wrapper announces
+                itself under, from ``AgentLaunchEvidence.wrapper_name``. NOT
+                passed through ``environment``: the agent inherits that, and a
+                name the agent can read is a name it can forge (#1065). It
+                reaches the container as wrapper argv instead, which ``exec``
+                overwrites before there is an agent to look at it.
 
         Yields:
             Individual stdout lines as they are produced
@@ -141,6 +148,7 @@ class AgenticEventStreamAdapter:
             command,
             working_directory,
             environment,
+            wrapper_name=wrapper_name,
         )
 
         logger.debug(

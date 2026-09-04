@@ -201,8 +201,19 @@ class EventStreamPort(Protocol):
         timeout_seconds: int | None = None,
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
-        """Stream stdout lines from command execution."""
+        """Stream stdout lines from command execution.
+
+        ``wrapper_name`` is the ``$0`` a transport that really creates a
+        process must announce itself under before becoming the agent, taken
+        from ``AgentLaunchEvidence.wrapper_name``. It is the caller's half of
+        the launch contract: a transport can only be recognised as having
+        started something if the name it answers under was chosen before this
+        stream existed. None means the caller is not collecting launch
+        evidence, and a transport that creates no process ignores it either
+        way.
+        """
         ...
 
     @property

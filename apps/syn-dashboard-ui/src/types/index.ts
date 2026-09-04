@@ -193,7 +193,8 @@ export interface PhaseMetrics {
   output_tokens: number
   total_tokens: number
   cost_usd: number
-  duration_seconds: number
+  /** Nullable: the API returns null when the duration is genuinely unknown. */
+  duration_seconds: number | null
   artifact_count: number
 }
 
@@ -294,7 +295,8 @@ export interface PhaseExecutionDetail {
   output_tokens: number
   cache_creation_tokens: number
   cache_read_tokens: number
-  duration_seconds: number
+  /** Nullable: the API returns null when the duration is genuinely unknown. */
+  duration_seconds: number | null
   cost_usd: number
   /**
    * Observations that carried no usable rate and so added nothing to the total.

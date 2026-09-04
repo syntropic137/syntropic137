@@ -63,6 +63,9 @@ _EVERY_FIELD: Mapping[str, object] = {
     "model": "gpt-5.6-sol",
     "provider": "codex",
     "allow_delegation": True,
+    # NOT the default. "workspace-write" is the default, so asserting it would
+    # prove nothing -- the same tautology the execution_type comment describes.
+    "sandbox": "read-only",
     "claude_plugins": ["owner/repo@abc123"],
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
@@ -110,6 +113,10 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"
     assert phase.allow_delegation is True
+    # A non-default value on purpose: "workspace-write" would also be wrong
+    # today, but "read-only" cannot be produced by any fallback, so only the
+    # caller's value arriving satisfies this.
+    assert phase.sandbox == "read-only"
     # IDENTITY, not cardinality. The previous version asserted `len(...) == 1`
     # while its comment claimed identity was checked -- so an implementation
     # substituting a wholly different plugin passed. Verified: a mutant

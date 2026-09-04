@@ -1,0 +1,21 @@
+# The awk state machine entered a ports block only on a physical line that read
+# exactly `ports:` and nothing else, so none of these four were ever looked at.
+# A YAML parser sees one shape for all of them before any rule runs.
+x-public-ports: &public_ports
+  - "5432:5432"
+
+services:
+  flow_style_sequence:
+    image: postgres
+    ports: ["5432:5432"]
+  key_with_trailing_comment:
+    image: postgres
+    ports: # public
+      - "5432:5432"
+  quoted_key:
+    image: postgres
+    "ports":
+      - "5432:5432"
+  aliased_sequence:
+    image: postgres
+    ports: *public_ports

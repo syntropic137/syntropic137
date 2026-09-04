@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -14,9 +15,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
-from syn_api._wiring import ensure_connected, get_conversation_store
+from syn_api._wiring import ensure_connected, get_conversation_store, get_projection_mgr
 from syn_api.types import (
     ConversationLine,
     ConversationLog,
@@ -26,6 +27,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
@@ -198,13 +200,305 @@ def _codex_command_execution_preview(item: Mapping[str, object]) -> str | None:
     return command[:_PREVIEW_LEN] if isinstance(command, str) and command else None
 
 
+# Claude Code's stream-json nests a tool call inside
+# ``message.content[].{type: "tool_use", name, input}`` (assistant lines) and
+# the matching result inside
+# ``message.content[].{type: "tool_result", content, is_error}`` (user
+# lines). There is no top-level ``tool_name``/``name`` key for either, so the
+# generic extractor below always falls through to None for these - this is
+# the claude-side counterpart to ``_extract_codex_fields``.
+_TOOL_PREVIEW_LEN = 100
+
+# Priority order of input keys to surface as a tool_use preview, checked by
+# field name rather than dispatching on tool name so new/renamed tools still
+# get a preview: ``command`` for Bash, ``file_path`` for Read/Edit/Write,
+# ``pattern`` for Grep/Glob, etc.
+_CLAUDE_TOOL_INPUT_KEYS = (
+    "command",
+    "file_path",
+    "pattern",
+    "path",
+    "notebook_path",
+    "url",
+    "query",
+    "description",
+    "prompt",
+)
+
+
+def _claude_tool_use_preview(input_data: Mapping[str, object]) -> str | None:
+    """Pick the first populated salient field from a ``tool_use`` block's input."""
+    for key in _CLAUDE_TOOL_INPUT_KEYS:
+        value = input_data.get(key)
+        if isinstance(value, str) and value:
+            return value[:_TOOL_PREVIEW_LEN]
+    return None
+
+
+def _claude_tool_result_text(content: object) -> str:
+    """Flatten a ``tool_result`` block's ``content`` into plain text.
+
+    ``content`` is either a bare string, or a list of ``{"type": "text",
+    "text": ...}`` blocks (seen in real recordings, e.g. subagent tool
+    results) - join those in order.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            part["text"]
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return ""
+
+
+def _claude_tool_result_preview(item: Mapping[str, object]) -> str | None:
+    """Preview for a ``tool_result`` block: its first output line, error-flagged."""
+    text = _claude_tool_result_text(item.get("content"))
+    first_line = next((line for line in text.splitlines() if line.strip()), "")
+    if item.get("is_error") is True:
+        return f"[error] {first_line}"[:_TOOL_PREVIEW_LEN] if first_line else "[error]"
+    return first_line[:_TOOL_PREVIEW_LEN] if first_line else None
+
+
+# One raw line maps to N tool blocks - ``message.content[]`` is a LIST, and
+# every tool block in it is a distinct call or result - but to only ONE
+# ``ConversationLine``, whose ``tool_name``/``content_preview`` are each a
+# single ``str | None``. So the blocks are joined into two columns rather than
+# dropped.
+#
+# The contract on the joined values, which consumers may rely on: splitting
+# either field on this separator yields ONE segment per entry the line
+# contributed, in order, and the two fields split to the same length. A
+# segment is empty where that entry has no value for that column. So segment i
+# of ``tool_name`` and segment i of ``content_preview`` always describe the
+# same entry. Either field is None when NO entry on the line contributed to it.
+#
+# That contract holds for EVERY input, not just for inputs that happen not to
+# collide, and it holds because of WHERE it is enforced rather than because
+# every extractor remembers to honour it. No extractor produces these two
+# strings at all: each returns a list of ``_ColumnEntry``, and
+# ``_render_tool_columns`` turns that list into the pair through
+# ``_join_column``, the only function in this module that names the separator
+# at all - grep it and the whole rule is on screen. An entry's own text can no
+# more forge a segment boundary than omit one, because the rewrite happens
+# there, below every branch, on the way out.
+#
+# That placement is the fix for a defect found three separate times in three
+# reviews of #1072. The rule used to live inside the claude branch's own join,
+# so it covered the claude branch and nothing else: a broken bar occurring in
+# codex command output, in a changed file path, in a codex agent message, in a
+# CLI diagnostic line or in a generic-fallback tool name still forged a
+# boundary and desynchronized the two columns. Each of those is a separate
+# writer of the same two fields, and patching them one at a time would have
+# left the next writer free to break it again. Enforcing it at the single
+# point where the fields are SET means a new extractor cannot violate the
+# contract even if its author has never read this comment - the return type
+# gives it no way to.
+#
+# WHICH character carries the structure is then purely a question of how often
+# that rewrite has to fire on real content, and the answer is why this is a
+# BROKEN BAR (U+00A6, "\u00a6") rather than the ASCII pipe it used to be
+# (#1072 review). These values are shell commands and command output, where a
+# real "|" is ordinary content: ``find /workspace -type f -name "*.py" | head
+# -30`` is a checked-in recording line, and with the pipe as the separator that
+# one real command manufactured a second apparent segment for a line with one
+# tool block. Escaping the pipe instead would have mangled every command
+# pipeline in the transcript to fix a collision that only matters when a line
+# carries several blocks. A broken bar has never appeared in this content, so
+# the rewrite is effectively never reached and a real pipe reaches the reader
+# byte-for-byte - but correctness does not rest on that rarity, only fidelity
+# does.
+#
+# ", " (the separator ``_codex_file_change_preview`` uses for paths) is unusable
+# here for the same reason the pipe was: commas are ordinary content in a
+# command, so escaping them would rewrite almost every preview.
+_TOOL_FIELD_SEP_CHAR = "\u00a6"
+_TOOL_FIELD_SEP = f" {_TOOL_FIELD_SEP_CHAR} "
+
+# What a separator character occurring in an entry's own text is displayed as.
+# The pipe is the closest reading of a broken bar, and is safe here precisely
+# because the pipe no longer carries any structural meaning in these fields.
+_TOOL_FIELD_SEP_CHAR_AS_CONTENT = "|"
+
+
+@dataclass(frozen=True)
+class _ColumnEntry:
+    """One transcript entry, in the two columns it renders into.
+
+    An entry is whatever occupies one slot of ``tool_name`` /
+    ``content_preview``: a claude ``tool_use`` block (name and preview), a
+    claude ``tool_result`` block (preview only), a codex tool item, or the
+    plain text of a message, an error or a CLI diagnostic (preview only). Both
+    fields are always ``str`` and never None - an entry missing one side
+    carries the empty string instead of being skipped, which is what keeps one
+    slot per entry in BOTH columns.
+
+    That is the whole point of this type, and of every extractor returning a
+    list of them instead of two strings. Segment *i* of ``tool_name`` then
+    describes the same entry as segment *i* of ``content_preview`` by
+    construction. The shape before it accumulated the two columns as two
+    independently-filtered lists, so an entry contributing one side but not the
+    other shifted every later entry of the shorter list up by one and the join
+    made the shift invisible - the reader saw a real preview confidently
+    attributed to the wrong tool (#1072 review).
+    """
+
+    name: str = ""
+    preview: str = ""
+
+    @classmethod
+    def of(cls, name: object = None, preview: str | None = None) -> _ColumnEntry:
+        """Build an entry from a raw name and an already-built preview.
+
+        ``name`` is typed ``object`` because it is read straight out of
+        arbitrary JSON - claude's block ``name``, or whatever the producer of
+        a generic line wrote into ``tool_name`` - so its type is not ours to
+        assume. A non-string is not a column value and becomes the empty
+        segment, rather than reaching the response model and failing
+        validation, which would fail the WHOLE transcript request rather than
+        the one odd line.
+
+        ``preview`` needs no such guard: every preview is built by one of the
+        ``_*_preview`` helpers above, which all return ``str | None``.
+        """
+        return cls(
+            name=name if isinstance(name, str) else "",
+            preview=preview or "",
+        )
+
+
+def _join_column(values: list[str]) -> str | None:
+    """Join one column's per-entry values into its ``str | None`` field.
+
+    Empty values are KEPT as empty segments - that is what preserves one
+    segment per entry, and therefore the positional correspondence between the
+    two columns. A column no entry contributed anything to (``tool_name`` on a
+    line of only ``tool_result`` blocks, or on any non-tool line) collapses to
+    None rather than rendering as a row of bare separators.
+    """
+    if not any(values):
+        return None
+    return _TOOL_FIELD_SEP.join(
+        value.replace(_TOOL_FIELD_SEP_CHAR, _TOOL_FIELD_SEP_CHAR_AS_CONTENT) for value in values
+    )
+
+
+def _render_tool_columns(entries: Sequence[_ColumnEntry]) -> tuple[str | None, str | None]:
+    """Render a line's entries into its ``(tool_name, content_preview)`` pair.
+
+    The single point at which these two response fields are set. Both columns
+    come from the SAME list in the SAME order, so they cannot differ in
+    length; and ``_join_column`` strips the separator character out of every
+    value on the way through, so no value can forge a boundary. Those two
+    properties together ARE the contract stated above - stated once, checkable
+    in one place, and unavailable to any extractor to get wrong.
+
+    Escaping inside the producers instead would take one copy of the rule per
+    producer and still not hold, because each truncates AFTER building its text
+    and a truncation can land anywhere.
+    """
+    return (
+        _join_column([entry.name for entry in entries]),
+        _join_column([entry.preview for entry in entries]),
+    )
+
+
+_CLAUDE_TOOL_USE = "tool_use"
+_CLAUDE_TOOL_RESULT = "tool_result"
+
+
+def _is_claude_tool_use(item: object) -> bool:
+    """True for a ``message.content[]`` block that is a tool CALL."""
+    return isinstance(item, dict) and item.get("type") == _CLAUDE_TOOL_USE
+
+
+def _claude_tool_block(item: Mapping[str, object]) -> _ColumnEntry | None:
+    """Normalize ONE ``message.content[]`` block, or None if it is not a tool block.
+
+    None covers plain ``text``, ``thinking`` and unrecognized types, which the
+    caller skips - they occupy no slot in either column.
+    """
+    item_type = item.get("type")
+    if item_type == _CLAUDE_TOOL_USE:
+        input_data = item.get("input")
+        preview = _claude_tool_use_preview(input_data) if isinstance(input_data, dict) else None
+        return _ColumnEntry.of(name=item.get("name"), preview=preview)
+    if item_type == _CLAUDE_TOOL_RESULT:
+        return _ColumnEntry.of(preview=_claude_tool_result_preview(item))
+    return None
+
+
+def _collect_claude_tool_blocks(content: list[object]) -> list[_ColumnEntry]:
+    """Every tool block in one message's ``content``, in order; empty if there are none."""
+    blocks: list[_ColumnEntry] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        block = _claude_tool_block(item)
+        if block is not None:
+            blocks.append(block)
+    return blocks
+
+
+def _extract_claude_tool_fields(
+    data: Mapping[str, object],
+) -> tuple[str, list[_ColumnEntry]] | None:
+    """Normalize a claude ``tool_use``/``tool_result`` line, or None otherwise.
+
+    Only ``assistant`` and ``user`` lines whose ``message.content[]`` contains
+    a ``tool_use`` or ``tool_result`` block are handled here; every other
+    shape (plain assistant text, a plain user turn, system/init, result,
+    an unrecognized type) returns None so the caller falls back to the
+    generic extractor, which already handles those correctly.
+
+    EVERY tool block on the line is represented, not just the first. An
+    assistant message that makes parallel tool calls carries one ``tool_use``
+    block per call, and the matching ``user`` message carries one
+    ``tool_result`` block per call; ``agentic_isolation``'s claude_cli
+    ``event_parser`` - the harness-side authority on this format - likewise
+    emits one observability event per block rather than stopping at the first.
+    Returning on the first block silently deleted the rest of the line (#1067
+    review).
+
+    Each block's preview is bounded by ``_TOOL_PREVIEW_LEN``, so the rendered
+    value is bounded by the block count, which is bounded by the raw line -
+    already returned in full and unbounded as ``ConversationLine.raw``.
+    """
+    top_type = data.get("type")
+    if top_type not in ("assistant", "user"):
+        return None
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+
+    blocks = _collect_claude_tool_blocks(content)
+    if not blocks:
+        return None
+
+    # A line holding any tool_use renders as a tool row; a line holding only
+    # tool_results keeps its own top-level type, as before this change. Read
+    # from the raw content rather than the blocks, so a tool_use whose ``name``
+    # is missing or non-string still renders as a tool row.
+    event_type = (
+        TranscriptEventType.TOOL_USE
+        if any(_is_claude_tool_use(item) for item in content)
+        else str(top_type)
+    )
+    return event_type, blocks
+
+
 _CODEX_TOOL_ITEM_TYPES = frozenset((CodexItemType.COMMAND_EXECUTION, CodexItemType.FILE_CHANGE))
 
 
 def _codex_item_fields(
     item: Mapping[str, object], stream_type: CodexStreamType
-) -> tuple[str, str | None, str | None]:
-    """Map a codex stream ``item`` to (event_type, tool_name, preview).
+) -> tuple[str, list[_ColumnEntry]]:
+    """Map a codex stream ``item`` to its (event_type, column entries).
 
     Codex emits both ``item.started`` and ``item.completed`` for the same
     tool call. Only ``item.completed`` renders a tool row - ``item.started``
@@ -216,27 +510,35 @@ def _codex_item_fields(
     if item_type == CodexItemType.AGENT_MESSAGE:
         text = item.get("text")
         preview = text[:_PREVIEW_LEN] if isinstance(text, str) and text else None
-        return TranscriptEventType.ASSISTANT, None, preview
+        return TranscriptEventType.ASSISTANT, [_ColumnEntry.of(preview=preview)]
     if item_type in _CODEX_TOOL_ITEM_TYPES and stream_type == CodexStreamType.ITEM_STARTED:
-        return TranscriptEventType.SYSTEM, None, None
+        return TranscriptEventType.SYSTEM, []
     if item_type == CodexItemType.COMMAND_EXECUTION:
         return (
             TranscriptEventType.TOOL_USE,
-            CODEX_TOOL_NAME_COMMAND,
-            _codex_command_execution_preview(item),
+            [
+                _ColumnEntry.of(
+                    name=CODEX_TOOL_NAME_COMMAND,
+                    preview=_codex_command_execution_preview(item),
+                )
+            ],
         )
     if item_type == CodexItemType.FILE_CHANGE:
         return (
             TranscriptEventType.TOOL_USE,
-            CODEX_TOOL_NAME_FILE_CHANGE,
-            _codex_file_change_preview(item),
+            [
+                _ColumnEntry.of(
+                    name=CODEX_TOOL_NAME_FILE_CHANGE,
+                    preview=_codex_file_change_preview(item),
+                )
+            ],
         )
-    return TranscriptEventType.SYSTEM, None, None
+    return TranscriptEventType.SYSTEM, []
 
 
 def _extract_codex_fields(
     data: Mapping[str, object],
-) -> tuple[str, str | None, str | None] | None:
+) -> tuple[str, list[_ColumnEntry]] | None:
     """Normalize a codex stream event, or None if the line is not codex-shaped.
 
     Codex's ``--json`` events use a closed set of top-level ``type`` values
@@ -248,53 +550,62 @@ def _extract_codex_fields(
     if raw_type not in _CODEX_STREAM_TYPES:
         return None
     if raw_type == CodexStreamType.TURN_COMPLETED:
-        return TranscriptEventType.RESULT, None, None
+        return TranscriptEventType.RESULT, []
     if raw_type == CodexStreamType.TURN_FAILED:
         error = data.get("error")
         preview = str(error)[:_PREVIEW_LEN] if error else None
-        return TranscriptEventType.ERROR, None, preview
+        return TranscriptEventType.ERROR, [_ColumnEntry.of(preview=preview)]
     item = data.get("item")
     if not isinstance(item, dict):
-        return TranscriptEventType.SYSTEM, None, None
+        return TranscriptEventType.SYSTEM, []
     return _codex_item_fields(item, CodexStreamType(raw_type))
 
 
 def _extract_line_fields(
     raw: str,
-) -> tuple[str | None, str | None, str | None]:
-    """Extract event_type, tool_name, and content preview from a JSONL line.
+) -> tuple[str | None, list[_ColumnEntry]]:
+    """Extract a line's event_type and its column entries from a JSONL line.
 
     Handles both claude ``stream-json`` and codex ``--json`` line shapes.
-    Returns (event_type, tool_name, preview) — all None-able.
+    Every branch returns entries rather than the two rendered strings, so the
+    separator contract is settled once by ``_render_tool_columns`` for all of
+    them - see the contract comment above.
     """
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, AttributeError):
         # Non-JSON line: a codex CLI diagnostic (e.g. an ERROR trace) on stdout.
         # Label it ``log`` rather than leaving it to render as "unknown".
-        return TranscriptEventType.LOG, None, _log_line_preview(raw)
+        return TranscriptEventType.LOG, [_ColumnEntry.of(preview=_log_line_preview(raw))]
 
     # Valid JSON but not an object (a bare scalar/array). Both the codex and
     # claude extractors call ``.get()``, so guard here - otherwise one odd line
     # (``null``, ``[]``, ``"diagnostic"``) would raise and fail the WHOLE
     # transcript request with QUERY_FAILED.
     if not isinstance(data, dict):
-        return TranscriptEventType.LOG, None, _log_line_preview(raw)
+        return TranscriptEventType.LOG, [_ColumnEntry.of(preview=_log_line_preview(raw))]
 
     codex = _extract_codex_fields(data)
     if codex is not None:
         return codex
 
+    claude_tool = _extract_claude_tool_fields(data)
+    if claude_tool is not None:
+        return claude_tool
+
     event_type = data.get("type") or data.get("event_type")
-    tool_name = data.get("tool_name") or data.get("name")
     content = _extract_content_preview(data)
-    preview = content[:_PREVIEW_LEN] if content else None
-    return event_type, tool_name, preview
+    entry = _ColumnEntry.of(
+        name=data.get("tool_name") or data.get("name"),
+        preview=content[:_PREVIEW_LEN] if content else None,
+    )
+    return event_type, [entry]
 
 
 def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
     """Parse a single raw JSONL line into a ConversationLine."""
-    event_type, tool_name, preview = _extract_line_fields(raw)
+    event_type, entries = _extract_line_fields(raw)
+    tool_name, preview = _render_tool_columns(entries)
     return ConversationLine(
         line_number=line_number,
         raw=raw,
@@ -302,6 +613,46 @@ def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
         tool_name=tool_name,
         content_preview=preview,
     )
+
+
+async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
+    """Classify why a conversation log is missing for this session.
+
+    A ``session_summaries`` row exists once ``StartSessionCommand`` succeeds
+    (SessionListProjection.on_session_started), so its absence here doesn't
+    itself mean "never started" - the caller already resolved this session_id
+    against that same projection to get this far.
+
+    ``agent_launch`` is the domain fact carried by ``AgentLaunchedEvent`` and
+    ``SessionCompletedEvent``, reported by the agent's own output stream once
+    the process is known to exist. It is the only thing that discriminates "no
+    agent ever ran" from "an agent ran and later failed/was cancelled": both
+    leave ``total_tokens == 0`` on every failure/cancellation path, so status
+    and tokens alone can't tell them apart (issue #1047, #1065).
+
+    Only ``NOT_LAUNCHED`` earns NEVER_STARTED. ``UNKNOWN`` - a row from a
+    stream written before the fact existed, or one whose launch write has not
+    landed yet - says nothing, and a row that says nothing must not be quoted
+    as saying no. It falls through to the generic NOT_FOUND, which is what
+    every such session got before the fact existed at all.
+
+    A session still ``running`` is neither of those - it may not have
+    produced a log yet regardless of whether the agent has launched, so it
+    gets its own PENDING classification rather than being folded into either
+    terminal case.
+    """
+    mgr = get_projection_mgr()
+    data = await mgr.store.get("session_summaries", session_id)
+    if data is None:
+        return ObservabilityError.NOT_FOUND
+
+    if data.get("status") == "running":
+        return ObservabilityError.PENDING
+
+    if AgentLaunch.read(data.get("agent_launch")) is AgentLaunch.NOT_LAUNCHED:
+        return ObservabilityError.NEVER_STARTED
+
+    return ObservabilityError.NOT_FOUND
 
 
 async def get_conversation_log(
@@ -325,6 +676,23 @@ async def get_conversation_log(
         raw_lines = await storage.retrieve_session(session_id)
 
         if raw_lines is None:
+            classification = await _classify_missing_conversation(session_id)
+            if classification == ObservabilityError.NEVER_STARTED:
+                return Err(
+                    ObservabilityError.NEVER_STARTED,
+                    message=(
+                        f"Session {session_id} never started an agent, so no "
+                        "conversation was ever recorded."
+                    ),
+                )
+            if classification == ObservabilityError.PENDING:
+                return Err(
+                    ObservabilityError.PENDING,
+                    message=(
+                        f"Session {session_id} is still running; no conversation "
+                        "log has been recorded yet."
+                    ),
+                )
             return Err(
                 ObservabilityError.NOT_FOUND,
                 message=f"Conversation log not found for session {session_id}",
@@ -416,7 +784,11 @@ async def get_conversation_log_endpoint(
     )
 
     if isinstance(result, Err):
-        if "not found" in (result.message or "").lower():
+        if result.error == ObservabilityError.NEVER_STARTED:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.PENDING:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ObservabilityError.NOT_FOUND:
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation log not found for session: {session_id}",

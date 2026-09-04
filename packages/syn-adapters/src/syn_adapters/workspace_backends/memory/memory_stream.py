@@ -47,6 +47,7 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         _timeout_seconds: int | None = None,
         _working_directory: str | None = None,
         _environment: dict[str, str] | None = None,
+        _wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream mock output lines.
 
@@ -54,6 +55,9 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
             handle: Isolation handle
             command: Command to execute (ignored)
             timeout_seconds: Timeout (ignored)
+            wrapper_name: Launch announcement name (ignored - no process is
+                created here, so there is nothing that could honestly answer
+                to it, and the session is left UNKNOWN)
 
         Yields:
             Pre-configured output lines

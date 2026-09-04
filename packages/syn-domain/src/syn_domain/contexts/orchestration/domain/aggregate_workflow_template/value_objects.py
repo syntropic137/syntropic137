@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 class WorkflowType(StrEnum):
@@ -160,6 +161,14 @@ class PhaseDefinition(BaseModel):
     harness on the same docker path. Sourced from the workflow YAML
     ``agent.provider`` field.
     """
+
+    sandbox: str = DEFAULT_PHASE_SANDBOX
+    """Authority level for this phase's agent process, from the workflow YAML
+    ``agent.sandbox`` field.
+
+    Defaults to ``DEFAULT_PHASE_SANDBOX``, which is currently the MOST
+    permissive level, not the least - see there for why (#1157, #1161,
+    #1167). A phase wanting less must declare it."""
 
     allow_delegation: bool = False
     """When true, both agent auths are staged so the phase's primary agent can
