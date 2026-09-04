@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
+import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
@@ -69,11 +70,7 @@ function PhaseTokenSegment({ label, total, rows, accentColor }: {
 
 function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   const Icon = phaseStatusIcons[phase.status] ?? Clock
-  const totalPhaseTokens =
-    phase.input_tokens +
-    phase.output_tokens +
-    (phase.cache_creation_tokens ?? 0) +
-    (phase.cache_read_tokens ?? 0)
+  const tokens = phaseTokenTotals(phase)
   // `duration_seconds` is nullable: the server returns null for a genuinely
   // unknown duration rather than a 0.0 that looks like a real measurement.
   // `liveDurationSeconds` keeps the running case ticking between polls while
@@ -96,7 +93,15 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
         <PhaseModelBreakdown costByModel={phase.cost_by_model} />
       )}
       <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-        <span>{formatTokens(totalPhaseTokens)}</span>
+        {/*
+          A running phase's counts are a lower bound, not a reading: the API has
+          no live per-phase token field, so the figures below stay at 0 (or at a
+          part-substituted cache figure) until the phase lands. Saying "so far"
+          is the difference between an incomplete count and a claim of none.
+        */}
+        <span title={tokens.settled ? undefined : 'Counted so far; this phase is still running'}>
+          {tokens.settled ? formatTokens(tokens.total) : `${formatTokens(tokens.total)} so far`}
+        </span>
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>
           {formatCostWithCoverage(Number(phase.cost_usd), phase.unpriced_observation_count)}
@@ -107,24 +112,20 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
       <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
         <PhaseTokenSegment
           label="In"
-          total={phase.input_tokens + (phase.cache_read_tokens ?? 0)}
+          total={tokens.inputTokens + tokens.cacheReadTokens}
           accentColor="bg-indigo-500/10 text-indigo-400"
           rows={[
-            { label: 'Fresh', value: phase.input_tokens },
-            { label: 'Cache read', value: phase.cache_read_tokens ?? 0, color: 'text-emerald-400' },
+            { label: 'Fresh', value: tokens.inputTokens },
+            { label: 'Cache read', value: tokens.cacheReadTokens, color: 'text-emerald-400' },
           ]}
         />
         <PhaseTokenSegment
           label="Out"
-          total={phase.output_tokens + (phase.cache_creation_tokens ?? 0)}
+          total={tokens.outputTokens + tokens.cacheCreationTokens}
           accentColor="bg-violet-500/10 text-violet-400"
           rows={[
-            { label: 'Output', value: phase.output_tokens },
-            {
-              label: 'Cache write',
-              value: phase.cache_creation_tokens ?? 0,
-              color: 'text-amber-400',
-            },
+            { label: 'Output', value: tokens.outputTokens },
+            { label: 'Cache write', value: tokens.cacheCreationTokens, color: 'text-amber-400' },
           ]}
         />
       </div>
@@ -166,26 +167,44 @@ function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
 }
 
 interface PhaseTimelineProps {
-  phases: ExecutionDetailResponse['phases']
+  /**
+   * The whole payload, not just `phases`: the header's token roll-up has to
+   * come from the execution-level total, which the phases cannot produce.
+   * Passing the execution keeps that choice inside this component, so a caller
+   * cannot render the timeline against a total derived some other way.
+   */
+  execution: ExecutionDetailResponse
   now: number
 }
 
-export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {
-  const totalTokens = phases.reduce((s, p) => s + p.input_tokens + p.output_tokens + (p.cache_creation_tokens ?? 0) + (p.cache_read_tokens ?? 0), 0)
-  const totalCost = phases.reduce((s, p) => s + Number(p.cost_usd), 0)
-  // The roll-up is its own consumer of coverage, not a side effect of fixing
-  // the cards. Summing only cost_usd made the header report a confident
-  // $0.0000 for an execution whose phases were entirely unpriced, and an
-  // apparently complete total for a mixed one - the #890 defect surviving one
-  // level up from the per-phase fix directly below.
-  const totalUnpriced = phases.reduce((s, p) => s + (p.unpriced_observation_count ?? 0), 0)
-  // Same shape as the unpriced-cost handling above: `?? 0` would turn an
-  // UNKNOWN duration into a measured zero, so an execution whose phases all
-  // report null would render a confident "0.0s" and a partly-known one would
-  // read as complete. Count what is missing and say so instead.
+export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
+  const phases = execution.phases
+  // Read from the execution, not from the phases below. Lane 1 leaves a running
+  // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
+  // for the whole of a live run - directly under a headline card already
+  // showing the live figure (#1048). Both now read executionTokenTotals().
+  const totalTokens = executionTokenTotals(execution).total
+  // Cost follows tokens: read the execution, not the phases. On the live path
+  // the domain builds an empty cost_by_phase map, so every phase is seeded
+  // cost_usd=0 and only overwritten once a summary exists. Summing the cards
+  // therefore printed a confident "$0.000000" directly beneath a Total Cost
+  // card reading $0.42 (#1048).
   //
-  // Folded from exactly the values the cards below render (same helper, same
-  // `now`), so the header cannot disagree with the timeline underneath it.
+  // The unpriced count has to come from the same level for the same reason:
+  // unpriced_by_phase is empty on that path too, so the #890 coverage signal
+  // was zeroed out exactly when it was needed and the zero rendered as a
+  // precise figure rather than as "unpriced".
+  const totalCost = Number(execution.total_cost_usd)
+  const totalUnpriced = execution.unpriced_observation_count
+  // Duration, unlike cost, IS folded from the cards - deliberately. A running
+  // phase's duration is derived live from started_at by the same helper the
+  // card uses, so the phases are a true reading here and folding them keeps the
+  // header from disagreeing with the timeline underneath it. Cost has no such
+  // live per-phase value to fold, which is why it reads the execution instead.
+  //
+  // `?? 0` would still turn an UNKNOWN duration into a measured zero, so an
+  // execution whose phases all report null would render a confident "0.0s" and
+  // a partly-known one would read as complete. Count what is missing instead.
   const knownDurations = phases
     .map((p) => liveDurationSeconds(p.status === 'running', p.started_at, p.duration_seconds, now))
     .filter((d): d is number => d !== null)

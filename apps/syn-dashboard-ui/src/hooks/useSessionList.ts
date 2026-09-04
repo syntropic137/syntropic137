@@ -45,14 +45,14 @@ const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
 }
 import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
+import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 const REFETCH_THROTTLE_MS = 500
 const POLL_INTERVAL_MS = 5000
 const SESSION_LIVE_EVENTS = new Set(['SessionStarted', 'SessionCompleted'])
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 function isTerminalSession(s: SessionSummary): boolean {
-  return TERMINAL_STATUSES.has(s.status)
+  return isTerminalSessionStatus(s.status)
 }
 
 function isDefaultViewState(

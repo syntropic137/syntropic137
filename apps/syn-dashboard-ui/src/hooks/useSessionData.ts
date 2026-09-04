@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
 import { useLiveTimer } from './useLiveTimer'
-import { usePolling } from './usePolling'
+import { useRefetchWhileRunning } from './useRefetchWhileRunning'
+import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 export interface UseSessionDataResult {
   session: SessionResponse | null
@@ -14,6 +15,10 @@ export interface UseSessionDataResult {
 }
 
 const FETCH_TIMEOUT_MS = 15_000
+
+function isTerminalSession(s: SessionResponse): boolean {
+  return isTerminalSessionStatus(s.status)
+}
 
 export function useSessionData(sessionId: string | undefined): UseSessionDataResult {
   const [session, setSession] = useState<SessionResponse | null>(null)
@@ -63,8 +68,12 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
     return () => abortRef.current?.abort()
   }, [fetchSession])
 
-  // Poll while running
-  usePolling(fetchSession, 2000, isRunning)
+  // Poll while non-terminal; also pauses while the tab is hidden (#1048).
+  useRefetchWhileRunning({
+    items: session ? [session] : [],
+    isTerminal: isTerminalSession,
+    refetch: fetchSession,
+  })
 
   return { session, loading, error, now, showConversationLog, setShowConversationLog }
 }

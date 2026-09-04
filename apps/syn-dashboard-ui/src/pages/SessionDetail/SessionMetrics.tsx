@@ -61,7 +61,11 @@ export function SessionMetrics({
       </section>
       {hasCostByModel && (
         <section id="cost-by-model">
-          <ModelBreakdown costByModel={session.cost_by_model} />
+          <ModelBreakdown
+            costByModel={session.cost_by_model}
+            totalCost={session.total_cost_usd}
+            unpricedObservationCount={session.unpriced_observation_count}
+          />
         </section>
       )}
     </div>
