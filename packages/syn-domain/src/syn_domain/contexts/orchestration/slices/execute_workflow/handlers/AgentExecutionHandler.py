@@ -134,22 +134,22 @@ class FinalUsage:
 
     @classmethod
     def resolve(cls, stream_result: StreamResult, tokens: TokenAccumulator) -> FinalUsage:
-        """Take the harness's own totals when it reported any, else what was observed.
+        """Take the harness's own totals when it reported them, else what was observed.
 
-        The result event is judged as a whole rather than field by field: a
-        harness that reported usage supplies every field (a genuine zero in one
-        of them is its answer, not a gap), and a harness that was killed
-        supplies none. Per-field fallback would mix the two accounting bases -
-        a result-event input against an accumulated output - and produce a
-        total that neither source ever measured.
+        The question is whether the harness reported, NOT how much it reported.
+        Those come apart at exactly one value: a run that finished having used
+        nothing reports ``0/0``, and reading that as "no report" hands its
+        authoritative answer back to the accumulator, which is the opposite of
+        what happened. `reported_usage` is present iff a terminal event was
+        parsed, so presence is the whole test (#1164).
         """
-        reported = bool(stream_result.result_input_tokens or stream_result.result_output_tokens)
-        if reported:
+        reported = stream_result.reported_usage
+        if reported is not None:
             return cls(
-                input_tokens=stream_result.result_input_tokens,
-                output_tokens=stream_result.result_output_tokens,
-                cache_creation=stream_result.result_cache_creation,
-                cache_read=stream_result.result_cache_read,
+                input_tokens=reported.input_tokens,
+                output_tokens=reported.output_tokens,
+                cache_creation=reported.cache_creation,
+                cache_read=reported.cache_read,
                 is_authoritative=True,
             )
         return cls(

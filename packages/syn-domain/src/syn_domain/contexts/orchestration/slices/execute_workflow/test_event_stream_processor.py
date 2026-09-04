@@ -112,10 +112,11 @@ class TestEventStreamProcessor:
         result = await proc.process_stream(_lines_to_stream(result_line), MockWorkspace())
 
         # Authoritative totals in StreamResult
-        assert result.result_input_tokens == 685
-        assert result.result_output_tokens == 1961
-        assert result.result_cache_creation == 5596
-        assert result.result_cache_read == 144509
+        assert result.reported_usage is not None
+        assert result.reported_usage.input_tokens == 685
+        assert result.reported_usage.output_tokens == 1961
+        assert result.reported_usage.cache_creation == 5596
+        assert result.reported_usage.cache_read == 144509
         assert result.total_cost_usd == pytest.approx(0.0319)
         assert result.duration_ms == 48000
         assert result.num_turns == 7
@@ -181,7 +182,8 @@ class TestEventStreamProcessor:
         assert len(token_obs) == 1
 
         # Result totals are in StreamResult
-        assert result.result_input_tokens == 300
+        assert result.reported_usage is not None
+        assert result.reported_usage.input_tokens == 300
         assert result.total_cost_usd == pytest.approx(0.01)
 
     @pytest.mark.asyncio

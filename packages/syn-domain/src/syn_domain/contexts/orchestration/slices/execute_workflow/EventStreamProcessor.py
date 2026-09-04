@@ -177,6 +177,46 @@ def _extract_error_reason(raw: str) -> str:
 
 
 @dataclass(frozen=True)
+class ReportedUsage:
+    """A harness's OWN cumulative token totals, from the terminal event it emits.
+
+    Exists so that "the harness reported" and "the harness reported a lot" stay
+    different questions. A run whose final usage is legitimately ``0/0`` and a
+    run that was SIGKILLed before it could report anything produce the same four
+    numbers; only the presence of this object tells them apart. Asking the
+    magnitude instead - ``bool(input_tokens or output_tokens)`` - answered the
+    second question and silently discarded the first run's authoritative answer
+    in favour of a partial one (#1164).
+
+    The four counts travel as a set because they share one accounting basis. A
+    harness that reports usage reports all of them, and a genuine zero in one is
+    its answer, not a gap; mixing a reported input against an accumulated output
+    would produce a total neither source ever measured.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation: int
+    cache_read: int
+
+    @classmethod
+    def from_claude_result(cls, cli_event: dict[str, Any]) -> ReportedUsage:
+        """Read the usage block off a claude CLI ``result`` event.
+
+        Call this ONLY where a terminal event was actually parsed: constructing
+        it is the assertion that one arrived, and a zero-filled instance means
+        "the harness counted, and counted zero".
+        """
+        usage = cli_event.get("usage", {})
+        return cls(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_creation=usage.get("cache_creation_input_tokens", 0),
+            cache_read=usage.get("cache_read_input_tokens", 0),
+        )
+
+
+@dataclass(frozen=True)
 class StreamResult:
     """Result of processing the event stream."""
 
@@ -185,12 +225,14 @@ class StreamResult:
     interrupt_reason: str | None
     agent_task_result: dict[str, Any] | None
     conversation_lines: list[str] = field(default_factory=list)
-    # Authoritative totals from the CLI result event (ISS-217)
+    # Authoritative totals from the CLI result event (ISS-217).
+    #
+    # `total_cost_usd`, `duration_ms` and `num_turns` are optional FIELD BY
+    # FIELD: a result event may omit any of them. `reported_usage` is optional
+    # as a WHOLE, and its absence is the record that no terminal event arrived
+    # at all (#1164).
     total_cost_usd: float | None = None
-    result_input_tokens: int = 0
-    result_output_tokens: int = 0
-    result_cache_creation: int = 0
-    result_cache_read: int = 0
+    reported_usage: ReportedUsage | None = None
     duration_ms: int | None = None
     num_turns: int | None = None
     # Error reason extracted from CLI result event (e.g. "API Error: 529 Overloaded")
@@ -268,12 +310,11 @@ class EventStreamProcessor:
         self._workspace_id = workspace_id
         self._agent_model = agent_model
 
-        # ISS-217: Authoritative totals captured from the CLI result event
+        # ISS-217: Authoritative totals captured from the CLI result event.
+        # `_reported_usage` stays None until a terminal `result` event is
+        # actually parsed - that is the whole record of whether one arrived.
         self._result_cost_usd: float | None = None
-        self._result_input_tokens: int = 0
-        self._result_output_tokens: int = 0
-        self._result_cache_creation: int = 0
-        self._result_cache_read: int = 0
+        self._reported_usage: ReportedUsage | None = None
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
@@ -356,11 +397,12 @@ class EventStreamProcessor:
                 break
 
         logger.info(
-            "Agent runner streaming complete: %d lines, cost=$%s (%d in, %d out)",
+            "Agent runner streaming complete: %d lines, cost=$%s, harness totals: %s",
             line_count,
             self._result_cost_usd,
-            self._result_input_tokens,
-            self._result_output_tokens,
+            f"{self._reported_usage.input_tokens} in, {self._reported_usage.output_tokens} out"
+            if self._reported_usage is not None
+            else "never reported",
         )
 
         return StreamResult(
@@ -370,10 +412,7 @@ class EventStreamProcessor:
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
             total_cost_usd=self._result_cost_usd,
-            result_input_tokens=self._result_input_tokens,
-            result_output_tokens=self._result_output_tokens,
-            result_cache_creation=self._result_cache_creation,
-            result_cache_read=self._result_cache_read,
+            reported_usage=self._reported_usage,
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
             error_reason=self._error_reason,
@@ -529,24 +568,26 @@ class EventStreamProcessor:
             return None
 
     def _capture_result_tokens(self, cli_event: dict[str, Any]) -> None:
-        """Store authoritative cumulative token counts from a result event."""
-        usage = cli_event.get("usage", {})
-        self._result_input_tokens = usage.get("input_tokens", 0)
-        self._result_output_tokens = usage.get("output_tokens", 0)
-        self._result_cache_creation = usage.get("cache_creation_input_tokens", 0)
-        self._result_cache_read = usage.get("cache_read_input_tokens", 0)
+        """Store authoritative cumulative token counts from a result event.
+
+        Reached only from `_handle_result_event`, i.e. only on a real terminal
+        `result` line - so assigning `_reported_usage` here IS the record that
+        the harness reported. The log is gated on the same fact rather than on
+        the numbers being large: a run that finished having used nothing is
+        exactly the run whose totals are worth seeing.
+        """
+        self._reported_usage = ReportedUsage.from_claude_result(cli_event)
         self._result_cost_usd = cli_event.get("total_cost_usd")
         self._result_duration_ms = cli_event.get("duration_ms")
         self._result_num_turns = cli_event.get("num_turns")
-        if self._result_input_tokens > 0 or self._result_output_tokens > 0:
-            logger.info(
-                "Result totals: cost=$%s, %d in, %d out (cache: %d read, %d create)",
-                self._result_cost_usd,
-                self._result_input_tokens,
-                self._result_output_tokens,
-                self._result_cache_read,
-                self._result_cache_creation,
-            )
+        logger.info(
+            "Result totals: cost=$%s, %d in, %d out (cache: %d read, %d create)",
+            self._result_cost_usd,
+            self._reported_usage.input_tokens,
+            self._reported_usage.output_tokens,
+            self._reported_usage.cache_read,
+            self._reported_usage.cache_creation,
+        )
 
     async def _handle_result_event(self, cli_event: dict[str, Any]) -> dict[str, Any] | None:
         """Handle a result event — extract task result and token usage."""

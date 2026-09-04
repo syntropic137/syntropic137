@@ -39,6 +39,8 @@ if TYPE_CHECKING:
         ObservationType,
     )
 
+pytestmark = pytest.mark.unit
+
 _MODEL = "claude-opus-4-20250514"
 _SESSION_ID = "sess-killed"
 _EXECUTION_ID = "exec-84543c5a5df4"
@@ -148,6 +150,19 @@ def _summary_of(writer: _RecordingWriter) -> dict[str, Any]:
     return summaries[0]
 
 
+class _InMemoryStore:
+    """The projection store, kept in a dict for the life of one test."""
+
+    def __init__(self) -> None:
+        self._rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    async def save(self, name: str, key: str, value: dict[str, Any]) -> None:
+        self._rows[(name, key)] = value
+
+    async def get(self, name: str, key: str) -> dict[str, Any] | None:
+        return self._rows.get((name, key))
+
+
 class _FakeRow:
     """Stands in for the asyncpg record ``_COST_BY_PHASE_QUERY`` returns."""
 
@@ -216,22 +231,86 @@ class TestKilledPhaseKeepsItsTokens:
         assert summary["total_input_tokens"] != sum(inp for inp, _ in _TURNS)
 
     @pytest.mark.asyncio
+    async def test_a_run_that_genuinely_used_nothing_keeps_its_own_zero(self) -> None:
+        """A reported 0/0 is an ANSWER, and must not be read as "never reported".
+
+        The distinction the whole fix rests on. This phase did emit its terminal
+        `result` event, and that event says zero - so zero is authoritative and
+        REPLACES the 17/9 the accumulator saw. Deciding by magnitude
+        (`bool(input or output)`) cannot tell this stream from a SIGKILLed one,
+        so it fell through to the accumulator and reported 17/9 as final for a
+        run the harness had already settled at 0/0.
+        """
+        lines = [
+            _assistant_turn("msg-0", 17, 9),
+            _result_event(input_tokens=0, output_tokens=0, cost=0.0),
+        ]
+        writer = await _run_phase(lines, exit_code=0)
+
+        # The accumulator really did have something to win with - without an
+        # observed 17/9 to be wrongly preferred, this test proves nothing.
+        assert writer.of_type("token_usage") == [
+            {
+                "input_tokens": 17,
+                "output_tokens": 9,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "model": _MODEL,
+            }
+        ]
+
+        summary = _summary_of(writer)
+        assert (summary["total_input_tokens"], summary["total_output_tokens"]) == (0, 0)
+        assert summary["totals_are_authoritative"] is True
+
+    @pytest.mark.asyncio
+    async def test_the_ledger_settles_a_genuine_zero_instead_of_estimating_it(self) -> None:
+        """The consuming hop: a reported zero settles the session at zero.
+
+        Asserted on the projection, not on the summary dict, because the summary
+        is one hop short of where the flag is spent: `is_finalized` is what the
+        dashboard badge and the cost ledger read. Under the magnitude check this
+        session came out 17/9 and NOT finalized - wrong number and wrong status,
+        from a run that had reported its own final answer.
+        """
+        lines = [
+            _assistant_turn("msg-0", 17, 9),
+            _result_event(input_tokens=0, output_tokens=0, cost=0.0),
+        ]
+        writer = await _run_phase(lines, exit_code=0)
+
+        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
+        for usage in writer.of_type("token_usage"):
+            await projection.on_agent_observation(
+                {"session_id": _SESSION_ID, "event_type": "token_usage", "data": usage}
+            )
+        counted = await projection.get_session_cost(_SESSION_ID)
+        assert counted is not None
+        assert (counted.input_tokens, counted.output_tokens) == (17, 9)
+
+        await projection.on_session_summary(
+            {
+                "session_id": _SESSION_ID,
+                "execution_id": _EXECUTION_ID,
+                "phase_id": _PHASE_ID,
+                "timestamp": "2026-01-01T23:56:48",
+                "data": _summary_of(writer),
+            }
+        )
+
+        settled = await projection.get_session_cost(_SESSION_ID)
+        assert settled is not None
+        assert (settled.input_tokens, settled.output_tokens) == (0, 0)
+        assert settled.is_finalized is True
+
+    @pytest.mark.asyncio
     async def test_terminal_cost_agrees_with_what_the_live_path_reported(self) -> None:
         """(c) Live and terminal price the same observations to the same number."""
         lines = [_assistant_turn(f"msg-{i}", inp, out) for i, (inp, out) in enumerate(_TURNS)]
         writer = await _run_phase(lines, exit_code=124)
 
         # LIVE: what the running execution reported, accumulated per observation.
-        store: dict[tuple[str, str], dict[str, Any]] = {}
-
-        class _Store:
-            async def save(self, name: str, key: str, value: dict[str, Any]) -> None:
-                store[(name, key)] = value
-
-            async def get(self, name: str, key: str) -> dict[str, Any] | None:
-                return store.get((name, key))
-
-        projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
         for usage in writer.of_type("token_usage"):
             await projection.on_agent_observation(
                 {
@@ -263,16 +342,7 @@ class TestKilledPhaseKeepsItsTokens:
         lines = [_assistant_turn(f"msg-{i}", inp, out) for i, (inp, out) in enumerate(_TURNS)]
         writer = await _run_phase(lines, exit_code=124)
 
-        store: dict[tuple[str, str], dict[str, Any]] = {}
-
-        class _Store:
-            async def save(self, name: str, key: str, value: dict[str, Any]) -> None:
-                store[(name, key)] = value
-
-            async def get(self, name: str, key: str) -> dict[str, Any] | None:
-                return store.get((name, key))
-
-        projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
         for usage in writer.of_type("token_usage"):
             await projection.on_agent_observation(
                 {

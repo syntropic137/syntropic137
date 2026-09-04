@@ -63,6 +63,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPolle
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     ApiErrorType,
     InterruptibleWorkspace,
+    ReportedUsage,
     StreamResult,
     api_error_label,
 )
@@ -467,10 +468,21 @@ class CodexStreamProcessor:
             agent_task_result=None,
             conversation_lines=conversation_lines,
             total_cost_usd=total_cost_usd,
-            result_input_tokens=self._totals.input_tokens,
-            result_output_tokens=self._totals.output_tokens,
-            result_cache_creation=0,
-            result_cache_read=self._totals.cache_read,
+            # Present only when codex reached `turn.completed`. A stream that
+            # was cut off has an accumulator, not a report, and saying so here
+            # is what stops the handler treating a truncated run's partial sum
+            # as codex's own final accounting (#1164). The numbers are the same
+            # either way - `_handle_turn_completed` feeds `_totals` and the
+            # shared accumulator the same per-turn values - so this settles
+            # what they MEAN, which is the part downstream cannot re-derive.
+            reported_usage=ReportedUsage(
+                input_tokens=self._totals.input_tokens,
+                output_tokens=self._totals.output_tokens,
+                cache_creation=0,
+                cache_read=self._totals.cache_read,
+            )
+            if self._totals.saw_terminal_turn
+            else None,
             duration_ms=duration_ms,
             num_turns=self._totals.turns,
             error_reason=self._error_reason,
