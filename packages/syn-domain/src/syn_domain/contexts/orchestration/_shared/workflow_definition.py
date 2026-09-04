@@ -22,6 +22,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
@@ -204,6 +206,18 @@ class AgentYamlDefinition(BaseModel):
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+    sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
+    """How much authority this phase's agent gets. Provider-neutral.
+
+    Omitted means ``read-only`` (``DEFAULT_PHASE_SANDBOX``): least privilege
+    unless the phase asks for more. A phase that edits files needs
+    ``workspace-write``; ``full-access`` is for a phase that must also write
+    outside the workspace.
+
+    A review or verify phase must leave this at the default. That is what
+    makes "the verifier does not modify what it certifies" enforced rather
+    than merely instructed (#1157, #1161)."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
@@ -452,6 +466,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
+        sandbox = (self.agent.sandbox if self.agent else None) or DEFAULT_PHASE_SANDBOX
         model = self.model or agent_model
 
         return PhaseDefinition(
@@ -470,6 +485,7 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
+            sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
         )

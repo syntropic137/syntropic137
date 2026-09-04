@@ -220,6 +220,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
     # Canonicalise here, not just in the YAML validator: a stored template
     # never saw that validator. Unknown names are refused rather than
@@ -247,13 +248,21 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     # exactly the author who asked for it, while passing any test that also
     # sets a model. Pinned by
     # test_tools_survive_when_they_are_the_only_thing_declared.
-    if not (phase_model or phase_provider or allow_delegation or allowed_tools):
+    # `sandbox` belongs in this condition for the same reason `allowed_tools`
+    # does (#1039): a phase whose only declaration is `agent.sandbox` takes
+    # this branch, and returning `defaults` would silently discard the one
+    # thing its author asked for. For sandbox that failure is not merely lost
+    # configuration - it is a phase running with authority it declined.
+    if not (
+        phase_model or phase_provider or allow_delegation or allowed_tools or sandbox
+    ):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
         allowed_tools=allowed_tools,
+        sandbox=sandbox or defaults.sandbox,
     )
 
 

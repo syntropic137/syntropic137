@@ -102,7 +102,11 @@ from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.agents import (
     AgentProvider,
     ModelAlias,
+    CODEX_SANDBOX_FLAGS,
+    DEFAULT_PHASE_SANDBOX,
+    PhaseSandbox,
     UnsupportedAgentProviderError,
+    UnsupportedPhaseSandboxError,
     require_executable_provider,
 )
 from syn_shared.env_constants import (
@@ -383,19 +387,43 @@ def apply_tool_policy_to_prompt(prompt: str, allowed_tools: Sequence[str]) -> st
     return _TOOL_GRANT_TEMPLATE.format(prompt=prompt, tools=", ".join(allowed_tools))
 
 
-def _build_codex_command(prompt: str, model: str | None) -> list[str]:
+def _resolve_sandbox(declared: str | None, *, phase_id: str) -> PhaseSandbox:
+    """Map a phase's declared sandbox level onto a known member.
+
+    An unknown value raises instead of falling back, because silently
+    downgrading an unrecognised level hands the phase whatever the default
+    happens to be - which is the class of failure this exists to close.
+    """
+    if declared is None:
+        return DEFAULT_PHASE_SANDBOX
+    try:
+        return PhaseSandbox(declared)
+    except ValueError:
+        raise UnsupportedPhaseSandboxError(declared, phase_id=phase_id) from None
+
+
+def _build_codex_command(
+    prompt: str,
+    model: str | None,
+    sandbox: PhaseSandbox = DEFAULT_PHASE_SANDBOX,
+) -> list[str]:
     """Build the Codex CLI command for agent execution.
 
     A codex phase inherits the domain default model ("haiku", a Claude alias)
     unless the YAML sets one. We only forward `--model` when it is a genuine
     codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+
+    The sandbox level comes from the phase, never from a constant here. It was
+    hardcoded to ``danger-full-access`` for every codex phase, which is how a
+    verify phase came to merge, commit and push the change it then certified
+    (#1157, #1161).
     """
     cmd = [
         "codex",
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        CODEX_SANDBOX_FLAGS[sandbox],
         "--skip-git-repo-check",
     ]
     if _is_codex_model(model):
@@ -430,7 +458,11 @@ def _build_agent_command(
                 phase_id=phase.phase_id,
                 declared=list(phase.agent_config.allowed_tools),
             )
-        return _build_codex_command(scoped_prompt, phase.agent_config.model)
+        return _build_codex_command(
+            scoped_prompt,
+            phase.agent_config.model,
+            _resolve_sandbox(phase.agent_config.sandbox, phase_id=phase.phase_id),
+        )
     if provider is AgentProvider.CLAUDE:
         return _build_claude_command(phase, scoped_prompt)
     raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
