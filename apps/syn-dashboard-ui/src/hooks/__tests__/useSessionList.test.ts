@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { useSessionList } from '../useSessionList'
@@ -73,7 +73,7 @@ describe('useSessionList', () => {
     })
 
     expect(result.current.sessions).toEqual([])
-    expect(result.current.filteredSessions).toEqual([])
+    expect(result.current.total).toBe(0)
   })
 
   it('handles fetch error gracefully', async () => {
@@ -88,7 +88,7 @@ describe('useSessionList', () => {
     expect(result.current.sessions).toEqual([])
   })
 
-  it('filters sessions by search query on id and workflow_id', async () => {
+  it('sends the search term to the server instead of narrowing the page', async () => {
     const sessions = [
       makeSessionSummary({ id: 'sess-alpha', workflow_id: 'wf-deploy' }),
       makeSessionSummary({ id: 'sess-beta', workflow_id: 'wf-test' }),
@@ -101,12 +101,26 @@ describe('useSessionList', () => {
       expect(result.current.loading).toBe(false)
     })
 
-    result.current.setSearchQuery('alpha')
+    act(() => result.current.setSearchQuery('alpha'))
 
+    // A matching session outside the page it holds could only be found by
+    // asking, so the term goes on the query rather than filtering these rows.
     await waitFor(() => {
-      expect(result.current.filteredSessions).toHaveLength(1)
+      expect(mockListSessions.mock.calls.at(-1)?.[0].q).toBe('alpha')
     })
+    expect(result.current.sessions).toHaveLength(2)
+  })
 
-    expect(result.current.filteredSessions[0].id).toBe('sess-alpha')
+  it('carries the time window as a bound the API will accept', async () => {
+    mockListSessions.mockResolvedValue({ sessions: [], total: 0 })
+
+    renderHook(() => useSessionList(), { wrapper })
+
+    await waitFor(() => expect(mockListSessions).toHaveBeenCalled())
+
+    const startedAfter = mockListSessions.mock.calls[0][0].started_after
+    expect(startedAfter).toBeDefined()
+    // A bound with no offset is a 422 from the API.
+    expect(startedAfter).toMatch(/(Z|[+-]\d{2}:\d{2})$/)
   })
 })

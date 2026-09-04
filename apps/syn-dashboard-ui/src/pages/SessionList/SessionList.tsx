@@ -18,6 +18,7 @@ import {
   Card,
   ConnectionIndicator,
   EmptyState,
+  ListPagination,
   ResourceFilterBar,
   SelectionActionBar,
 } from '../../components'
@@ -67,7 +68,7 @@ function SessionSearchBar({ value, onChange }: SessionSearchBarProps) {
 
 export function SessionList() {
   const {
-    filteredSessions,
+    sessions,
     loading,
     searchQuery,
     setSearchQuery,
@@ -82,9 +83,13 @@ export function SessionList() {
     toggleSort,
     connected,
     lastEventAt,
+    page,
+    pageSize,
+    total,
+    setPage,
   } = useSessionList()
 
-  const selection = useRowSelection(filteredSessions)
+  const selection = useRowSelection(sessions)
   const isMobile = useIsMobile()
 
   useSelectionShortcuts({
@@ -140,20 +145,28 @@ export function SessionList() {
 
       {isMobile ? (
         <SessionCardList
-          rows={filteredSessions}
+          rows={sessions}
           loading={loading}
           selection={selectionProps}
           emptyState={emptyState}
         />
       ) : (
         <SessionTable
-          rows={filteredSessions}
+          rows={sessions}
           loading={loading}
           selection={selectionProps}
           emptyState={emptyState}
           sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
+
+      <ListPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        itemLabel="session"
+      />
     </div>
   )
 }

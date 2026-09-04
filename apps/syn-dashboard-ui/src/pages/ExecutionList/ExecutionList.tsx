@@ -15,6 +15,7 @@ import {
   Card,
   ConnectionIndicator,
   EmptyState,
+  ListPagination,
   ResourceFilterBar,
   SelectionActionBar,
 } from '../../components'
@@ -63,7 +64,7 @@ function ExecutionSearchBar({ value, onChange }: ExecutionSearchBarProps) {
 
 export function ExecutionList() {
   const {
-    filteredExecutions,
+    executions,
     loading,
     searchQuery,
     setSearchQuery,
@@ -78,13 +79,17 @@ export function ExecutionList() {
     toggleSort,
     connected,
     lastEventAt,
+    page,
+    pageSize,
+    total,
+    setPage,
   } = useExecutionList()
 
   // Stable identity for useRowSelection: a new array reference each render would
   // trip the items-changed branch and cascade into a render loop.
   const selectionItems = useMemo(
-    () => filteredExecutions.map((e) => ({ ...e, id: e.workflow_execution_id })),
-    [filteredExecutions],
+    () => executions.map((e) => ({ ...e, id: e.workflow_execution_id })),
+    [executions],
   )
   const selection = useRowSelection(selectionItems)
   const isMobile = useIsMobile()
@@ -138,20 +143,28 @@ export function ExecutionList() {
 
       {isMobile ? (
         <ExecutionCardList
-          rows={filteredExecutions}
+          rows={executions}
           loading={loading}
           emptyState={emptyState}
           selection={selectionProps}
         />
       ) : (
         <ExecutionTable
-          rows={filteredExecutions}
+          rows={executions}
           loading={loading}
           emptyState={emptyState}
           selection={selectionProps}
           sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
+
+      <ListPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        itemLabel="execution"
+      />
     </div>
   )
 }

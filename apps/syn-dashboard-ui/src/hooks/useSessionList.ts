@@ -1,37 +1,31 @@
 /**
  * Session list data + live updates.
  *
- * Owns all data concerns for the SessionList page:
- *   - URL-backed filter state (status chips + time window)
- *   - initial fetch (and refetch when filters change)
- *   - live patches via the shared activity stream (SessionStarted/Completed)
- *   - polling fallback gated on the stream being disconnected
+ * The query - filters, paging, facet counts, SSE and polling - is
+ * `useServerList`. This hook supplies only what is specific to sessions: the
+ * `workflow_id` scope read from the URL, how to fetch a page of them, which
+ * events mean the list changed, and the sortable columns.
  *
  * Pages should call this hook and feed the result to presentational
- * components — no fetching, formatting, or SSE handling lives in the page.
+ * components - no fetching, formatting, or SSE handling lives in the page.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useResetView } from './useResetView'
 import { listSessions, type SessionListResponse } from '../api/sessions'
-import type {
-  SSEEventFrame,
-  SessionSummary,
-  TimeWindow,
-} from '../types'
+import type { ListPage, ListQuery } from '../api/listQuery'
+import type { SessionSummary } from '../types'
 import { sortSessions } from '../utils/sessionSort'
-import { useActivityStream } from './useActivityStream'
-import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import {
   useSortUrlState,
   type SortConfig,
   type SortKey,
   type SortState,
 } from './useSortUrlState'
+import { useServerList, type UseServerListResult } from './useServerList'
+import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
   validKeys: [
@@ -47,13 +41,8 @@ const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
   defaultKey: 'started',
   defaultDir: 'desc',
 }
-import { useStatusCounts } from './useStatusCounts'
-import { useThrottledRefetch } from './useThrottledRefetch'
-import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
-const REFETCH_THROTTLE_MS = 500
-const POLL_INTERVAL_MS = 5000
-const SESSION_LIVE_EVENTS = new Set(['SessionStarted', 'SessionCompleted'])
+const SESSION_LIVE_EVENTS: ReadonlySet<string> = new Set(['SessionStarted', 'SessionCompleted'])
 
 function isTerminalSession(s: SessionSummary): boolean {
   return isTerminalSessionStatus(s.status)
@@ -78,136 +67,55 @@ function toSessionSummary(row: ApiSessionSummary): SessionSummary {
   }
 }
 
-function isDefaultViewState(
-  isDefaultSort: boolean,
-  selectedStatuses: Set<string>,
-  timeWindow: TimeWindow,
-): boolean {
-  return isDefaultSort && selectedStatuses.size === 0 && timeWindow === '24h'
-}
-
-export interface UseSessionListResult {
+export interface UseSessionListResult
+  extends Omit<UseServerListResult<SessionSummary>, 'rows' | 'isDefaultFilters'> {
+  /** The current page, in the operator's chosen order. */
   sessions: SessionSummary[]
-  filteredSessions: SessionSummary[]
-  loading: boolean
-  searchQuery: string
-  setSearchQuery: (query: string) => void
-  selectedStatuses: Set<string>
-  toggleStatus: (status: string) => void
-  clearStatuses: () => void
-  timeWindow: TimeWindow
-  setTimeWindow: (next: TimeWindow) => void
-  /** Restore default filters AND default sort (started/desc). */
-  resetView: () => void
   /** True when filters and sort are at their defaults. */
   isDefaultView: boolean
-  statusCounts: Record<string, number>
   sort: SortState<SortKey>
   toggleSort: (key: SortKey) => void
-  /** SSE liveness for the page's connection indicator. */
-  connected: boolean
-  /** Wall-clock ms of the most recent activity frame, or null. */
-  lastEventAt: number | null
-}
-
-function matchesQuery(session: SessionSummary, query: string): boolean {
-  const q = query.toLowerCase()
-  return (
-    session.id.toLowerCase().includes(q) ||
-    (session.workflow_id?.toLowerCase().includes(q) ?? false)
-  )
 }
 
 export function useSessionList(): UseSessionListResult {
   const [searchParams] = useSearchParams()
   const workflowIdFilter = searchParams.get('workflow_id') ?? ''
-  const {
-    selectedStatuses,
-    timeWindow,
-    toggleStatus,
-    setTimeWindow,
-    clearStatuses,
-  } = useFilterUrlState()
   const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(SESSION_SORT_CONFIG)
-  const isDefaultView = isDefaultViewState(isDefaultSort, selectedStatuses, timeWindow)
-  const resetView = useResetView()
 
-  const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-
-  const statusesKey = useMemo(
-    () => Array.from(selectedStatuses).sort().join(','),
-    [selectedStatuses],
-  )
-
-  const fetchNow = useCallback(() => {
-    const statuses = statusesKey ? statusesKey.split(',') : undefined
-    listSessions({
-      workflow_id: workflowIdFilter || undefined,
-      statuses,
-      started_after: timeWindowToStartedAfter(timeWindow),
-      limit: 100,
-    })
-      .then((data) => setSessions((data.sessions ?? []).map(toSessionSummary)))
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [workflowIdFilter, statusesKey, timeWindow])
-
-  const scheduleRefetch = useThrottledRefetch(fetchNow, REFETCH_THROTTLE_MS)
-
-  useEffect(() => {
-    fetchNow()
-  }, [fetchNow])
-
-  const handleFrame = useCallback(
-    (frame: SSEEventFrame) => {
-      if (frame.type === 'event' && SESSION_LIVE_EVENTS.has(frame.event_type)) {
-        scheduleRefetch()
+  const fetchPage = useCallback(
+    async (query: ListQuery): Promise<ListPage<SessionSummary>> => {
+      const response = await listSessions({
+        ...query,
+        workflow_id: workflowIdFilter || undefined,
+      })
+      return {
+        rows: (response.sessions ?? []).map(toSessionSummary),
+        total: response.total,
+        statusCounts: response.status_counts ?? {},
       }
     },
-    [scheduleRefetch],
+    [workflowIdFilter],
   )
 
-  const { connected, lastEventAt } = useActivityStream({
-    onEvent: handleFrame,
-    filter: (eventType) => SESSION_LIVE_EVENTS.has(eventType),
+  const { rows, isDefaultFilters, ...list } = useServerList({
+    fetchPage,
+    scopeKey: workflowIdFilter,
+    liveEvents: SESSION_LIVE_EVENTS,
+    isTerminal: isTerminalSession,
   })
 
-  useEffect(() => {
-    if (connected) return
-    const id = setInterval(fetchNow, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [connected, fetchNow])
-
-  // SSE only fires on Started/Completed, but Lane 2 (tokens/cost/duration)
-  // updates continuously. Poll while any row is non-terminal.
-  useRefetchWhileRunning({ items: sessions, isTerminal: isTerminalSession, refetch: fetchNow })
-
-  const filteredSessions = useMemo(() => {
-    const matched = searchQuery ? sessions.filter((s) => matchesQuery(s, searchQuery)) : sessions
-    return sortSessions(matched, sort.key, sort.dir)
-  }, [sessions, searchQuery, sort.key, sort.dir])
-
-  const statusCounts = useStatusCounts(sessions)
+  // Reorders the page the server sent; the endpoint offers no sort parameter,
+  // so a non-default sort orders these 50 rows and not the collection.
+  const sessions = useMemo(
+    () => sortSessions(rows, sort.key, sort.dir),
+    [rows, sort.key, sort.dir],
+  )
 
   return {
+    ...list,
     sessions,
-    filteredSessions,
-    loading,
-    searchQuery,
-    setSearchQuery,
-    selectedStatuses,
-    toggleStatus,
-    clearStatuses,
-    timeWindow,
-    setTimeWindow,
-    resetView,
-    isDefaultView,
-    statusCounts,
+    isDefaultView: isDefaultSort && isDefaultFilters,
     sort,
     toggleSort,
-    connected,
-    lastEventAt,
   }
 }
