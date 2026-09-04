@@ -620,10 +620,84 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by status",
+              "description": "Filter by single status (legacy)",
               "title": "Status"
             },
-            "description": "Filter by status"
+            "description": "Filter by single status (legacy)"
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated list of statuses (OR'd; takes precedence over `status`)",
+              "title": "Statuses"
+            },
+            "description": "Comma-separated list of statuses (OR'd; takes precedence over `status`)"
+          },
+          {
+            "name": "started_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 lower bound on started_at",
+              "title": "Started After"
+            },
+            "description": "Inclusive ISO 8601 lower bound on started_at"
+          },
+          {
+            "name": "started_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 upper bound on started_at",
+              "title": "Started Before"
+            },
+            "description": "Inclusive ISO 8601 upper bound on started_at"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match against execution id, workflow id and workflow name",
+              "title": "Q"
+            },
+            "description": "Case-insensitive substring match against execution id, workflow id and workflow name"
           },
           {
             "name": "page",
@@ -644,7 +718,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
+              "maximum": 200,
               "minimum": 1,
               "description": "Items per page",
               "default": 50,
@@ -1236,18 +1310,77 @@
             "description": "Inclusive ISO 8601 upper bound on started_at"
           },
           {
-            "name": "limit",
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match against session id and workflow id",
+              "title": "Q"
+            },
+            "description": "Case-insensitive substring match against session id and workflow id"
+          },
+          {
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 200,
               "minimum": 1,
-              "description": "Max items to return",
-              "default": 50,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Items per page",
+              "title": "Page Size"
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deprecated alias for page_size. Ignored when page_size is given.",
+              "deprecated": true,
               "title": "Limit"
             },
-            "description": "Max items to return"
+            "description": "Deprecated alias for page_size. Ignored when page_size is given.",
+            "deprecated": true
           }
         ],
         "responses": {
@@ -7054,6 +7187,13 @@
             "type": "integer",
             "title": "Page Size",
             "default": 50
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
           }
         },
         "type": "object",
@@ -9997,6 +10137,23 @@
             "type": "integer",
             "title": "Total",
             "default": 0
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 50
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
           }
         },
         "type": "object",

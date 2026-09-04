@@ -45,7 +45,9 @@ async def test_list_sessions_empty():
     result = await list_sessions()
 
     assert isinstance(result, Ok)
-    assert result.value == []
+    assert result.value.rows == []
+    assert result.value.total == 0
+    assert result.value.status_counts == {}
 
 
 async def test_start_session():

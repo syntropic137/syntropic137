@@ -2623,6 +2623,10 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -4113,6 +4117,20 @@ export interface components {
              * @default 0
              */
             total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * SessionResponse
@@ -5748,8 +5766,16 @@ export interface operations {
     list_executions_endpoint_executions_get: {
         parameters: {
             query?: {
-                /** @description Filter by status */
+                /** @description Filter by single status (legacy) */
                 status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at */
+                started_before?: string | null;
+                /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
+                q?: string | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -6090,8 +6116,17 @@ export interface operations {
                 started_after?: string | null;
                 /** @description Inclusive ISO 8601 upper bound on started_at */
                 started_before?: string | null;
-                /** @description Max items to return */
-                limit?: number;
+                /** @description Case-insensitive substring match against session id and workflow id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
             };
             header?: never;
             path?: never;

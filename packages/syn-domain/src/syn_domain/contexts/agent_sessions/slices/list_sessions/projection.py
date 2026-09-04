@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from event_sourcing import ProjectionStore
 
@@ -20,6 +20,7 @@ from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
+from syn_domain.pagination import Page, matches_search, paginate, within_window
 
 logger = logging.getLogger(__name__)
 
@@ -44,36 +45,6 @@ def _calculate_duration(
         return (completed_at - started_at).total_seconds()
     except (ValueError, TypeError):
         return None
-
-
-def _coerce_iso_datetime(value: object) -> datetime | None:
-    """Parse an ISO 8601 string or accept an existing datetime; return None on failure.
-
-    Handles the trailing ``Z`` suffix (RFC 3339) which ``fromisoformat`` rejects
-    on Python <3.11.
-    """
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _within_window(
-    record: Mapping[str, object],
-    after: datetime | None,
-    before: datetime | None,
-) -> bool:
-    """True if ``record['started_at']`` is within [after, before]."""
-    started = _coerce_iso_datetime(record.get("started_at"))
-    if started is None:
-        return False
-    if after is not None and started < after:
-        return False
-    return not (before is not None and started > before)
 
 
 def _build_query_filters(
@@ -106,7 +77,9 @@ def _apply_post_filters(
         allowed = set(statuses)
         data = [d for d in data if d.get("status") in allowed]
     if started_after is not None or started_before is not None:
-        data = [d for d in data if _within_window(d, started_after, started_before)]
+        data = [
+            d for d in data if within_window(d.get("started_at"), started_after, started_before)
+        ]
     return data[offset : offset + limit] if limit else data[offset:]
 
 
@@ -405,6 +378,59 @@ class SessionListProjection(AutoDispatchProjection):
             data = _apply_post_filters(data, statuses, started_after, started_before, offset, limit)
 
         return [SessionSummary.from_dict(d) for d in data]
+
+    async def page(
+        self,
+        *,
+        workflow_id: str | None = None,
+        parent_session_id: str | None = None,
+        statuses: Collection[str] | None = None,
+        started_after: datetime | None = None,
+        started_before: datetime | None = None,
+        search: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> Page[SessionSummary]:
+        """One page of sessions, with the total and status facets it came from.
+
+        ``query`` answers "which rows", which was enough while the endpoint had
+        no paging: it capped at 200 and there was nowhere to go from there, so
+        roughly a day of history was reachable and the rest was not addressable
+        at any parameter setting. Paging needs a total counted over the same
+        predicate as the rows, which is what this returns.
+
+        Only the equality filters the store can express are pushed down.
+        ``status`` deliberately is NOT, even though the store could: the facet
+        tally has to see every status the rest of the query matched, and a
+        store-side status filter would leave it able to report only the one
+        already selected.
+
+        ``search`` matches case-insensitively against the session id and the
+        workflow id.
+        """
+        filters = _build_query_filters(workflow_id, None, None, parent_session_id)
+
+        def base(record: Mapping[str, object]) -> bool:
+            return within_window(
+                record.get("started_at"), started_after, started_before
+            ) and matches_search(search, record.get("id"), record.get("workflow_id"))
+
+        return paginate(
+            await self._store.query(
+                self.PROJECTION_NAME,
+                filters=filters if filters else None,
+                order_by="-started_at",
+                limit=None,
+                offset=0,
+            ),
+            base_predicate=base,
+            status_of=lambda r: str(r.get("status") or ""),
+            statuses=statuses,
+            sort_key=lambda r: str(r.get("started_at") or ""),
+            to_row=SessionSummary.from_dict,
+            offset=offset,
+            limit=limit,
+        )
 
     async def reconcile_orphaned(
         self,

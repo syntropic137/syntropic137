@@ -20,6 +20,21 @@ pytestmark = pytest.mark.unit
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 
+#: Calling the endpoint function directly bypasses FastAPI, so every parameter
+#: left out arrives as the ``Query(...)`` sentinel rather than as its default.
+#: Spelling the whole signature once here means adding a parameter is one edit,
+#: not one per call site.
+_LIST_ARGS: dict[str, object] = {
+    "status": None,
+    "statuses": None,
+    "started_after": None,
+    "started_before": None,
+    "q": None,
+    "page": 1,
+    "page_size": 50,
+}
+
+
 @pytest.fixture(autouse=True)
 def _reset_storage():
     """Reset in-memory storage and projections between tests."""
@@ -331,7 +346,7 @@ async def test_list_reports_a_live_duration_for_a_running_execution():
     row["started_at"] = started_at
     await manager.workflow_execution_list._store.save("workflow_executions", "exec-live-list", row)
 
-    response = await queries.list_executions_endpoint(status=None, page=1, page_size=50)
+    response = await queries.list_executions_endpoint(**_LIST_ARGS)
     summary = next(e for e in response.executions if e.workflow_execution_id == "exec-live-list")
     assert summary.duration_seconds is not None
     # ~420s could not have arisen from the old code, which returned None here,
@@ -355,7 +370,7 @@ async def test_list_reports_unknown_rather_than_zero_for_an_unstarted_execution(
         "workflow_executions", "exec-pending-list", row
     )
 
-    response = await queries.list_executions_endpoint(status=None, page=1, page_size=50)
+    response = await queries.list_executions_endpoint(**_LIST_ARGS)
     summary = next(e for e in response.executions if e.workflow_execution_id == "exec-pending-list")
     assert summary.duration_seconds is None
     assert summary.duration_display == "\u2014"
@@ -625,7 +640,7 @@ async def test_list_executions_endpoint_loads_enrichment_exactly_once(
 
     monkeypatch.setattr(executions_queries, "_load_execution_enrichment", _counting_enrichment)
 
-    response = await executions_queries.list_executions_endpoint(status=None, page=1, page_size=50)
+    response = await executions_queries.list_executions_endpoint(**_LIST_ARGS)
 
     assert len(calls) == 1, (
         f"expected exactly one enrichment fetch for the whole request, got {len(calls)}: {calls}"

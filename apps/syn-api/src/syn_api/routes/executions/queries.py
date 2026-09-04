@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api.list_query import MAX_PAGE_SIZE, parse_statuses
 from syn_api.types import (
     Err,
     ExecutionDetail,
@@ -24,6 +25,7 @@ from syn_api.types import (
     Result,
     ToolOperation,
 )
+from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
     format_duration_seconds,
@@ -41,7 +43,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
@@ -425,30 +427,43 @@ async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
 async def _load_execution_list_data(
     manager: ProjectionManager,
     workflow_id: str | None,
-    status: str | None,
-    limit: int,
+    statuses: Collection[str] | None,
+    limit: int | None,
     offset: int,
-) -> tuple[list[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
-    """Fetch domain summaries plus their tool-count and cost enrichment, once.
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    search: str | None = None,
+) -> tuple[Page[WorkflowExecutionSummary], dict[str, int], dict[str, _ExecutionEnrichment]]:
+    """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
     Shared by ``list_()`` and ``list_executions_endpoint`` so a single request
     never issues the enrichment lookup for the same execution ids twice
     (issue #1077 - that duplication doubled every per-execution round trip).
+
+    Returns a ``Page`` rather than a bare list because ``total`` and the status
+    facets have to be counted over the same filtered sequence the rows came
+    from; computing them separately is what #1119 was.
     """
     projection = manager.workflow_execution_list
     if workflow_id:
-        domain_summaries = await projection.get_by_workflow_id(workflow_id)
+        # The "every run of one workflow" view: it has always returned the lot,
+        # unfiltered and unsliced, and nothing on this path pages.
+        rows = await projection.get_by_workflow_id(workflow_id)
+        page = Page.unpaged(rows, status_of=lambda s: s.status)
     else:
-        domain_summaries = await projection.get_all(
-            limit=limit,
+        page = await projection.page(
+            statuses=statuses,
+            started_after=started_after,
+            started_before=started_before,
+            search=search,
             offset=offset,
-            status_filter=status,
+            limit=limit,
         )
-    execution_ids = [s.workflow_execution_id for s in domain_summaries]
-    tool_counts = await _fetch_tool_counts(execution_ids) if domain_summaries else {}
+    execution_ids = [s.workflow_execution_id for s in page.rows]
+    tool_counts = await _fetch_tool_counts(execution_ids) if page.rows else {}
     # Enrich each execution's cost + token totals from the Lane 2 execution_cost projection (#695)
     cost_by_execution = await _load_execution_enrichment(manager, execution_ids)
-    return domain_summaries, tool_counts, cost_by_execution
+    return page, tool_counts, cost_by_execution
 
 
 def _to_execution_summary(
@@ -488,10 +503,10 @@ async def list_(
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
-    domain_summaries, tool_counts, cost_by_execution = await _load_execution_list_data(
-        manager, workflow_id, status, limit, offset
+    page, tool_counts, cost_by_execution = await _load_execution_list_data(
+        manager, workflow_id, [status] if status else None, limit, offset
     )
-    return Ok([_to_execution_summary(s, tool_counts, cost_by_execution) for s in domain_summaries])
+    return Ok([_to_execution_summary(s, tool_counts, cost_by_execution) for s in page.rows])
 
 
 async def get(
@@ -697,16 +712,39 @@ async def list_active(
 
 @router.get("/executions", response_model=ExecutionListResponse)
 async def list_executions_endpoint(
-    status: str | None = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by single status (legacy)"),
+    statuses: str | None = Query(
+        None,
+        description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
+    ),
+    started_after: datetime | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at"
+    ),
+    started_before: datetime | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at"
+    ),
+    q: str | None = Query(
+        None,
+        description=(
+            "Case-insensitive substring match against execution id, workflow id and workflow name"
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
-    domain_summaries, tool_counts, cost_by_execution = await _load_execution_list_data(
-        manager, None, status, page_size, offset
+    execution_page, tool_counts, cost_by_execution = await _load_execution_list_data(
+        manager,
+        None,
+        parse_statuses(statuses, status),
+        page_size,
+        offset,
+        started_after=started_after,
+        started_before=started_before,
+        search=q,
     )
     return ExecutionListResponse(
         executions=[
@@ -714,14 +752,16 @@ async def list_executions_endpoint(
                 _to_execution_summary(s, tool_counts, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
             )
-            for s in domain_summaries
+            for s in execution_page.rows
         ],
-        # The COLLECTION size, not this page's length (#1119). `total` is the
-        # only field a client can page on, and reporting the page length made
-        # it always say "you have them all".
-        total=await manager.workflow_execution_list.count(status),
+        # The size of the filtered COLLECTION, not this page's length (#1119),
+        # and counted over every filter above rather than status alone (#1159):
+        # a total that ignores the time window describes all of history while
+        # the rows describe a day of it.
+        total=execution_page.total,
         page=page,
         page_size=page_size,
+        status_counts=execution_page.status_counts,
     )
 
 

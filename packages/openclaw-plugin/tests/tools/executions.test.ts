@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SyntropicClient } from "../../src/client.js";
 import { synGetExecution, synListExecutions } from "../../src/tools/executions.js";
-import { executionDetail, executionList } from "../fixtures/responses.js";
+import {
+  executionDetail,
+  executionList,
+  executionListPaged,
+} from "../fixtures/responses.js";
 
 const mockFetch = vi.fn<typeof globalThis.fetch>();
 let client: SyntropicClient;
@@ -32,6 +36,37 @@ describe("synListExecutions", () => {
     expect(result.content).toContain("Issue Resolution");
     expect(result.content).toContain("running");
     expect(result.content).toContain("1/3 phases");
+  });
+
+  it("reports the page count from the collection size, not the rows returned", async () => {
+    // `total` now means "rows matching every filter", which is the number this
+    // header divides. With 137 across pages of 50 the answer is 3 and the
+    // caller is on 2 - none of which can be read off `executions.length`.
+    mockFetch.mockResolvedValueOnce(jsonResponse(executionListPaged));
+
+    const result = await synListExecutions(client, { page: 2 });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("## Executions (137 total, page 2/3)");
+  });
+
+  it("tolerates the fields the widened API response adds", async () => {
+    // This package has no generated types and is deliberately left out of the
+    // dashboard's alias change: its local `ExecutionListResponse` is a
+    // structural SUBSET of the server's, so unknown fields are inert. This
+    // test is what makes that a checked claim rather than an assumption.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        ...executionListPaged,
+        status_counts: { running: 100, completed: 37 },
+      }),
+    );
+
+    const result = await synListExecutions(client, { page: 2 });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("## Executions (137 total, page 2/3)");
+    expect(result.content).toContain("Issue Resolution");
   });
 
   it("handles empty list", async () => {
