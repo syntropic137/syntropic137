@@ -547,7 +547,7 @@ class TestArtifactCollectionHandler:
             workflow_id="wf-1",
             session_id="sess-1",
             phase_name="Research",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         assert isinstance(result.command, ArtifactsCollectedCommand)
@@ -564,7 +564,13 @@ class TestArtifactCollectionHandler:
 
     @pytest.mark.anyio
     async def test_empty_artifacts(self) -> None:
-        """Handler handles case with no artifacts collected."""
+        """Handler handles case with no artifacts collected.
+
+        Declares NO output types, which since #1167 is the only way an empty
+        collection is legitimate: a phase that declared output and produced
+        none never reaches the handler's command-building, because the
+        collector raises.
+        """
         from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
             CollectedArtifacts,
         )
@@ -589,7 +595,7 @@ class TestArtifactCollectionHandler:
             workflow_id="wf-1",
             session_id="sess-1",
             phase_name="Research",
-            output_artifact_type="text",
+            output_artifact_types=(),
         )
 
         assert result.command.artifact_ids == []
@@ -959,7 +965,7 @@ class TestWorkspaceProvisionHandler:
             description="",
             agent_config=AgentConfiguration(),
             prompt_template="Do the task",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         repos = ["https://github.com/org/repo-a"]
@@ -1041,7 +1047,7 @@ class TestWorkspaceProvisionHandler:
             description="",
             agent_config=AgentConfiguration(),
             prompt_template="Do the task",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1114,7 +1120,7 @@ class TestWorkspaceProvisionHandler:
             description="",
             agent_config=AgentConfiguration(),
             prompt_template="Do the task",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
@@ -1342,7 +1348,7 @@ class TestWorkspaceProvisionClaudePlugins:
             description="",
             agent_config=AgentConfiguration(),
             prompt_template="Do the task",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
             claude_plugins=(plugin,),
         )
         todo = TodoItem(
@@ -1421,7 +1427,7 @@ class TestWorkspaceProvisionClaudePlugins:
             description="",
             agent_config=AgentConfiguration(),
             prompt_template="Do the task",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
         todo = TodoItem(
             execution_id="exec-1",
@@ -1507,7 +1513,7 @@ def _make_skill_phase(
         description="",
         agent_config=AgentConfiguration(provider=provider),
         prompt_template="Do the task",
-        output_artifact_type="text",
+        output_artifact_types=("text",),
         skills=skills,
     )
 

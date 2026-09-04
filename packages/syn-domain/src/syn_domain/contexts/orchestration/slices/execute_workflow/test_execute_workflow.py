@@ -117,7 +117,11 @@ class TestExecutionValueObjects:
 
         assert phase.agent_config.provider == "claude"  # Default is now Claude, not mock
         assert phase.agent_config.max_tokens == 4096
-        assert phase.output_artifact_type == "text"
+        # An unconfigured phase DECLARES NOTHING, and that is load-bearing
+        # since #1167: empty is what makes producing nothing legitimate. The
+        # previous default was "text", which is indistinguishable from a phase
+        # that really declared "text" and so made the contract unenforceable.
+        assert phase.output_artifact_types == ()
 
 
 # =============================================================================

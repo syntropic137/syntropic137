@@ -267,6 +267,96 @@ class TestMemoryIsolationAdapter:
         assert await adapter.health_check(handle) is False
 
 
+class TestCopyFromHonoursThePatterns:
+    """The double must be able to represent an empty `artifacts/output/`.
+
+    `copy_from` used to ignore its patterns and return every stored file.
+    Provisioning puts CLAUDE.md, AGENTS.md and the prompt in the same store, so
+    a phase that produced nothing still "collected" several files and looked
+    productive - and #1167, a phase completing with none of its declared
+    output, was invisible through this backend by construction.
+    """
+
+    @pytest.fixture
+    def adapter(self) -> MemoryIsolationAdapter:
+        from syn_adapters.workspace_backends.memory import MemoryIsolationAdapter
+
+        return MemoryIsolationAdapter()
+
+    @pytest.fixture
+    def config(self) -> IsolationConfig:
+        return IsolationConfig(
+            execution_id="exec-glob",
+            workspace_id="ws-glob",
+            workflow_id="wf-glob",
+            backend=IsolationBackendType.MEMORY,
+            capabilities=(CapabilityType.NETWORK,),
+            security_policy=SecurityPolicy(memory_limit_mb=512),
+        )
+
+    @pytest.mark.asyncio
+    async def test_provisioning_files_are_not_returned_as_phase_output(
+        self, adapter: MemoryIsolationAdapter, config: IsolationConfig
+    ) -> None:
+        """The exact shape that hid #1167: a workspace with no deliverable."""
+        handle = await adapter.create(config)
+        await adapter.copy_to(
+            handle,
+            [
+                ("CLAUDE.md", b"# instructions"),
+                ("AGENTS.md", b"# instructions"),
+                ("artifacts/input/prior.md", b"# from an earlier phase"),
+            ],
+        )
+
+        collected = await adapter.copy_from(handle, ["artifacts/output/**/*"])
+
+        assert collected == [], (
+            f"Nothing was written under artifacts/output/, so nothing should be "
+            f"collected. Got {[p for p, _ in collected]}."
+        )
+
+    @pytest.mark.asyncio
+    async def test_matching_files_are_returned_at_any_depth(
+        self, adapter: MemoryIsolationAdapter, config: IsolationConfig
+    ) -> None:
+        handle = await adapter.create(config)
+        await adapter.copy_to(
+            handle,
+            [
+                ("CLAUDE.md", b"x"),
+                ("artifacts/output/deliverable.md", b"top"),
+                ("artifacts/output/nested/deep/report.md", b"deep"),
+            ],
+        )
+
+        collected = await adapter.copy_from(handle, ["artifacts/output/**/*"])
+
+        assert sorted(p for p, _ in collected) == [
+            "artifacts/output/deliverable.md",
+            "artifacts/output/nested/deep/report.md",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_star_does_not_cross_a_directory_separator(
+        self, adapter: MemoryIsolationAdapter, config: IsolationConfig
+    ) -> None:
+        """Why fnmatch was not usable: its `*` would match `input/x.md` here."""
+        handle = await adapter.create(config)
+        await adapter.copy_to(
+            handle,
+            [
+                ("artifacts/output.md", b"sibling"),
+                ("artifacts/input/x.md", b"other phase"),
+                ("artifacts/keep.md", b"wanted"),
+            ],
+        )
+
+        collected = await adapter.copy_from(handle, ["artifacts/*"])
+
+        assert sorted(p for p, _ in collected) == ["artifacts/keep.md", "artifacts/output.md"]
+
+
 # =============================================================================
 # MEMORY SIDECAR ADAPTER TESTS
 # =============================================================================

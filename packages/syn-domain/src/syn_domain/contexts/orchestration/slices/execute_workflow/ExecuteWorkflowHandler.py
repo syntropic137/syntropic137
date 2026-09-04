@@ -473,9 +473,11 @@ class ExecuteWorkflowHandler:
                     description=phase.description,
                     agent_config=agent_config,
                     prompt_template=phase.prompt_template or "",
-                    output_artifact_type=(
-                        phase.output_artifact_types[0] if phase.output_artifact_types else "text"
-                    ),
+                    # Passed through whole. Collapsing to `[0] or "text"` here
+                    # is what erased the difference between a phase that
+                    # declared nothing and one that declared "text", four hops
+                    # before anything could act on it (#1167).
+                    output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
                     claude_plugins=resolved,
                     skills=resolved_skills,

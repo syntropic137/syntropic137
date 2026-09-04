@@ -141,6 +141,13 @@ def _make_processor(
 
 
 def _one_phase_workflow() -> list[ExecutablePhase]:
+    """One phase that declares NO output, matching a fake agent that writes none.
+
+    The empty declaration is deliberate. These tests drive the real collection
+    step with an agent double that produces no files, so declaring an output
+    type here would (correctly, since #1167) fail every one of them for a
+    reason none of them is about.
+    """
     return [
         ExecutablePhase(
             phase_id="phase-001",
@@ -149,7 +156,7 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
             description="Single phase for smoke testing",
             agent_config=AgentConfiguration(),
             prompt_template="do the thing",
-            output_artifact_type="text",
+            output_artifact_types=(),
             timeout_seconds=30,
         )
     ]
@@ -249,3 +256,151 @@ class TestProcessorSmoke:
 
         assert result.status == "completed", f"Expected 'completed' but got '{result.status}'."
         assert fake.call_count == 1
+
+
+def _two_phase_workflow(
+    first_declares: tuple[str, ...],
+    second_declares: tuple[str, ...] = (),
+) -> list[ExecutablePhase]:
+    """Two sequential phases, so "the next one did not run" is observable.
+
+    A single-phase workflow cannot express the property that matters in #1167:
+    the failure was not that a phase produced nothing, it was that the run
+    CARRIED ON without it. When the vanished phase is `verify`, carrying on is
+    the whole defect.
+    """
+    return [
+        ExecutablePhase(
+            phase_id="phase-001",
+            name="Produce Phase",
+            order=1,
+            description="Declares output",
+            agent_config=AgentConfiguration(),
+            prompt_template="produce the thing",
+            output_artifact_types=first_declares,
+            timeout_seconds=30,
+        ),
+        ExecutablePhase(
+            phase_id="phase-002",
+            name="Downstream Phase",
+            order=2,
+            description="Must not run if phase 1 failed its contract",
+            agent_config=AgentConfiguration(),
+            prompt_template="consume the thing",
+            output_artifact_types=second_declares,
+            timeout_seconds=30,
+        ),
+    ]
+
+
+@pytest.mark.unit
+class TestADeclaredOutputMustBeProduced:
+    """#1167: a phase that promises output and delivers none fails the run.
+
+    Four real executions ended `status=completed, error_message=None,
+    artifact_id=None` - the phase produced none of the output its contract
+    declared and the execution advanced regardless. In one of them the phase
+    was `verify`, so the review gate left the run silently while every surface
+    still reported success.
+
+    These drive the FULL processor loop rather than the collector alone,
+    because the defect was never in one object: the declaration was collapsed
+    to a scalar four hops upstream, and each end of every hop looked correct.
+    """
+
+    async def test_declared_but_unproduced_fails_and_stops_the_run(self) -> None:
+        """(a) The gate cannot be skipped: phase 2 must not run.
+
+        `call_count == 1` is the assertion that matters. A version of this fix
+        that failed the phase but let the execution continue would still
+        report `status='failed'` here while leaving the real defect - a
+        removed gate that nobody notices - completely intact.
+        """
+        fake = FakeAgentExecutionHandler.success()  # exit 0, writes nothing
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-missing",
+            workflow_name="Missing Artifact Workflow",
+            phases=_two_phase_workflow(first_declares=("plan",)),
+            inputs={},
+            execution_id="exec-1167-missing",
+        )
+
+        assert result.status == "failed", (
+            f"Expected 'failed' but got '{result.status}'. A phase declaring "
+            "'plan' and writing nothing under artifacts/output/ produced none "
+            "of its contract; completing it is #1167."
+        )
+        assert result.error_message is not None
+        assert "phase-001" in result.error_message, (
+            f"The error must NAME the phase that broke its contract, got: {result.error_message!r}"
+        )
+        assert "plan" in result.error_message, (
+            f"The error must name WHAT was missing, got: {result.error_message!r}"
+        )
+        assert fake.call_count == 1, (
+            f"The downstream phase ran anyway ({fake.call_count} agent calls). "
+            "Failing the phase while letting the execution advance leaves the "
+            "defect intact - a dropped `verify` still disappears from the run."
+        )
+
+    async def test_a_phase_declaring_nothing_may_produce_nothing(self) -> None:
+        """(b) The true negative. Without this the fix breaks legitimate phases.
+
+        Four phases in the shipped self-host validation workflows declare no
+        `output_artifacts` (`delegation:build-and-delegate`,
+        `github-ops:exercise`, `skills-injection:report` and `:confirm`). They
+        answer a question and stop, nothing downstream reads them, and they
+        must keep passing. Only a DECLARED-and-unproduced output is a failure.
+        """
+        fake = FakeAgentExecutionHandler.success()  # writes nothing, as above
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-undeclared",
+            workflow_name="Undeclared Output Workflow",
+            phases=_two_phase_workflow(first_declares=()),
+            inputs={},
+            execution_id="exec-1167-undeclared",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}' "
+            f"({result.error_message!r}). A phase that declares no output "
+            "artifact types is allowed to produce none; failing it would break "
+            "every shipped validation workflow."
+        )
+        assert fake.call_count == 2, "Both phases should have run to completion"
+
+    async def test_a_phase_that_produces_what_it_declared_is_unaffected(self) -> None:
+        """(c) The happy path still completes, and the artifact still lands.
+
+        Asserting only the status would pass even if the enforcement had eaten
+        the artifact on its way through, so the collected id is checked too -
+        that is the hop the plural declaration now travels.
+        """
+        fake = FakeAgentExecutionHandler.success(
+            produces=[("artifacts/output/deliverable.md", b"# Real output")]
+        )
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-produced",
+            workflow_name="Produced Output Workflow",
+            phases=_two_phase_workflow(first_declares=("plan",), second_declares=("markdown",)),
+            inputs={},
+            execution_id="exec-1167-produced",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}' "
+            f"({result.error_message!r}). Both phases declared output and both "
+            "wrote a file, so nothing here should trip the #1167 gate."
+        )
+        assert fake.call_count == 2
+        assert len(result.artifact_ids) == 2, (
+            f"Expected one artifact per phase, got {result.artifact_ids}. The "
+            "declaration now travels as a tuple; a hop that dropped it would "
+            "surface here as a lost artifact."
+        )

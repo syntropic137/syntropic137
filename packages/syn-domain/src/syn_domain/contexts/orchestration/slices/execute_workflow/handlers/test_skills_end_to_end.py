@@ -239,7 +239,7 @@ async def test_skills_pipeline_end_to_end_registration_to_install() -> None:
         # Headless codex phase: skills-cli agent key derives from provider.
         agent_config=AgentConfiguration(provider=phase_def.provider or "codex"),
         prompt_template="Review this.",
-        output_artifact_type="text",
+        output_artifact_types=("text",),
         skills=resolved_skills,
     )
 
@@ -341,7 +341,7 @@ async def test_divergent_providers_install_each_phase_skill_for_its_own_harness(
                 provider=phase_def.provider or "claude",
             ),
             prompt_template=phase_def.prompt_template,
-            output_artifact_type="text",
+            output_artifact_types=("text",),
             skills=resolved_skills,
         )
 

@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    PhaseProducedNoDeclaredOutputError,
+)
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
     WORKSPACE_OUTPUT_DIR,
@@ -93,6 +96,23 @@ _ARTIFACT_TYPE_MAP: dict[str, ArtifactType] = {
 def map_artifact_type(type_str: str) -> ArtifactType:
     """Map string artifact type to enum."""
     return _ARTIFACT_TYPE_MAP.get(type_str.lower(), ArtifactType.OTHER)
+
+
+#: What an artifact is tagged as when its phase declared no type at all.
+_UNDECLARED_ARTIFACT_TYPE: Final[str] = "text"
+
+
+def _primary_type(declared: tuple[str, ...]) -> str:
+    """The single type every artifact this phase produced is tagged with.
+
+    A phase may declare several output types but the artifact record carries
+    one, so the first declaration wins. This is the ONLY place the plural
+    declaration is narrowed to a singular tag; it used to happen four hops
+    earlier, in ExecuteWorkflowHandler, which is why "declared nothing" and
+    "declared text" arrived here indistinguishable and no enforcement was
+    possible (#1167).
+    """
+    return declared[0] if declared else _UNDECLARED_ARTIFACT_TYPE
 
 
 @dataclass(frozen=True)
@@ -401,11 +421,23 @@ class ArtifactCollector:
         execution_id: str,
         session_id: str,
         phase_name: str,
-        output_artifact_type: str,
+        output_artifact_types: tuple[str, ...],
     ) -> CollectedArtifacts:
-        """Collect output artifacts from workspace after execution.
+        """Collect a phase's declared output from its workspace, or fail.
 
-        Collects from artifacts/output/ (ADR-036) and creates artifact aggregates.
+        Collects from artifacts/output/ (ADR-036) and creates artifact
+        aggregates. `output_artifact_types` is what the phase's workflow
+        definition PROMISED it would produce.
+
+        A phase that promised output and delivered none does not return - it
+        raises. Before #1167 it returned empty here and the execution advanced
+        as though the phase had succeeded, so a `verify` phase could drop out
+        of a run while every surface still reported completed. The signal was
+        already present and simply nothing consumed it.
+
+        Raises:
+            PhaseProducedNoDeclaredOutputError: the phase declared output
+                artifact types and produced none of them.
 
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
@@ -415,6 +447,17 @@ class ArtifactCollector:
         )
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
+        # Judged on COLLECTABLE files, not on what the glob returned: a phase
+        # whose entire output tree was build junk produced no deliverable, and
+        # that is the same failure as writing nothing at all.
+        if output_artifact_types and not artifacts:
+            raise PhaseProducedNoDeclaredOutputError(
+                phase_id=phase_id,
+                phase_name=phase_name,
+                declared=output_artifact_types,
+            )
+
+        artifact_type = _primary_type(output_artifact_types)
         artifact_ids: list[str] = []
         files: list[PhaseOutputFile] = []
         first_content: str | None = None
@@ -428,7 +471,7 @@ class ArtifactCollector:
                 phase_id=phase_id,
                 execution_id=execution_id,
                 session_id=session_id,
-                artifact_type=output_artifact_type,
+                artifact_type=artifact_type,
                 content=content_str,
                 title=f"{phase_name}: {artifact_path}",
                 source_path=artifact_path,
@@ -455,9 +498,17 @@ class ArtifactCollector:
         execution_id: str,
         session_id: str,
         phase_name: str,
-        output_artifact_type: str,
+        output_artifact_types: tuple[str, ...],
     ) -> list[str]:
-        """Collect partial artifacts during interrupt. Never raises."""
+        """Collect whatever an interrupted phase managed to write. Never raises.
+
+        Deliberately does NOT enforce the output contract that
+        `collect_from_workspace` enforces. An interrupted phase is already
+        failing or cancelled, and its outcome is decided by the interrupt; the
+        only question left here is how much of its work can be salvaged.
+        Raising on an empty salvage would replace a truthful "cancelled" with a
+        misleading "contract violated" and lose the real reason (#1167).
+        """
         try:
             # Same filter as the happy path: collect_partial is the interrupt
             # route and shares the pattern, so fixing only the other site would
@@ -466,6 +517,7 @@ class ArtifactCollector:
             partial_artifacts = [
                 (path, body) for path, body in partial_collected if _is_collectable(path)
             ]
+            artifact_type = _primary_type(output_artifact_types)
             artifact_ids: list[str] = []
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
@@ -476,7 +528,7 @@ class ArtifactCollector:
                     phase_id=phase_id,
                     execution_id=execution_id,
                     session_id=session_id,
-                    artifact_type=output_artifact_type,
+                    artifact_type=artifact_type,
                     content=content_str,
                     title=f"{phase_name} (partial): {artifact_path}",
                     source_path=artifact_path,

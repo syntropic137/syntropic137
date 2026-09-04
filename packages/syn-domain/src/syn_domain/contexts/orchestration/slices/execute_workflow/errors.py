@@ -91,3 +91,43 @@ class UnsupportedToolPolicyForProviderError(ValueError):
             "tool vocabulary, so the list would be accepted and never applied. "
             "Remove allowed_tools, or run this phase on 'claude'."
         )
+
+
+class PhaseProducedNoDeclaredOutputError(Exception):
+    """A phase declared output artifact types and produced none of them (#1167).
+
+    THE FAILURE THIS EXISTS TO STOP. A phase could finish with
+    status=completed, error_message=None and artifact_id=None - none of the
+    output its contract declares - and the execution advanced as though it had
+    succeeded. Four real executions did exactly that; in one the phase that
+    vanished was `verify`, so the review gate was silently removed from the run
+    while every surface still reported completed.
+
+    WHY THE DECLARATION IS THE TEST, not "did it write anything". A phase that
+    declares no output types is legitimately allowed to produce nothing - the
+    self-host validation workflows have four such phases, which answer a
+    question and stop. Only a declared-but-unproduced output is a failure, so
+    an empty declaration is silence, not a violation.
+
+    Raised from ArtifactCollector.collect_from_workspace, which is the one
+    place holding both halves of the comparison: what the phase promised and
+    what it actually wrote.
+    """
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        phase_name: str,
+        declared: tuple[str, ...],
+    ) -> None:
+        super().__init__(
+            f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
+            f"({', '.join(declared)}) but produced none: nothing collectable "
+            f"was written under artifacts/output/. The phase's contract is "
+            f"unmet, so the execution fails here rather than advancing as "
+            f"though it had succeeded."
+        )
+        self.phase_id = phase_id
+        self.phase_name = phase_name
+        self.declared = declared
