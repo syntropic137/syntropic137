@@ -82,6 +82,7 @@ class DegradedReason(StrEnum):
     SKILL_STORAGE = "skill_storage"
     CONVERSATION_STORAGE = "conversation_storage"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
+    PROJECTION_CATCHUP = "projection_catchup"
     EVENT_POLLER = "event_poller"
     CHECK_RUN_POLLER = "check_run_poller"
     ANTHROPIC_API_KEY = "anthropic_api_key"
@@ -331,7 +332,7 @@ async def health_check() -> Result[dict, LifecycleError]:
     if _state.degraded_reasons:
         response["degraded_reasons"] = _state.degraded_reasons
 
-    _enrich_subscription_health(response, mode)
+    await _enrich_subscription_health(response, mode)
     _enrich_codex_auth_health(response)
 
     return Ok(response)
@@ -572,25 +573,59 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-def _enrich_subscription_health(response: dict, mode: str) -> None:
-    """Add subscription coordinator status to the health response."""
+async def _enrich_subscription_health(response: dict, mode: str) -> None:
+    """Add subscription coordinator status and read-model lag to the response.
+
+    WHY LAG BELONGS HERE. `running` alone is set once at start() and never moves,
+    so during a projection rebuild this block reported `status: healthy` while
+    every read model was thousands of events behind and freshly dispatched
+    executions 404ed. An operator seeing those 404s has to be able to tell
+    "rebuild in progress" from "the platform lost my execution", and /health is
+    where they look. See `read_model_lag` for what "catching up" means and why.
+
+    A replay is reported through the EXISTING degraded machinery — mode plus a
+    DegradedReason — rather than by changing top-level `status`. `status` is what
+    liveness probes read, and the process is alive and accepting writes during a
+    rebuild; taking it out of rotation would turn a stale read path into an
+    outage. `subscription.status` DOES gain a third value, because that field's
+    job is to describe the read path and "healthy" was the lie.
+
+    Never raises. A lag probe that can take /health down is worse than no probe,
+    so any failure degrades to reporting the subscription as unknown.
+    """
     if _state.subscription_service is None:
         return
+
+    def _degrade(reason: DegradedReason) -> None:
+        response.setdefault("degraded_reasons", []).append(reason)
+        if mode == "full":
+            response["mode"] = "degraded"
 
     try:
         sub_status = _state.subscription_service.get_status()
         sub_healthy = sub_status.get("running", False)
+        lag = await _state.subscription_service.describe_read_model_lag()
+
+        catching_up = lag is not None and lag.is_catching_up
+        if not sub_healthy:
+            status = "degraded"
+        elif catching_up:
+            status = "catching_up"
+        else:
+            status = "healthy"
+
         response["subscription"] = {
             **sub_status,
-            "status": "healthy" if sub_healthy else "degraded",
+            "status": status,
+            **(lag.model_dump(mode="json") if lag is not None else {}),
         }
+
         if not sub_healthy:
-            response.setdefault("degraded_reasons", []).append(
-                DegradedReason.SUBSCRIPTION_COORDINATOR
-            )
-            if mode == "full":
-                response["mode"] = "degraded"
+            _degrade(DegradedReason.SUBSCRIPTION_COORDINATOR)
+        if catching_up:
+            _degrade(DegradedReason.PROJECTION_CATCHUP)
     except Exception:
+        logger.debug("subscription health probe failed", exc_info=True)
         response["subscription"] = {"status": "unknown"}
 
 
