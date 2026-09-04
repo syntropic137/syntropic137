@@ -76,6 +76,15 @@ class WorkflowResponse(BaseModel):
     workflow_type: str
     classification: str
     phases: list[PhaseDefinitionResponse] = Field(default_factory=list)
+    """The phases as `_map_phases` built them, carried whole.
+
+    This used to be a second, route-local phase model that the endpoint
+    filled field by field from an already-complete `PhaseDefinitionResponse`.
+    Every phase field therefore had two build sites, and a field added to one
+    was silently dropped by the other -- which is exactly what happened to
+    `allow_delegation`/`claude_plugins`/`skills` (#1013) and then again to
+    `input_artifact_types`/`output_artifact_types` (#1176). Reusing the mapped
+    object removes the second site rather than adding a third field to it."""
     input_declarations: list[InputDeclarationModel] = Field(default_factory=list)
     created_at: str | None = None
     runs_count: int = 0
@@ -709,18 +718,14 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         description=detail.description,
         workflow_type=detail.workflow_type,
         classification=detail.classification,
-        # Passed through, not re-copied. This used to rebuild every phase into
-        # a second, near-identical model that named fourteen of the eighteen
-        # fields; the four it omitted -- `input_artifact_types`,
-        # `output_artifact_types`, `execution_type` and `max_tokens` -- were
-        # absent from the JSON entirely (#1176). Absent reads as `None`
-        # through `.get()`, so the endpoint said "declares no outputs" and
-        # "declares nothing" in the same breath, and a reader concluded the
-        # artifact wiring of `sdlc-implement-v1` was empty when the YAML
-        # declares it on all four phases. Two hand-maintained models meant
-        # every field added to one and not the other drifted silently; there
-        # is now one, so there is nothing left to drift.
-        phases=detail.phases,
+        # `get_workflow()` already mapped these through `_map_phases`. Copying
+        # them field by field here is what lost `input_artifact_types` and
+        # `output_artifact_types` (#1176) -- along with `execution_type` and
+        # `max_tokens`, unreported but dropped by the same copy -- and
+        # `allow_delegation`, plugins and skills before that (#1013): the copy
+        # is a second build site nobody remembers to update. Pass the mapped
+        # phases through instead.
+        phases=list(detail.phases),
         input_declarations=[
             InputDeclarationModel(
                 name=d.name,

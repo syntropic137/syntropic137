@@ -18,6 +18,15 @@ So these tests assert on the REAL JSON BODY over ASGI, not on the response
 object. `WorkflowResponse(...)` in-process would answer "is the field on the
 model", which is the question one hop before the one that was wrong. Key
 presence is only observable after serialization, and key presence is the bug.
+`model_dump()` is not a substitute: it reports the model's own fields, so it
+answers the same one-hop-early question that let this through.
+
+Why the tests drive the route rather than `_map_phases`: `_map_phases` was
+already correct throughout, and `test_phase_fields_are_readable.py` covers it
+-- every one of its assertions passed for the whole life of this bug. The loss
+happened one hop later, where the endpoint rebuilt an already-complete phase
+model into a second, route-local one. Testing either END of that hop sees
+nothing, which is why the guard written for #1013 did not catch #1176.
 """
 
 from __future__ import annotations
@@ -272,16 +281,23 @@ class TestTheEndpointMatchesTheFileOnDisk:
     """
 
     def test_the_fixture_is_not_vacuous(self) -> None:
-        """A drift test whose expectation is empty passes against anything.
+        """A guard on the FILE, not on the code.
 
-        This asserts the FILE still says something worth comparing, so
-        emptying `workflow.yaml` fails here rather than turning the two tests
-        below into no-ops.
+        A drift test whose expectation is empty passes against anything, so
+        emptying `workflow.yaml` must fail here rather than quietly turning
+        the tests below into no-ops. The last two assertions are what keep
+        the drift test covering the absent-versus-empty case: it only does so
+        while the workflow still declares both an empty list and a populated
+        one, and if someone gives every phase an input that stops being true
+        silently.
         """
         declared = _declared_in_yaml()
 
-        assert len(declared) == 4
+        assert len(declared) == 4, f"expected four phases on disk, found {len(declared)}"
         assert any(outputs for _, outputs in declared.values())
+        assert [] in [inputs for inputs, _ in declared.values()], (
+            "no phase declares an empty input list any more"
+        )
         assert any(inputs for inputs, _ in declared.values())
 
     async def test_every_phase_matches_its_declaration(self) -> None:
