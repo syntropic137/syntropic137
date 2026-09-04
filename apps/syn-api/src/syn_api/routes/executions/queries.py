@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Query
 
+from syn_adapters.workspace_backends.agentic.capture_observation import (
+    SESSION_CAPTURE_OBSERVATION,
+    read_agent_session_ids,
+)
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.types import (
@@ -255,11 +259,71 @@ async def _load_session_cost(
     return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
 
 
+async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None]:
+    """Which agent-native session ids each of this execution's phases produced.
+
+    Keyed by the phase's ``session_id`` - the uuid4 the HOST assigns per phase
+    run. The values are the ids the AGENTS chose for themselves, which is a
+    disjoint namespace: the host never passes its id to the agent, so nothing
+    else in the system relates the two, and without this an execution cannot be
+    traced to the transcripts it produced (#1185).
+
+    A phase maps to MANY, because one phase yields several whenever it
+    delegates - a codex phase handing work to claude, a subagent, a resumed
+    thread.
+
+    THREE-VALUED, and the caller must keep it that way. ``[]`` means the
+    exporter looked and confirmed none; a MISSING KEY means nobody could tell
+    us, which is what ``dict.get`` already returns as ``None``. Collapsing the
+    two turns a version skew, or a telemetry outage, into a reported loss.
+
+    Lane 2, so it fails soft: an unreachable event store answers "we cannot
+    tell you" for every phase rather than failing a read of the domain truth,
+    which is in Lane 1 and unaffected.
+    """
+    try:
+        from syn_api._wiring import get_event_store_instance
+
+        # ONE query for the whole execution, not one per phase.
+        #
+        # ENVELOPE WARNING: `query_by_execution` FLATTENS the payload to the top
+        # level, where `query`/`query_recent_by_types` nest it under `data`. So
+        # the row IS the payload here, and passing `row["data"]` would read an
+        # absent key on every row - the same misreading that once made every
+        # healthy capture row report as UNKNOWN. Flattening is lossless for this
+        # payload because the write path strips the envelope's own key names
+        # from it (`RESERVED_OBSERVATION_KEYS`, then `_EXCLUDED_KEYS`), so a
+        # stored payload cannot shadow `session_id`.
+        rows = await get_event_store_instance().query_by_execution(
+            execution_id, event_type=SESSION_CAPTURE_OBSERVATION
+        )
+    except Exception:
+        logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
+        return {}
+
+    by_session: dict[str, list[str] | None] = {}
+    for row in rows:
+        session_id = row.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        # Rows arrive newest first, so the first one wins: a phase re-probed
+        # after a retry is described by its most recent verdict.
+        if session_id not in by_session:
+            by_session[session_id] = read_agent_session_ids(row)
+    return by_session
+
+
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
+    agent_sessions: dict[str, list[str] | None],
 ) -> PhaseExecution:
-    """Map a domain phase to an API PhaseExecution."""
+    """Map a domain phase to an API PhaseExecution.
+
+    ``agent_sessions`` is the execution-wide capture lookup from
+    ``_load_agent_session_ids``, passed in rather than fetched here so the
+    query runs once per execution instead of once per phase.
+    """
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
 
     if phase.session_id:
@@ -291,6 +355,9 @@ async def _map_phase_detail(
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
         cost_by_model=sc.cost_by_model,
+        # `.get` on purpose: a phase with no capture row is "not reported",
+        # which is None - never [], which would claim a confirmed empty sweep.
+        agent_session_ids=agent_sessions.get(phase.session_id) if phase.session_id else None,
         operations=ops,
     )
 
@@ -330,6 +397,11 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
+        # Passed through verbatim, None included: this constructor re-lists
+        # every field by hand and is exactly the hop that drops one (#891,
+        # #1176). `or []` here would erase the not-reported/confirmed-none
+        # distinction the field exists to carry.
+        agent_session_ids=phase.agent_session_ids,
         operations=operations,
     )
 
@@ -628,7 +700,8 @@ async def get_detail(
     detail = await manager.workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
-    phases = [await _map_phase_detail(p, manager) for p in detail.phases]
+    agent_sessions = await _load_agent_session_ids(execution_id)
+    phases = [await _map_phase_detail(p, manager, agent_sessions) for p in detail.phases]
     # Folded from the phases this response already carries, so the header total
     # and the timeline below it are the same numbers by construction.
     duration = _DurationTotal.over(p.duration_seconds for p in phases)
