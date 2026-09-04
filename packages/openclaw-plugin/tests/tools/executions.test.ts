@@ -55,6 +55,8 @@ describe("synListExecutions", () => {
     // dashboard's alias change: its local `ExecutionListResponse` is a
     // structural SUBSET of the server's, so unknown fields are inert. This
     // test is what makes that a checked claim rather than an assumption.
+    // TODO(#1182): wire this package into `just codegen` so drift is a gate,
+    // not a test that only catches breakage after the fact.
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
         ...executionListPaged,
