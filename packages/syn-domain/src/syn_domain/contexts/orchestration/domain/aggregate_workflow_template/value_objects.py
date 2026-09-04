@@ -164,7 +164,11 @@ class PhaseDefinition(BaseModel):
 
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """Authority level for this phase's agent process, from the workflow YAML
-    ``agent.sandbox`` field. Defaults to least privilege (#1157, #1161)."""
+    ``agent.sandbox`` field.
+
+    Defaults to ``DEFAULT_PHASE_SANDBOX``, which is currently the MOST
+    permissive level, not the least - see there for why (#1157, #1161,
+    #1167). A phase wanting less must declare it."""
 
     allow_delegation: bool = False
     """When true, both agent auths are staged so the phase's primary agent can

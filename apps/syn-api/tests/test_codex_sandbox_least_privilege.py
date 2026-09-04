@@ -5,7 +5,12 @@ regardless of what its workflow said. On ``exec-dff4ff410bb1`` a verify phase
 used that grant to merge, commit and push the change it then certified, and
 the resulting verdict was indistinguishable from a real one.
 
-The levels were measured against codex 0.147.0 rather than assumed:
+The levels below were measured against codex 0.147.0 **on macOS**. The sandbox
+is implemented by the host's native engine - Seatbelt on macOS, Landlock/seccomp
+on Linux - so these are indicative, not authoritative, for the Linux workspace
+image. That distinction is not pedantic: ``workspace-write`` permitted the
+deliverable write on macOS and denied it in the container, which is how
+v0.28.0-beta.5 shipped a broken default (#1167).
 
     workspace-write   write: yes   git commit: yes   network: yes
     read-only         write: no    git commit: no    network: yes
@@ -35,23 +40,32 @@ def _sandbox_arg(argv: list[str]) -> str:
 
 
 class TestDefaultIsLeastPrivilege:
-    def test_undeclared_phase_is_not_full_access(self) -> None:
-        """The regression that mattered: silence must not mean full access.
+    def test_undeclared_phase_keeps_todays_behaviour(self) -> None:
+        """The default is full access, and that is a stopgap, not a target.
 
-        Not ``READ_ONLY`` as the default, because a phase publishes its
-        deliverable by writing under ``artifacts/output/`` and a read-only
-        phase would produce none. ``READ_ONLY`` stays available and is the
-        right level for a verify phase once the deliverable channel does not
-        require a write.
+        Both lower levels were tried and are unusable until #1167 lands:
+        ``WORKSPACE_WRITE`` broke every codex phase in v0.28.0-beta.5 (the
+        deliverable write under ``artifacts/output/`` was denied, no artifact
+        was produced, and the phase still reported ``completed``), and
+        ``READ_ONLY`` cannot publish a deliverable at all.
+
+        This test exists to pin that the default is a DELIBERATE choice with a
+        reason, so that changing it again is a decision rather than an
+        accident. A phase wanting less authority declares it today.
         """
-        assert DEFAULT_PHASE_SANDBOX is PhaseSandbox.WORKSPACE_WRITE
+        assert DEFAULT_PHASE_SANDBOX is PhaseSandbox.FULL_ACCESS
         argv = _build_codex_command("prompt", "gpt-5.6-sol")
-        assert _sandbox_arg(argv) == "workspace-write"
+        assert _sandbox_arg(argv) == "danger-full-access"
 
-    def test_no_codex_command_is_full_access_by_default(self) -> None:
+    def test_a_phase_can_ask_for_less_than_the_default(self) -> None:
+        """The point of #1162: authority is declared, not assumed.
+
+        The default being permissive does not make the mechanism pointless -
+        a phase that declares ``read-only`` gets it, on every model.
+        """
         for model in (None, "gpt-5.6-sol", "haiku"):
-            argv = _build_codex_command("prompt", model)
-            assert _sandbox_arg(argv) != "danger-full-access"
+            argv = _build_codex_command("prompt", model, PhaseSandbox.READ_ONLY)
+            assert _sandbox_arg(argv) == "read-only"
 
 
 class TestDeclaredLevelIsHonoured:
@@ -89,6 +103,40 @@ class TestUnknownLevelIsRefusedNotDowngraded:
         assert _resolve_sandbox(None, phase_id="verify") is DEFAULT_PHASE_SANDBOX
 
 
+class TestTheConfigHopKeepsIt:
+    """The hop the YAML test does not cover: PhaseDefinition -> AgentConfiguration.
+
+    ``_build_agent_config_from_phase`` has an early-return branch that returns
+    defaults when a phase declares "nothing". A field missing from that
+    branch's condition is silently dropped for exactly the author who asked
+    for it - which cost ``allowed_tools`` a release (#1039).
+    """
+
+    def test_a_phase_declaring_only_sandbox_keeps_it(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            _build_agent_config_from_phase,
+        )
+
+        class _OnlySandbox:
+            phase_id = "verify"
+            model = None
+            provider = None
+            allow_delegation = False
+            allowed_tools: tuple[str, ...] = ()
+            sandbox = "read-only"
+
+        config = _build_agent_config_from_phase(_OnlySandbox())
+        assert config.sandbox == "read-only", "dropped by the early-return branch"
+        assert (
+            _sandbox_arg(
+                _build_codex_command(
+                    "p", "gpt-5.6-sol", _resolve_sandbox(config.sandbox, phase_id="verify")
+                )
+            )
+            == "read-only"
+        )
+
+
 class TestStoredValuesAreNotWidened:
     """A stored template is rehydrated straight from a historical event.
 
@@ -124,8 +172,15 @@ class TestStoredValuesAreNotWidened:
 
 class TestTheWholePathFromYaml:
     """The unit tests above call the builder directly and would not notice
-    ``sandbox`` being dropped between YAML and the command line. This one
-    walks the hops that actually carry it."""
+    ``sandbox`` being dropped between YAML and the command line.
+
+    This walks the YAML -> PhaseDefinition hop and then the resolve/build
+    hops. It does NOT currently traverse ``WorkflowTemplateAggregate`` or
+    ``_build_agent_config_from_phase``; the API-side roundtrip is covered
+    separately by ``test_phase_create_carries_every_field``, which caught a
+    real drop in ``_build_phase_defs``. Stated rather than implied, because a
+    test whose docstring claims more than it does is worse than no test.
+    """
 
     def test_yaml_read_only_reaches_the_codex_argv(self) -> None:
         from syn_domain.contexts.orchestration._shared.workflow_definition import (

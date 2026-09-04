@@ -52,8 +52,12 @@ class PhaseSandbox(StrEnum):
     another way to publish."""
 
     WORKSPACE_WRITE = "workspace-write"
-    """Read, write and run commands inside the workspace. No network. The
-    default for phases that produce changes."""
+    """Read, write and run commands inside the workspace.
+
+    NOT "no network" - network egress was measured as available at every
+    level (see ``DEFAULT_PHASE_SANDBOX``). Also NOT usable by a phase that
+    publishes a deliverable: this was the v0.28.0-beta.5 default and the
+    write under ``artifacts/output/`` was denied (#1167)."""
 
     FULL_ACCESS = "full-access"
     """Unrestricted filesystem access AND network egress. Required only by a
@@ -69,35 +73,45 @@ CODEX_SANDBOX_FLAGS: dict[PhaseSandbox, str] = {
 }
 
 
-DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.WORKSPACE_WRITE
-"""What a phase gets when it declares nothing.
+DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.FULL_ACCESS
+"""What a phase gets when it declares nothing: today's behaviour, unchanged.
 
-NOT ``READ_ONLY``, and not for want of wanting it. A phase publishes its
-deliverable by WRITING a file under ``artifacts/output/``, which the
-collector then picks up - so a read-only phase produces no artifact and the
-phase after it starves. ``READ_ONLY`` is correct for a verify phase and
-becomes usable once a phase can publish its deliverable without writing;
-until then it is opt-in and would break the pipeline if defaulted.
+This is deliberately the MOST permissive level, and that is a stopgap rather
+than a judgement that it is correct.
 
-Every codex phase used to receive ``danger-full-access`` unconditionally,
-which is how a verify phase came to merge, commit and push the change it then
-certified (#1161). Defaulting to ``READ_ONLY`` inverts that: a phase that
-writes must say so, and a phase that forgets fails loudly at its first write
-instead of silently holding more authority than its author intended.
+``WORKSPACE_WRITE`` was tried as the default in v0.28.0-beta.5 and broke every
+codex phase in production: a phase publishes its deliverable by WRITING under
+``artifacts/output/``, the write was denied, no artifact was produced, and the
+phase still reported ``completed`` - silently removing the verify gate from
+every run (#1167). Rolled back after ~70 minutes.
 
-Measured on codex 0.147.0, since the levels do not mean what their names
-suggest:
+``READ_ONLY`` is the level a verify phase should run at and is unusable for the
+same reason: a read-only phase publishes nothing.
 
-===================  ==========  ============  =========
+So the default stays where it is until a phase can publish its deliverable
+WITHOUT a filesystem write (#1167). That change is what makes ``READ_ONLY``
+viable for verify phases, which is the actual goal of #1157 - and it closes
+#1161 at the same time, since a verifier that cannot write cannot push the
+change it certifies.
+
+What this module still buys today: the level is DECLARED PER PHASE and mapped
+at the command builder, instead of a constant hardcoded for every codex phase.
+A phase that wants less can ask for less right now.
+
+Levels measured against codex 0.147.0 on macOS. Note the caveat below - these
+were NOT measured on Linux, and the sandbox is implemented by the host's native
+engine (Seatbelt on macOS, Landlock/seccomp on Linux), so they are indicative
+rather than authoritative for the workspace image:
+
+===================  ==========  ==============  =========
 level                write file  ``git commit``  network
-===================  ==========  ============  =========
-``workspace-write``  yes         yes           yes
-``read-only``        no          no            **yes**
-===================  ==========  ============  =========
+===================  ==========  ==============  =========
+``workspace-write``  yes         yes             yes
+``read-only``        no          no              **yes**
+===================  ==========  ==============  =========
 
 Network egress survives every level, so the sandbox is a FILESYSTEM control
-only. Do not reach for ``workspace-write`` expecting it to contain a phase to
-the box - it will not. Restricting egress is the workspace container's job.
+only. Restricting egress is the workspace container's job, not a flag's.
 """
 
 
