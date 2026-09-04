@@ -37,6 +37,16 @@ collections, quoted keys and aliases before any rule runs, walks
 `services.*.ports[]`, and decides on what the entry MEANS: which interface does
 this bind? Nothing here counts a character.
 
+FINDING THE ENTRY IS HALF THE JOB, and it is the half that fails quietly: an
+entry the walk never reaches is not a warning, it is a clean run. The parser
+normalises the two alias shapes for free, but a `<<` merge key is a mapping
+operation the parser leaves for its caller, so `_mapping_items` applies it -
+otherwise a service inherits `ports` from an anchor and the gate reports zero
+publishes for the document. The same failure mode on the shell side is a flag
+spelling the pattern does not match (`-p5432:5432`). When something here is
+loosened, prefer widening what is FOUND and letting the meaning rules judge
+it, over adding a rule about how it was written.
+
 WHAT THIS GATE DOES NOT PROMISE. It resolves `${...}` with every variable
 UNSET, so its guarantee is about DEFAULTS. `${SYN_ENV_BIND:-127.0.0.1}` binds
 loopback here and binds 0.0.0.0 for an operator who exports
@@ -44,7 +54,10 @@ loopback here and binds 0.0.0.0 for an operator who exports
 guarantee, but it would also delete the supported way to run selfhost behind a
 reverse proxy, so instead every variable that can flip a bind public must be
 named in DECLARED_OPERATOR_BINDS below, the run reports how large that surface
-is, and a new undeclared one fails.
+is, and a new undeclared one fails. That promise is only as good as
+`binding_variables`: a variable it does not credit is an undeclared operator
+override that never gets reported, which reads as a clean run and is the one
+outcome this design cannot afford.
 
 SCOPE is what actually starts containers: compose files under docker/ and
 infra/, the justfile, and scripts/. Prose in docs and READMEs is out of scope on
@@ -90,6 +103,10 @@ _BARE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 
 #: `$$` is Compose's escape for a literal `$`; it is not a variable.
 _ESCAPED_DOLLAR = "\x00SYN_DOLLAR\x00"
+
+#: What a plain `<<` key resolves to. Merge is a YAML feature, not a Compose
+#: one, so the parser tags it and nothing here has to match on the characters.
+_MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
 @dataclass(frozen=True)
@@ -238,13 +255,32 @@ def _reason_for_host_ip(host_ip: str) -> str | None:
     return None
 
 
-def host_ip_variables(publish: Publish) -> list[str]:
-    """The variables that land in the host-interface field of this publish.
+def binding_variables(publish: Publish) -> list[str]:
+    """The variables whose value can change which interface this publish binds.
 
     A port variable is not an interface variable, so probing every name would
-    blame the wrong one. Resolving all of them to distinct markers in a single
-    pass and then asking which markers ended up in the host-IP field answers
-    that exactly, without depending on where the `${...}` sits in the text.
+    blame the wrong one - and blaming the wrong one fails a safe line, which
+    is how a gate gets switched off. The question is therefore not "where is
+    the `${...}` written" but "can this name move the interface".
+
+    Resolving every name to a distinct colon-free marker in one pass and
+    splitting the result answers it. If the spec then still names a host
+    interface, that field is settled by whatever is inside it: a marker there
+    can move the bind, and a marker anywhere else is confined to a port field
+    and cannot. If it names NO host interface, the mapping has no interface
+    field of its own to be confined to - the variables are supplying the
+    structure, so any of them can supply an interface with it.
+
+    That second case is what the first version of this walk missed. It kept
+    only markers landing inside a parsed host-IP field, so the whole of
+    `${PUBLISH:-127.0.0.1:15432:5432}` - and the leading run of
+    `${DB_BIND:-127.0.0.1:15432}:5432` - reported no interface variable at
+    all, and an undeclared name chose the interface with nothing to say so.
+
+    The residue is a port variable holding a value with a colon in it, which
+    shifts the fields and is not credited here. That is deliberate: it
+    produces a mapping docker rejects as malformed rather than a bind, and
+    crediting it would fail every legitimate `${HOST}:${PORT}:5432`.
     """
     if publish.long_form:
         return variable_names(publish.host_ip or "")
@@ -253,7 +289,9 @@ def host_ip_variables(publish: Publish) -> list[str]:
     names = variable_names(spec)
     markers = {name: f"synmark{index}" for index, name in enumerate(names)}
     host_ip, _, _ = split_short_syntax(interpolate(spec, markers))
-    return [name for name in names if markers[name] in (host_ip or "")]
+    if host_ip is None:
+        return names
+    return [name for name in names if markers[name] in host_ip]
 
 
 def evaluate(publishes: list[Publish]) -> tuple[int, list[str]]:
@@ -266,7 +304,7 @@ def evaluate(publishes: list[Publish]) -> tuple[int, list[str]]:
         if reason is not None:
             findings.append(Finding(publish.file, publish.line, publish.shown, reason))
             continue
-        for name in host_ip_variables(publish):
+        for name in binding_variables(publish):
             if any(reject_reason(publish, {name: hostile}) for hostile in ("0.0.0.0", "::")):
                 overridable.append((publish, name))
 
@@ -347,9 +385,44 @@ def _child(node: yaml.Node | None, key: str) -> yaml.Node | None:
 
 
 def _mapping_items(node: yaml.Node | None) -> list[tuple[str, yaml.Node]]:
-    if not isinstance(node, yaml.MappingNode):
-        return []
-    return [(k.value, v) for k, v in node.value if isinstance(k, yaml.ScalarNode)]
+    """A mapping's keys, with `<<` merge keys resolved into the keys they add.
+
+    A merge key is a third way a service acquires `ports`, and the sneakiest:
+    the word never appears near the service. Returning the literal `<<` entry
+    instead of what it inherits means the walk finds nothing to judge and the
+    document passes with no publishes at all - the same class of miss as the
+    aliases above, one level further in.
+
+    Merge is not "walk everything": YAML defines precedence, and a mapping
+    Docker never applies is the wrong one to judge. A key written here wins
+    over any it inherits, and in `<<: [*a, *b]` the earlier source wins, so
+    nothing already present is ever replaced. `<<` is recognised by its
+    resolved tag rather than its text, because a quoted `"<<"` is an ordinary
+    key and merges nothing.
+    """
+    items: dict[str, yaml.Node] = {}
+    visited: set[int] = set()
+
+    def absorb(mapping: yaml.Node | None) -> None:
+        # `visited` stops a mapping that merges itself through its own anchor
+        # from recursing forever; PyYAML registers an anchor before it fills
+        # the node in, so `&a\n<<: *a` composes and would otherwise hang.
+        if not isinstance(mapping, yaml.MappingNode) or id(mapping) in visited:
+            return
+        visited.add(id(mapping))
+        inherited: list[yaml.Node] = []
+        for key, value in mapping.value:
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            if key.tag == _MERGE_TAG:
+                inherited.extend(value.value if isinstance(value, yaml.SequenceNode) else [value])
+            elif key.value not in items:
+                items[key.value] = value
+        for source in inherited:
+            absorb(source)
+
+    absorb(node)
+    return list(items.items())
 
 
 def _sequence(node: yaml.Node | None) -> list[yaml.Node]:
@@ -358,8 +431,12 @@ def _sequence(node: yaml.Node | None) -> list[yaml.Node]:
 
 #: `-p`/`--publish` and its argument, with the quoting the shell would strip.
 #: The quotes are why the first version missed `-p "${PROXY_PORT}:8080"`: it
-#: required the argument to START with a digit or a `$`.
-_PUBLISH_FLAG = re.compile(r"""(?:^|\s)(?:-p|--publish)[=\s]+("[^"]*"|'[^']*'|\S+)""")
+#: required the argument to START with a digit or a `$`. The separator is
+#: optional because docker takes `-p5432:5432` too, and a gate that reads one
+#: spelling of a flag and silently skips another is worse than one that reads
+#: neither - it tells you the flag is covered. Nothing is loosened by this:
+#: what makes an argument a publish is _LOOKS_LIKE_A_PORT below, not the space.
+_PUBLISH_FLAG = re.compile(r"""(?:^|\s)(?:-p|--publish)[=\s]*("[^"]*"|'[^']*'|\S+)""")
 
 #: `mkdir -p workspaces` and `cargo build -p aps-cli` are also `-p`. A port
 #: mapping either contains a colon and starts somewhere an address or a

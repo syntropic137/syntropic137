@@ -1,8 +1,11 @@
 """Unit tests for the no-public-ports gate.
 
-Every fixture under `fixtures/no_public_ports/` was run against the PREVIOUS,
-awk-based version of this gate before being written down, and the file names
-record what it did with them:
+Every fixture under `fixtures/no_public_ports/` was run against the version of
+this gate that PRECEDED it before being written down, and the file names record
+what that version did with them. None of them is an assertion that the current
+code does what it currently does.
+
+Six were run against the original awk gate, which counted colons:
 
     waved_through_by_colon_count.{yaml,sh}  old gate: ok, exit 0
     never_scanned_at_all.yaml               old gate: ok, exit 0
@@ -18,8 +21,26 @@ record what it did with them:
                                             colons, not because anything asked
                                             what they bind
 
-So these are not assertions that the current code does what it does. Each one
-is a case the shipped gate got wrong, in one of the two directions.
+Three more were run against the FIRST YAML-aware version (d2ed8a64), which
+fixed the colon counting and was then found to have three holes of its own.
+All three exited 0 on the fixture that now covers them:
+
+    inherited_through_a_merge_key.yaml      d2ed8a64: 1 publish found, exit 0 -
+                                            it returned the literal `<<` entry,
+                                            so two publicly-binding services
+                                            inheriting `ports` were never walked
+    interpolation_outside_the_host_ip_      d2ed8a64: 2 publishes found, exit 0,
+      field.yaml                            and binding_variables() returned []
+                                            for both, so an undeclared variable
+                                            choosing the interface was reported
+                                            nowhere
+    compact_publish_flag.sh                 d2ed8a64: 0 publishes found, exit 0 -
+                                            the flag pattern required a
+                                            separator, so `-p5432:5432` matched
+                                            nothing, while `--publish=5432:5432`
+                                            was rejected correctly
+
+Each one is a case the shipped gate got wrong, in one of the two directions.
 
 They drive `evaluate()` - the verdict a human actually reads - rather than the
 classification helpers, and they assert the LINE NUMBERS in that rendered
@@ -239,6 +260,123 @@ class TestShellPublishes:
     def test_safe_publishes_and_unrelated_dash_p_flags_are_left_alone(self) -> None:
         """`mkdir -p`, `cargo build -p` and an echoed `-p` all share the flag.
         A gate that flags them gets switched off."""
+        code, flagged = verdict("safe.sh")
+        assert flagged == {}
+        assert code == 0
+
+
+class TestPortsInheritedThroughAMergeKey:
+    """A `<<` merge key is the third way a service acquires `ports`, and the
+    one the first YAML-aware version did not walk: it read the literal `<<`
+    entry and never looked at what it inherits, so the document reported zero
+    publishes and exited 0 with two publicly-binding services in it."""
+
+    def test_a_service_that_inherits_ports_is_judged_on_them(self) -> None:
+        code, flagged = verdict("inherited_through_a_merge_key.yaml")
+        assert code == 1
+        assert "no host interface" in flagged[14]
+
+    def test_the_inherited_entry_is_reported_where_the_anchor_is_written(self) -> None:
+        """Line 14 is inside `x-inherited-public`, the mapping a human has to
+        change; line 28 is only the `<<:` that pulls it in. Same rule as the
+        alias case, and the reason merge is resolved on the node graph rather
+        than by copying text."""
+        _, flagged = verdict("inherited_through_a_merge_key.yaml")
+        assert 28 not in flagged
+
+    def test_ports_written_on_the_service_win_over_the_inherited_ones(self) -> None:
+        """`own_ports_win_over_the_inherited_ones` merges a 0.0.0.0 anchor AND
+        writes its own loopback `ports`. YAML gives the local key precedence, so
+        line 17 is a mapping docker never applies - flagging it would fail a
+        service that is correctly configured, which is how a gate loses its
+        credibility. Line 17 is reachable ONLY through this service, so it is
+        flagged if and only if the precedence is inverted."""
+        _, flagged = verdict("inherited_through_a_merge_key.yaml")
+        assert 17 not in flagged
+
+    def test_the_earlier_source_of_a_merge_list_wins(self) -> None:
+        """`<<: [*loopback_base, *later_public]` resolves to the loopback ports
+        on line 20. Taking the last source instead binds 0.0.0.0 and would flag
+        line 23, which nothing else in this fixture can reach."""
+        _, flagged = verdict("inherited_through_a_merge_key.yaml")
+        assert 23 not in flagged
+
+    def test_no_other_entry_in_the_document_is_flagged(self) -> None:
+        """Stated as an exact set so a merge rule that pulls in a mapping which
+        does not apply shows up as an extra line rather than passing unnoticed."""
+        _, flagged = verdict("inherited_through_a_merge_key.yaml")
+        assert sorted(flagged) == [14]
+
+
+class TestVariablesThatChooseTheInterfaceFromOutsideTheHostIpField:
+    """The defaults-only promise is that any variable able to flip a bind
+    public is NAMED. The first YAML-aware version only credited variables whose
+    marker landed inside the parsed host-IP field, so a variable supplying the
+    whole mapping - or a leading run of it - chose the interface with nothing
+    reported at all, and the run was clean."""
+
+    def test_both_are_rejected_as_undeclared_operator_overrides(self) -> None:
+        code, flagged = verdict("interpolation_outside_the_host_ip_field.yaml")
+        assert code == 1
+        assert sorted(flagged) == [16, 20]
+
+    def test_a_variable_supplying_the_whole_mapping_is_named(self) -> None:
+        """`${PUBLISH:-127.0.0.1:15432:5432}` is loopback unset and picks a
+        random port on every interface when an operator exports it."""
+        _, flagged = verdict("interpolation_outside_the_host_ip_field.yaml")
+        assert "${PUBLISH}" in flagged[16]
+        assert "DECLARED_OPERATOR_BINDS" in flagged[16]
+
+    def test_a_variable_supplying_part_of_the_mapping_is_named(self) -> None:
+        """`${DB_BIND:-127.0.0.1:15432}:5432` spans the boundary between the
+        host interface and the host port, so it belongs to neither field and
+        was credited to neither."""
+        _, flagged = verdict("interpolation_outside_the_host_ip_field.yaml")
+        assert "${DB_BIND}" in flagged[20]
+
+    def test_a_port_variable_is_still_not_blamed_for_the_interface(self) -> None:
+        """The reason the narrow rule existed. `safe.yaml` interpolates
+        `${SYN_ENV_PORT_DB}` into the host PORT of an otherwise safe mapping;
+        widening the question from "where is it written" to "can it move the
+        bind" must not start failing that line, or the fix trades a silent miss
+        for a false positive on the spelling the gate asks people to use."""
+        code, lines = evaluate(
+            publishes_in_compose("safe.yaml", (FIXTURES / "safe.yaml").read_text())
+        )
+        assert code == 0
+        assert any("SYN_ENV_BIND=0.0.0.0" in line for line in lines)
+        assert not any("SYN_ENV_PORT_DB" in line for line in lines)
+
+
+class TestTheCompactPublishFlag:
+    """`docker run -p5432:5432` - no separator. The first YAML-aware version
+    required `[=\\s]+` after the flag, so it found nothing on any of these
+    lines and exited 0, while `--publish=5432:5432` was rejected correctly."""
+
+    def test_every_compact_spelling_is_found_and_judged(self) -> None:
+        code, flagged = verdict("compact_publish_flag.sh")
+        assert code == 1
+        assert sorted(flagged) == [9, 10, 11]
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (9, "no host interface"),  # -p5432:5432
+            (10, "'0.0.0.0'"),  # -p"0.0.0.0:5432:5432"
+            (11, "'::'"),  # -p'[::]:5432:5432'
+        ],
+    )
+    def test_each_is_rejected_for_what_it_binds(self, line: int, expected: str) -> None:
+        """Compact quoting included: the shell strips the quote whether or not a
+        space precedes it, so `-p"..."` publishes exactly what `-p "..."` does."""
+        _, flagged = verdict("compact_publish_flag.sh")
+        assert expected in flagged[line]
+
+    def test_non_publish_uses_of_the_flag_survive_the_looser_separator(self) -> None:
+        """Making the separator optional means `-p` now matches with anything
+        after it, so `mkdir -p workspaces` and `cargo build -p aps-cli` are
+        candidates on every run. They are still excluded by what the argument
+        LOOKS like, which is the only thing that ever excluded them."""
         code, flagged = verdict("safe.sh")
         assert flagged == {}
         assert code == 0
