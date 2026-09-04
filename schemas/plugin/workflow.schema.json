@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.28.0-beta.4/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.28.0-beta.5/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
