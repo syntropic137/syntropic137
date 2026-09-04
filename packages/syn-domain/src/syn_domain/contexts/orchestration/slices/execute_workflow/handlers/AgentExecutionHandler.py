@@ -259,6 +259,11 @@ class AgentExecutionHandler:
         # the process finally returns says whether that exec happened (#1065).
         # `finally`, because an agent that announced itself and then blew up
         # mid-stream still existed, and the exception must not swallow that.
+        #
+        # The transport is told which name to announce under, rather than the
+        # observer being told by the stream which name to believe. That is the
+        # whole of the forgery defence: `launch.wrapper_name` exists before
+        # this stream does, so no line on it can become the name that counts.
         launch = AgentLaunchEvidence(on_launch)
         try:
             stream_result = await processor.process_stream(
@@ -267,6 +272,7 @@ class AgentExecutionHandler:
                         claude_cmd,
                         timeout_seconds=timeout_seconds,
                         environment=agent_env,
+                        wrapper_name=launch.wrapper_name,
                     ),
                 ),
                 workspace,

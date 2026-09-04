@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 import time
 
-from syn_domain.contexts.orchestration import announce_as
+from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
 
 logger = logging.getLogger(__name__)
 
@@ -41,48 +40,35 @@ logger = logging.getLogger(__name__)
 #: argument rather than interpolated, which keeps this script a constant.
 _ANNOUNCE_THEN_EXEC = 'printf "%s\\n" "$1"; shift; exec "$@"'
 
-#: Prefixes the name this wrapper runs under, for an operator reading a phase
-#: log; the rest of the name is what makes it evidence.
-_WRAPPER = "syn-launch"
-
-
-def _wrapper_name() -> str:
-    """A name for one wrapper, which no other process on its stream can produce.
-
-    This becomes the shell's ``$0``, and a POSIX shell puts ``$0`` in front of
-    its own diagnostics - so it is the signature that lets ``AgentLaunchEvidence``
-    read "the exec failed" off a stream that also carries agent output, instead
-    of reading it off the exit status alone and retracting agents that really
-    ran and really exited 126 or 127 (#1065).
-
-    Fresh per exec, because a constant name would be a signature the agent
-    could forge: agent stdout and this shell's stderr are the same stream by
-    design (ADR-043), so a guessable name lets a line the agent chooses to
-    print decide whether that agent is reported as having existed. This one is
-    never inside the container - it is an argument to the `docker exec` CLIENT,
-    on the host, and ``exec`` overwrites the argv holding it before the agent
-    exists to look.
-
-    The published marker needs no such protection and says so: an agent that
-    echoes it only attests its own existence. This name is the opposite - a
-    forged copy denies the agent's existence - so it is the half that is minted.
-    """
-    return f"{_WRAPPER}-{secrets.token_hex(8)}"
-
 
 def _build_exec_command(
     container_name: str,
     command: list[str],
     working_directory: str | None,
     environment: dict[str, str] | None,
+    *,
+    wrapper_name: str | None,
 ) -> list[str]:
-    """Build the docker exec command list, wrapped so a startable agent announces itself."""
+    """Build the docker exec command list, wrapped so a startable agent announces itself.
+
+    ``wrapper_name`` is the ``$0`` to announce under, and it comes from whoever
+    is going to listen for that announcement - ``AgentLaunchEvidence.wrapper_name``
+    in production. Passing it in rather than minting it here is what makes the
+    name a challenge the agent cannot answer: the listener knows it before this
+    stream exists, so a name the stream carries can never become the one that
+    counts (#1065).
+
+    A caller that is not collecting launch evidence passes None and gets a
+    throwaway name, so the exec is the same shape either way: the wrapper also
+    fixes which process the timeout path signals, and a transport that ran two
+    different argv depending on who was watching would be two transports.
+    """
     exec_cmd = ["docker", "exec", "-i", "-w", working_directory or "/workspace"]
     if environment:
         for key, value in environment.items():
             exec_cmd.extend(["-e", f"{key}={value}"])
     exec_cmd.append(container_name)
-    wrapper = _wrapper_name()
+    wrapper = wrapper_name if wrapper_name is not None else mint_wrapper_name()
     exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, wrapper, announce_as(wrapper), *command])
     return exec_cmd
 

@@ -154,7 +154,12 @@ async def _launches_and_lines(
 
     handle = IsolationHandle(isolation_id="container-abc123", isolation_type="docker")
     evidence = AgentLaunchEvidence(observer)
-    lines = [line async for line in evidence.observing(adapter.stream(handle, command))]
+    lines = [
+        line
+        async for line in evidence.observing(
+            adapter.stream(handle, command, wrapper_name=evidence.wrapper_name),
+        )
+    ]
     await evidence.settle(adapter.last_exit_code)
     await evidence.settle(adapter.last_exit_code)
     return launches, lines
@@ -401,6 +406,56 @@ async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
     assert launches == 1
 
 
+async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launched(
+    fake_docker: Callable[[str], _FakeDocker],
+) -> None:
+    """The forgery a minted name alone does not stop (#1065).
+
+    Randomness makes the wrapper's name unguessable; it does not make it
+    unREPLACEABLE. An observer that learned which name to trust FROM the stream
+    could be told a second time, so an agent never had to guess: announce a
+    name of your own, sign a diagnostic with it, exit 127, and the observer
+    retracts a launch that really happened - the false NOT_LAUNCHED this whole
+    module exists to prevent, reachable from ordinary agent output.
+
+    That is an ordering property ("exactly one announcement, before any agent
+    output"), and no amount of entropy enforces an ordering. So the ordering is
+    removed instead: the name is minted by the observer BEFORE this stream
+    exists and handed to the transport, and a second announcement is just a
+    line the agent typed.
+
+    The whole chain is real - the production command builder, a real /bin/sh
+    running the real wrapper, a real failed process status, the real observer -
+    because the defect lived in exactly the hop between them.
+    """
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    forged_name = "syn-launch-deadbeefdeadbeef"
+    forged_announcement = announce_as(forged_name)
+    forged_diagnostic = f"{forged_name}: 1: exec: /usr/local/bin/claude: not found"
+
+    launches, lines = await _launches_and_lines(
+        docker.adapter,
+        [
+            "python3",
+            "-c",
+            f"print({forged_announcement!r}); print({forged_diagnostic!r}); raise SystemExit(127)",
+        ],
+    )
+
+    assert lines == [forged_announcement, forged_diagnostic], (
+        "the agent must really have announced a wrapper name of its own AND signed a "
+        f"line with it, or this test cannot fail; a stream missing either is not the "
+        f"uncovered shape (more than one announcement on one stream): {lines}"
+    )
+    assert docker.adapter.last_exit_code == 127, (
+        "the retraction must really be armed, or the launch would survive for the wrong reason"
+    )
+    assert launches == 1, (
+        "the agent genuinely launched - the real wrapper announced and exec'd it - so "
+        "a name the agent chose must not be able to retract that"
+    )
+
+
 class _ContainerArgv(NamedTuple):
     """The three things the adapter hands a container, read back out of the argv.
 
@@ -419,19 +474,27 @@ class _ContainerArgv(NamedTuple):
         return cls(*exec_argv[sh + 2 : sh + 5])
 
 
-async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
-    """Put lines through the real observer, settled as a clean exit would settle it."""
+async def _observed(lines_for: Callable[[str], list[str]]) -> tuple[bool, list[str]]:
+    """Put lines through the real observer, settled as a clean exit would settle it.
+
+    ``lines_for`` is handed the name the evidence minted, because that is the
+    only way a stream can carry the announcement this evidence listens for.
+    Taking a plain list instead would let a case pass while the transport
+    announced under a name of its own - which is the whole failure being
+    guarded against, so the fixture is not allowed to be able to express it.
+    """
     launched = False
 
     async def observer() -> None:
         nonlocal launched
         launched = True
 
+    evidence = AgentLaunchEvidence(observer)
+
     async def stream() -> AsyncIterator[str]:
-        for line in lines:
+        for line in lines_for(evidence.wrapper_name):
             yield line
 
-    evidence = AgentLaunchEvidence(observer)
     survived = [line async for line in evidence.observing(stream())]
     await evidence.settle(exit_code=0)
     return launched, survived
@@ -448,10 +511,25 @@ async def test_the_announcement_the_adapter_makes_is_the_one_the_domain_counts()
     a string the observer ignores, every session would report never-started,
     and every other test here would still pass.
     """
-    argv = _ContainerArgv.of(_build_exec_command(_CONTAINER, ["claude", "-p", "hello"], None, None))
+    built: list[_ContainerArgv] = []
 
-    launched, survived = await _observed([argv.announcement, '{"type":"result"}'])
+    def as_the_adapter_would(wrapper_name: str) -> list[str]:
+        built.append(
+            _ContainerArgv.of(
+                _build_exec_command(
+                    _CONTAINER,
+                    ["claude", "-p", "hello"],
+                    None,
+                    None,
+                    wrapper_name=wrapper_name,
+                )
+            )
+        )
+        return [built[0].announcement, '{"type":"result"}']
 
+    launched, survived = await _observed(as_the_adapter_would)
+
+    argv = built[0]
     assert launched is True, (
         f"the observer does not count {argv.announcement!r}, the line the adapter really prints"
     )
@@ -477,7 +555,15 @@ async def test_each_exec_is_wrapped_under_a_name_the_last_one_did_not_use() -> N
     name that repeats is the defect.
     """
     names = {
-        _ContainerArgv.of(_build_exec_command(_CONTAINER, ["claude"], None, None)).wrapper
+        _ContainerArgv.of(
+            _build_exec_command(
+                _CONTAINER,
+                ["claude"],
+                None,
+                None,
+                wrapper_name=AgentLaunchEvidence(None).wrapper_name,
+            )
+        ).wrapper
         for _ in range(50)
     }
 
@@ -503,7 +589,13 @@ async def test_the_shell_signs_its_exec_diagnostic_with_the_name_we_gave_it(shel
     if (shell_path := shutil.which(shell)) is None:
         pytest.skip(f"{shell} is not installed")
     argv = _ContainerArgv.of(
-        _build_exec_command(_CONTAINER, ["/definitely/missing/claude"], None, None)
+        _build_exec_command(
+            _CONTAINER,
+            ["/definitely/missing/claude"],
+            None,
+            None,
+            wrapper_name=AgentLaunchEvidence(None).wrapper_name,
+        )
     )
 
     missing = "/definitely/missing/claude"

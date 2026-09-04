@@ -105,6 +105,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
     announce_as,
+    mint_wrapper_name,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
@@ -228,6 +229,7 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "mint_wrapper_name",
     "require_supported_execution_type",
     "validate_phase_declarations",
     "validate_workflow_yaml",

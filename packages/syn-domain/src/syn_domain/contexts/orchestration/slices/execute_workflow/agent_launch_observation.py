@@ -33,10 +33,22 @@ A transport that creates no process - a replayed recording, an in-memory double
 - emits no marker and leaves the session UNKNOWN. That is right rather than a
 gap: it has no standing to attest a launch, and UNKNOWN is the state that
 exists for having no evidence.
+
+The name in that marker is a CHALLENGE, issued before the stream exists and
+never learned from it. ``AgentLaunchEvidence`` mints one per exec and the
+transport is told to answer under it; only a process the transport created
+inside the workspace could have been told, so only such a process can answer.
+Reading the name off the stream instead would put the answer in charge of the
+question: an agent could announce a name of its own, sign a diagnostic with it
+and retract its own launch, which is the false NOT_LAUNCHED this module exists
+to prevent (#1065). A secret learned from the stream is not a secret, and no
+amount of randomness fixes that - it is an ordering property, not an entropy
+one, so the ordering is removed rather than defended.
 """
 
 from __future__ import annotations
 
+import secrets
 from typing import TYPE_CHECKING, Final, Protocol
 
 if TYPE_CHECKING:
@@ -48,13 +60,15 @@ AGENT_LAUNCH_MARKER = "__syn_agent_launched__"
 
 Part of the event stream contract: a transport that really creates a process
 emits this line first, and nothing else in the stream means a launch.
-``AgentLaunchEvidence`` consumes it, so it never reaches a stream processor. An
-agent that echoed it would only be attesting its own existence, which is why
-no escaping is needed for this half of the line.
+``AgentLaunchEvidence`` consumes the one line it was expecting, so that line
+never reaches a stream processor. An agent that echoed this marker would only
+be attesting its own existence, which is why no escaping is needed for this
+half of the line - and its copy is forwarded like any other agent output,
+because it is agent output.
 
 The rest of the line is the wrapper's NAME, and that half does need to be
-unguessable - see ``announce_as``. Use that to build the line rather than
-concatenating here, so the two ends cannot drift.
+unguessable - see ``mint_wrapper_name``. Build the line with ``announce_as``
+rather than concatenating here, so the two ends cannot drift.
 
 What the line claims is exactly "a process here is about to become the agent",
 which is all a wrapper can honestly say at the moment it speaks. Turning that
@@ -70,22 +84,44 @@ def announce_as(name: str) -> str:
     ``name`` is the wrapper's ``$0``, which is also what a POSIX shell puts in
     front of its own diagnostics - so announcing it here is what later lets
     ``AgentLaunchEvidence`` tell a line the wrapper wrote from a line the agent
-    wrote. That only works while the agent cannot produce the name itself,
-    which makes it the caller's job to mint one that is fresh and unguessable
-    per exec rather than to name the wrapper something readable.
+    wrote. That only works while the agent cannot produce the name itself, so
+    take ``name`` from ``mint_wrapper_name`` rather than calling the wrapper
+    something readable.
 
-    Inverse of ``_announced_name``; they are kept adjacent because a transport
-    that formats this line by hand is how the two halves silently drift apart.
+    Kept beside ``mint_wrapper_name`` and ``AgentLaunchEvidence`` because a
+    transport that formats this line by hand is how the two halves silently
+    drift apart.
     """
     return f"{AGENT_LAUNCH_MARKER} {name}"
 
 
-def _announced_name(line: str) -> str | None:
-    """The wrapper name this line announces, or None if it is not an announcement."""
-    marker, sep, name = line.partition(" ")
-    if marker != AGENT_LAUNCH_MARKER or not sep or not name:
-        return None
-    return name
+#: Prefixes every wrapper name, for an operator reading a phase log. The rest
+#: is what makes the name evidence.
+_WRAPPER_PREFIX: Final = "syn-launch"
+
+
+def mint_wrapper_name() -> str:
+    """A name for one wrapper, which no other process on its stream can produce.
+
+    This becomes the wrapper shell's ``$0``, and a POSIX shell puts ``$0`` in
+    front of its own diagnostics - so it is the signature that lets
+    ``AgentLaunchEvidence`` read "the exec failed" off a stream that also
+    carries agent output, instead of reading it off the exit status alone and
+    retracting agents that really ran and really exited 126 or 127 (#1065).
+
+    Fresh per exec, because a constant name would be a signature the agent
+    could forge: agent stdout and the wrapper's stderr are the same stream by
+    design (ADR-043), so a guessable name lets a line the agent chooses to
+    print decide whether that agent is reported as having existed. Nothing
+    inside the container is ever told this name except through the wrapper's
+    own argv, which ``exec`` overwrites before the agent exists to look.
+
+    The published marker needs no such protection and says so: an agent that
+    echoes it only attests its own existence. This name is the opposite - a
+    forged copy denies the agent's existence - so it is the half that is
+    minted.
+    """
+    return f"{_WRAPPER_PREFIX}-{secrets.token_hex(8)}"
 
 
 #: The two statuses a shell reports when it could not execute the command:
@@ -114,11 +150,14 @@ class AgentLaunchObserver(Protocol):
 class AgentLaunchEvidence:
     """What one phase's stream showed about whether an agent process existed.
 
-    Used in two steps, because the answer is not available in one. ``observing``
-    wraps the phase's stream and watches it go by; ``settle`` is given what the
-    process finally exited with and records the launch, or does not.
+    Used in three steps, because the answer is not available in one.
+    ``wrapper_name`` is the challenge, handed to the transport before the
+    stream exists; ``observing`` wraps the phase's stream and watches it go by;
+    ``settle`` is given what the process finally exited with and records the
+    launch, or does not.
 
-    Holding the marker provisional between those two steps is the point. A
+    Holding the marker provisional between announcement and status is the
+    point. A
     wrapper announces immediately before ``exec``, so at the moment the line
     arrives "an agent exists" is a claim about the next instruction rather than
     an observation - and the one case that matters, an exec that fails, looks
@@ -135,18 +174,49 @@ class AgentLaunchEvidence:
     statement this whole module exists to keep honest.
     """
 
-    __slots__ = ("_observer", "_ran_to_the_end", "_recorded", "_spoke_over", "_wrapper")
+    __slots__ = (
+        "_announced",
+        "_announcement",
+        "_observer",
+        "_ran_to_the_end",
+        "_recorded",
+        "_spoke_over",
+        "_wrapper",
+    )
 
     def __init__(self, observer: AgentLaunchObserver | None) -> None:
-        """Watch on behalf of ``observer``, or of nobody when there is none."""
+        """Watch on behalf of ``observer``, or of nobody when there is none.
+
+        Mints the name it will listen for here, before there is a stream to
+        listen to, so nothing on the stream can choose it.
+        """
         self._observer = observer
-        self._wrapper: str | None = None
+        self._wrapper = mint_wrapper_name()
+        self._announcement = announce_as(self._wrapper)
+        self._announced = False
         self._spoke_over = False
         self._ran_to_the_end = False
         self._recorded = False
 
+    @property
+    def wrapper_name(self) -> str:
+        """The ``$0`` the transport must run this phase's wrapper under.
+
+        The only name this evidence will accept an announcement under, and the
+        only place a caller can get one - so the name the transport announces
+        and the name the observer listens for cannot be different names.
+        """
+        return self._wrapper
+
     async def observing(self, stream: AsyncIterator[str]) -> AsyncIterator[str]:
         """Yield from ``stream``, keeping the agent's announcement for ``settle``.
+
+        Only the exact announcement of the name minted for this phase is taken
+        - and taken as a fact about the transport, not as an instruction, so
+        the stream never gets to say which name counts. A line that merely
+        looks like an announcement is an agent that typed one, and is treated
+        as what it is: agent output, forwarded, and evidence that something
+        spoke over the wrapper.
 
         Transparent otherwise: every other line passes through untouched and
         every exception propagates unchanged, including the wrapper's own
@@ -155,26 +225,25 @@ class AgentLaunchEvidence:
         answer rather than answered no.
         """
         async for line in stream:
-            name = _announced_name(line)
-            if name is None:
-                if not self._signed_by_the_wrapper(line):
-                    self._spoke_over = True
-                yield line
+            if line == self._announcement:
+                self._announced = True
                 continue
-            self._wrapper = name
+            if not self._signed_by_the_wrapper(line):
+                self._spoke_over = True
+            yield line
         self._ran_to_the_end = True
 
     def _signed_by_the_wrapper(self, line: str) -> bool:
-        """Whether the wrapper that announced itself on this stream wrote this line.
+        """Whether the wrapper this phase's transport was told to run under wrote this line.
 
         A POSIX shell prefixes its diagnostics with its own ``$0`` and a colon,
-        and the wrapper announced that ``$0`` on the way past. The wording
-        after the colon is not checked: dash says ``exec: X: not found`` where
-        bash says ``line 1: X: No such file or directory``, and which of them
-        is /bin/sh is a property of the workspace image rather than of this
-        repo. The prefix is the part we set ourselves.
+        and that ``$0`` was minted here. The wording after the colon is not
+        checked: dash says ``exec: X: not found`` where bash says ``line 1: X:
+        No such file or directory``, and which of them is /bin/sh is a property
+        of the workspace image rather than of this repo. The prefix is the part
+        we set ourselves.
         """
-        return self._wrapper is not None and line.startswith(f"{self._wrapper}:")
+        return line.startswith(f"{self._wrapper}:")
 
     async def settle(self, exit_code: int | None) -> None:
         """Record the launch this phase's stream attested, if it attested one.
@@ -202,7 +271,7 @@ class AgentLaunchEvidence:
         Idempotent, so a caller may settle from a ``finally`` without counting
         the launch twice.
         """
-        if self._recorded or self._wrapper is None:
+        if self._recorded or not self._announced:
             return
         if self._ran_to_the_end and exit_code in _COULD_NOT_EXEC and not self._spoke_over:
             return

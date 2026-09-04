@@ -44,7 +44,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
 pytestmark = pytest.mark.unit
 
@@ -59,22 +59,28 @@ _PROCESSOR_PATH = (
 #: unusable as evidence.
 _CLIENT_DIAGNOSTIC = "Error response from daemon: No such container: agentic-ws-abc123"
 
-#: The name the wrapper on this stream ran under. Minted per exec in
-#: production, so that a line an agent chose to print cannot be mistaken for
-#: one the wrapper wrote; here it only has to be a name, and one that no line
-#: below uses by accident.
-_WRAPPER = "syn-launch-6f1c0a55b2d34e97"
 
-#: What the wrapper announces immediately before ``exec``, built by the same
-#: function the adapter builds it with - hand-writing the format here is how
-#: this fixture would come to assert a contract production does not have.
-_ANNOUNCED = announce_as(_WRAPPER)
+def _announced(wrapper: str) -> str:
+    """What the wrapper announces immediately before ``exec``.
 
-#: What that wrapper shell prints when the announcement it just made turns out
-#: to be false. It arrives on the same stream as agent output, and only the
-#: name in front of it says which of the two wrote it. The wording after the
-#: name is dash's; bash words it differently, which is why nothing reads it.
-_EXEC_FAILED = f"{_WRAPPER}: 1: exec: /usr/local/bin/claude: not found"
+    Built by the same function the adapter builds it with - hand-writing the
+    format here is how this fixture would come to assert a contract production
+    does not have - and from the name the HANDLER chose, which is the only name
+    a real wrapper could announce under. A fixture holding a name of its own
+    could still pass while the handler told the transport nothing, and that
+    hop is what decides whether any session is ever recorded as launched.
+    """
+    return announce_as(wrapper)
+
+
+def _exec_failed(wrapper: str) -> str:
+    """What that wrapper shell prints when the announcement it just made was false.
+
+    It arrives on the same stream as agent output, and only the name in front
+    of it says which of the two wrote it. The wording after the name is dash's;
+    bash words it differently, which is why nothing reads it.
+    """
+    return f"{wrapper}: 1: exec: /usr/local/bin/claude: not found"
 
 
 class _ConsumingStreamProcessor:
@@ -101,19 +107,35 @@ class _ConsumingStreamProcessor:
 
 
 def _workspace(
-    *, lines: list[str] | None = None, raises: bool = False, exit_code: int = 0
+    *,
+    lines: Callable[[str], list[str]] | None = None,
+    raises: bool = False,
+    exit_code: int = 0,
 ) -> MagicMock:
     """A workspace whose stream produces the given lines, or cannot start at all.
+
+    ``lines`` is called with the ``$0`` the handler told this transport to
+    announce under, because that is all a real transport has to go on: nothing
+    inside the container can produce a name it was never given. A double that
+    made its lines up would keep passing after the handler stopped passing the
+    name, and every session in production would then report never-started.
 
     ``exit_code`` is what the process carrying the stream reports afterwards -
     the wrapper shell's own status when it never managed to exec the agent, and
     the agent's own status once it did.
     """
 
-    async def _stream(*_args: object, **_kwargs: object) -> AsyncIterator[str]:
+    async def _stream(
+        *_args: object, wrapper_name: str | None = None, **_kwargs: object
+    ) -> AsyncIterator[str]:
         if raises:
             raise RuntimeError("docker is not installed")
-        for line in lines or []:
+        assert wrapper_name is not None, (
+            "the handler must tell the transport which name to announce under; a "
+            "transport that was never told cannot be recognised as having started "
+            "anything, and every session would report never-started"
+        )
+        for line in lines(wrapper_name) if lines else []:
             yield line
 
     workspace = MagicMock()
@@ -181,7 +203,7 @@ async def test_a_stream_with_no_announcement_records_no_launch(lines: list[str])
     session_mgr = _session_manager()
     await session_mgr.start()
 
-    await _run_phase(_workspace(lines=lines), session_mgr)
+    await _run_phase(_workspace(lines=lambda _wrapper: lines), session_mgr)
 
     assert _launch_of(session_mgr) is AgentLaunch.NOT_LAUNCHED
 
@@ -209,7 +231,7 @@ async def test_an_agent_that_dies_before_printing_anything_still_launched() -> N
     session_mgr = _session_manager()
     await session_mgr.start()
 
-    await _run_phase(_workspace(lines=[_ANNOUNCED]), session_mgr)
+    await _run_phase(_workspace(lines=lambda w: [_announced(w)]), session_mgr)
 
     assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
 
@@ -232,7 +254,7 @@ async def test_a_streaming_agent_is_launched_and_its_output_is_untouched() -> No
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[_ANNOUNCED, '{"a": 1}', '{"b": 2}']),
+        _workspace(lines=lambda w: [_announced(w), '{"a": 1}', '{"b": 2}']),
         session_mgr,
         processor=_Recording,
     )
@@ -259,7 +281,7 @@ async def test_an_announcement_the_exec_did_not_follow_records_no_launch(
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[_ANNOUNCED, _EXEC_FAILED], exit_code=exit_code),
+        _workspace(lines=lambda w: [_announced(w), _exec_failed(w)], exit_code=exit_code),
         session_mgr,
     )
 
@@ -279,7 +301,7 @@ async def test_an_agent_that_ran_and_failed_is_still_launched() -> None:
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[_ANNOUNCED, '{"type": "result"}'], exit_code=1),
+        _workspace(lines=lambda w: [_announced(w), '{"type": "result"}'], exit_code=1),
         session_mgr,
     )
 
@@ -306,7 +328,7 @@ async def test_an_agent_that_spoke_and_then_exited_126_or_127_is_still_launched(
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[_ANNOUNCED, '{"type": "result"}'], exit_code=exit_code),
+        _workspace(lines=lambda w: [_announced(w), '{"type": "result"}'], exit_code=exit_code),
         session_mgr,
     )
 
@@ -342,7 +364,7 @@ async def test_a_cancelled_phase_keeps_the_launch_its_agent_earned() -> None:
             )
 
     await _run_phase(
-        _workspace(lines=[_ANNOUNCED, '{"a": 1}', '{"b": 2}'], exit_code=127),
+        _workspace(lines=lambda w: [_announced(w), '{"a": 1}', '{"b": 2}'], exit_code=127),
         session_mgr,
         processor=_StopsAtTheFirstLine,
     )
