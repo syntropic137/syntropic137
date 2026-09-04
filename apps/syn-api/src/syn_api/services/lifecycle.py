@@ -575,20 +575,12 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-#: The values `subscription.status` can take. "healthy" is the absence of every
-#: signal below, so it is not a signal itself and has no row in the table.
 _ReadPathStatus = Literal["healthy", "degraded", "stalled", "catching_up"]
 
 
 @dataclass(frozen=True)
 class _ReadPathSignal:
-    """One way the read path can be unwell: whether it is, and what to say if so.
-
-    `reason` is what `degraded_reasons` carries; `status` is what
-    `subscription.status` says when this is the most severe signal firing. Both
-    live on the same row because they are one signal described two ways, and a
-    row is the whole of what a new signal costs.
-    """
+    """One read-path failure and both ways the health response describes it."""
 
     fires: bool
     reason: DegradedReason
@@ -606,23 +598,10 @@ class _ReadPathVerdict:
 def _judge_read_path(*, running: bool, lag: ReadModelLag | None) -> _ReadPathVerdict:
     """Turn the subscription's facts into the verdict /health publishes.
 
-    ADDING A THIRD SIGNAL? Add a row. It is deliberately impossible to add one
-    that reports a reason but no status, or a status no reason explains: the
-    ranking and the list are read off the SAME rows, so they cannot drift into
-    disagreeing about one deployment. That drift is the bug this shape exists to
-    make unwriteable, and it was reachable while the two were computed apart.
-
-    THE ROWS ARE ORDERED BY SEVERITY, most severe first, because
-    `subscription.status` has ONE slot and the signals are independent. When
-    several fire it leads with the one needing a human: a dead coordinator, then
-    a stall, then a rebuild. That ranking is presentation only —
-    `degraded_reasons` carries EVERY signal that fired, so a wedged replay is
-    `stalled` with both reasons raised. Two true facts about one read path, not
-    a conflict.
-
-    `lag is None` means the subscription is not up yet, which is a different
-    answer from "not behind": it fires no lag signal of its own, and `running`
-    is what reports it.
+    Add future signals as severity-ordered rows. Reading status and reason from
+    the same row prevents them from drifting; every fired reason is retained.
+    A missing lag measurement fires no lag signal because `running` reports an
+    unavailable subscription separately.
     """
     signals = (
         _ReadPathSignal(
