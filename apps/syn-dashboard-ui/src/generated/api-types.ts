@@ -3374,6 +3374,8 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
         };

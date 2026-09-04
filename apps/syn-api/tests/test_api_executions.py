@@ -311,13 +311,14 @@ def _phase(
     started_at: str | None = None,
     completed_at: str | None = None,
     duration_seconds: float | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """A phase row shaped exactly as the projection stores it."""
     return {
         "workflow_phase_id": phase_id,
         "name": phase_id,
         "status": status,
-        "session_id": None,
+        "session_id": session_id,
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_creation_tokens": 0,
@@ -650,3 +651,226 @@ async def test_list_executions_endpoint_loads_enrichment_exactly_once(
         "exec-once-a",
         "exec-once-b",
     }
+
+
+# -- #1185: an execution must be traceable to the transcripts it produced ------
+#
+# The relation exists only in the capture observation on Lane 2: a phase's
+# `session_id` is a uuid4 the HOST assigns, and the ids the AGENTS chose for
+# themselves are a disjoint namespace. Nothing else in the system joins them.
+#
+# Every assertion below is made on `ExecutionDetailResponse`, the model the HTTP
+# endpoint actually returns -- NOT on the intermediate `PhaseExecution`. The
+# value is carried across two hand-listed constructors (`_map_phase_detail`,
+# then `_map_phase_to_response`), and a hop that drops it satisfies any test
+# that inspects the objects at either end.
+
+
+def _capture_row(
+    session_id: str,
+    *,
+    execution_id: str = "exec-capture",
+    schema_version: int | None = None,
+    **payload_overrides: object,
+) -> dict:
+    """One row exactly as ``AgentEventStore.query_by_execution`` returns it.
+
+    FLATTENED, not nested. `query_execution_events` spreads the stored payload
+    across the top level (`**json.loads(row["data"])`) while `query_session_events`
+    nests it under `data`. Building the fixture in the wrong one of those two
+    shapes is how the capture status route once certified a reader that reported
+    every healthy row as UNKNOWN, so this mirrors the adapter it is standing in
+    for and not the other one.
+
+    The payload half is built through the real `CaptureObservationData`, so a
+    renamed field fails here rather than silently serialising to nothing.
+    """
+    import json
+
+    from syn_adapters.workspace_backends.agentic.capture_observation import (
+        SESSION_CAPTURE_OBSERVATION,
+        CaptureObservationData,
+    )
+
+    payload = json.loads(
+        CaptureObservationData(
+            state="captured",
+            needs_backfill=False,
+            reason=None,
+            store_url="https://sessions.example.com",
+            origin_environment="container",
+            origin_deployment="syntropic137__development",
+            partition="e-1/w-1",
+        ).model_dump_json()
+    )
+    if schema_version is not None:
+        payload["schema_version"] = schema_version
+    payload.update(payload_overrides)
+    return {
+        "timestamp": "2026-03-23T10:00:05+00:00",
+        "event_type": SESSION_CAPTURE_OBSERVATION,
+        "session_id": session_id,
+        "execution_id": execution_id,
+        "phase_id": "p-1",
+        **payload,
+    }
+
+
+@pytest.fixture
+def _capture_rows(monkeypatch: pytest.MonkeyPatch):
+    """Stand in for the event store the capture lookup reads from."""
+
+    def _install(rows: list[dict]):
+        seen: list[tuple[str, str | None]] = []
+
+        class _Store:
+            async def query_by_execution(
+                self, execution_id: str, event_type: str | None = None, limit: int = 1000
+            ) -> list[dict]:
+                seen.append((execution_id, event_type))
+                return [r for r in rows if r.get("execution_id") == execution_id]
+
+        monkeypatch.setattr("syn_api._wiring.get_event_store_instance", lambda: _Store())
+        return seen
+
+    return _install
+
+
+async def _capture_response(phases: list[dict]):
+    """Seed one execution and return the model the HTTP endpoint hands back."""
+    from syn_api.routes.executions.queries import get_execution_endpoint
+
+    await _seed_execution_detail_with_phases("exec-capture", phases)
+    return await get_execution_endpoint("exec-capture")
+
+
+async def test_a_phase_carries_the_agent_sessions_its_capture_reported(_capture_rows):
+    """(a) The join from an execution to its transcripts, in the reported order.
+
+    Order is asserted, not just membership: the store returns the leader first
+    and a client resuming a thread needs to know which one that was.
+    """
+    _capture_rows([_capture_row("host-uuid-1", agent_session_ids=["sess-codex", "sess-claude"])])
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].agent_session_ids == ["sess-codex", "sess-claude"]
+
+
+async def test_an_unreported_capture_is_null_not_an_empty_list(_capture_rows):
+    """(b) A phase from a schema the field did not exist in reports NOTHING KNOWN.
+
+    THE POINT OF THE ISSUE, with (c) below. `null` says "the exporter could not
+    tell us"; `[]` would claim it swept and confirmed the phase produced no
+    transcripts. A response model that defaults None to [] turns a version skew
+    into a reported loss -- exactly the defect #1176 was filed for.
+    """
+    rows = [_capture_row("host-uuid-1", schema_version=1, agent_session_ids=["sess-codex"])]
+    _capture_rows(rows)
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].agent_session_ids is None
+    # And null survives serialisation as null rather than vanishing or becoming [].
+    assert response.phases[0].model_dump()["agent_session_ids"] is None
+
+
+async def test_a_confirmed_empty_sweep_is_an_empty_list_not_null(_capture_rows):
+    """(c) A schema 2 exporter that looked and found none said something.
+
+    The counterpart to (b): this one MUST NOT read as null. An implementation
+    that cannot tell these two apart has not fixed the issue.
+    """
+    rows = [_capture_row("host-uuid-1", schema_version=2, agent_session_ids=[])]
+    _capture_rows(rows)
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].agent_session_ids == []
+    assert response.phases[0].agent_session_ids is not None
+
+
+async def test_a_delegating_phase_reports_every_session_not_just_the_leader(_capture_rows):
+    """(d) One phase, several agents: a codex leader, a claude delegate, a subagent.
+
+    Truncating to the first is the plausible wrong implementation -- it looks
+    right for every phase that did not delegate, which is most of them.
+    """
+    produced = ["sess-codex-leader", "sess-claude-delegate", "sess-claude-subagent"]
+    rows = [_capture_row("host-uuid-1", agent_session_ids=produced)]
+    _capture_rows(rows)
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].agent_session_ids == produced
+
+
+async def test_each_phase_gets_its_own_agent_sessions(_capture_rows):
+    """The lookup is keyed per phase, so one execution's phases do not merge.
+
+    A single execution-wide query serves every phase, which makes cross-talk
+    between them the failure mode worth pinning: a leaked list would attribute
+    one phase's transcripts to another, and auditing agent behaviour by phase is
+    the whole point.
+    """
+    rows = [
+        _capture_row("host-uuid-1", agent_session_ids=["sess-a"]),
+        _capture_row("host-uuid-2", agent_session_ids=["sess-b", "sess-c"]),
+        _capture_row("host-uuid-3", schema_version=2, agent_session_ids=[]),
+    ]
+    _capture_rows(rows)
+
+    response = await _capture_response(
+        [
+            _phase("phase-1", "completed", session_id="host-uuid-1"),
+            _phase("phase-2", "completed", session_id="host-uuid-2"),
+            _phase("phase-3", "completed", session_id="host-uuid-3"),
+            # No capture row at all, and no session id to find one by.
+            _phase("phase-4", "pending"),
+        ],
+    )
+
+    by_phase = {p.phase_id: p.agent_session_ids for p in response.phases}
+    assert by_phase == {
+        "phase-1": ["sess-a"],
+        "phase-2": ["sess-b", "sess-c"],
+        "phase-3": [],
+        "phase-4": None,
+    }
+
+
+async def test_the_capture_lookup_runs_once_per_execution_not_once_per_phase(_capture_rows):
+    """Four phases must not mean four round trips to the event store (#1077)."""
+    rows = [_capture_row(f"host-uuid-{i}", agent_session_ids=[f"sess-{i}"]) for i in range(4)]
+    seen = _capture_rows(rows)
+
+    await _capture_response(
+        [_phase(f"phase-{i}", "completed", session_id=f"host-uuid-{i}") for i in range(4)],
+    )
+
+    assert seen == [("exec-capture", "session_capture")], (
+        f"expected one capture query for the whole execution, got {len(seen)}: {seen}"
+    )
+
+
+async def test_an_unreachable_event_store_reports_unknown_not_a_loss(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Telemetry being down cannot make a phase claim it produced no transcripts.
+
+    Lane 2 failing must not fail the Lane 1 read, and must not answer `[]` --
+    the honest answer to "we could not ask" is null.
+    """
+
+    class _BrokenStore:
+        async def query_by_execution(
+            self, execution_id: str, event_type: str | None = None, limit: int = 1000
+        ) -> list[dict]:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+    monkeypatch.setattr("syn_api._wiring.get_event_store_instance", lambda: _BrokenStore())
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.status == "running"
+    assert response.phases[0].agent_session_ids is None
