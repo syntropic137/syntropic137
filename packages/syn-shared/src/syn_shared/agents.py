@@ -27,6 +27,80 @@ class AgentProvider(StrEnum):
     """Headless ``codex exec`` docker-exec path (the codex bridge)."""
 
 
+class PhaseSandbox(StrEnum):
+    """How much authority a phase's agent process is granted.
+
+    Named provider-neutrally so the same declaration can mean the same thing
+    on any harness, but TODAY it steers ``codex exec --sandbox`` only. Claude
+    phases scope authority through ``allowed_tools`` and ignore this field -
+    declaring ``read-only`` on a claude phase does not restrict it. Do not
+    read a level here as a guarantee on a claude phase.
+
+    Ordered least to most authority. Prefer the least a phase can finish
+    with: a phase that cannot write cannot invent work it was asked to
+    check (#1157, #1161).
+    """
+
+    READ_ONLY = "read-only"
+    """Read and search only. The correct level for any review, verify or
+    audit phase - it makes "the verifier does not modify what it certifies"
+    an enforced property rather than a sentence in a prompt.
+
+    Must be declared explicitly; it is not the default (see
+    ``DEFAULT_PHASE_SANDBOX`` for why). A phase at this level cannot write
+    its deliverable either, so a verify phase moves here only once it has
+    another way to publish."""
+
+    WORKSPACE_WRITE = "workspace-write"
+    """Read, write and run commands inside the workspace. No network. The
+    default for phases that produce changes."""
+
+    FULL_ACCESS = "full-access"
+    """Unrestricted filesystem access AND network egress. Required only by a
+    phase that must reach the network (pushing a branch, calling the GitHub
+    API). Never appropriate for a phase whose job is to check other work."""
+
+
+#: Provider-neutral level -> the value `codex exec --sandbox` expects.
+CODEX_SANDBOX_FLAGS: dict[PhaseSandbox, str] = {
+    PhaseSandbox.READ_ONLY: "read-only",
+    PhaseSandbox.WORKSPACE_WRITE: "workspace-write",
+    PhaseSandbox.FULL_ACCESS: "danger-full-access",
+}
+
+
+DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.WORKSPACE_WRITE
+"""What a phase gets when it declares nothing.
+
+NOT ``READ_ONLY``, and not for want of wanting it. A phase publishes its
+deliverable by WRITING a file under ``artifacts/output/``, which the
+collector then picks up - so a read-only phase produces no artifact and the
+phase after it starves. ``READ_ONLY`` is correct for a verify phase and
+becomes usable once a phase can publish its deliverable without writing;
+until then it is opt-in and would break the pipeline if defaulted.
+
+Every codex phase used to receive ``danger-full-access`` unconditionally,
+which is how a verify phase came to merge, commit and push the change it then
+certified (#1161). Defaulting to ``READ_ONLY`` inverts that: a phase that
+writes must say so, and a phase that forgets fails loudly at its first write
+instead of silently holding more authority than its author intended.
+
+Measured on codex 0.147.0, since the levels do not mean what their names
+suggest:
+
+===================  ==========  ============  =========
+level                write file  ``git commit``  network
+===================  ==========  ============  =========
+``workspace-write``  yes         yes           yes
+``read-only``        no          no            **yes**
+===================  ==========  ============  =========
+
+Network egress survives every level, so the sandbox is a FILESYSTEM control
+only. Do not reach for ``workspace-write`` expecting it to contain a phase to
+the box - it will not. Restricting egress is the workspace container's job.
+"""
+
+
 REMOVED_INTERACTIVE_PROVIDER: str = "claude-interactive"
 """The provider value of the REMOVED interactive-tmux path.
 
@@ -38,6 +112,28 @@ completion heuristic, and empty observability timelines - and was excised in
 favour of the headless docker-exec substrate (``claude -p`` / ``codex exec``).
 Do not reintroduce it as a provider.
 """
+
+
+class UnsupportedPhaseSandboxError(ValueError):
+    """A phase names a sandbox level that is not a known ``PhaseSandbox``.
+
+    Rejected rather than defaulted. Defaulting an unrecognised level would
+    hand the phase whatever the fallback happens to be, which is how a typo
+    in a workflow definition becomes a silent authority change - the same
+    class of failure as remapping an unknown provider.
+    """
+
+    def __init__(self, sandbox: object, *, phase_id: str | None = None) -> None:
+        self.sandbox = sandbox
+        self.phase_id = phase_id
+        where = f"Phase {phase_id!r}" if phase_id else "This phase"
+        known = ", ".join(repr(str(m)) for m in PhaseSandbox)
+        super().__init__(
+            f"{where} declares agent.sandbox={sandbox!r}, which is not a known "
+            f"sandbox level. Known levels, least to most authority: {known}. "
+            "A review or verify phase should declare "
+            f"'{PhaseSandbox.READ_ONLY}'."
+        )
 
 
 class UnsupportedAgentProviderError(ValueError):

@@ -1,0 +1,29 @@
+# What the rule actually asks for. None of these may ever be flagged.
+services:
+  literal_loopback:
+    image: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+  loopback_elsewhere_in_127_8:
+    image: postgres
+    ports:
+      - "127.0.0.2:5432:5432"
+  bracketed_ipv6_loopback:
+    image: postgres
+    ports:
+      - "[::1]:5432:5432"
+  loopback_port_range_and_protocol:
+    image: postgres
+    ports:
+      - "127.0.0.1:15432-15434:5432-5434/tcp"
+  declared_operator_override:
+    image: postgres
+    ports:
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_DB}:5432"
+  long_form_with_loopback_host_ip:
+    image: postgres
+    ports:
+      - target: 5432
+        published: 15432
+        host_ip: 127.0.0.1
+        mode: host

@@ -1,4 +1,11 @@
-"""Regression tests for provider-specific agent command construction."""
+"""Regression tests for provider-specific agent command construction.
+
+These assertions named ``danger-full-access`` until #1157. That was not a
+choice any workflow made - it was hardcoded for every codex phase, and a
+verify phase used it to push the change it then certified (#1161). The level
+is now per-phase and these pin the DEFAULT. A phase wanting more must declare
+it; see test_codex_sandbox_least_privilege.py for the level mapping.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +48,7 @@ def test_codex_command_passes_actual_model_and_prompt_as_individual_args() -> No
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        "workspace-write",
         "--skip-git-repo-check",
         "--model",
         "gpt-5.6",
@@ -55,7 +62,7 @@ def test_codex_command_omits_model_option_when_model_is_not_provided() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        "workspace-write",
         "--skip-git-repo-check",
         "do the thing",
     ]
@@ -101,7 +108,7 @@ def test_codex_command_via_domain_default_model_omits_model_flag() -> None:
         "exec",
         "--json",
         "--sandbox",
-        "danger-full-access",
+        "workspace-write",
         "--skip-git-repo-check",
         "do the thing",
     ]

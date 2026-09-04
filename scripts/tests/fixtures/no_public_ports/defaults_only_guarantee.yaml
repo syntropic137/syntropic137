@@ -1,0 +1,19 @@
+# Interpolation is the seam the old gate could not see at all: it stripped
+# `${...}` textually and counted what was left, so every entry here read as
+# "two colons, safe" no matter what the variable resolved to. All three are
+# loopback with the variable unset. All three become 0.0.0.0 for an operator
+# who exports it - which is a supported deployment for the declared one and an
+# unreviewed hole for the other two.
+services:
+  undeclared_override:
+    image: postgres
+    ports:
+      - "${BIND:-127.0.0.1}:15432:5432"
+  undeclared_ipv6_override:
+    image: postgres
+    ports:
+      - "${BIND6:-::1}:15432:5432"
+  declared_override:
+    image: postgres
+    ports:
+      - "${SYN_ENV_BIND:-127.0.0.1}:15432:5432"
