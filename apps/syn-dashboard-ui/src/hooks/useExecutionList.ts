@@ -25,6 +25,7 @@ import {
 } from './useSortUrlState'
 import { useStatusCounts } from './useStatusCounts'
 import { useThrottledRefetch } from './useThrottledRefetch'
+import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 
 const REFETCH_THROTTLE_MS = 500
 const POLL_INTERVAL_MS = 5000
@@ -34,7 +35,6 @@ const EXECUTION_LIVE_EVENTS = new Set([
   'WorkflowCompleted',
   'WorkflowFailed',
 ])
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 export type ExecutionSortKey =
   | 'status'
@@ -53,7 +53,7 @@ const EXECUTION_SORT_CONFIG: SortConfig<ExecutionSortKey> = {
 }
 
 function isTerminalExecution(e: ExecutionListItem): boolean {
-  return TERMINAL_STATUSES.has(e.status)
+  return isTerminalExecutionStatus(e.status)
 }
 
 function matchesQuery(e: ExecutionListItem, query: string): boolean {

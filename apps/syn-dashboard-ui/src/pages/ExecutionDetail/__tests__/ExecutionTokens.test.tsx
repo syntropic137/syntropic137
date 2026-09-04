@@ -75,7 +75,10 @@ function midPhaseExecution(
   } as unknown as ExecutionDetailResponse
 }
 
-function renderExecution(execution: ExecutionDetailResponse) {
+function renderExecution(
+  execution: ExecutionDetailResponse | null,
+  hookOverrides: { error?: string | null; loading?: boolean; isConnected?: boolean } = {},
+) {
   useExecutionData.mockReturnValue({
     execution,
     artifactDetails: {},
@@ -84,6 +87,7 @@ function renderExecution(execution: ExecutionDetailResponse) {
     isConnected: true,
     now: Date.now(),
     refreshExecution: vi.fn(),
+    ...hookOverrides,
   })
   return render(
     <MemoryRouter initialEntries={['/executions/exec-1048']}>
@@ -181,5 +185,74 @@ describe('ExecutionDetail token totals while a phase is running', () => {
     expect(card.value).toBe('1,000')
     expect(card.subtitle).toBe('In: 800 / Out: 200')
     expect(screen.queryByText('In Progress')).toBeNull()
+  })
+})
+
+describe('ExecutionDetail through a recoverable poll failure (#1048)', () => {
+  // The page polls every 3s for the life of a run. The render guard was
+  // `if (error || !execution)`, so the first transient 502 replaced a live page
+  // with "Execution not found" — permanently, because the hook never cleared
+  // `error` on a later success. A failed refresh means the numbers stopped
+  // advancing, not that the execution vanished.
+  it('keeps the metrics on screen when the last refresh failed', () => {
+    renderExecution(midPhaseExecution(), { error: '502 Bad Gateway' })
+
+    expect(screen.queryByText('Execution not found')).toBeNull()
+    expect(metricCard('Total Tokens').value).toBe('1,234,567')
+    expect(metricCard('Total Cost').value).toBe('$4.25')
+  })
+
+  it('says the page has stopped updating instead of failing silently', () => {
+    renderExecution(midPhaseExecution(), { error: '502 Bad Gateway' })
+
+    // Non-blocking, and it names the reason: a page that quietly froze would
+    // be worse than the empty state it replaced.
+    const indicator = screen.getByText(/Not updating/)
+    expect(indicator).toBeTruthy()
+    expect(indicator.closest('[title]')?.getAttribute('title')).toBe('502 Bad Gateway')
+    expect(screen.queryByText('Live')).toBeNull()
+  })
+
+  it('still shows the empty state when there is genuinely no execution', () => {
+    // The guard must narrow to "no data", not disappear: an unknown id has
+    // nothing to render and must not fall through to the page body.
+    renderExecution(null, { error: 'Not Found' })
+
+    expect(screen.getByText('Execution not found')).toBeTruthy()
+  })
+
+  it('reports Live again once a later poll succeeds', () => {
+    renderExecution(midPhaseExecution(), { error: null })
+
+    expect(screen.getByText('Live')).toBeTruthy()
+    expect(screen.queryByText(/Not updating/)).toBeNull()
+  })
+})
+
+describe('ExecutionDetail cost-by-model against the execution total (#1048)', () => {
+  it('does not present a partial per-model breakdown as the execution total', () => {
+    // One phase has landed and carries a $1.00 model row; the execution has
+    // actually cost $4.25 so far. The card used to sum its own rows and label
+    // that "total", contradicting the Total Cost card directly above it.
+    const execution = midPhaseExecution({
+      phases: [
+        {
+          ...midPhaseExecution().phases[0],
+          status: 'completed',
+          cost_by_model: { 'claude-sonnet-5-20250101': '1.00' },
+        },
+      ],
+    })
+    const { container } = renderExecution(execution)
+
+    const section = container.querySelector('#cost-by-model')
+    expect(section).not.toBeNull()
+    const card = within(section as HTMLElement)
+
+    expect(card.getByText('$4.25')).toBeTruthy()
+    // The $3.25 the breakdown cannot attribute is shown, not dropped: the
+    // parts have to add up to the headline.
+    expect(card.getByText('not yet attributed')).toBeTruthy()
+    expect(card.getByText('$3.25')).toBeTruthy()
   })
 })

@@ -184,20 +184,27 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
   // for the whole of a live run - directly under a headline card already
   // showing the live figure (#1048). Both now read executionTokenTotals().
   const totalTokens = executionTokenTotals(execution).total
-  const totalCost = phases.reduce((s, p) => s + Number(p.cost_usd), 0)
-  // The roll-up is its own consumer of coverage, not a side effect of fixing
-  // the cards. Summing only cost_usd made the header report a confident
-  // $0.0000 for an execution whose phases were entirely unpriced, and an
-  // apparently complete total for a mixed one - the #890 defect surviving one
-  // level up from the per-phase fix directly below.
-  const totalUnpriced = phases.reduce((s, p) => s + (p.unpriced_observation_count ?? 0), 0)
-  // Same shape as the unpriced-cost handling above: `?? 0` would turn an
-  // UNKNOWN duration into a measured zero, so an execution whose phases all
-  // report null would render a confident "0.0s" and a partly-known one would
-  // read as complete. Count what is missing and say so instead.
+  // Cost follows tokens: read the execution, not the phases. On the live path
+  // the domain builds an empty cost_by_phase map, so every phase is seeded
+  // cost_usd=0 and only overwritten once a summary exists. Summing the cards
+  // therefore printed a confident "$0.000000" directly beneath a Total Cost
+  // card reading $0.42 (#1048).
   //
-  // Folded from exactly the values the cards below render (same helper, same
-  // `now`), so the header cannot disagree with the timeline underneath it.
+  // The unpriced count has to come from the same level for the same reason:
+  // unpriced_by_phase is empty on that path too, so the #890 coverage signal
+  // was zeroed out exactly when it was needed and the zero rendered as a
+  // precise figure rather than as "unpriced".
+  const totalCost = Number(execution.total_cost_usd)
+  const totalUnpriced = execution.unpriced_observation_count
+  // Duration, unlike cost, IS folded from the cards - deliberately. A running
+  // phase's duration is derived live from started_at by the same helper the
+  // card uses, so the phases are a true reading here and folding them keeps the
+  // header from disagreeing with the timeline underneath it. Cost has no such
+  // live per-phase value to fold, which is why it reads the execution instead.
+  //
+  // `?? 0` would still turn an UNKNOWN duration into a measured zero, so an
+  // execution whose phases all report null would render a confident "0.0s" and
+  // a partly-known one would read as complete. Count what is missing instead.
   const knownDurations = phases
     .map((p) => liveDurationSeconds(p.status === 'running', p.started_at, p.duration_seconds, now))
     .filter((d): d is number => d !== null)

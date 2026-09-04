@@ -91,38 +91,105 @@ function headerStrip(): string {
   return strip?.textContent ?? ''
 }
 
-describe('PhaseTimeline header roll-up', () => {
-  it('renders a dollar figure when every phase is priced', () => {
-    renderTimeline([
-      phase({ workflow_phase_id: 'plan', cost_usd: 1.5 }),
-      phase({ workflow_phase_id: 'build', cost_usd: 2.5 }),
-    ])
-    expect(headerStrip()).toContain('$4.00')
+describe('PhaseTimeline cost roll-up', () => {
+  // Every fixture sets the execution-level cost to a figure the phases cannot
+  // produce. On the live path the domain hands back an empty cost_by_phase map,
+  // so each phase is seeded cost_usd=0 while the execution total is real - a
+  // roll-up summed from the cards prints "$0.000000" under a $0.42 headline.
+  it('reports the execution total, not the sum of the phase cards', () => {
+    // The exact shape from the report: one phase, seeded 0, live total $0.42.
+    renderTimeline([phase({ workflow_phase_id: 'implement', cost_usd: 0 })], {
+      total_cost_usd: 0.42,
+    })
+    expect(headerStrip()).toContain('$0.42')
+    expect(headerStrip()).not.toContain('$0.000000')
+  })
+
+  it('follows the execution even when the phases carry costs of their own', () => {
+    // Phases sum to $4.00; the execution says $6.25. Only one of those is the
+    // figure the Total Cost card shows, and the header must agree with it.
+    renderTimeline(
+      [
+        phase({ workflow_phase_id: 'plan', cost_usd: 1.5 }),
+        phase({ workflow_phase_id: 'build', cost_usd: 2.5 }),
+      ],
+      { total_cost_usd: 6.25 },
+    )
+    expect(headerStrip()).toContain('$6.25')
+    expect(headerStrip()).not.toContain('$4.00')
     expect(headerStrip()).not.toContain('unpriced')
   })
 
-  it('says unpriced, not $0.0000, when no phase could be priced', () => {
-    renderTimeline([
-      phase({ workflow_phase_id: 'plan', cost_usd: 0, unpriced_observation_count: 4 }),
-      phase({ workflow_phase_id: 'build', cost_usd: 0, unpriced_observation_count: 7 }),
-    ])
+  it('says unpriced, not $0.000000, when nothing could be priced', () => {
+    // The #890 coverage signal lives at execution level too: unpriced_by_phase
+    // is empty on the live path, so a count summed from the phases reads 0 and
+    // the zero cost renders as a confident figure.
+    renderTimeline([phase({ workflow_phase_id: 'plan', unpriced_observation_count: 0 })], {
+      total_cost_usd: 0,
+      unpriced_observation_count: 11,
+    })
     expect(headerStrip()).toContain('unpriced')
-    expect(headerStrip()).not.toContain('$0.0000')
+    expect(headerStrip()).not.toContain('$0.000000')
   })
 
   it('marks a mixed total as a lower bound rather than a complete figure', () => {
-    renderTimeline([
-      phase({ workflow_phase_id: 'plan', cost_usd: 3 }),
-      phase({ workflow_phase_id: 'build', cost_usd: 0, unpriced_observation_count: 9 }),
-    ])
+    renderTimeline([phase({ workflow_phase_id: 'plan', unpriced_observation_count: 0 })], {
+      total_cost_usd: 3,
+      unpriced_observation_count: 9,
+    })
     const text = headerStrip()
     expect(text).toContain('(partial)')
     expect(text).toContain('$3.00')
   })
 
   it('treats a genuinely free priced execution as $0, not unpriced', () => {
-    renderTimeline([phase({ workflow_phase_id: 'plan', cost_usd: 0 })])
+    renderTimeline([phase({ workflow_phase_id: 'plan' })], {
+      total_cost_usd: 0,
+      unpriced_observation_count: 0,
+    })
     expect(headerStrip()).not.toContain('unpriced')
+  })
+})
+
+describe('PhaseTimeline with an unknown phase duration', () => {
+  // `duration_seconds` is `float | None` on the API and resolve_duration_seconds
+  // returns None for "unknown, never 0.0". The hand-written dashboard type used
+  // to declare it `number`, so `.toFixed(1)` type-checked and threw at runtime,
+  // taking the whole page down with it.
+  it('renders a phase whose duration is unknown without crashing', () => {
+    const { container } = renderTimeline([
+      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
+    ])
+    expect(container.textContent).toContain('Phase')
+  })
+
+  it('shows an unknown duration as unknown, not as a measured 0.0', () => {
+    const { container } = renderTimeline([
+      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
+    ])
+    // The backend deliberately distinguishes "no reading" from "took no time",
+    // so the card must not launder the first into the second.
+    expect(container.textContent).not.toContain('0.0s')
+    expect(container.textContent).toContain('\u2014')
+  })
+
+  it('keeps unknown phases out of the header total instead of counting them as 0', () => {
+    renderTimeline([
+      phase({ workflow_phase_id: 'plan', duration_seconds: 60 }),
+      phase({ workflow_phase_id: 'build', duration_seconds: null }),
+    ])
+    // 60.0s is a real reading of one phase, not of the execution: say how many
+    // phases it does not cover rather than implying it covers them all.
+    expect(headerStrip()).toContain('60.0s')
+    expect(headerStrip()).toContain('+1 unknown')
+  })
+
+  it('reports the whole header duration as unknown when no phase has one', () => {
+    renderTimeline([
+      phase({ workflow_phase_id: 'plan', duration_seconds: null }),
+      phase({ workflow_phase_id: 'build', duration_seconds: null }),
+    ])
+    expect(headerStrip()).not.toContain('0.0s')
   })
 })
 

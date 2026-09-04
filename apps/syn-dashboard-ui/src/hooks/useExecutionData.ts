@@ -6,6 +6,7 @@ import { useLiveTimer } from './useLiveTimer'
 import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
+import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 
 export interface UseExecutionDataResult {
   execution: ExecutionDetailResponse | null
@@ -17,12 +18,8 @@ export interface UseExecutionDataResult {
   refreshExecution: () => void
 }
 
-// Matches useExecutionList's TERMINAL_STATUSES — paused/other non-terminal
-// states should keep polling, not just 'running' (#1048).
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
-
 function isTerminalExecution(e: ExecutionDetailResponse): boolean {
-  return TERMINAL_STATUSES.has(e.status)
+  return isTerminalExecutionStatus(e.status)
 }
 
 const REFRESH_EVENT_TYPES = new Set([
@@ -62,7 +59,14 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
   const refreshExecution = useCallback(() => {
     if (!executionId) return
     getExecution(executionId)
-      .then((exec) => setExecution(exec))
+      .then((exec) => {
+        setExecution(exec)
+        // A poll that succeeds clears the last one's failure. Without this the
+        // first transient 502 in a run latched `error` for the life of the
+        // page, and the detail view rendered "Execution not found" on top of
+        // execution data that was still refreshing underneath it (#1048).
+        setError(null)
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [executionId])

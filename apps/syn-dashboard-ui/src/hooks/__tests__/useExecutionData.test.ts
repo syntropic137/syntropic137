@@ -162,6 +162,8 @@ describe('useExecutionData live polling (#1048)', () => {
     { status: 'completed', visibility: 'visible', shouldPoll: false },
     { status: 'failed', visibility: 'visible', shouldPoll: false },
     { status: 'cancelled', visibility: 'visible', shouldPoll: false },
+    { status: 'interrupted', visibility: 'visible', shouldPoll: false },
+    { status: 'not_started', visibility: 'visible', shouldPoll: true },
     { status: 'completed', visibility: 'hidden', shouldPoll: false },
   ])(
     'invariant: polling occurs iff status is non-terminal and tab is visible ($status/$visibility)',
@@ -177,6 +179,91 @@ describe('useExecutionData live polling (#1048)', () => {
         await vi.advanceTimersByTimeAsync(3000)
         expect(mockGetExecution).toHaveBeenCalledTimes(shouldPoll ? 2 : 1)
       })
+    },
+  )
+})
+
+describe('useExecutionData recovers from a transient poll failure (#1048)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('clears the error once a later poll succeeds, and never drops the execution', async () => {
+    // The page polls every 3s for the length of a run, so a single 502 in a
+    // long execution is close to certain. `error` used to latch: it was set in
+    // the .catch and never cleared, so the detail page rendered "Execution not
+    // found" forever while the data underneath kept refreshing.
+    mockGetExecution.mockResolvedValueOnce(makeExecution({ total_tokens: 100 }))
+
+    const { result } = renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBeNull()
+
+    mockGetExecution.mockRejectedValueOnce(new Error('502 Bad Gateway'))
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.waitFor(() => expect(result.current.error).toBe('502 Bad Gateway'))
+    // The failure says the figures stopped advancing, not that they are gone.
+    expect(result.current.execution?.total_tokens).toBe(100)
+
+    mockGetExecution.mockResolvedValueOnce(makeExecution({ total_tokens: 900 }))
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(900))
+
+    expect(result.current.error).toBeNull()
+  })
+})
+
+describe('useExecutionData stops polling in every terminal status (#1048)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // ExecutionStatus has seven members. Three of them can still change
+  // (not_started, running, paused); the other four cannot. The hook's set held
+  // only three of those four, so `interrupted` — a forceful SIGINT stop, which
+  // the execution-detail projection writes and never revisits — kept the page
+  // polling the API every 3 seconds for as long as the tab stayed open.
+  it('stops polling an interrupted execution', async () => {
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+
+    const { result } = renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(result.current.execution?.status).toBe('running'))
+    expect(mockGetExecution).toHaveBeenCalledTimes(1)
+
+    // Drive the real running -> interrupted transition while mounted.
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'interrupted' }))
+    await vi.advanceTimersByTimeAsync(3000)
+    await vi.waitFor(() => expect(result.current.execution?.status).toBe('interrupted'))
+    expect(mockGetExecution).toHaveBeenCalledTimes(2)
+
+    // Polling must have stopped, not merely paused: five more intervals.
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(mockGetExecution).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['completed', 'failed', 'cancelled', 'interrupted'])(
+    'issues no further request for a %s execution',
+    async (status) => {
+      mockGetExecution.mockResolvedValue(makeExecution({ status }))
+
+      const { result } = renderHook(() => useExecutionData('exec-1'))
+      await vi.waitFor(() => expect(result.current.execution?.status).toBe(status))
+      expect(mockGetExecution).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(1)
     },
   )
 })

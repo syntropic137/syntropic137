@@ -3,6 +3,7 @@ import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
 import { useLiveTimer } from './useLiveTimer'
 import { useRefetchWhileRunning } from './useRefetchWhileRunning'
+import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 export interface UseSessionDataResult {
   session: SessionResponse | null
@@ -15,11 +16,8 @@ export interface UseSessionDataResult {
 
 const FETCH_TIMEOUT_MS = 15_000
 
-// Matches useSessionList's TERMINAL_STATUSES.
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
-
 function isTerminalSession(s: SessionResponse): boolean {
-  return TERMINAL_STATUSES.has(s.status)
+  return isTerminalSessionStatus(s.status)
 }
 
 export function useSessionData(sessionId: string | undefined): UseSessionDataResult {
