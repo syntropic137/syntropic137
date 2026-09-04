@@ -1,7 +1,12 @@
 # Does a coverage gate change what a refactor plan says?
 
 **Slug:** `2026-09-01--refactor-planning--does-a-coverage-gate-change-the-plan`
-**Status:** hypothesis committed, not yet run
+**Status:** run; **inconclusive for final-plan quality** - see `verdict.md`
+
+> All six runs ended before their final phase, so neither arm produced a final
+> plan and the comparison below was never made. The predictions in this file are
+> the ORIGINAL preregistration and are left exactly as written; read `verdict.md`
+> and `results.md` for what the runs do and do not show.
 
 ## Question
 

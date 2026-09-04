@@ -1,6 +1,6 @@
 ---
 model: sonnet
-allowed-tools: Read,Grep,Glob,Bash,Write
+allowed-tools: Read,Grep,Glob,Write
 timeout-seconds: 1800
 ---
 

@@ -80,7 +80,6 @@ phases:
       - Read
       - Grep
       - Glob
-      - Bash
       - Write
     prompt_file: phases/characterize.md
 
@@ -98,7 +97,6 @@ phases:
       - Read
       - Grep
       - Glob
-      - Bash
       - Write
     prompt_file: phases/seams.md
 
