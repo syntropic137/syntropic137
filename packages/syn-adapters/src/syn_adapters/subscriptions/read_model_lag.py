@@ -151,8 +151,9 @@ class CheckpointState(BaseModel):
     position: int = Field(description="Global nonce this checkpoint has reached.")
     updated_at: datetime | None = Field(
         default=None,
-        description="When this checkpoint last moved. None when unknown, which is "
-        "treated as 'cannot prove it is stuck' rather than as stuck.",
+        description="When this checkpoint last moved, or the earliest time an absent "
+        "checkpoint is known to have been absent. None when neither is known, which "
+        "is treated as 'cannot prove it is stuck' rather than as stuck.",
     )
 
 

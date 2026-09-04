@@ -362,10 +362,45 @@ async def test_a_replay_that_wedges_raises_both_signals() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_rebuild_wedged_before_its_first_checkpoint_is_stalled() -> None:
+    """A cleared checkpoint is a production state, not missing evidence forever.
+
+    Version reconciliation deletes the old row before replay. If the first
+    event fails, no replacement row is ever written, so the coordinator start
+    time is the only durable-process observation available to the health
+    surface. Once that observation is old enough, the operator must be told to
+    intervene rather than to keep waiting for a rebuild that cannot progress.
+    """
+    service = await _service_at(
+        dict.fromkeys(PEERS, HEAD),
+        without_checkpoint=REBUILDING,
+    )
+    # Private: production captures this when it constructs the coordinator;
+    # backdating it avoids making a unit test wait two minutes.
+    service._coordinator_started_at = datetime.now(UTC) - timedelta(
+        seconds=STALLED_AFTER_SECONDS + 1
+    )
+    try:
+        lag = await service.describe_read_model_lag()
+    finally:
+        await service.stop()
+
+    assert lag is not None
+    assert lag.is_catching_up is True
+    assert lag.is_stalled is True
+    assert lag.lagging_projections[0].projection == REBUILDING
+    assert lag.lagging_projections[0].position == 0
+    assert lag.lagging_projections[0].stalled is True
+
+
+@pytest.mark.unit
 def test_a_projection_with_no_checkpoint_yet_is_not_called_stuck() -> None:
-    """A cleared checkpoint has no `updated_at` to be old, and the honest
-    reading of "no evidence" is not "stuck". It is still the deepest lag in the
-    list, so it is never invisible — see the cleared-checkpoint test above."""
+    """The pure measurement does not invent an age when none is supplied.
+
+    The service supplies its coordinator start time for production checkpoint
+    absences; callers without any observation time can only report the lag.
+    """
     lag = measure_read_model_lag(
         head_position=HEAD,
         checkpoints={},

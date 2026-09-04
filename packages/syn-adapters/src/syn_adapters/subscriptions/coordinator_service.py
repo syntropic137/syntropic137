@@ -91,6 +91,7 @@ class CoordinatorSubscriptionService:
         self._db_pool: asyncpg.Pool | None = None
         self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
+        self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
 
@@ -148,6 +149,18 @@ class CoordinatorSubscriptionService:
             for checkpoint in await checkpoint_store.get_all_checkpoints()
         }
 
+        # A version rebuild deletes its checkpoint before replaying. If the
+        # projection fails on its first event there is no row whose updated_at
+        # can prove that it stopped moving. The coordinator start is a
+        # conservative lower bound for how long that row has been absent, and
+        # keeps this otherwise-permanent failure distinguishable from a slow
+        # rebuild without changing reconciliation or dispatch behaviour.
+        for projection_name in coordinator.projections:
+            checkpoints.setdefault(
+                projection_name,
+                CheckpointState(position=0, updated_at=self._coordinator_started_at),
+            )
+
         # From the coordinator, not from self._projections: the realtime adapter
         # is appended during start() and is checkpointed like any other, so a
         # replay stalled on it would otherwise be invisible.
@@ -199,6 +212,7 @@ class CoordinatorSubscriptionService:
             logger.info("RealTimeProjection adapter added")
 
         # Create coordinator
+        self._coordinator_started_at = datetime.now(UTC)
         self._coordinator = SubscriptionCoordinator(
             event_store=self._event_store,
             checkpoint_store=self._checkpoint_store,
