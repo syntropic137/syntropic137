@@ -16,8 +16,7 @@ import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
     disconnect,
@@ -28,6 +27,8 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.services.credentials import validate_credentials
+from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
     reconcile_orphaned_executions,
@@ -49,7 +50,6 @@ if TYPE_CHECKING:
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
-    from syn_adapters.subscriptions.read_model_lag import ReadModelLag
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
@@ -70,25 +70,6 @@ def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
             exc,
             exc_info=(type(exc), exc, exc.__traceback__),
         )
-
-
-class DegradedReason(StrEnum):
-    """Reasons the API may enter degraded mode.
-
-    StrEnum so values serialize directly to JSON in health responses.
-    """
-
-    ARTIFACT_STORAGE = "artifact_storage"
-    CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
-    SKILL_STORAGE = "skill_storage"
-    CONVERSATION_STORAGE = "conversation_storage"
-    SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
-    PROJECTION_CATCHUP = "projection_catchup"
-    PROJECTION_STALLED = "projection_stalled"
-    EVENT_POLLER = "event_poller"
-    CHECK_RUN_POLLER = "check_run_poller"
-    ANTHROPIC_API_KEY = "anthropic_api_key"
-    GITHUB_APP = "github_app"
 
 
 @dataclass
@@ -112,7 +93,7 @@ class LifecycleState:
 # this registry — no manual if/elif dispatch or separate frozensets.
 #
 # To add a new service:
-#   1. Add a value to DegradedReason
+#   1. Add a value to DegradedReason (in degraded_reasons.py)
 #   2. Write an _init_<service>(state) function (raises on failure)
 #   3. Optionally write a _shutdown_<service>(state) function
 #   4. Add a _ServiceEntry to _SERVICE_REGISTRY
@@ -575,59 +556,6 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-_ReadPathStatus = Literal["healthy", "degraded", "stalled", "catching_up"]
-
-
-@dataclass(frozen=True)
-class _ReadPathSignal:
-    """One read-path failure and both ways the health response describes it."""
-
-    fires: bool
-    reason: DegradedReason
-    status: _ReadPathStatus
-
-
-@dataclass(frozen=True)
-class _ReadPathVerdict:
-    """What /health should say about the read path."""
-
-    status: _ReadPathStatus
-    degraded_reasons: tuple[DegradedReason, ...]
-
-
-def _judge_read_path(*, running: bool, lag: ReadModelLag | None) -> _ReadPathVerdict:
-    """Turn the subscription's facts into the verdict /health publishes.
-
-    Add future signals as severity-ordered rows. Reading status and reason from
-    the same row prevents them from drifting; every fired reason is retained.
-    A missing lag measurement fires no lag signal because `running` reports an
-    unavailable subscription separately.
-    """
-    signals = (
-        _ReadPathSignal(
-            fires=not running,
-            reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
-            status="degraded",
-        ),
-        _ReadPathSignal(
-            fires=lag is not None and lag.is_stalled,
-            reason=DegradedReason.PROJECTION_STALLED,
-            status="stalled",
-        ),
-        _ReadPathSignal(
-            fires=lag is not None and lag.is_catching_up,
-            reason=DegradedReason.PROJECTION_CATCHUP,
-            status="catching_up",
-        ),
-    )
-    fired = tuple(signal for signal in signals if signal.fires)
-
-    return _ReadPathVerdict(
-        status=fired[0].status if fired else "healthy",
-        degraded_reasons=tuple(signal.reason for signal in fired),
-    )
-
-
 async def _enrich_subscription_health(response: dict, mode: str) -> None:
     """Add subscription coordinator status and read-model lag to the response.
 
@@ -641,9 +569,9 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
     TWO WAYS TO BE BEHIND, reported separately, because they need opposite
     responses from the operator reading this: a rebuild (`catching_up`) ends by
     itself and the answer is to wait, while a stalled projection does not and the
-    answer is to intervene. Which signals say what is `_judge_read_path`'s
-    decision, not this function's — this one only renders it. A third signal
-    belongs there.
+    answer is to intervene. Which signals say what is
+    `read_path_health._judge_read_path`'s decision, not this function's — this
+    one only renders it. A third signal belongs there.
 
     Being behind is reported through the EXISTING degraded machinery — mode plus
     a DegradedReason — rather than by changing top-level `status`. `status` is
@@ -911,7 +839,7 @@ async def _shutdown_check_run_poller(state: LifecycleState) -> None:
 # ── Service Registry (ADR-057) ─────────────────────────────────────
 #
 # Single source of truth for all degradable services. To add a service:
-#   1. Add a DegradedReason enum value
+#   1. Add a DegradedReason enum value (in degraded_reasons.py)
 #   2. Write an _init_<name>(state) function that raises on failure
 #   3. Optionally write a _shutdown_<name>(state) function
 #   4. Add a _ServiceEntry here
