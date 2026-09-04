@@ -790,6 +790,23 @@ class PhaseExecution(BaseModel):
     completed_at: datetime | None = None
     model: str | None = None
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    agent_session_ids: list[str] | None = None
+    """The agent-native session ids this phase's capture confirmed, in the order
+    the store reported them.
+
+    A phase has MANY. ``session_id`` above is the uuid4 syn137 assigns per phase
+    run; these are the ids the AGENTS chose for themselves, and one phase yields
+    several whenever it delegates - a codex phase handing work to claude, a
+    subagent, a resumed thread. The host never passes its id to the agent, so
+    the two namespaces are disjoint and this field is the only thing relating
+    them: it is what makes an execution's transcripts fetchable (#1185).
+
+    THREE-VALUED, and null is not empty. ``null`` means nothing could tell us -
+    a phase that predates the field, an exporter that did not report it, or
+    telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
+    none. Defaulting the first to the second reports a loss that did not happen
+    (#1176).
+    """
     operations: list[ToolOperation] = Field(default_factory=list)
 
 

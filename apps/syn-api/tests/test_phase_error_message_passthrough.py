@@ -37,7 +37,7 @@ def _failed_phase_detail() -> PhaseExecutionDetail:
 @pytest.mark.anyio
 async def test_read_model_error_message_reaches_the_api_model() -> None:
     """Hop 1: read model -> PhaseExecution."""
-    mapped = await _map_phase_detail(_failed_phase_detail(), None)
+    mapped = await _map_phase_detail(_failed_phase_detail(), None, {})
 
     assert mapped.error_message == _REASON
 
@@ -66,7 +66,7 @@ async def test_a_successful_phase_carries_no_error_message() -> None:
         session_id=None,
     )
 
-    mapped = await _map_phase_detail(detail, None)
+    mapped = await _map_phase_detail(detail, None, {})
 
     assert mapped.error_message is None
     assert _map_phase_to_response(mapped).error_message is None
