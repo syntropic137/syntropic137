@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -24,7 +25,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 #: left out arrives as the ``Query(...)`` sentinel rather than as its default.
 #: Spelling the whole signature once here means adding a parameter is one edit,
 #: not one per call site.
-_LIST_ARGS: dict[str, object] = {
+_LIST_ARGS: Mapping[str, object] = {
     "status": None,
     "statuses": None,
     "started_after": None,
