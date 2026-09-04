@@ -52,8 +52,12 @@ class PhaseSandbox(StrEnum):
     another way to publish."""
 
     WORKSPACE_WRITE = "workspace-write"
-    """Read, write and run commands inside the workspace. No network. The
-    default for phases that produce changes."""
+    """Read, write and run commands inside the workspace.
+
+    NOT "no network" - network egress was measured as available at every
+    level (see ``DEFAULT_PHASE_SANDBOX``). Also NOT usable by a phase that
+    publishes a deliverable: this was the v0.28.0-beta.5 default and the
+    write under ``artifacts/output/`` was denied (#1167)."""
 
     FULL_ACCESS = "full-access"
     """Unrestricted filesystem access AND network egress. Required only by a

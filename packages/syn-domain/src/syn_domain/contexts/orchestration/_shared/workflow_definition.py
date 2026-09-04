@@ -208,10 +208,12 @@ class AgentYamlDefinition(BaseModel):
     sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
     """How much authority this phase's agent gets. Provider-neutral.
 
-    Omitted means ``workspace-write`` (``DEFAULT_PHASE_SANDBOX``), NOT
-    ``read-only``: a phase publishes its deliverable by writing under
-    ``artifacts/output/``, so a read-only phase produces no artifact and
-    starves the phase after it.
+    Omitted means ``full-access`` (``DEFAULT_PHASE_SANDBOX``) - today's
+    behaviour, kept deliberately as a stopgap. Both lower levels are unusable
+    until a phase can publish its deliverable without a filesystem write
+    (#1167): ``workspace-write`` was tried in v0.28.0-beta.5 and the write
+    under ``artifacts/output/`` was denied, and ``read-only`` cannot publish
+    at all.
 
     A review or verify phase must therefore declare ``read-only``
     EXPLICITLY - leaving it out grants write access. That declaration is what
