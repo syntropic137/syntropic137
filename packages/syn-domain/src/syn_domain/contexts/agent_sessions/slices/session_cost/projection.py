@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     import asyncpg
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
+        SessionSummaryData,
+        TokenUsageData,
+    )
+
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
@@ -54,6 +59,20 @@ def _set_linkage(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
         session_cost.phase_id = event_data["phase_id"]
     if event_data.get("workspace_id"):
         session_cost.workspace_id = event_data["workspace_id"]
+
+
+def _reported[N: (int, float)](value: N | None, current: N) -> N:
+    """``value`` when the summary actually reported one, else ``current``.
+
+    Takes the value rather than the payload and a key so that the caller's
+    ``.get`` collapses "absent" into ``None`` before this ever sees it, leaving
+    one rule here: null means nobody counted this, and nobody counting is not a
+    reason to discard what the observations already counted.
+
+    ``dict.get(key, default)`` alone would not do: a harness that was killed
+    still emits the key, carrying ``None``, so the default never fires.
+    """
+    return current if value is None else value
 
 
 def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str) -> SessionCost:
@@ -164,7 +183,7 @@ class SessionCostProjection:
 
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 
-    def _handle_token_usage(self, session_cost: SessionCost, data: dict[str, Any]) -> None:
+    def _handle_token_usage(self, session_cost: SessionCost, data: TokenUsageData) -> None:
         """Handle TOKEN_USAGE observation data.
 
         Updates token counts, calculates cost, and tracks per-model breakdown.
@@ -222,10 +241,26 @@ class SessionCostProjection:
             pass  # Tool execution itself is free - cost is in tokens
 
     async def on_session_summary(self, event_data: dict[str, Any]) -> None:
-        """Handle session_summary event with accurate cumulative totals.
+        """Apply a run's end-of-run totals, without letting silence overwrite counts.
 
-        This event is produced at the end of agent execution and contains
-        the authoritative totals from Claude CLI's result event.
+        A summary reports what the harness knew when the run ended, and a run
+        that was killed or timed out never got to say. Two rules keep that from
+        being read as "spent nothing" (#1164):
+
+        - A field the summary does not actually report - absent, or present as
+          ``None`` because the harness never filled it in - leaves the counted
+          value alone. ``num_turns: None`` from a timed-out phase used to be
+          assigned straight over the turns counted from its observations,
+          replacing a real 3 with ``None`` in an ``int`` field.
+        - ``is_finalized`` follows ``totals_are_authoritative``: the session is
+          settled only when the harness reported its own totals. A phase killed
+          mid-run is still the best estimate available, not a final bill, and
+          the dashboard badge says so. Summaries written before that flag
+          existed carry no key and keep the original settled semantics.
+
+        Reported values still REPLACE rather than add: per-turn deltas
+        double-count the context re-sent each turn, so the harness's cumulative
+        figure is lower than the accumulated sum and is the one to trust.
         """
         session_id = event_data.get("session_id")
         if not session_id:
@@ -235,29 +270,42 @@ class SessionCostProjection:
         session_cost = _get_or_create_session_cost(existing, session_id)
         _set_linkage(session_cost, event_data)
 
-        data = event_data.get("data", {})
+        # The payload arrives from the event store as an untyped JSON object;
+        # naming its shape here is what lets the type checker catch a key that
+        # the producer does not write.
+        data: SessionSummaryData = event_data.get("data", {})
 
-        session_cost.input_tokens = data.get("total_input_tokens", session_cost.input_tokens)
-        session_cost.output_tokens = data.get("total_output_tokens", session_cost.output_tokens)
-        session_cost.cache_creation_tokens = data.get(
-            "cache_creation_tokens", session_cost.cache_creation_tokens
+        session_cost.input_tokens = _reported(
+            data.get("total_input_tokens"), session_cost.input_tokens
         )
-        session_cost.cache_read_tokens = data.get(
-            "cache_read_tokens", session_cost.cache_read_tokens
+        session_cost.output_tokens = _reported(
+            data.get("total_output_tokens"), session_cost.output_tokens
         )
-        session_cost.tool_calls = data.get("tool_count", session_cost.tool_calls)
-        session_cost.turns = data.get("num_turns", session_cost.turns)
-        session_cost.duration_ms = data.get("duration_ms", session_cost.duration_ms)
+        session_cost.cache_creation_tokens = _reported(
+            data.get("cache_creation_tokens"), session_cost.cache_creation_tokens
+        )
+        session_cost.cache_read_tokens = _reported(
+            data.get("cache_read_tokens"), session_cost.cache_read_tokens
+        )
+        session_cost.tool_calls = _reported(data.get("tool_count"), session_cost.tool_calls)
+        session_cost.turns = _reported(data.get("num_turns"), session_cost.turns)
+        session_cost.duration_ms = _reported(data.get("duration_ms"), session_cost.duration_ms)
 
         if data.get("model"):
             session_cost.agent_model = data["model"]
 
+        # An absent cost leaves the running one alone, and nothing recomputes it
+        # here: it was priced per observation with that observation's own model
+        # (#788), so re-pricing the totals under the summary's single model
+        # would be wrong for any session that spanned two. Leaving it is also
+        # what keeps a killed phase agreeing with the last figure the live path
+        # reported, instead of dropping to $0.00.
         if data.get("total_cost_usd") is not None:
             session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
             session_cost.token_cost_usd = session_cost.total_cost_usd
 
         session_cost.completed_at = _parse_timestamp(event_data.get("timestamp"))
-        session_cost.is_finalized = True
+        session_cost.is_finalized = bool(data.get("totals_are_authoritative", True))
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 
     async def on_session_cost_finalized(self, event_data: dict[str, Any]) -> None:

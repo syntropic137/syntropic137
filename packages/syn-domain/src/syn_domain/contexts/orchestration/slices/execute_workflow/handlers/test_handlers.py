@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProces
     MISSING_TERMINAL_TURN_REASON,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    ReportedUsage,
     StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -156,10 +157,12 @@ class TestAgentExecutionHandler:
             interrupt_reason=None,
             agent_task_result=None,
             total_cost_usd=0.0319,
-            result_input_tokens=685,
-            result_output_tokens=1961,
-            result_cache_creation=5596,
-            result_cache_read=144509,
+            reported_usage=ReportedUsage(
+                input_tokens=685,
+                output_tokens=1961,
+                cache_creation=5596,
+                cache_read=144509,
+            ),
             duration_ms=48000,
             num_turns=7,
         )
@@ -203,10 +206,12 @@ class TestAgentExecutionHandler:
             interrupt_reason=None,
             agent_task_result=None,
             total_cost_usd=0.0319,
-            result_input_tokens=685,
-            result_output_tokens=1961,
-            result_cache_creation=5596,
-            result_cache_read=144509,
+            reported_usage=ReportedUsage(
+                input_tokens=685,
+                output_tokens=1961,
+                cache_creation=5596,
+                cache_read=144509,
+            ),
             duration_ms=48000,
             num_turns=7,
         )
@@ -244,6 +249,9 @@ class TestAgentExecutionHandler:
             cache_read=144509,
             num_turns=7,
             duration_ms=48000,
+            # The harness reported these itself, so they are authoritative and
+            # downstream may replace accumulated estimates with them (#1164).
+            totals_are_authoritative=True,
         )
 
     @pytest.mark.anyio
@@ -258,8 +266,9 @@ class TestAgentExecutionHandler:
             interrupt_requested=False,
             interrupt_reason=None,
             agent_task_result=None,
-            result_input_tokens=12,
-            result_output_tokens=7,
+            reported_usage=ReportedUsage(
+                input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
+            ),
         )
 
         with (
@@ -464,8 +473,9 @@ class TestAgentExecutionHandler:
             interrupt_requested=False,
             interrupt_reason=None,
             agent_task_result=None,
-            result_input_tokens=12,
-            result_output_tokens=7,
+            reported_usage=ReportedUsage(
+                input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
+            ),
         )
 
         async def process_stream(*_args: object) -> StreamResult:

@@ -107,16 +107,17 @@ async def test_codex_recording_produces_timeline() -> None:
 
     # Fixture: input_tokens=97006, cached_input_tokens=87808, output_tokens=288,
     # reasoning_output_tokens=0 => fresh_input=9198, cache_read=87808, output=288.
-    assert result.result_input_tokens == 9198
-    assert result.result_cache_read == 87808
-    assert result.result_output_tokens == 288
+    assert result.reported_usage is not None
+    assert result.reported_usage.input_tokens == 9198
+    assert result.reported_usage.cache_read == 87808
+    assert result.reported_usage.output_tokens == 288
     assert result.num_turns == 1
     assert result.error_reason is None
 
-    # Shared TokenAccumulator updated too (not just StreamResult.result_*).
-    assert tokens.input_tokens == result.result_input_tokens
-    assert tokens.output_tokens == result.result_output_tokens
-    assert tokens.cache_read_tokens == result.result_cache_read
+    # Shared TokenAccumulator updated too (not just StreamResult.reported_usage).
+    assert tokens.input_tokens == result.reported_usage.input_tokens
+    assert tokens.output_tokens == result.reported_usage.output_tokens
+    assert tokens.cache_read_tokens == result.reported_usage.cache_read
 
     # Raw provider-native JSONL preserved, including interleaved non-JSON
     # noise lines the real codex CLI emits on stdout.
@@ -168,7 +169,8 @@ async def test_a_truncated_line_the_stream_recovers_from_is_not_a_failure() -> N
 
     assert result.error_reason is None
     assert result.num_turns == 1
-    assert result.result_input_tokens == 100
+    assert result.reported_usage is not None
+    assert result.reported_usage.input_tokens == 100
 
 
 @pytest.mark.asyncio
@@ -182,6 +184,34 @@ async def test_no_terminal_usage_fails_explicitly() -> None:
     assert result.error_reason is not None
     assert "turn.completed" in result.error_reason
     assert result.num_turns == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_truncated_codex_stream_reports_no_harness_totals() -> None:
+    """A cut-off codex run has an accumulator, not a report (#1164).
+
+    `StreamResult.reported_usage` is what `FinalUsage.resolve` reads to decide
+    whether the numbers are the harness's own, and codex fills the same field
+    the claude parser does. Left populated, a truncated run's partial sum would
+    be labelled authoritative on the way to the aggregate - the same
+    presence-vs-magnitude confusion, one processor over.
+    """
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    truncated = await processor.process_stream(
+        _lines(_FIXTURES_DIR / "codex_no_terminal.jsonl"), _NoopWorkspace()
+    )
+    assert truncated.reported_usage is None
+
+    # And the complete run over the same processor DOES report - otherwise the
+    # assertion above would hold for a field nothing ever sets.
+    complete_processor, _ = _make_processor(_RecordingCollector())
+    complete = await complete_processor.process_stream(
+        _lines(_FIXTURES_DIR / "codex_exec_recording.jsonl"), _NoopWorkspace()
+    )
+    assert complete.reported_usage is not None
 
 
 @pytest.mark.asyncio
@@ -449,8 +479,9 @@ async def test_the_tsx_line_from_1146_does_not_fail_a_stream_that_completes() ->
         f"a line of TSX the agent echoed failed the phase: {result.error_reason}"
     )
     assert result.num_turns == 1
-    assert result.result_input_tokens == 10168  # 103168 fresh - 93000 cached
-    assert result.result_output_tokens == 10020
+    assert result.reported_usage is not None
+    assert result.reported_usage.input_tokens == 10168  # 103168 fresh - 93000 cached
+    assert result.reported_usage.output_tokens == 10020
 
 
 @pytest.mark.unit
@@ -504,11 +535,7 @@ async def test_echoed_lines_change_nothing_about_how_real_events_are_handled() -
 
     assert noisy.line_count == clean.line_count + 7  # the junk WAS read
     assert _observable(noisy_collector.calls) == _observable(clean_collector.calls)
-    assert (noisy.result_input_tokens, noisy.result_output_tokens, noisy.result_cache_read) == (
-        clean.result_input_tokens,
-        clean.result_output_tokens,
-        clean.result_cache_read,
-    )
+    assert noisy.reported_usage == clean.reported_usage
     assert noisy.num_turns == clean.num_turns
     assert noisy.error_reason == clean.error_reason is None
     assert noisy.leader_native_session_id == clean.leader_native_session_id

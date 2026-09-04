@@ -9,6 +9,7 @@ Reports AgentExecutionCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -103,16 +104,61 @@ async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> b
     return any(content for _, content in collected)
 
 
-def _resolve_final_totals(
-    stream_result: StreamResult, tokens: TokenAccumulator
-) -> tuple[int, int, int, int]:
-    """Prefer authoritative result-event totals over accumulated per-turn counts."""
-    return (
-        stream_result.result_input_tokens or tokens.input_tokens,
-        stream_result.result_output_tokens or tokens.output_tokens,
-        stream_result.result_cache_creation or tokens.cache_creation_tokens,
-        stream_result.result_cache_read or tokens.cache_read_tokens,
-    )
+@dataclass(frozen=True)
+class FinalUsage:
+    """A phase's end-of-run token totals, and whether the harness itself reported them.
+
+    Both facts are decided in one place because they must never disagree. The
+    numbers say what the phase used; ``is_authoritative`` says who counted
+    them, and consumers need the second to know what the first is worth:
+
+    - **Authoritative** - the harness emitted its terminal ``result`` event and
+      these are its own cumulative totals. They REPLACE anything accumulated
+      mid-stream, which is the whole point of preferring them: per-turn deltas
+      double-count the context re-sent on every turn, so the accumulated sum is
+      normally far HIGHER than the truth.
+    - **Estimated** - the process died before reporting (timeout, SIGKILL), so
+      these are the deltas observed while it ran. Partial, but real: a phase
+      killed after an hour of tool calls did not cost nothing (#1164).
+
+    Collapsing the two into bare numbers is what made a killed phase read as
+    $0.00 - the totals were reset to the result event's zeros, and no consumer
+    could tell "spent nothing" from "never got to say".
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_creation: int
+    cache_read: int
+    is_authoritative: bool
+
+    @classmethod
+    def resolve(cls, stream_result: StreamResult, tokens: TokenAccumulator) -> FinalUsage:
+        """Take the harness's own totals when it reported them, else what was observed.
+
+        The question is whether the harness reported, NOT how much it reported.
+        Those come apart at exactly one value: a run that finished having used
+        nothing reports ``0/0``, and reading that as "no report" hands its
+        authoritative answer back to the accumulator, which is the opposite of
+        what happened. `reported_usage` is present iff a terminal event was
+        parsed, so presence is the whole test (#1164).
+        """
+        reported = stream_result.reported_usage
+        if reported is not None:
+            return cls(
+                input_tokens=reported.input_tokens,
+                output_tokens=reported.output_tokens,
+                cache_creation=reported.cache_creation,
+                cache_read=reported.cache_read,
+                is_authoritative=True,
+            )
+        return cls(
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            cache_creation=tokens.cache_creation_tokens,
+            cache_read=tokens.cache_read_tokens,
+            is_authoritative=False,
+        )
 
 
 class AgentExecutionResult:
@@ -309,33 +355,43 @@ class AgentExecutionHandler:
             else:
                 exit_code = 1
 
-        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2).
+        # Resolved ONCE, for both lanes. The session_summary used to be written
+        # straight from `stream_result.result_*` while the command below used
+        # the accumulator fallback, so a killed phase reported its real tokens
+        # to the aggregate and zeros to observability - and observability is
+        # what the cost ledger reads (#1164).
+        usage = FinalUsage.resolve(stream_result, tokens)
+
+        # ISS-217: Emit session_summary with the phase's end-of-run totals (Lane 2).
         # The codex path already emits its summary inside CodexStreamProcessor
         # (single-layer), so the handler skips it for runner == "codex".
+        #
+        # `total_cost_usd` stays whatever the harness said, including None: a
+        # NULL cost is priced downstream from these tokens and this model,
+        # which is exactly the estimate wanted for a phase that was killed
+        # before it could report one. Passing 0.0 instead would be taken as
+        # authoritative and priced verbatim.
         if collector is not None and runner != AgentRunner.CODEX:
             await collector.record_session_summary(
                 total_cost_usd=stream_result.total_cost_usd,
-                input_tokens=stream_result.result_input_tokens,
-                output_tokens=stream_result.result_output_tokens,
-                cache_creation=stream_result.result_cache_creation,
-                cache_read=stream_result.result_cache_read,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_creation=usage.cache_creation,
+                cache_read=usage.cache_read,
                 num_turns=stream_result.num_turns,
                 duration_ms=stream_result.duration_ms,
+                totals_are_authoritative=usage.is_authoritative,
             )
-
-        final_input, final_output, final_cache_creation, final_cache_read = _resolve_final_totals(
-            stream_result, tokens
-        )
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             session_id=session_id,
             exit_code=exit_code,
-            input_tokens=final_input,
-            output_tokens=final_output,
-            cache_creation_tokens=final_cache_creation,
-            cache_read_tokens=final_cache_read,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_creation_tokens=usage.cache_creation,
+            cache_read_tokens=usage.cache_read,
         )
 
         return AgentExecutionResult(
