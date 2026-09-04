@@ -395,6 +395,48 @@ async def test_a_rebuild_wedged_before_its_first_checkpoint_is_stalled() -> None
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_just_started_coordinator_does_not_call_a_missing_row_stuck() -> None:
+    """The anti-misfire half of the same signal: absence is evidence only once it is OLD.
+
+    EVERY projection lacks a checkpoint row for a moment at startup - that is
+    what the first seconds of any rebuild look like, and it is the moment an
+    operator watching a deploy is most likely to be reading /health. Reporting
+    them all stalled on every boot would be a worse bug than the one this signal
+    was added for: it fires on healthy deployments, so it teaches operators that
+    `stalled` means nothing, and then the real stall is ignored too.
+
+    The service keeps the start time it captured itself here, so the age this
+    turns on is really elapsed time and not a value the fixture chose.
+    """
+    service = await _service_at(
+        dict.fromkeys(PEERS, HEAD),
+        without_checkpoint=REBUILDING,
+    )
+    try:
+        lag = await service.describe_read_model_lag()
+    finally:
+        await service.stop()
+
+    assert lag is not None
+    assert lag.is_stalled is False
+    entry = lag.lagging_projections[0]
+    assert entry.projection == REBUILDING
+    assert entry.position == 0
+    assert entry.stalled is False
+    # The coordinator start time DID reach the measurement: a missing row had no
+    # age at all before it was supplied, and a None age would satisfy every
+    # assertion above for the wrong reason - "cannot prove it is stuck" rather
+    # than "measured, and it is young". Pinning it here is what makes this a test
+    # of the threshold instead of a test of the absent default.
+    assert entry.checkpoint_age_seconds is not None
+    assert entry.checkpoint_age_seconds < STALLED_AFTER_SECONDS
+    # Still a rebuild in flight, so the operator is told to wait - not told
+    # nothing, and not told to intervene.
+    assert lag.is_catching_up is True
+
+
+@pytest.mark.unit
 def test_a_projection_with_no_checkpoint_yet_is_not_called_stuck() -> None:
     """The pure measurement does not invent an age when none is supplied.
 

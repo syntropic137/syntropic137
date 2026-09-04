@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from syn_api._wiring import (
     disconnect,
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+    from syn_adapters.subscriptions.read_model_lag import ReadModelLag
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
@@ -574,6 +575,80 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
+#: The values `subscription.status` can take. "healthy" is the absence of every
+#: signal below, so it is not a signal itself and has no row in the table.
+_ReadPathStatus = Literal["healthy", "degraded", "stalled", "catching_up"]
+
+
+@dataclass(frozen=True)
+class _ReadPathSignal:
+    """One way the read path can be unwell: whether it is, and what to say if so.
+
+    `reason` is what `degraded_reasons` carries; `status` is what
+    `subscription.status` says when this is the most severe signal firing. Both
+    live on the same row because they are one signal described two ways, and a
+    row is the whole of what a new signal costs.
+    """
+
+    fires: bool
+    reason: DegradedReason
+    status: _ReadPathStatus
+
+
+@dataclass(frozen=True)
+class _ReadPathVerdict:
+    """What /health should say about the read path."""
+
+    status: _ReadPathStatus
+    degraded_reasons: tuple[DegradedReason, ...]
+
+
+def _judge_read_path(*, running: bool, lag: ReadModelLag | None) -> _ReadPathVerdict:
+    """Turn the subscription's facts into the verdict /health publishes.
+
+    ADDING A THIRD SIGNAL? Add a row. It is deliberately impossible to add one
+    that reports a reason but no status, or a status no reason explains: the
+    ranking and the list are read off the SAME rows, so they cannot drift into
+    disagreeing about one deployment. That drift is the bug this shape exists to
+    make unwriteable, and it was reachable while the two were computed apart.
+
+    THE ROWS ARE ORDERED BY SEVERITY, most severe first, because
+    `subscription.status` has ONE slot and the signals are independent. When
+    several fire it leads with the one needing a human: a dead coordinator, then
+    a stall, then a rebuild. That ranking is presentation only —
+    `degraded_reasons` carries EVERY signal that fired, so a wedged replay is
+    `stalled` with both reasons raised. Two true facts about one read path, not
+    a conflict.
+
+    `lag is None` means the subscription is not up yet, which is a different
+    answer from "not behind": it fires no lag signal of its own, and `running`
+    is what reports it.
+    """
+    signals = (
+        _ReadPathSignal(
+            fires=not running,
+            reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
+            status="degraded",
+        ),
+        _ReadPathSignal(
+            fires=lag is not None and lag.is_stalled,
+            reason=DegradedReason.PROJECTION_STALLED,
+            status="stalled",
+        ),
+        _ReadPathSignal(
+            fires=lag is not None and lag.is_catching_up,
+            reason=DegradedReason.PROJECTION_CATCHUP,
+            status="catching_up",
+        ),
+    )
+    fired = tuple(signal for signal in signals if signal.fires)
+
+    return _ReadPathVerdict(
+        status=fired[0].status if fired else "healthy",
+        degraded_reasons=tuple(signal.reason for signal in fired),
+    )
+
+
 async def _enrich_subscription_health(response: dict, mode: str) -> None:
     """Add subscription coordinator status and read-model lag to the response.
 
@@ -587,10 +662,9 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
     TWO WAYS TO BE BEHIND, reported separately, because they need opposite
     responses from the operator reading this: a rebuild (`catching_up`) ends by
     itself and the answer is to wait, while a stalled projection does not and the
-    answer is to intervene. Both degrade, so neither is answered with "healthy";
-    they are distinguished by `subscription.status` and by which DegradedReason
-    appears. A replay that has itself wedged sets both reasons — that is two true
-    facts about one read path, not a conflict.
+    answer is to intervene. Which signals say what is `_judge_read_path`'s
+    decision, not this function's — this one only renders it. A third signal
+    belongs there.
 
     Being behind is reported through the EXISTING degraded machinery — mode plus
     a DegradedReason — rather than by changing top-level `status`. `status` is
@@ -605,42 +679,21 @@ async def _enrich_subscription_health(response: dict, mode: str) -> None:
     if _state.subscription_service is None:
         return
 
-    def _degrade(reason: DegradedReason) -> None:
-        response.setdefault("degraded_reasons", []).append(reason)
-        if mode == "full":
-            response["mode"] = "degraded"
-
     try:
         sub_status = _state.subscription_service.get_status()
-        sub_healthy = sub_status.get("running", False)
         lag = await _state.subscription_service.describe_read_model_lag()
-
-        catching_up = lag is not None and lag.is_catching_up
-        stalled = lag is not None and lag.is_stalled
-        # Stalled outranks catching_up in the single `status` slot: when both are
-        # true the one needing a human is the one to lead with. Both still appear
-        # in degraded_reasons, so neither is lost to the ordering.
-        if not sub_healthy:
-            status = "degraded"
-        elif stalled:
-            status = "stalled"
-        elif catching_up:
-            status = "catching_up"
-        else:
-            status = "healthy"
+        verdict = _judge_read_path(running=sub_status.get("running", False), lag=lag)
 
         response["subscription"] = {
             **sub_status,
-            "status": status,
+            "status": verdict.status,
             **(lag.model_dump(mode="json") if lag is not None else {}),
         }
 
-        if not sub_healthy:
-            _degrade(DegradedReason.SUBSCRIPTION_COORDINATOR)
-        if catching_up:
-            _degrade(DegradedReason.PROJECTION_CATCHUP)
-        if stalled:
-            _degrade(DegradedReason.PROJECTION_STALLED)
+        if verdict.degraded_reasons:
+            response.setdefault("degraded_reasons", []).extend(verdict.degraded_reasons)
+            if mode == "full":
+                response["mode"] = "degraded"
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
         response["subscription"] = {"status": "unknown"}

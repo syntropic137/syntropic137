@@ -21,7 +21,9 @@ There are two ways to be behind and they need opposite responses, so /health has
 to tell them apart: a rebuild ends by itself and the answer is to wait, a stalled
 projection does not and the answer is to intervene. Both must be reachable from
 the payload alone, and each must be visible WITHOUT the other, which is what the
-independence assertions below pin.
+independence assertions below pin. They are not exclusive: a replay that wedges
+sets both, and that payload is covered too - it is the one where the single
+`status` slot has to rank them while `degraded_reasons` must not.
 """
 
 from __future__ import annotations
@@ -109,6 +111,33 @@ def _lag_wedged() -> ReadModelLag:
         },
         projection_names=[REBUILDING, *PEERS],
         replaying=False,
+        now=NOW,
+    )
+
+
+def _lag_rebuild_wedged_before_its_first_checkpoint() -> ReadModelLag:
+    """A rebuild that failed on the FIRST event it was replayed.
+
+    Version reconciliation deletes the checkpoint row before the replay, and a
+    projection that raises on its first event never writes a replacement - so
+    there is no row whose `updated_at` could be old. The service supplies its own
+    start time as the age of that absence, which is what `position: 0` with a
+    stale `updated_at` stands for here.
+
+    Both signals are true: a replay IS running, and this projection is not moving
+    through it. Left to `is_catching_up` alone the payload says "wait" about a
+    rebuild that will never finish.
+    """
+    return measure_read_model_lag(
+        head_position=HEAD,
+        checkpoints={
+            REBUILDING: CheckpointState(position=0, updated_at=STUCK),
+            **{
+                name: CheckpointState(position=FROZEN_POSITION, updated_at=MOVING) for name in PEERS
+            },
+        },
+        projection_names=[REBUILDING, *PEERS],
+        replaying=True,
         now=NOW,
     )
 
@@ -261,6 +290,47 @@ async def test_a_wedged_projection_is_visible_and_named(health_payload: HealthPr
     # raised. An operator told to wait here would wait forever.
     assert subscription["is_catching_up"] is False
     assert "projection_catchup" not in body["degraded_reasons"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_wedged_rebuild_reports_both_signals_on_the_wire(
+    health_payload: HealthProbe,
+) -> None:
+    """(e) Both signals true at once, through the serializer.
+
+    The single `status` slot has to rank them and the reasons list must not, so
+    this is the one payload where the two renderings of the verdict can disagree
+    - a status that leads with the stall while the catch-up reason silently
+    disappears, or the reverse. Asserting the reasons as a whole list rather than
+    with `in` is what makes a dropped one fail here.
+    """
+    body = await health_payload(_lag_rebuild_wedged_before_its_first_checkpoint())
+
+    subscription = body["subscription"]
+    assert subscription["is_catching_up"] is True
+    assert subscription["is_stalled"] is True
+
+    # Degraded once, with EVERY reason that fired - an operator filtering on
+    # `projection_stalled` and one filtering on `projection_catchup` both see it.
+    # Asserted as a whole list, in severity order, so a reason dropped when the
+    # other outranks it fails here rather than passing an `in` check.
+    assert body["mode"] == "degraded"
+    assert body["degraded_reasons"] == ["projection_stalled", "projection_catchup"]
+    # The slot that holds one value leads with the one needing a human, and it
+    # agrees with the head of the list because both are read off the same rows.
+    assert subscription["status"] == "stalled"
+
+    # Named, at position 0: the rebuild never got its first checkpoint written.
+    stuck = subscription["lagging_projections"][0]
+    assert stuck["projection"] == REBUILDING
+    assert stuck["position"] == 0
+    assert stuck["stalled"] is True
+    assert stuck["checkpoint_age_seconds"] == STALLED_AFTER_SECONDS + 1
+    # The peers are behind too - a replay holds everyone back - and are not stuck.
+    assert [
+        entry["projection"] for entry in subscription["lagging_projections"] if entry["stalled"]
+    ] == [REBUILDING]
 
 
 @pytest.mark.unit
