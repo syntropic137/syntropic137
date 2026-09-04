@@ -27,6 +27,7 @@ from syn_api._wiring import (
 from syn_api.list_query import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    WindowBound,
     parse_statuses,
     resolve_page_size,
 )
@@ -677,11 +678,11 @@ async def list_sessions_endpoint(
         None,
         description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
     ),
-    started_after: datetime | None = Query(
-        None, description="Inclusive ISO 8601 lower bound on started_at"
+    started_after: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at (timezone required)"
     ),
-    started_before: datetime | None = Query(
-        None, description="Inclusive ISO 8601 upper bound on started_at"
+    started_before: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at (timezone required)"
     ),
     q: str | None = Query(
         None,

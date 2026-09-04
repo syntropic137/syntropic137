@@ -23,7 +23,7 @@ precedent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -107,19 +107,40 @@ def paginate[R, T](
 
 
 def coerce_datetime(value: object) -> datetime | None:
-    """Parse an ISO 8601 string or accept an existing datetime; None if neither.
+    """The instant ``value`` names, as an aware UTC datetime; None if it names none.
 
-    Handles the trailing ``Z`` suffix (RFC 3339), which ``fromisoformat``
-    rejects before Python 3.11.
+    Accepts an ISO 8601 string or an existing datetime, and handles the
+    trailing ``Z`` suffix (RFC 3339), which ``fromisoformat`` rejects before
+    Python 3.11.
+
+    A value carrying no offset is read as UTC. Every timestamp reaching this
+    module is UTC already -- aggregates stamp ``datetime.now(UTC)`` -- so UTC
+    is the only reading the stored data supports, and it is the reading
+    ``reconciliation._started_before`` already applies to these same
+    timestamps.
+
+    That is deliberately the OPPOSITE of what the API does with a bound the
+    caller sent (``syn_api.list_query.WindowBound`` refuses one with no
+    offset), and the difference is who is there to ask. A bound is a question
+    a person just typed, so an ambiguous one can be handed back. A row is a
+    value the system wrote and is reading again years later; there is no one to
+    hand it back to, and the alternatives are a 500 or dropping the row from a
+    window it may well belong in.
+
+    Normalising here is also what makes the comparison total. Python raises
+    ``TypeError`` comparing an aware datetime with a naive one, so without it
+    any caller -- not only the HTTP one behind the validated bound -- is one
+    timezone-less value away from a 500 (#1183). After it there is one kind of
+    datetime left and nothing downstream has to know which kind it was given.
     """
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
         return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def within_window(
@@ -134,15 +155,22 @@ def within_window(
     excluded from the rows, the total and the facet counts alike -- the three
     must agree about it or the count describes rows the query does not return
     (#920).
+
+    Bounds and rows are compared as UTC instants, so this never raises on a
+    timezone-less value on either side and no caller has to normalise before
+    calling; :func:`coerce_datetime` owns that reading and explains why the
+    API's answer for a bound is a stricter one.
     """
     if after is None and before is None:
         return True
     started = coerce_datetime(value)
     if started is None:
         return False
-    if after is not None and started < after:
+    lower = coerce_datetime(after)
+    upper = coerce_datetime(before)
+    if lower is not None and started < lower:
         return False
-    return not (before is not None and started > before)
+    return not (upper is not None and started > upper)
 
 
 def matches_search(term: str | None, *fields: object) -> bool:

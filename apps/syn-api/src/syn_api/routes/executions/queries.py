@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
-from syn_api.list_query import MAX_PAGE_SIZE, parse_statuses
+from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.types import (
     Err,
     ExecutionDetail,
@@ -717,11 +717,11 @@ async def list_executions_endpoint(
         None,
         description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
     ),
-    started_after: datetime | None = Query(
-        None, description="Inclusive ISO 8601 lower bound on started_at"
+    started_after: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at (timezone required)"
     ),
-    started_before: datetime | None = Query(
-        None, description="Inclusive ISO 8601 upper bound on started_at"
+    started_before: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at (timezone required)"
     ),
     q: str | None = Query(
         None,

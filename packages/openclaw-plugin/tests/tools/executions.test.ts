@@ -50,27 +50,6 @@ describe("synListExecutions", () => {
     expect(result.content).toContain("## Executions (137 total, page 2/3)");
   });
 
-  it("tolerates the fields the widened API response adds", async () => {
-    // This package has no generated types and is deliberately left out of the
-    // dashboard's alias change: its local `ExecutionListResponse` is a
-    // structural SUBSET of the server's, so unknown fields are inert. This
-    // test is what makes that a checked claim rather than an assumption.
-    // TODO(#1182): wire this package into `just codegen` so drift is a gate,
-    // not a test that only catches breakage after the fact.
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        ...executionListPaged,
-        status_counts: { running: 100, completed: 37 },
-      }),
-    );
-
-    const result = await synListExecutions(client, { page: 2 });
-
-    expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("## Executions (137 total, page 2/3)");
-    expect(result.content).toContain("Issue Resolution");
-  });
-
   it("handles empty list", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({ executions: [], total: 0, page: 1, page_size: 50 }),

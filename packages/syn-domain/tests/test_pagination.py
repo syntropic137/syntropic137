@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from syn_domain.pagination import Page, matches_search, paginate, within_window
+from syn_domain.pagination import Page, coerce_datetime, matches_search, paginate, within_window
 
 pytestmark = pytest.mark.unit
 
@@ -197,3 +197,71 @@ def test_unpaged_is_the_whole_collection() -> None:
     page = Page.unpaged(_RECORDS, status_of=lambda r: r.status)
     assert page.total == len(_RECORDS) == len(page.rows)
     assert sum(page.status_counts.values()) == len(_RECORDS)
+
+
+# -- A timestamp is a UTC instant however it was spelled (#1183) ---------------
+#
+# `within_window` compared the bound straight against the row, and Python
+# raises `TypeError` comparing an aware datetime with a naive one. Either side
+# could arrive without an offset - the bound from a hand-edited
+# `?started_after=2026-04-01T00:00:00` that FastAPI parsed without complaint,
+# the row from an event whose producer omitted one - so the mismatch is
+# symmetric and both halves reached the same 500.
+#
+# The API now refuses a bound with no offset (`syn_api.list_query.WindowBound`),
+# but that guards one caller and one half. The comparison itself has to be
+# total: nothing checks a ROW for an offset, and `page()` and `query()` are
+# reachable from callers that are not HTTP requests.
+
+_AWARE = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+_NAIVE = datetime(2026, 4, 1, 12, 0)
+
+
+def test_a_timezone_less_value_is_the_same_instant_as_its_utc_spelling() -> None:
+    """The contract, stated once: a missing offset means UTC.
+
+    Equality rather than "is aware": `astimezone` also returns something aware,
+    and on a host that is not UTC it returns a different instant.
+    """
+    assert coerce_datetime(_NAIVE) == _AWARE
+    assert coerce_datetime("2026-04-01T12:00:00") == _AWARE
+    assert coerce_datetime("2026-04-01T12:00:00Z") == _AWARE
+    assert coerce_datetime("2026-04-01T14:00:00+02:00") == _AWARE
+
+
+def test_an_unparseable_value_is_still_nothing() -> None:
+    assert coerce_datetime("not a timestamp") is None
+    assert coerce_datetime(None) is None
+    assert coerce_datetime(1743508800) is None
+
+
+@pytest.mark.parametrize(
+    ("row", "after", "before"),
+    [
+        pytest.param("2026-04-01T12:00:00+00:00", _NAIVE, None, id="naive-lower-aware-row"),
+        pytest.param("2026-04-01T12:00:00+00:00", None, _NAIVE, id="naive-upper-aware-row"),
+        pytest.param("2026-04-01T12:00:00", _AWARE, None, id="aware-lower-naive-row"),
+        pytest.param("2026-04-01T12:00:00", None, _AWARE, id="aware-upper-naive-row"),
+        pytest.param("2026-04-01T12:00:00", _NAIVE, _NAIVE, id="naive-both-naive-row"),
+    ],
+)
+def test_either_side_may_omit_the_offset(
+    row: str, after: datetime | None, before: datetime | None
+) -> None:
+    """Every mixture of aware and naive, on both sides, in both directions.
+
+    The row sits exactly on the bound in each case, so an answer at all means
+    the comparison happened AND placed the two values at the same instant.
+    Before the fix, four of these five raised `TypeError`.
+    """
+    assert within_window(row, after, before) is True
+
+
+def test_a_timezone_less_bound_excludes_the_rows_outside_it() -> None:
+    """Not crashing is not the assertion: the bound still has to select.
+
+    A bound that was coerced but then ignored, or widened to cover everything,
+    passes the row-on-the-bound cases above and fails here.
+    """
+    assert within_window("2026-04-01T11:59:59+00:00", _NAIVE, None) is False
+    assert within_window("2026-04-01T12:00:01+00:00", None, _NAIVE) is False

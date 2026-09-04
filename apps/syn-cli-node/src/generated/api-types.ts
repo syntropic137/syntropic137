@@ -5770,9 +5770,9 @@ export interface operations {
                 status?: string | null;
                 /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
                 statuses?: string | null;
-                /** @description Inclusive ISO 8601 lower bound on started_at */
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
                 started_after?: string | null;
-                /** @description Inclusive ISO 8601 upper bound on started_at */
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
                 started_before?: string | null;
                 /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
                 q?: string | null;
@@ -6112,9 +6112,9 @@ export interface operations {
                 status?: string | null;
                 /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
                 statuses?: string | null;
-                /** @description Inclusive ISO 8601 lower bound on started_at */
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
                 started_after?: string | null;
-                /** @description Inclusive ISO 8601 upper bound on started_at */
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
                 started_before?: string | null;
                 /** @description Case-insensitive substring match against session id and workflow id */
                 q?: string | null;
