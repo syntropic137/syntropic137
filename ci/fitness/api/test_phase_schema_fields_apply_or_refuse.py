@@ -58,7 +58,7 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # `prompt_file` is resolved into `prompt_template` at load time, so it
     # rides the same keyword; it has no separate execution identity.
     "prompt_file": ("ExecutablePhase", "prompt_template"),
-    "output_artifacts": ("ExecutablePhase", "output_artifact_type"),
+    "output_artifacts": ("ExecutablePhase", "output_artifact_types"),
     "timeout_seconds": ("ExecutablePhase", "timeout_seconds"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),

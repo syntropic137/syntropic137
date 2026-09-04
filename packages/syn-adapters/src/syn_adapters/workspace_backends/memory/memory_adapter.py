@@ -13,6 +13,7 @@ Usage in tests:
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -29,6 +30,43 @@ if TYPE_CHECKING:
         IsolationConfig,
         IsolationHandle,
     )
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a workspace collection glob into a regex over POSIX paths.
+
+    `fnmatch` is not usable here: its `*` crosses `/`, so `artifacts/output/**/*`
+    would match `artifacts/input/x.md` and the pattern would be decorative. The
+    three constructs the workspace ports actually use are handled explicitly:
+
+      ``**/``  any number of leading directories (including none)
+      ``*``    any run of characters within ONE segment
+      ``?``    one character within one segment
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile(f"^{''.join(out)}$")
+
+
+def _matches_any(path: str, patterns: list[str]) -> bool:
+    """Whether a stored path is selected by any collection pattern."""
+    return any(_glob_to_regex(p).match(path) for p in patterns)
 
 
 # =============================================================================
@@ -195,26 +233,33 @@ class MemoryIsolationAdapter(InMemoryAdapter):
     async def copy_from(
         self,
         handle: IsolationHandle,
-        patterns: list[str],  # noqa: ARG002
+        patterns: list[str],
         base_path: str = "/workspace",  # noqa: ARG002
     ) -> list[tuple[str, bytes]]:
-        """Copy files out of the mock isolation.
+        """Copy files out of the mock isolation, HONOURING the patterns.
 
-        Returns stored files.
+        This used to ignore `patterns` and return every file in the workspace.
+        That made the double unable to represent the situation behind #1167:
+        provisioning writes CLAUDE.md, AGENTS.md and the prompt into the same
+        store, so a phase that produced NOTHING still collected a handful of
+        files and looked productive. Every artifact assertion driven through
+        this backend was really counting provisioning noise, and the one
+        defect the pattern exists to expose - an empty `artifacts/output/` -
+        was the one it could not show.
 
         Args:
             handle: Handle from create()
-            patterns: Ignored in mock (returns all files)
+            patterns: Collection globs, relative to the workspace root
             base_path: Ignored in mock
 
         Returns:
-            All stored files
+            Stored files whose path matches at least one pattern
         """
         state = self._instances.get(handle.isolation_id)
         if state is None:
             return []
 
-        return list(state.files.items())
+        return [(path, body) for path, body in state.files.items() if _matches_any(path, patterns)]
 
     # ==========================================================================
     # TEST HELPERS

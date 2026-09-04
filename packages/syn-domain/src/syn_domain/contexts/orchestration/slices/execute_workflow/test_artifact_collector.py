@@ -12,6 +12,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     ArtifactCollector,
     map_artifact_type,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    PhaseProducedNoDeclaredOutputError,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
@@ -109,7 +112,7 @@ class TestArtifactCollector:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
         assert len(result.artifact_ids) == 2
         assert result.first_content == "# Result"
@@ -126,7 +129,14 @@ class TestArtifactCollector:
         ]
 
     @pytest.mark.asyncio
-    async def test_collect_empty_workspace(self) -> None:
+    async def test_collect_empty_workspace_when_nothing_was_declared(self) -> None:
+        """An UNDECLARED phase may produce nothing - the #1167 true negative.
+
+        The declaration is empty, so there is no contract to violate and the
+        empty collection is returned rather than raised on. The paired failure
+        case lives in TestADeclaredOutputMustBeProduced below; without both,
+        the rule either does not bite or bites everything.
+        """
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
         workspace = MockWorkspace()
         result = await collector.collect_from_workspace(
@@ -136,7 +146,7 @@ class TestArtifactCollector:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="text",
+            output_artifact_types=(),
         )
         assert result.artifact_ids == []
         assert result.first_content is None
@@ -194,7 +204,7 @@ class TestArtifactCollector:
             execution_id="e1",
             session_id="s1",
             phase_name="Phase",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
         assert len(result) == 1
         assert len(repo.saved) == 1
@@ -213,7 +223,7 @@ class TestArtifactCollector:
             execution_id="e1",
             session_id="s1",
             phase_name="Phase",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
         assert result == []
 
@@ -251,7 +261,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert len(result.artifact_ids) == 2
@@ -278,7 +288,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert result.first_content == "# Real Result"
@@ -305,7 +315,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert len(ids) == 1
@@ -331,7 +341,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert len(result.artifact_ids) == 2
@@ -361,7 +371,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         assert len(result.artifact_ids) == 2
@@ -391,7 +401,7 @@ class TestBuildJunkIsNotCollected:
             execution_id="e1",
             session_id="s1",
             phase_name="Test Phase",
-            output_artifact_type="text",
+            output_artifact_types=("text",),
         )
 
         assert len(result.artifact_ids) == 4
@@ -424,7 +434,7 @@ class TestExactlyOnePrimaryDeliverable:
             execution_id="e1",
             session_id="s1",
             phase_name="Planning",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True, False, False]
@@ -444,7 +454,107 @@ class TestExactlyOnePrimaryDeliverable:
             execution_id="e1",
             session_id="s1",
             phase_name="Planning",
-            output_artifact_type="markdown",
+            output_artifact_types=("markdown",),
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True]
+
+
+class TestADeclaredOutputMustBeProduced:
+    """#1167 at the collector, where the declaration meets what was written.
+
+    The end-to-end proof that the run STOPS lives in
+    tests/contexts/workflows/execute_workflow/test_processor_smoke.py. These
+    pin the rule itself: which combinations of declaration and output are a
+    contract violation, and which are ordinary.
+    """
+
+    @pytest.mark.asyncio
+    async def test_declared_and_produced_nothing_raises(self) -> None:
+        collector = ArtifactCollector(MockArtifactRepo(), None, None)
+
+        with pytest.raises(PhaseProducedNoDeclaredOutputError) as excinfo:
+            await collector.collect_from_workspace(
+                workspace=MockWorkspace(),
+                workflow_id="w1",
+                phase_id="verify",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Verify",
+                output_artifact_types=("analysis_report",),
+            )
+
+        message = str(excinfo.value)
+        assert "verify" in message, f"must name the phase, got {message!r}"
+        assert "analysis_report" in message, f"must name what was missing, got {message!r}"
+
+    @pytest.mark.asyncio
+    async def test_a_workspace_holding_only_build_junk_counts_as_nothing(self) -> None:
+        """Junk is not a deliverable, so declaring output and emitting only
+        junk is the same violation as emitting nothing.
+
+        Without this the rule is trivially evaded by any phase whose run
+        happened to leave a __pycache__ behind - which, for a phase that ran
+        Python at all, is most of them.
+        """
+        collector = ArtifactCollector(MockArtifactRepo(), None, None)
+        workspace = MockWorkspace(
+            collected_files=[("artifacts/output/__pycache__/mod.cpython-312.pyc", b"\x00")]
+        )
+
+        with pytest.raises(PhaseProducedNoDeclaredOutputError):
+            await collector.collect_from_workspace(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="falsify",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Falsify",
+                output_artifact_types=("markdown",),
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_interrupted_phase_salvaging_nothing_does_not_raise(self) -> None:
+        """collect_partial is the interrupt path and stays best-effort.
+
+        An interrupted phase already has a verdict. Raising a contract
+        violation over an empty salvage would overwrite "cancelled" with a
+        misleading cause.
+        """
+        collector = ArtifactCollector(MockArtifactRepo(), None, None)
+
+        ids = await collector.collect_partial(
+            workspace=MockWorkspace(),
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Interrupted",
+            output_artifact_types=("markdown",),
+        )
+
+        assert ids == []
+
+    @pytest.mark.asyncio
+    async def test_the_first_declared_type_tags_every_artifact(self) -> None:
+        """A phase may declare several types; the artifact record carries one.
+
+        Pinned because the narrowing MOVED in #1167 - it used to happen in
+        ExecuteWorkflowHandler and now happens here. A tuple asserted with two
+        entries could not pass under the old singular field.
+        """
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(collected_files=[("artifacts/output/plan.md", b"# Plan")])
+
+        await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Planning",
+            output_artifact_types=("plan", "markdown"),
+        )
+
+        assert [a.artifact_type for a in repo.saved] == [ArtifactType.PLAN]

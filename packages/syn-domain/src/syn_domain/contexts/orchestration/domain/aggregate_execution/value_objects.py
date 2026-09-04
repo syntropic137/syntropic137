@@ -216,8 +216,14 @@ class ExecutablePhase:
     # Input configuration
     inputs: list[PhaseInput] = field(default_factory=list)
 
-    # Output artifact type
-    output_artifact_type: str = "text"
+    # What this phase's definition declares it produces. Plural and possibly
+    # EMPTY, which is the whole point: empty means "declared nothing" and is a
+    # phase legitimately allowed to produce nothing, while a non-empty
+    # declaration is a contract the collector enforces (#1167). The previous
+    # singular `output_artifact_type: str = "text"` could not express the
+    # difference - an undeclared phase and one declaring "text" both arrived
+    # here as "text", so no enforcement was possible downstream.
+    output_artifact_types: tuple[str, ...] = ()
 
     # Timeout for this phase (can override agent config)
     timeout_seconds: int | None = None

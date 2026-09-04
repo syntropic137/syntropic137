@@ -175,6 +175,13 @@ def completed_phase(
 
     # Health signals, not errors: a phase can legitimately produce neither, and
     # the dashboard shows them so a silently empty phase is visible as such.
+    #
+    # `no_artifacts` narrowed in meaning with #1167 and is no longer the only
+    # thing standing between an empty phase and a green run. A phase that
+    # DECLARED output and produced none now fails at collection and never
+    # reaches here, so reaching here with no artifacts means the phase declared
+    # none - legitimately empty. The warning stays because "legitimate" is not
+    # the same as "expected" and an operator still wants to see it.
     warnings: list[str] = []
     if inp == 0 and out == 0:
         warnings.append("zero_tokens")

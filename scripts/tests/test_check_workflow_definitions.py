@@ -121,3 +121,131 @@ class TestTheRepositoryOwnWorkflowsStayValid:
             check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+class TestAnInputArtifactMustBeSuppliedBySomething:
+    """An input nothing supplies is a phase reading a file that is never written.
+
+    This is #1166: a `report` phase that reads `verify.md` when no `verify`
+    output exists reads nothing, silently, and reports on it anyway. The
+    invariant is that every declared input resolves to SOMETHING - an earlier
+    phase's output or a declared workflow input. Not "an earlier phase": a
+    workflow input is a legitimate supplier, and requiring a producing phase
+    would reject workflows that work today.
+
+    `WorkflowDefinition.validate_input_artifacts_resolve` already implements
+    this and `tests/contexts/workflows/test_declaration_integrity.py` already
+    tests it at the model. What was untested is the GATE's verdict, and the two
+    are not the same assertion. Measured, not assumed: making the gate swallow
+    this one rejection -
+
+        except (ValidationError, ValueError, OSError) as exc:
+            if "input_artifacts" in str(exc):
+                return None
+
+    - leaves all 56 model-level and fitness tests green and fails only the
+    first test below. That is not a hypothetical mutation. It is the shortest
+    path to a green run for anyone who hits this rejection on a workflow they
+    believe is fine, which makes it the one worth nailing down here.
+    """
+
+    def test_an_input_nothing_supplies_is_rejected(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            {
+                "id": "starved",
+                "name": "Starved",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "produce",
+                        "name": "Produce",
+                        "order": 1,
+                        "prompt_template": "x",
+                        "output_artifacts": ["plan"],
+                    },
+                    {
+                        "id": "report",
+                        "name": "Report",
+                        "order": 2,
+                        "prompt_template": "x",
+                        "input_artifacts": ["verify_notes"],
+                    },
+                ],
+            },
+        )
+
+        reason = validate_file(path)
+
+        assert reason is not None, (
+            "the gate accepted a phase whose declared input no phase produces "
+            "and no workflow input provides; that phase reads nothing at "
+            "runtime and says so to no one (#1166)"
+        )
+        assert "report" in reason, f"the rejection must name the offending PHASE, got: {reason!r}"
+        assert "verify_notes" in reason, (
+            f"the rejection must name the unsatisfied INPUT, got: {reason!r}"
+        )
+
+    def test_an_input_an_earlier_phase_produces_is_accepted(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            {
+                "id": "chained",
+                "name": "Chained",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "produce",
+                        "name": "Produce",
+                        "order": 1,
+                        "prompt_template": "x",
+                        "output_artifacts": ["plan"],
+                    },
+                    {
+                        "id": "report",
+                        "name": "Report",
+                        "order": 2,
+                        "prompt_template": "x",
+                        "input_artifacts": ["plan"],
+                    },
+                ],
+            },
+        )
+
+        assert _gate_accepts(path), (
+            f"a phase consuming an earlier phase's declared output was rejected: "
+            f"{validate_file(path)!r}"
+        )
+
+    def test_an_input_a_workflow_input_supplies_is_accepted(self, tmp_path: Path) -> None:
+        """The case a stricter "must have a producing PHASE" rule would break.
+
+        A first phase has no earlier phase and no other spelling for its
+        dependency. Rejecting this would make authors delete the declaration
+        rather than fix it, which loses the graph the check exists to protect.
+        """
+        path = _write(
+            tmp_path,
+            {
+                "id": "from-input",
+                "name": "From Input",
+                "requires_repos": False,
+                "inputs": [{"name": "task", "description": "the task", "required": True}],
+                "phases": [
+                    {
+                        "id": "research",
+                        "name": "Research",
+                        "order": 1,
+                        "prompt_template": "x",
+                        "input_artifacts": ["task"],
+                    },
+                ],
+            },
+        )
+
+        assert _gate_accepts(path), (
+            f"a phase consuming a DECLARED WORKFLOW INPUT was rejected: "
+            f"{validate_file(path)!r}. A workflow input is a legitimate "
+            "supplier; this phase is not starved."
+        )

@@ -44,6 +44,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +144,13 @@ def _make_processor(
 
 
 def _one_phase_workflow() -> list[ExecutablePhase]:
+    """One phase that declares NO output, matching a fake agent that writes none.
+
+    The empty declaration is deliberate. These tests drive the real collection
+    step with an agent double that produces no files, so declaring an output
+    type here would (correctly, since #1167) fail every one of them for a
+    reason none of them is about.
+    """
     return [
         ExecutablePhase(
             phase_id="phase-001",
@@ -149,7 +159,7 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
             description="Single phase for smoke testing",
             agent_config=AgentConfiguration(),
             prompt_template="do the thing",
-            output_artifact_type="text",
+            output_artifact_types=(),
             timeout_seconds=30,
         )
     ]
@@ -249,3 +259,310 @@ class TestProcessorSmoke:
 
         assert result.status == "completed", f"Expected 'completed' but got '{result.status}'."
         assert fake.call_count == 1
+
+
+def _two_phase_workflow(
+    first_declares: tuple[str, ...],
+    second_declares: tuple[str, ...] = (),
+) -> list[ExecutablePhase]:
+    """Two sequential phases, so "the next one did not run" is observable.
+
+    A single-phase workflow cannot express the property that matters in #1167:
+    the failure was not that a phase produced nothing, it was that the run
+    CARRIED ON without it. When the vanished phase is `verify`, carrying on is
+    the whole defect.
+    """
+    return [
+        ExecutablePhase(
+            phase_id="phase-001",
+            name="Produce Phase",
+            order=1,
+            description="Declares output",
+            agent_config=AgentConfiguration(),
+            prompt_template="produce the thing",
+            output_artifact_types=first_declares,
+            timeout_seconds=30,
+        ),
+        ExecutablePhase(
+            phase_id="phase-002",
+            name="Downstream Phase",
+            order=2,
+            description="Must not run if phase 1 failed its contract",
+            agent_config=AgentConfiguration(),
+            prompt_template="consume the thing",
+            output_artifact_types=second_declares,
+            timeout_seconds=30,
+        ),
+    ]
+
+
+@pytest.mark.unit
+class TestADeclaredOutputMustBeProduced:
+    """#1167: a phase that promises output and delivers none fails the run.
+
+    Four real executions ended `status=completed, error_message=None,
+    artifact_id=None` - the phase produced none of the output its contract
+    declared and the execution advanced regardless. In one of them the phase
+    was `verify`, so the review gate left the run silently while every surface
+    still reported success.
+
+    These drive the FULL processor loop rather than the collector alone,
+    because the defect was never in one object: the declaration was collapsed
+    to a scalar four hops upstream, and each end of every hop looked correct.
+    """
+
+    async def test_declared_but_unproduced_fails_and_stops_the_run(self) -> None:
+        """(a) The gate cannot be skipped: phase 2 must not run.
+
+        `call_count == 1` is the assertion that matters. A version of this fix
+        that failed the phase but let the execution continue would still
+        report `status='failed'` here while leaving the real defect - a
+        removed gate that nobody notices - completely intact.
+        """
+        fake = FakeAgentExecutionHandler.success()  # exit 0, writes nothing
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-missing",
+            workflow_name="Missing Artifact Workflow",
+            phases=_two_phase_workflow(first_declares=("plan",)),
+            inputs={},
+            execution_id="exec-1167-missing",
+        )
+
+        assert result.status == "failed", (
+            f"Expected 'failed' but got '{result.status}'. A phase declaring "
+            "'plan' and writing nothing under artifacts/output/ produced none "
+            "of its contract; completing it is #1167."
+        )
+        assert result.error_message is not None
+        assert "phase-001" in result.error_message, (
+            f"The error must NAME the phase that broke its contract, got: {result.error_message!r}"
+        )
+        assert "plan" in result.error_message, (
+            f"The error must name WHAT was missing, got: {result.error_message!r}"
+        )
+        assert fake.call_count == 1, (
+            f"The downstream phase ran anyway ({fake.call_count} agent calls). "
+            "Failing the phase while letting the execution advance leaves the "
+            "defect intact - a dropped `verify` still disappears from the run."
+        )
+
+    async def test_a_phase_declaring_nothing_may_produce_nothing(self) -> None:
+        """(b) The true negative. Without this the fix breaks legitimate phases.
+
+        Four phases in the shipped self-host validation workflows declare no
+        `output_artifacts` (`delegation:build-and-delegate`,
+        `github-ops:exercise`, `skills-injection:report` and `:confirm`). They
+        answer a question and stop, nothing downstream reads them, and they
+        must keep passing. Only a DECLARED-and-unproduced output is a failure.
+        """
+        fake = FakeAgentExecutionHandler.success()  # writes nothing, as above
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-undeclared",
+            workflow_name="Undeclared Output Workflow",
+            phases=_two_phase_workflow(first_declares=()),
+            inputs={},
+            execution_id="exec-1167-undeclared",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}' "
+            f"({result.error_message!r}). A phase that declares no output "
+            "artifact types is allowed to produce none; failing it would break "
+            "every shipped validation workflow."
+        )
+        assert fake.call_count == 2, "Both phases should have run to completion"
+
+    async def test_a_phase_that_produces_what_it_declared_is_unaffected(self) -> None:
+        """(c) The happy path still completes, and the artifact still lands.
+
+        Asserting only the status would pass even if the enforcement had eaten
+        the artifact on its way through, so the collected id is checked too -
+        that is the hop the plural declaration now travels.
+        """
+        fake = FakeAgentExecutionHandler.success(
+            produces=[("artifacts/output/deliverable.md", b"# Real output")]
+        )
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1167-produced",
+            workflow_name="Produced Output Workflow",
+            phases=_two_phase_workflow(first_declares=("plan",), second_declares=("markdown",)),
+            inputs={},
+            execution_id="exec-1167-produced",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}' "
+            f"({result.error_message!r}). Both phases declared output and both "
+            "wrote a file, so nothing here should trip the #1167 gate."
+        )
+        assert fake.call_count == 2
+        assert len(result.artifact_ids) == 2, (
+            f"Expected one artifact per phase, got {result.artifact_ids}. The "
+            "declaration now travels as a tuple; a hop that dropped it would "
+            "surface here as a lost artifact."
+        )
+
+
+class FakeWorkflowRepository:
+    """Returns one stored template, which is all ``handle()`` asks of it."""
+
+    def __init__(self, template: WorkflowTemplateAggregate) -> None:
+        self._template = template
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None:
+        return self._template if aggregate_id == self._template.id else None
+
+
+def _stored_template(workflow_yaml: str) -> WorkflowTemplateAggregate:
+    """Author a workflow the way an author does, and store it the way install does.
+
+    Every hop between the YAML and the aggregate is real: `from_yaml` parses
+    and validates, `build_command_from_definition` maps `output_artifacts` onto
+    the command, and `create_workflow` emits the event the aggregate applies.
+    A test that hand-built the aggregate would skip all three.
+    """
+    from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+    from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+        build_command_from_definition,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+
+    template = WorkflowTemplateAggregate()
+    template.create_workflow(
+        build_command_from_definition(WorkflowDefinition.from_yaml(workflow_yaml))
+    )
+    return template
+
+
+_DECLARING_WORKFLOW_YAML = """
+id: wf-1167-authored
+name: Authored Workflow
+requires_repos: false
+phases:
+  - id: produce
+    name: Produce
+    order: 1
+    prompt_template: produce the thing
+    output_artifacts: [plan]
+  - id: downstream
+    name: Downstream
+    order: 2
+    prompt_template: consume the thing
+    input_artifacts: [plan]
+"""
+
+_SILENT_WORKFLOW_YAML = """
+id: wf-1167-authored-silent
+name: Authored Silent Workflow
+requires_repos: false
+phases:
+  - id: produce
+    name: Produce
+    order: 1
+    prompt_template: answer the question
+  - id: downstream
+    name: Downstream
+    order: 2
+    prompt_template: answer the next question
+"""
+
+
+async def _run_authored(workflow_yaml: str, fake: FakeAgentExecutionHandler):
+    """Drive the whole production path: stored template -> handler -> processor."""
+    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        ExecuteWorkflowCommand,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    template = _stored_template(workflow_yaml)
+    handler = ExecuteWorkflowHandler(
+        processor=_make_processor(fake),
+        workflow_repository=FakeWorkflowRepository(template),  # type: ignore[arg-type]
+    )
+    return await handler.handle(ExecuteWorkflowCommand(aggregate_id=template.id, inputs={}))
+
+
+@pytest.mark.unit
+class TestTheDeclarationSurvivesTheProductionConversion:
+    """#1167: the enforcement must be reachable from an AUTHORED workflow.
+
+    The tests above construct `ExecutablePhase` by hand and hand it straight to
+    the processor. That skips `ExecuteWorkflowHandler._get_executable_phases`,
+    which is the ONLY production site that builds an `ExecutablePhase`, and the
+    hop where the declaration was collapsed to `[0] or "text"` in the first
+    place - the original defect lived precisely there.
+
+    Verified rather than assumed: erasing the declaration at that hop
+    (`output_artifact_types=()` in the conversion) leaves all three tests
+    above, the architecture fitness test, and the entire `-m unit` suite green.
+    So the enforcement could stop enforcing without one red test, which is the
+    same "correct at both ends of the hop" defect class #1167 is about.
+
+    These start from YAML because that is where a declaration is actually
+    written, and end at the processor's verdict because that is the only place
+    it means anything. Asserting `phases[0].output_artifact_types == ("plan",)`
+    would pin the hop but not the consequence: a collector that stopped
+    checking would keep it green.
+    """
+
+    async def test_an_authored_declaration_still_fails_a_phase_that_produces_nothing(
+        self,
+    ) -> None:
+        """The declaration must survive YAML -> command -> aggregate -> conversion.
+
+        Any one of those hops dropping `output_artifacts` turns this run back
+        into the silent success of #1167, and this is the only test that would
+        notice.
+        """
+        fake = FakeAgentExecutionHandler.success()  # exit 0, writes nothing
+
+        result = await _run_authored(_DECLARING_WORKFLOW_YAML, fake)
+
+        assert result.status == "failed", (
+            f"Expected 'failed' but got '{result.status}' ({result.error_message!r}). "
+            "The workflow's YAML declares `output_artifacts: [plan]` and the "
+            "phase wrote nothing. A pass here means the declaration was "
+            "dropped somewhere between the YAML and the collector - most "
+            "likely ExecuteWorkflowHandler._get_executable_phases, which is "
+            "where #1167 collapsed it."
+        )
+        assert result.error_message is not None
+        assert "produce" in result.error_message, (
+            f"The error must NAME the phase that broke its contract, got: {result.error_message!r}"
+        )
+        assert "plan" in result.error_message, (
+            f"The error must name WHAT was missing, got: {result.error_message!r}"
+        )
+        assert fake.call_count == 1, (
+            f"The downstream phase ran anyway ({fake.call_count} agent calls). "
+            "The gate has to stop the run, not just mark a phase failed."
+        )
+
+    async def test_an_authored_workflow_declaring_nothing_still_completes(self) -> None:
+        """The true negative, through the same path.
+
+        Without this, a conversion that hard-coded a non-empty declaration -
+        the mirror image of the mutation above - would pass the test before it
+        while breaking the four shipped phases that legitimately declare no
+        output.
+        """
+        fake = FakeAgentExecutionHandler.success()  # writes nothing, as above
+
+        result = await _run_authored(_SILENT_WORKFLOW_YAML, fake)
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}' "
+            f"({result.error_message!r}). Neither authored phase declares "
+            "`output_artifacts`, so producing none is their contract, not a breach."
+        )
+        assert fake.call_count == 2, "Both phases should have run to completion"

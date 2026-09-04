@@ -759,7 +759,7 @@ class WorkflowExecutionProcessor:
             workflow_id=aggregate.workflow_id or "",
             session_id=todo.session_id or "",
             phase_name=phase.name,
-            output_artifact_type=phase.output_artifact_type,
+            output_artifact_types=phase.output_artifact_types,
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
