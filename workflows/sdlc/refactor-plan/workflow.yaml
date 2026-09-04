@@ -1,0 +1,134 @@
+id: sdlc-refactor-plan-v2
+name: "SDLC: Refactor planning - coverage gate, seams, extraction, TDD sequence (v2, opus)"
+description: >
+  Plan a refactor of a large module WITHOUT writing code. Five phases. The first
+  is a gate: measure real test coverage and say plainly whether the module is
+  safe to refactor at all. A refactor without a behavioural net is not a
+  refactor, it is a rewrite with extra confidence.
+type: research
+classification: complex
+requires_repos: true
+
+# WHY THIS EXISTS SEPARATELY FROM sdlc-research-plan-v3.
+#
+# v3 is research -> plan -> review -> revise, and it is the right shape for
+# "how should we build X". It is the WRONG shape for "how should we restructure
+# X", because it has no place to establish that restructuring is safe.
+#
+# Refactoring has a precondition that feature work does not: the behaviour must
+# already be pinned by tests, or there is nothing to preserve and no way to know
+# you preserved it. Fowler's definition is "change the internal structure
+# WITHOUT changing observable behaviour" - which is unfalsifiable without a test
+# that observes the behaviour. Feathers' whole method for legacy code is
+# characterization tests FIRST, precisely because the tests you wish you had are
+# the ones that would have caught the regression you are about to introduce.
+#
+# So phase 1 is a gate rather than a step. It is allowed to conclude "do not
+# refactor this yet, write these tests first", and that is a SUCCESSFUL run.
+#
+# Per-phase tool scoping is enforced (#1039): allowed_tools becomes one
+# comma-joined `--tools` flag governing availability. Every phase that writes a
+# deliverable MUST declare Write - the whole sdlc-research-plan family omitted
+# it and silently relied on the restriction being inert.
+
+# WHY v2 RATHER THAN EDITING v1. v1 ran on sonnet and its numbers are the
+# measured arm of experiments/2026-09-01--refactor-planning--does-a-coverage-
+# gate-change-the-plan. Changing the model under the same id would leave those
+# numbers attached to a workflow that no longer exists, and would invite a
+# later comparison against runs that used a different model without saying so.
+#
+# The pair is also the next experiment. "Does opus justify its cost here" is
+# exactly the model cost-versus-quality question, and v1/v2 differing in ONE
+# field is the cleanest way to ask it.
+#
+# NOT expressible today: thinking level. There is no such field in the phase
+# schema and no code path that would apply one, so declaring it would create
+# precisely the inert field ADR-069 D5 and the declaration-integrity fitness
+# gate now forbid. It needs a consumer before it can be a declaration.
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>.md, so renaming a phase breaks the phase after it.
+  - id: coverage-gate
+    name: Measure coverage and decide whether to proceed
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    model: opus
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    prompt_file: phases/coverage-gate.md
+
+  - id: characterize
+    name: Specify the tests that must exist before any extraction
+    order: 2
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    model: opus
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+    prompt_file: phases/characterize.md
+
+  - id: seams
+    name: Find the seams and design the extraction
+    order: 3
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    model: opus
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+    prompt_file: phases/seams.md
+
+  # Cross-model review. Codex cannot declare tools at all - `_build_codex_command`
+  # hardcodes the sandbox and takes only a prompt and a model (#1009) - so this
+  # phase declares none rather than declaring some that would be refused.
+  - id: cross-model-review
+    name: Adversarial review of the refactor plan
+    order: 4
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    agent:
+      provider: codex
+    prompt_file: phases/cross-model-review.md
+
+  - id: revise
+    name: Revise the plan against the review
+    order: 5
+    execution_type: sequential
+    input_artifacts:
+      - markdown
+    output_artifacts:
+      - markdown
+    timeout_seconds: 1800
+    model: opus
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Write
+    prompt_file: phases/revise.md
