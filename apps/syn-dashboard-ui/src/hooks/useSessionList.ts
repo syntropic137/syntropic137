@@ -16,8 +16,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useResetView } from './useResetView'
-import { listSessions } from '../api/sessions'
-import type { SSEEventFrame, SessionSummary, TimeWindow } from '../types'
+import { listSessions, type SessionListResponse } from '../api/sessions'
+import type {
+  SSEEventFrame,
+  SessionSummary,
+  TimeWindow,
+} from '../types'
 import { sortSessions } from '../utils/sessionSort'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
@@ -53,6 +57,25 @@ const SESSION_LIVE_EVENTS = new Set(['SessionStarted', 'SessionCompleted'])
 
 function isTerminalSession(s: SessionSummary): boolean {
   return isTerminalSessionStatus(s.status)
+}
+
+type ApiSessionSummary = NonNullable<SessionListResponse['sessions']>[number]
+
+function toSessionSummary(row: ApiSessionSummary): SessionSummary {
+  return {
+    ...row,
+    workflow_name: row.workflow_name ?? null,
+    execution_id: row.execution_id ?? null,
+    phase_display: row.phase_display ?? null,
+    agent_model: row.agent_model ?? null,
+    agent_model_display: row.agent_model_display ?? null,
+    repos: row.repos ?? [],
+    repos_display: row.repos_display ?? null,
+    total_cost_usd: Number(row.total_cost_usd ?? 0),
+    duration_seconds: row.duration_seconds ?? null,
+    started_at: row.started_at ?? null,
+    completed_at: row.completed_at ?? null,
+  }
 }
 
 function isDefaultViewState(
@@ -126,7 +149,7 @@ export function useSessionList(): UseSessionListResult {
       started_after: timeWindowToStartedAfter(timeWindow),
       limit: 100,
     })
-      .then((data) => setSessions(data.sessions))
+      .then((data) => setSessions((data.sessions ?? []).map(toSessionSummary)))
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [workflowIdFilter, statusesKey, timeWindow])
