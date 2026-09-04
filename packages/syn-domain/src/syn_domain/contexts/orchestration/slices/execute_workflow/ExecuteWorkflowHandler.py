@@ -200,6 +200,26 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
             )
 
 
+def _phase_declares_anything(
+    *,
+    model: str | None,
+    provider: str | None,
+    allow_delegation: bool,
+    allowed_tools: tuple[str, ...],
+    sandbox: str | None,
+) -> bool:
+    """True when the phase set any agent field at all.
+
+    EVERY field a phase can declare must be named here, not only in the
+    constructor (#1039). A phase declaring exactly one of them takes the
+    early-return branch, so a field missing from this predicate is silently
+    dropped for precisely the author who asked for it - that cost
+    `allowed_tools` a release. For `sandbox` the same bug would run a phase
+    with authority it explicitly declined.
+    """
+    return bool(model or provider or allow_delegation or allowed_tools or sandbox)
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -248,12 +268,13 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     # exactly the author who asked for it, while passing any test that also
     # sets a model. Pinned by
     # test_tools_survive_when_they_are_the_only_thing_declared.
-    # `sandbox` belongs in this condition for the same reason `allowed_tools`
-    # does (#1039): a phase whose only declaration is `agent.sandbox` takes
-    # this branch, and returning `defaults` would silently discard the one
-    # thing its author asked for. For sandbox that failure is not merely lost
-    # configuration - it is a phase running with authority it declined.
-    if not (phase_model or phase_provider or allow_delegation or allowed_tools or sandbox):
+    if not _phase_declares_anything(
+        model=phase_model,
+        provider=phase_provider,
+        allow_delegation=allow_delegation,
+        allowed_tools=allowed_tools,
+        sandbox=sandbox,
+    ):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,
