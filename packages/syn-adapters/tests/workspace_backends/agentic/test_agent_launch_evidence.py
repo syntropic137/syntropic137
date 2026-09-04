@@ -442,17 +442,18 @@ async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launch
         ],
     )
 
-    assert lines == [forged_announcement, forged_diagnostic], (
-        "the agent must really have announced a wrapper name of its own AND signed a "
-        f"line with it, or this test cannot fail; a stream missing either is not the "
-        f"uncovered shape (more than one announcement on one stream): {lines}"
-    )
     assert docker.adapter.last_exit_code == 127, (
         "the retraction must really be armed, or the launch would survive for the wrong reason"
     )
     assert launches == 1, (
         "the agent genuinely launched - the real wrapper announced and exec'd it - so "
         "a name the agent chose must not be able to retract that"
+    )
+    assert lines == [forged_announcement, forged_diagnostic], (
+        "and both forged lines must reach the stream untouched, or this test is not the "
+        "uncovered shape (MORE THAN ONE announcement-shaped line on one stream). An "
+        "observer that consumed either had recognised a name it did not mint, which is "
+        f"the defect itself: {lines}"
     )
 
 
