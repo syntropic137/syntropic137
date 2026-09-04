@@ -1,0 +1,29 @@
+# Every entry here is publicly binding, and every one of them PASSED the awk
+# gate that counted colons: each has two or more once ${...} was stripped, so
+# "the first field must be the interface" concluded it was safe. Captured from
+# the reproduction in PR #1155 rather than invented.
+services:
+  quoted_all_interfaces:
+    image: postgres
+    ports:
+      - "0.0.0.0:15432:5432"
+  unquoted_all_interfaces:
+    image: postgres
+    ports:
+      - 0.0.0.0:15432:5432
+  bracketed_ipv6_wildcard:
+    image: postgres
+    ports:
+      - "[::]:15432:5432"
+  all_interfaces_port_range:
+    image: postgres
+    ports:
+      - "0.0.0.0:15432-15434:5432-5434"
+  empty_host_and_empty_port:
+    image: postgres
+    ports:
+      - "::5432"
+  interpolated_host_without_default:
+    image: postgres
+    ports:
+      - "${BIND}:15432:5432"

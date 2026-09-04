@@ -17,7 +17,7 @@ services:
   timescaledb:
     container_name: syn-env-${SYN_ENV_NAME}-db
     ports:
-      - "${SYN_ENV_PORT_DB}:5432"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_DB}:5432"
     volumes:
       - ./init-db:/docker-entrypoint-initdb.d:ro
     # No persistent volume - ephemeral, clean slate on creation
@@ -25,12 +25,12 @@ services:
   event-store:
     container_name: syn-env-${SYN_ENV_NAME}-event-store
     ports:
-      - "${SYN_ENV_PORT_ES}:50051"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_ES}:50051"
 
   collector:
     container_name: syn-env-${SYN_ENV_NAME}-collector
     ports:
-      - "${SYN_ENV_PORT_COLLECTOR}:8080"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_COLLECTOR}:8080"
 
   # Definition in docker-compose.yaml; only container_name here
   docker-socket-proxy:
@@ -42,7 +42,7 @@ services:
       args:
         INCLUDE_DOCKER_CLI: "1"
     ports:
-      - "${SYN_ENV_PORT_API}:8000"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_API}:8000"
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     # root-path /api/v1 matches selfhost - gateway proxies /api/v1/* to here
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --root-path /api/v1"]
@@ -87,7 +87,7 @@ services:
       dockerfile: infra/docker/images/gateway/Dockerfile
     container_name: syn-env-${SYN_ENV_NAME}-gateway
     ports:
-      - "${SYN_ENV_PORT_GATEWAY}:80"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_GATEWAY}:80"
     environment:
       # No auth for test environments
       - SYN_API_PASSWORD=
@@ -105,20 +105,20 @@ services:
   minio:
     container_name: syn-env-${SYN_ENV_NAME}-minio
     ports:
-      - "${SYN_ENV_PORT_MINIO}:9000"
-      - "${SYN_ENV_PORT_MINIO_CONSOLE}:9001"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_MINIO}:9000"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_MINIO_CONSOLE}:9001"
     # No persistent volume - ephemeral
 
   redis:
     container_name: syn-env-${SYN_ENV_NAME}-redis
     ports:
-      - "${SYN_ENV_PORT_REDIS}:6379"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_REDIS}:6379"
     # No persistent volume - ephemeral
 
   envoy-proxy:
     container_name: syn-env-${SYN_ENV_NAME}-envoy-proxy
     ports:
-      - "${SYN_ENV_PORT_ENVOY}:8081"
+      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_ENVOY}:8081"
 
   token-injector:
     container_name: syn-env-${SYN_ENV_NAME}-token-injector

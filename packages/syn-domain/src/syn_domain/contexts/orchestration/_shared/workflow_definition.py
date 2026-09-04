@@ -40,7 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
     require_supported_execution_type,
 )
-from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDER, AgentProvider
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
@@ -204,6 +204,22 @@ class AgentYamlDefinition(BaseModel):
 
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
+
+    sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
+    """How much authority this phase's agent gets. Provider-neutral.
+
+    Omitted means ``workspace-write`` (``DEFAULT_PHASE_SANDBOX``), NOT
+    ``read-only``: a phase publishes its deliverable by writing under
+    ``artifacts/output/``, so a read-only phase produces no artifact and
+    starves the phase after it.
+
+    A review or verify phase must therefore declare ``read-only``
+    EXPLICITLY - leaving it out grants write access. That declaration is what
+    makes "the verifier does not modify what it certifies" enforced rather
+    than merely instructed (#1157, #1161).
+
+    Steers codex phases only. Claude phases scope authority through
+    ``allowed_tools`` and ignore this field."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
@@ -452,6 +468,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
+        sandbox = (self.agent.sandbox if self.agent else None) or DEFAULT_PHASE_SANDBOX
         model = self.model or agent_model
 
         return PhaseDefinition(
@@ -470,6 +487,7 @@ class PhaseYamlDefinition(BaseModel):
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
+            sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
         )

@@ -1,0 +1,39 @@
+# A YAML merge key is a THIRD way a service acquires `ports`, distinct from the
+# two alias shapes in never_scanned_at_all.yaml: here the word `ports` appears
+# nowhere under `services` at all. The first YAML-aware version of this gate
+# returned the literal `<<` entry from the mapping without applying merge
+# semantics, so it walked no inherited keys, found ZERO publishes among these
+# services and exited 0.
+#
+# Merge is not "walk everything", so the precedence YAML defines is pinned too,
+# and each anchor below is a SEPARATE publicly-binding mapping on its own line.
+# That separation is the point: if a rule is inverted, the wrong anchor's line
+# is flagged and says so. Sharing one anchor would let both mistakes resolve to
+# a line that is already flagged for another reason, and prove nothing.
+x-inherited-public: &inherited_public
+  ports: ["5432:5432"]
+
+x-overridden-public: &overridden_public
+  ports: ["0.0.0.0:5433:5432"]
+
+x-loopback-base: &loopback_base
+  ports: ["127.0.0.1:5434:5432"]
+
+x-later-public: &later_public
+  ports: ["0.0.0.0:5435:5432"]
+
+services:
+  # Inheritance works at all: the only entry here that may be flagged.
+  inherits_ports_through_a_merge_key:
+    <<: *inherited_public
+    image: postgres
+  # A key written on the service wins over one it inherits, so the public
+  # mapping is one docker never applies.
+  own_ports_win_over_the_inherited_ones:
+    <<: *overridden_public
+    ports: ["127.0.0.1:5433:5432"]
+    image: postgres
+  # In `<<: [*a, *b]` the EARLIER source wins, so this resolves to loopback.
+  the_earlier_merge_source_wins:
+    <<: [*loopback_base, *later_public]
+    image: postgres

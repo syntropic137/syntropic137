@@ -1,0 +1,25 @@
+# The old gate got long syntax exactly backwards. It rejected `unsafe_*` never
+# and `safe_*` always: the flow mapping happens to contain four colons and
+# cleared the >=2 bar, while the block form's first line `- target: 5432` has
+# one colon and was flagged before anything read the `host_ip:` two lines down.
+services:
+  unsafe_flow_long_form:
+    image: postgres
+    ports:
+      - {target: 5432, published: "15432", protocol: tcp, mode: host}
+  unsafe_block_long_form:
+    image: postgres
+    ports:
+      - target: 5432
+        published: 15432
+        protocol: tcp
+  safe_block_long_form:
+    image: postgres
+    ports:
+      - target: 5432
+        published: 15432
+        host_ip: 127.0.0.1
+  safe_flow_long_form:
+    image: postgres
+    ports:
+      - {target: 5432, published: "15432", host_ip: "::1"}
