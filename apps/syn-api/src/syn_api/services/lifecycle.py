@@ -16,7 +16,6 @@ import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -28,6 +27,8 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.services.credentials import validate_credentials
+from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
     reconcile_orphaned_executions,
@@ -71,23 +72,6 @@ def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
         )
 
 
-class DegradedReason(StrEnum):
-    """Reasons the API may enter degraded mode.
-
-    StrEnum so values serialize directly to JSON in health responses.
-    """
-
-    ARTIFACT_STORAGE = "artifact_storage"
-    CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
-    SKILL_STORAGE = "skill_storage"
-    CONVERSATION_STORAGE = "conversation_storage"
-    SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
-    EVENT_POLLER = "event_poller"
-    CHECK_RUN_POLLER = "check_run_poller"
-    ANTHROPIC_API_KEY = "anthropic_api_key"
-    GITHUB_APP = "github_app"
-
-
 @dataclass
 class LifecycleState:
     """Mutable state managed across startup / shutdown / health_check."""
@@ -109,7 +93,7 @@ class LifecycleState:
 # this registry — no manual if/elif dispatch or separate frozensets.
 #
 # To add a new service:
-#   1. Add a value to DegradedReason
+#   1. Add a value to DegradedReason (in degraded_reasons.py)
 #   2. Write an _init_<service>(state) function (raises on failure)
 #   3. Optionally write a _shutdown_<service>(state) function
 #   4. Add a _ServiceEntry to _SERVICE_REGISTRY
@@ -331,7 +315,7 @@ async def health_check() -> Result[dict, LifecycleError]:
     if _state.degraded_reasons:
         response["degraded_reasons"] = _state.degraded_reasons
 
-    _enrich_subscription_health(response, mode)
+    await _enrich_subscription_health(response, mode)
     _enrich_codex_auth_health(response)
 
     return Ok(response)
@@ -572,25 +556,53 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-def _enrich_subscription_health(response: dict, mode: str) -> None:
-    """Add subscription coordinator status to the health response."""
+async def _enrich_subscription_health(response: dict, mode: str) -> None:
+    """Add subscription coordinator status and read-model lag to the response.
+
+    WHY LAG BELONGS HERE. `running` alone is set once at start() and never moves,
+    so during a projection rebuild this block reported `status: healthy` while
+    every read model was thousands of events behind and freshly dispatched
+    executions 404ed. An operator seeing those 404s has to be able to tell
+    "rebuild in progress" from "the platform lost my execution", and /health is
+    where they look. See `read_model_lag` for what "catching up" means and why.
+
+    TWO WAYS TO BE BEHIND, reported separately, because they need opposite
+    responses from the operator reading this: a rebuild (`catching_up`) ends by
+    itself and the answer is to wait, while a stalled projection does not and the
+    answer is to intervene. Which signals say what is
+    `read_path_health._judge_read_path`'s decision, not this function's — this
+    one only renders it. A third signal belongs there.
+
+    Being behind is reported through the EXISTING degraded machinery — mode plus
+    a DegradedReason — rather than by changing top-level `status`. `status` is
+    what liveness probes read, and the process is alive and accepting writes in
+    both cases; taking it out of rotation would turn a stale read path into an
+    outage. `subscription.status` DOES gain the extra values, because that
+    field's job is to describe the read path and "healthy" was the lie.
+
+    Never raises. A lag probe that can take /health down is worse than no probe,
+    so any failure degrades to reporting the subscription as unknown.
+    """
     if _state.subscription_service is None:
         return
 
     try:
         sub_status = _state.subscription_service.get_status()
-        sub_healthy = sub_status.get("running", False)
+        lag = await _state.subscription_service.describe_read_model_lag()
+        verdict = _judge_read_path(running=sub_status.get("running", False), lag=lag)
+
         response["subscription"] = {
             **sub_status,
-            "status": "healthy" if sub_healthy else "degraded",
+            "status": verdict.status,
+            **(lag.model_dump(mode="json") if lag is not None else {}),
         }
-        if not sub_healthy:
-            response.setdefault("degraded_reasons", []).append(
-                DegradedReason.SUBSCRIPTION_COORDINATOR
-            )
+
+        if verdict.degraded_reasons:
+            response.setdefault("degraded_reasons", []).extend(verdict.degraded_reasons)
             if mode == "full":
                 response["mode"] = "degraded"
     except Exception:
+        logger.debug("subscription health probe failed", exc_info=True)
         response["subscription"] = {"status": "unknown"}
 
 
@@ -827,7 +839,7 @@ async def _shutdown_check_run_poller(state: LifecycleState) -> None:
 # ── Service Registry (ADR-057) ─────────────────────────────────────
 #
 # Single source of truth for all degradable services. To add a service:
-#   1. Add a DegradedReason enum value
+#   1. Add a DegradedReason enum value (in degraded_reasons.py)
 #   2. Write an _init_<name>(state) function that raises on failure
 #   3. Optionally write a _shutdown_<name>(state) function
 #   4. Add a _ServiceEntry here

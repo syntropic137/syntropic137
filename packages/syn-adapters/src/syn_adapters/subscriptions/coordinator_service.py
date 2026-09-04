@@ -14,6 +14,8 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import sys
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import asyncpg
@@ -24,6 +26,11 @@ from event_sourcing import (
     SubscriptionCoordinator,
 )
 
+from syn_adapters.subscriptions.read_model_lag import (
+    CheckpointState,
+    ReadModelLag,
+    measure_read_model_lag,
+)
 from syn_adapters.subscriptions.realtime_adapter import (
     RealTimeProjectionAdapter as RealTimeProjectionAdapter,
 )
@@ -84,6 +91,7 @@ class CoordinatorSubscriptionService:
         self._db_pool: asyncpg.Pool | None = None
         self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
+        self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
 
@@ -99,6 +107,70 @@ class CoordinatorSubscriptionService:
             "projection_count": len(self._projections),
             "realtime_enabled": self._realtime_projection is not None,
         }
+
+    async def describe_read_model_lag(self) -> ReadModelLag | None:
+        """How far the read models are behind, and which projection is worst.
+
+        ``None`` when the subscription is not up yet, which is a genuinely
+        different answer from "not behind" and is reported as such: before the
+        coordinator exists there is nothing whose progress could be measured,
+        and the caller already reports a not-running subscription as degraded.
+
+        Costs one indexed read of the store head plus one read of the checkpoint
+        table per call. Never raises - see the caller for why a health probe
+        must not be able to take /health down.
+        """
+        coordinator = self._coordinator
+        checkpoint_store = self._checkpoint_store
+        if coordinator is None or checkpoint_store is None:
+            return None
+
+        # Backwards from the highest possible nonce, so one row is the head.
+        # from_global_nonce is inclusive on a backwards read, which is why this
+        # cannot simply ask from 0. Same call the coordinator makes to fix its
+        # own live boundary.
+        head_events, _is_end, _next = await self._event_store.read_all(
+            from_global_nonce=sys.maxsize,
+            max_count=1,
+            forward=False,
+        )
+        head_position = 0
+        if head_events and head_events[0].metadata.global_nonce is not None:
+            head_position = head_events[0].metadata.global_nonce
+
+        # updated_at comes along with the position: a checkpoint that is behind
+        # the head tells you nothing about whether the projection is working
+        # until you know whether it is still moving.
+        checkpoints = {
+            checkpoint.projection_name: CheckpointState(
+                position=checkpoint.global_position,
+                updated_at=checkpoint.updated_at,
+            )
+            for checkpoint in await checkpoint_store.get_all_checkpoints()
+        }
+
+        # A version rebuild deletes its checkpoint before replaying. If the
+        # projection fails on its first event there is no row whose updated_at
+        # can prove that it stopped moving. The coordinator start is a
+        # conservative lower bound for how long that row has been absent, and
+        # keeps this otherwise-permanent failure distinguishable from a slow
+        # rebuild without changing reconciliation or dispatch behaviour.
+        for projection_name in coordinator.projections:
+            checkpoints.setdefault(
+                projection_name,
+                CheckpointState(position=0, updated_at=self._coordinator_started_at),
+            )
+
+        # From the coordinator, not from self._projections: the realtime adapter
+        # is appended during start() and is checkpointed like any other, so a
+        # replay stalled on it would otherwise be invisible.
+        return measure_read_model_lag(
+            head_position=head_position,
+            checkpoints=checkpoints,
+            projection_names=coordinator.projections.keys(),
+            replaying=coordinator.is_catching_up,
+            now=datetime.now(UTC),
+        )
 
     async def start(self) -> None:
         """Start the coordinator subscription service."""
@@ -140,6 +212,7 @@ class CoordinatorSubscriptionService:
             logger.info("RealTimeProjection adapter added")
 
         # Create coordinator
+        self._coordinator_started_at = datetime.now(UTC)
         self._coordinator = SubscriptionCoordinator(
             event_store=self._event_store,
             checkpoint_store=self._checkpoint_store,
