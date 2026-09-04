@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
 
-from syn_domain.contexts.orchestration import AGENT_LAUNCH_MARKER
+from syn_domain.contexts.orchestration import announce_as
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,44 @@ logger = logging.getLogger(__name__)
 #: to do, and the kernel checks more than a shell can - a script that resolves,
 #: is a regular file and carries the executable bit still fails ``exec`` with
 #: 127 when its shebang interpreter is missing. So the script makes no
-#: prediction and the claim is settled afterwards instead, from the status this
-#: shell returns: ``exec`` replaces it on success, so a 126 or 127 coming back
-#: is the shell still being here to report that the agent never replaced it
-#: (see ``AgentLaunchEvidence``, #1065).
+#: prediction and the claim is settled afterwards instead, from what this shell
+#: leaves behind: ``exec`` replaces it on success, so a 126 or 127 coming back
+#: with nothing on the stream but this shell's own signed diagnostic is the
+#: shell still being here to report that the agent never replaced it (see
+#: ``AgentLaunchEvidence``, #1065).
 #:
 #: ``exec`` then replaces the shell, so the agent inherits the pid the timeout
-#: path signals and the argv it was given. The marker is passed as an argument
-#: rather than interpolated, which keeps this script a constant.
+#: path signals and the argv it was given. The announcement is passed as an
+#: argument rather than interpolated, which keeps this script a constant.
 _ANNOUNCE_THEN_EXEC = 'printf "%s\\n" "$1"; shift; exec "$@"'
+
+#: Prefixes the name this wrapper runs under, for an operator reading a phase
+#: log; the rest of the name is what makes it evidence.
+_WRAPPER = "syn-launch"
+
+
+def _wrapper_name() -> str:
+    """A name for one wrapper, which no other process on its stream can produce.
+
+    This becomes the shell's ``$0``, and a POSIX shell puts ``$0`` in front of
+    its own diagnostics - so it is the signature that lets ``AgentLaunchEvidence``
+    read "the exec failed" off a stream that also carries agent output, instead
+    of reading it off the exit status alone and retracting agents that really
+    ran and really exited 126 or 127 (#1065).
+
+    Fresh per exec, because a constant name would be a signature the agent
+    could forge: agent stdout and this shell's stderr are the same stream by
+    design (ADR-043), so a guessable name lets a line the agent chooses to
+    print decide whether that agent is reported as having existed. This one is
+    never inside the container - it is an argument to the `docker exec` CLIENT,
+    on the host, and ``exec`` overwrites the argv holding it before the agent
+    exists to look.
+
+    The published marker needs no such protection and says so: an agent that
+    echoes it only attests its own existence. This name is the opposite - a
+    forged copy denies the agent's existence - so it is the half that is minted.
+    """
+    return f"{_WRAPPER}-{secrets.token_hex(8)}"
 
 
 def _build_exec_command(
@@ -52,7 +82,8 @@ def _build_exec_command(
         for key, value in environment.items():
             exec_cmd.extend(["-e", f"{key}={value}"])
     exec_cmd.append(container_name)
-    exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, "syn-launch", AGENT_LAUNCH_MARKER, *command])
+    wrapper = _wrapper_name()
+    exec_cmd.extend(["sh", "-c", _ANNOUNCE_THEN_EXEC, wrapper, announce_as(wrapper), *command])
     return exec_cmd
 
 

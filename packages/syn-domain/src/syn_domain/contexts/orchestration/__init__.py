@@ -104,6 +104,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
+    announce_as,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
@@ -225,6 +226,7 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "announce_as",
     "build_command_from_definition",
     "require_supported_execution_type",
     "validate_phase_declarations",

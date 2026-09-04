@@ -29,7 +29,9 @@ a number chosen by the test.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
+import subprocess
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
@@ -41,6 +43,7 @@ from syn_adapters.workspace_backends.agentic.stream_helpers import _build_exec_c
 from syn_domain.contexts.orchestration import (
     AGENT_LAUNCH_MARKER as PUBLISHED_LAUNCH_MARKER,
 )
+from syn_domain.contexts.orchestration import announce_as
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
 )
@@ -338,14 +341,82 @@ async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
     assert launches == 0
 
 
-def _announced_marker(exec_argv: list[str]) -> str:
-    """The marker the adapter really put on the wire, read back out of the argv.
+async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
+    fake_docker: Callable[[str], _FakeDocker],
+) -> None:
+    """The retraction's own residue, which reading the status alone got wrong (#1065).
 
-    Taken positionally, from what a container would be handed, rather than by
-    importing the constant a third time - an assertion that re-imports the
-    value it is checking cannot see the two halves disagree.
+    126 and 127 are not reserved. A process that really ran is free to exit
+    with either - a shell script the agent invoked could not find a tool, a
+    harness passes its child's status straight through - and this one has
+    already put a line on the stream that no failed exec could have produced,
+    because a failed exec means there was never an agent to produce it.
+
+    Settling on the status alone recorded this session as never having started
+    an agent, and the API then told its user the missing conversation log was
+    not lost data. That is the same false statement as #1047, reached from the
+    other direction.
     """
-    return exec_argv[exec_argv.index("syn-launch") + 1]
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+
+    launches, lines = await _launches_and_lines(
+        docker.adapter,
+        ["python3", "-c", 'print("{\\"type\\":\\"result\\"}"); raise SystemExit(127)'],
+    )
+
+    assert docker.adapter.last_exit_code == 127, (
+        "the agent must really have chosen 127 itself, or this is not the case"
+    )
+    assert lines == ['{"type":"result"}'], (
+        f"the agent must really have spoken before dying, or this cannot fail: {lines}"
+    )
+    assert launches == 1
+
+
+async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
+    fake_docker: Callable[[str], _FakeDocker],
+) -> None:
+    """Why the wrapper's name is minted rather than written down (#1065).
+
+    Agent stdout and the wrapper's stderr are one stream by design (ADR-043),
+    so whatever the wrapper is called, an agent can print a line that starts
+    the same way. If that name were a constant in this repo - and it was, and
+    it is quoted verbatim in the fixtures of this very test suite, which the
+    agents working on it run - then an agent could print its own retraction and
+    be reported as never having existed.
+
+    So the readable part is not the evidence. This agent forges it exactly and
+    exits 127, and the launch survives, because the name it could not see is
+    the part that counts.
+    """
+    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    forged = "syn-launch: 1: exec: /usr/local/bin/claude: not found"
+
+    launches, lines = await _launches_and_lines(
+        docker.adapter, ["python3", "-c", f"print({forged!r}); raise SystemExit(127)"]
+    )
+
+    assert lines == [forged], "the agent must really have forged the line, or this cannot fail"
+    assert docker.adapter.last_exit_code == 127
+    assert launches == 1
+
+
+class _ContainerArgv(NamedTuple):
+    """The three things the adapter hands a container, read back out of the argv.
+
+    Taken positionally, from what a container would really be given, rather
+    than by importing the constants a third time - an assertion that re-imports
+    the value it is checking cannot see the two halves disagree.
+    """
+
+    script: str
+    wrapper: str
+    announcement: str
+
+    @classmethod
+    def of(cls, exec_argv: list[str]) -> _ContainerArgv:
+        sh = exec_argv.index("sh")
+        return cls(*exec_argv[sh + 2 : sh + 5])
 
 
 async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
@@ -366,27 +437,87 @@ async def _observed(lines: list[str]) -> tuple[bool, list[str]]:
     return launched, survived
 
 
-async def test_the_marker_the_adapter_announces_is_the_one_the_domain_counts() -> None:
+async def test_the_announcement_the_adapter_makes_is_the_one_the_domain_counts() -> None:
     """The hop between the two halves of the launch contract (#1065).
 
-    ``_build_exec_command`` bakes the marker into a container-side argv and
-    reaches it through the orchestration context's public API;
+    ``_build_exec_command`` bakes the announcement into a container-side argv
+    and reaches it through the orchestration context's public API;
     ``AgentLaunchEvidence`` decides what counts as evidence and defines it. Both
     ends are exercised above, but only against each other - so a public export
-    that drifted from the constant it re-exports would leave the adapter
-    announcing a string the observer ignores, every session would report
-    never-started, and every other test here would still pass.
+    that drifted from the line it re-exports would leave the adapter announcing
+    a string the observer ignores, every session would report never-started,
+    and every other test here would still pass.
     """
-    argv = _build_exec_command(_CONTAINER, ["claude", "-p", "hello"], None, None)
-    announced = _announced_marker(argv)
+    argv = _ContainerArgv.of(_build_exec_command(_CONTAINER, ["claude", "-p", "hello"], None, None))
 
-    launched, survived = await _observed([announced, '{"type":"result"}'])
+    launched, survived = await _observed([argv.announcement, '{"type":"result"}'])
 
     assert launched is True, (
-        f"the observer does not count {announced!r}, the line the adapter really prints"
+        f"the observer does not count {argv.announcement!r}, the line the adapter really prints"
     )
-    assert survived == ['{"type":"result"}'], "the marker is consumed, not forwarded"
-    assert announced == PUBLISHED_LAUNCH_MARKER, (
-        "the context publishes this constant as the wire contract; the adapter "
-        "must be announcing exactly what it publishes"
+    assert survived == ['{"type":"result"}'], "the announcement is consumed, not forwarded"
+    assert argv.announcement == announce_as(argv.wrapper), (
+        "the context owns this line's format; the adapter must announce exactly what "
+        "it publishes, or the observer will not recognise the wrapper it then quotes"
     )
+    assert argv.announcement.startswith(PUBLISHED_LAUNCH_MARKER), (
+        "the context publishes this constant as the wire contract"
+    )
+
+
+async def test_each_exec_is_wrapped_under_a_name_the_last_one_did_not_use() -> None:
+    """What stops the discriminator from being a string an agent can type (#1065).
+
+    The retraction now turns on whether a line was signed by the wrapper, and
+    agent stdout and the wrapper's stderr are the same stream by design
+    (ADR-043). A wrapper named by a constant would therefore let an agent
+    print its own retraction and be reported as never having existed - the
+    exact false statement this module exists to prevent, reachable from
+    ordinary output. Being unable to guess the name is the whole defence, so a
+    name that repeats is the defect.
+    """
+    names = {
+        _ContainerArgv.of(_build_exec_command(_CONTAINER, ["claude"], None, None)).wrapper
+        for _ in range(50)
+    }
+
+    assert len(names) == 50, f"wrapper names repeat across execs: {sorted(names)[:5]}"
+    assert all(len(name) >= 16 for name in names), f"too short to be unguessable: {names}"
+
+
+@pytest.mark.parametrize("shell", ["dash", "bash"])
+async def test_the_shell_signs_its_exec_diagnostic_with_the_name_we_gave_it(shell: str) -> None:
+    """The property the retraction rests on, taken from a real shell (#1065).
+
+    ``AgentLaunchEvidence`` tells the wrapper's voice from the agent's by the
+    ``$0`` this repo sets, and NOT by the wording after it - because the
+    wording is not ours. These two disagree about it completely:
+
+        dash: ``NAME: 1: exec: /missing: not found``
+        bash: ``NAME: line 1: /missing: No such file or directory``
+
+    Which of them is /bin/sh is a property of the workspace image, so a rule
+    that read the wording would pass here and fail in production the day that
+    image changed. Both agree on the prefix, and this is what pins that.
+    """
+    if (shell_path := shutil.which(shell)) is None:
+        pytest.skip(f"{shell} is not installed")
+    argv = _ContainerArgv.of(
+        _build_exec_command(_CONTAINER, ["/definitely/missing/claude"], None, None)
+    )
+
+    missing = "/definitely/missing/claude"
+    result = subprocess.run(
+        [shell_path, "-c", argv.script, argv.wrapper, argv.announcement, missing],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    printed = (result.stdout + result.stderr).splitlines()
+    assert argv.announcement in printed, f"{shell} did not make the announcement: {printed}"
+    diagnostic = next(line for line in printed if line != argv.announcement)
+    assert diagnostic.startswith(f"{argv.wrapper}:"), (
+        f"{shell} does not sign its exec diagnostic with $0: {diagnostic!r}"
+    )
+    assert result.returncode == 127

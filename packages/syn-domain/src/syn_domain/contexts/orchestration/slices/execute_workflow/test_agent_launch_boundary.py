@@ -31,7 +31,7 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoItem,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    AGENT_LAUNCH_MARKER,
+    announce_as,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
@@ -59,11 +59,22 @@ _PROCESSOR_PATH = (
 #: unusable as evidence.
 _CLIENT_DIAGNOSTIC = "Error response from daemon: No such container: agentic-ws-abc123"
 
-#: What the wrapper shell prints when the announcement it just made turns out
-#: to be false. It arrives on the same stream as agent output and cannot be
-#: told apart from it by looking, which is why the exit status rather than the
-#: line decides.
-_EXEC_FAILED = "syn-launch: 1: exec: /usr/local/bin/claude: not found"
+#: The name the wrapper on this stream ran under. Minted per exec in
+#: production, so that a line an agent chose to print cannot be mistaken for
+#: one the wrapper wrote; here it only has to be a name, and one that no line
+#: below uses by accident.
+_WRAPPER = "syn-launch-6f1c0a55b2d34e97"
+
+#: What the wrapper announces immediately before ``exec``, built by the same
+#: function the adapter builds it with - hand-writing the format here is how
+#: this fixture would come to assert a contract production does not have.
+_ANNOUNCED = announce_as(_WRAPPER)
+
+#: What that wrapper shell prints when the announcement it just made turns out
+#: to be false. It arrives on the same stream as agent output, and only the
+#: name in front of it says which of the two wrote it. The wording after the
+#: name is dash's; bash words it differently, which is why nothing reads it.
+_EXEC_FAILED = f"{_WRAPPER}: 1: exec: /usr/local/bin/claude: not found"
 
 
 class _ConsumingStreamProcessor:
@@ -198,7 +209,7 @@ async def test_an_agent_that_dies_before_printing_anything_still_launched() -> N
     session_mgr = _session_manager()
     await session_mgr.start()
 
-    await _run_phase(_workspace(lines=[AGENT_LAUNCH_MARKER]), session_mgr)
+    await _run_phase(_workspace(lines=[_ANNOUNCED]), session_mgr)
 
     assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
 
@@ -221,7 +232,7 @@ async def test_a_streaming_agent_is_launched_and_its_output_is_untouched() -> No
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"a": 1}', '{"b": 2}']),
+        _workspace(lines=[_ANNOUNCED, '{"a": 1}', '{"b": 2}']),
         session_mgr,
         processor=_Recording,
     )
@@ -248,7 +259,7 @@ async def test_an_announcement_the_exec_did_not_follow_records_no_launch(
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[AGENT_LAUNCH_MARKER, _EXEC_FAILED], exit_code=exit_code),
+        _workspace(lines=[_ANNOUNCED, _EXEC_FAILED], exit_code=exit_code),
         session_mgr,
     )
 
@@ -268,7 +279,34 @@ async def test_an_agent_that_ran_and_failed_is_still_launched() -> None:
     await session_mgr.start()
 
     await _run_phase(
-        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"type": "result"}'], exit_code=1),
+        _workspace(lines=[_ANNOUNCED, '{"type": "result"}'], exit_code=1),
+        session_mgr,
+    )
+
+    assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exit_code", [126, 127], ids=["not executable", "not found"])
+async def test_an_agent_that_spoke_and_then_exited_126_or_127_is_still_launched(
+    exit_code: int,
+) -> None:
+    """The other half of the retraction, and where the status alone was not enough (#1065).
+
+    Identical to the failed-exec case above in everything the handler used to
+    look at: same announcement, same status. The only difference is that a line
+    arrived which the wrapper did not write - and a wrapper that never managed
+    to ``exec`` has no agent to write one, so that line is proof the exec
+    happened after all.
+
+    Retracting here told a user their session never started an agent that had
+    just produced output for them, which is #1047 pointing the other way.
+    """
+    session_mgr = _session_manager()
+    await session_mgr.start()
+
+    await _run_phase(
+        _workspace(lines=[_ANNOUNCED, '{"type": "result"}'], exit_code=exit_code),
         session_mgr,
     )
 
@@ -304,7 +342,7 @@ async def test_a_cancelled_phase_keeps_the_launch_its_agent_earned() -> None:
             )
 
     await _run_phase(
-        _workspace(lines=[AGENT_LAUNCH_MARKER, '{"a": 1}', '{"b": 2}'], exit_code=127),
+        _workspace(lines=[_ANNOUNCED, '{"a": 1}', '{"b": 2}'], exit_code=127),
         session_mgr,
         processor=_StopsAtTheFirstLine,
     )
