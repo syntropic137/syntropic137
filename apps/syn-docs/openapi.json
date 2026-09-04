@@ -8492,7 +8492,7 @@
         "title": "PauseRequest",
         "description": "Request to pause an execution."
       },
-      "PhaseDefinition": {
+      "PhaseDefinitionResponse": {
         "properties": {
           "phase_id": {
             "type": "string",
@@ -8597,6 +8597,36 @@
             },
             "type": "array",
             "title": "Skills"
+          },
+          "execution_type": {
+            "type": "string",
+            "title": "Execution Type",
+            "default": "sequential"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "input_artifact_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Input Artifact Types"
+          },
+          "output_artifact_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Output Artifact Types"
           }
         },
         "type": "object",
@@ -8604,7 +8634,8 @@
           "phase_id",
           "name"
         ],
-        "title": "PhaseDefinition"
+        "title": "PhaseDefinitionResponse",
+        "description": "Phase definition within a workflow template."
       },
       "PhaseExecutionInfo": {
         "properties": {
@@ -12191,7 +12222,7 @@
           },
           "phases": {
             "items": {
-              "$ref": "#/components/schemas/PhaseDefinition"
+              "$ref": "#/components/schemas/PhaseDefinitionResponse"
             },
             "type": "array",
             "title": "Phases"

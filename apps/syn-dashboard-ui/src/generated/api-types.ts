@@ -3267,8 +3267,11 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
-        /** PhaseDefinition */
-        PhaseDefinition: {
+        /**
+         * PhaseDefinitionResponse
+         * @description Phase definition within a workflow template.
+         */
+        PhaseDefinitionResponse: {
             /** Phase Id */
             phase_id: string;
             /** Name */
@@ -3309,6 +3312,17 @@ export interface components {
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
             skills?: components["schemas"]["PhaseRefResponse"][];
+            /**
+             * Execution Type
+             * @default sequential
+             */
+            execution_type: string;
+            /** Max Tokens */
+            max_tokens?: number | null;
+            /** Input Artifact Types */
+            input_artifact_types?: string[];
+            /** Output Artifact Types */
+            output_artifact_types?: string[];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -5257,7 +5271,7 @@ export interface components {
             /** Classification */
             classification: string;
             /** Phases */
-            phases?: components["schemas"]["PhaseDefinition"][];
+            phases?: components["schemas"]["PhaseDefinitionResponse"][];
             /** Input Declarations */
             input_declarations?: components["schemas"]["InputDeclarationModel"][];
             /** Created At */
