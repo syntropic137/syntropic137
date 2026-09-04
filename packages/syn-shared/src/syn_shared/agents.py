@@ -64,8 +64,15 @@ CODEX_SANDBOX_FLAGS: dict[PhaseSandbox, str] = {
 }
 
 
-DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.READ_ONLY
-"""What a phase gets when it declares nothing: the least authority there is.
+DEFAULT_PHASE_SANDBOX: PhaseSandbox = PhaseSandbox.WORKSPACE_WRITE
+"""What a phase gets when it declares nothing.
+
+NOT ``READ_ONLY``, and not for want of wanting it. A phase publishes its
+deliverable by WRITING a file under ``artifacts/output/``, which the
+collector then picks up - so a read-only phase produces no artifact and the
+phase after it starves. ``READ_ONLY`` is correct for a verify phase and
+becomes usable once a phase can publish its deliverable without writing;
+until then it is opt-in and would break the pipeline if defaulted.
 
 Every codex phase used to receive ``danger-full-access`` unconditionally,
 which is how a verify phase came to merge, commit and push the change it then

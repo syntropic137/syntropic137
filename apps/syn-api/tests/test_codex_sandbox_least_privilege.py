@@ -35,10 +35,18 @@ def _sandbox_arg(argv: list[str]) -> str:
 
 
 class TestDefaultIsLeastPrivilege:
-    def test_undeclared_phase_gets_read_only(self) -> None:
-        """The regression that mattered: silence must not mean full access."""
-        assert DEFAULT_PHASE_SANDBOX is PhaseSandbox.READ_ONLY
-        assert _sandbox_arg(_build_codex_command("prompt", "gpt-5.6-sol")) == "read-only"
+    def test_undeclared_phase_is_not_full_access(self) -> None:
+        """The regression that mattered: silence must not mean full access.
+
+        Not ``READ_ONLY`` as the default, because a phase publishes its
+        deliverable by writing under ``artifacts/output/`` and a read-only
+        phase would produce none. ``READ_ONLY`` stays available and is the
+        right level for a verify phase once the deliverable channel does not
+        require a write.
+        """
+        assert DEFAULT_PHASE_SANDBOX is PhaseSandbox.WORKSPACE_WRITE
+        argv = _build_codex_command("prompt", "gpt-5.6-sol")
+        assert _sandbox_arg(argv) == "workspace-write"
 
     def test_no_codex_command_is_full_access_by_default(self) -> None:
         for model in (None, "gpt-5.6-sol", "haiku"):
