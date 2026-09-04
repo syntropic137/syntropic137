@@ -122,6 +122,13 @@ export interface ExecutionSummary {
   tool_call_count: number;
 }
 
+// A hand-maintained structural SUBSET of the server's response: this package
+// has no generated types, so fields the API adds (`status_counts`, and
+// whatever follows) are simply absent here rather than wrong. Nothing checks
+// that, and nothing can - extra JSON keys are inert at runtime, so the drift
+// this would suffer from is a field we stop READING, which only a consumer of
+// that field could detect.
+// TODO(#1182): wire this package into `just codegen` so the subset is a gate.
 export interface ExecutionListResponse {
   executions: ExecutionSummary[];
   total: number;

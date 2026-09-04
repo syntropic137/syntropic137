@@ -13,7 +13,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listAllExecutions } from '../api/executions'
 import { useResetView } from './useResetView'
-import type { ExecutionListItem, SSEEventFrame, TimeWindow } from '../types'
+import type {
+  ExecutionListItem,
+  ExecutionListResponse,
+  SSEEventFrame,
+  TimeWindow,
+} from '../types'
 import { sortExecutions } from '../utils/executionSort'
 import { useActivityStream } from './useActivityStream'
 import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
@@ -54,6 +59,20 @@ const EXECUTION_SORT_CONFIG: SortConfig<ExecutionSortKey> = {
 
 function isTerminalExecution(e: ExecutionListItem): boolean {
   return isTerminalExecutionStatus(e.status)
+}
+
+function toExecutionListItem(
+  row: ExecutionListResponse['executions'][number],
+): ExecutionListItem {
+  return {
+    ...row,
+    started_at: row.started_at ?? null,
+    completed_at: row.completed_at ?? null,
+    total_cost_usd: Number(row.total_cost_usd),
+    duration_seconds: row.duration_seconds ?? null,
+    repos: row.repos ?? [],
+    repos_display: row.repos_display ?? null,
+  }
 }
 
 function matchesQuery(e: ExecutionListItem, query: string): boolean {
@@ -136,7 +155,7 @@ export function useExecutionList(): UseExecutionListResult {
       page: 1,
       page_size: PAGE_SIZE,
     })
-      .then((response) => setExecutions(response.executions))
+      .then((response) => setExecutions(response.executions.map(toExecutionListItem)))
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [statusesKey])

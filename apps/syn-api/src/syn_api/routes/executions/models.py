@@ -127,3 +127,11 @@ class ExecutionListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 50
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    """Matching executions tallied by status, ignoring the status filter itself.
+
+    Counted over every OTHER filter the request carried, so the chips say what
+    selecting a different status would actually return. A tally of the returned
+    rows cannot answer that: it only ever knows about the status already
+    selected, and only about one page of it.
+    """

@@ -46,9 +46,21 @@ describe('useSessionList', () => {
       expect(result.current.loading).toBe(false)
     })
 
-    expect(result.current.sessions).toEqual([session])
-    expect(result.current.sessions).toHaveLength(1)
-    expect(result.current.sessions[0].id).toBe('sess-1')
+    expect(result.current.sessions).toEqual([
+      {
+        ...session,
+        workflow_name: null,
+        execution_id: null,
+        phase_display: null,
+        agent_model: null,
+        agent_model_display: null,
+        repos: [],
+        repos_display: null,
+        total_cost_usd: 0,
+        duration_seconds: null,
+        completed_at: null,
+      },
+    ])
   })
 
   it('returns empty array when API returns no sessions', async () => {

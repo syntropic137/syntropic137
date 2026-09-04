@@ -275,12 +275,21 @@ export interface ExecutionListItem {
   repos_display: string | null
 }
 
-export interface ExecutionListResponse {
-  executions: ExecutionListItem[]
-  total: number
-  page: number
-  page_size: number
-}
+/**
+ * The `/executions` envelope, aliased to the generated type rather than
+ * restated.
+ *
+ * Hand-written, it silently lost every field the API gained: the compiler had
+ * nothing to compare it against, and `response.status_counts` on a shape that
+ * does not declare it is `undefined`, not an error. That is #1176 one layer
+ * out. As an alias, a server field added without regenerating is a build
+ * failure at the point of use.
+ *
+ * `ExecutionListItem` above is left in place for the callers that name it; the
+ * generated `ExecutionSummaryResponse` is assignable to it, which is what made
+ * this alias a drop-in.
+ */
+export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
 
 export interface PhaseExecutionDetail {
   /** Explicit naming for OTel correlation (ADR-028) */

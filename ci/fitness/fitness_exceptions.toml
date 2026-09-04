@@ -36,6 +36,7 @@
 # Adding a prefix here is a conscious decision - review before merging.
 allowed_prefixes = [
     "syn_domain.contexts",
+    "syn_domain.pagination",
     "syn_shared",
     "syn_adapters.projection_stores",
     "time",

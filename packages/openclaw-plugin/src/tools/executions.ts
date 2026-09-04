@@ -64,7 +64,7 @@ export const executionToolDefs = [
         page: { type: "number", description: "Page number (default 1)" },
         page_size: {
           type: "number",
-          description: "Results per page (default 50, max 100)",
+          description: "Results per page (default 50, max 200)",
         },
       },
     },
