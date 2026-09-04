@@ -56,6 +56,18 @@ def _set_linkage(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
         session_cost.workspace_id = event_data["workspace_id"]
 
 
+def _reported[N: (int, float)](data: dict[str, Any], key: str, current: N) -> N:
+    """The summary's value for ``key``, or ``current`` when it did not report one.
+
+    ``dict.get(key, default)`` is not enough: a harness that was killed still
+    emits the key, carrying ``None``. Absent and null mean the same thing here -
+    nobody counted this - and neither is a reason to discard what the
+    observations already counted.
+    """
+    value = data.get(key)
+    return current if value is None else value
+
+
 def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str) -> SessionCost:
     """Load session cost from existing dict or create a new one."""
     return SessionCost.from_dict(existing) if existing else SessionCost(session_id=session_id)
@@ -222,10 +234,26 @@ class SessionCostProjection:
             pass  # Tool execution itself is free - cost is in tokens
 
     async def on_session_summary(self, event_data: dict[str, Any]) -> None:
-        """Handle session_summary event with accurate cumulative totals.
+        """Apply a run's end-of-run totals, without letting silence overwrite counts.
 
-        This event is produced at the end of agent execution and contains
-        the authoritative totals from Claude CLI's result event.
+        A summary reports what the harness knew when the run ended, and a run
+        that was killed or timed out never got to say. Two rules keep that from
+        being read as "spent nothing" (#1164):
+
+        - A field the summary does not actually report - absent, or present as
+          ``None`` because the harness never filled it in - leaves the counted
+          value alone. ``num_turns: None`` from a timed-out phase used to be
+          assigned straight over the turns counted from its observations,
+          replacing a real 3 with ``None`` in an ``int`` field.
+        - ``is_finalized`` follows ``totals_are_authoritative``: the session is
+          settled only when the harness reported its own totals. A phase killed
+          mid-run is still the best estimate available, not a final bill, and
+          the dashboard badge says so. Summaries written before that flag
+          existed carry no key and keep the original settled semantics.
+
+        Reported values still REPLACE rather than add: per-turn deltas
+        double-count the context re-sent each turn, so the harness's cumulative
+        figure is lower than the accumulated sum and is the one to trust.
         """
         session_id = event_data.get("session_id")
         if not session_id:
@@ -237,27 +265,35 @@ class SessionCostProjection:
 
         data = event_data.get("data", {})
 
-        session_cost.input_tokens = data.get("total_input_tokens", session_cost.input_tokens)
-        session_cost.output_tokens = data.get("total_output_tokens", session_cost.output_tokens)
-        session_cost.cache_creation_tokens = data.get(
-            "cache_creation_tokens", session_cost.cache_creation_tokens
+        session_cost.input_tokens = _reported(data, "total_input_tokens", session_cost.input_tokens)
+        session_cost.output_tokens = _reported(
+            data, "total_output_tokens", session_cost.output_tokens
         )
-        session_cost.cache_read_tokens = data.get(
-            "cache_read_tokens", session_cost.cache_read_tokens
+        session_cost.cache_creation_tokens = _reported(
+            data, "cache_creation_tokens", session_cost.cache_creation_tokens
         )
-        session_cost.tool_calls = data.get("tool_count", session_cost.tool_calls)
-        session_cost.turns = data.get("num_turns", session_cost.turns)
-        session_cost.duration_ms = data.get("duration_ms", session_cost.duration_ms)
+        session_cost.cache_read_tokens = _reported(
+            data, "cache_read_tokens", session_cost.cache_read_tokens
+        )
+        session_cost.tool_calls = _reported(data, "tool_count", session_cost.tool_calls)
+        session_cost.turns = _reported(data, "num_turns", session_cost.turns)
+        session_cost.duration_ms = _reported(data, "duration_ms", session_cost.duration_ms)
 
         if data.get("model"):
             session_cost.agent_model = data["model"]
 
+        # An absent cost leaves the running one alone, and nothing recomputes it
+        # here: it was priced per observation with that observation's own model
+        # (#788), so re-pricing the totals under the summary's single model
+        # would be wrong for any session that spanned two. Leaving it is also
+        # what keeps a killed phase agreeing with the last figure the live path
+        # reported, instead of dropping to $0.00.
         if data.get("total_cost_usd") is not None:
             session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
             session_cost.token_cost_usd = session_cost.total_cost_usd
 
         session_cost.completed_at = _parse_timestamp(event_data.get("timestamp"))
-        session_cost.is_finalized = True
+        session_cost.is_finalized = bool(data.get("totals_are_authoritative", True))
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 
     async def on_session_cost_finalized(self, event_data: dict[str, Any]) -> None:

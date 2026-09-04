@@ -251,11 +251,20 @@ class ObservabilityCollector:
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        totals_are_authoritative: bool = True,
     ) -> None:
-        """Record end-of-session summary with authoritative CLI totals (ISS-217).
+        """Record end-of-session summary with the run's final totals (ISS-217).
 
         Emits a session_summary observation so SessionCostProjection.on_session_summary()
-        can overwrite accumulated estimates with the SDK-reported values.
+        can replace accumulated estimates with the SDK-reported values.
+
+        ``totals_are_authoritative`` says whether the harness reported these
+        totals itself. It is False when the process was killed or timed out
+        before it could, leaving the totals observed-so-far rather than final.
+        Consumers need the distinction: authoritative totals REPLACE what was
+        accumulated, estimated ones must never reduce it (#1164). It defaults
+        to True so that summaries recorded before this flag existed keep their
+        original replace semantics on replay.
         """
         if self._writer is None:
             return
@@ -269,6 +278,7 @@ class ObservabilityCollector:
             "num_turns": num_turns,
             "duration_ms": duration_ms,
             "model": self._agent_model,
+            "totals_are_authoritative": totals_are_authoritative,
         }
 
         await self._writer.record_observation(
@@ -280,7 +290,8 @@ class ObservabilityCollector:
             workspace_id=self._workspace_id,
         )
         logger.info(
-            "Session summary recorded: cost=$%s, %d in, %d out, %d turns, %dms",
+            "Session summary recorded (%s): cost=$%s, %d in, %d out, %d turns, %dms",
+            "authoritative" if totals_are_authoritative else "estimated from observations",
             total_cost_usd,
             input_tokens,
             output_tokens,

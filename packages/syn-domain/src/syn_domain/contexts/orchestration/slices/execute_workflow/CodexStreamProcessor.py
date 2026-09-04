@@ -278,6 +278,7 @@ class CodexObservabilityRecorder(Protocol):
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        totals_are_authoritative: bool = True,
     ) -> None: ...
 
 
@@ -434,6 +435,11 @@ class CodexStreamProcessor:
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
+        # A codex stream that never reached `turn.completed` was cut off, so
+        # these totals are what was observed before it stopped, not codex's
+        # own final accounting. Same distinction the claude path draws (#1164);
+        # the numbers are the running accumulator's either way, so the flag is
+        # the only thing that tells a truncated run from a complete one.
         await self._collector.record_session_summary(
             total_cost_usd=total_cost_usd,
             input_tokens=self._totals.input_tokens,
@@ -442,6 +448,7 @@ class CodexStreamProcessor:
             cache_read=self._totals.cache_read,
             num_turns=self._totals.turns or None,
             duration_ms=duration_ms,
+            totals_are_authoritative=self._totals.saw_terminal_turn,
         )
 
         logger.info(

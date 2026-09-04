@@ -244,6 +244,9 @@ class TestAgentExecutionHandler:
             cache_read=144509,
             num_turns=7,
             duration_ms=48000,
+            # The harness reported these itself, so they are authoritative and
+            # downstream may replace accumulated estimates with them (#1164).
+            totals_are_authoritative=True,
         )
 
     @pytest.mark.anyio
