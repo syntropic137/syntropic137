@@ -1,0 +1,36 @@
+id: telemetry-lag-probe-v1
+name: "Probe: does live telemetry track a working phase"
+description: >
+  One phase that emits timestamped markers at known intervals. Comparing the
+  markers it actually wrote against what the API reported while it ran measures
+  how stale live telemetry is, and whether a working phase can look stalled.
+type: custom
+classification: standard
+requires_repos: false
+
+# WHY THIS EXISTS. Six healthy runs were cancelled on 2026-09-01 because
+# duration_seconds froze at 365s while the phase ran on to 809s and completed.
+# Two API surfaces disagreed at the same instant: the session view reported a
+# stale 365.189, the execution view reported 0.0 for the same running phase.
+# A human and an agent independently read that as a hang.
+#
+# This probe is the instrument, not the answer. It emits ground truth the
+# platform cannot fake: one line per interval in a run-unique log, each
+# carrying the wall-clock time it was written, plus a line count emitted by the
+# shell rather than by the agent - so "what happened" and "what was reported"
+# can be compared directly rather than inferred from a counter.
+
+phases:
+  - id: heartbeat
+    name: Emit timestamped markers at known intervals
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 600
+    model: sonnet
+    allowed_tools:
+      - Bash
+      - Write
+    prompt_file: phases/heartbeat.md
