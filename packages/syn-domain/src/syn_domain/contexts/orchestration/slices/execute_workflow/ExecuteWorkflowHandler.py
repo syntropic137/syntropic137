@@ -253,9 +253,7 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     # this branch, and returning `defaults` would silently discard the one
     # thing its author asked for. For sandbox that failure is not merely lost
     # configuration - it is a phase running with authority it declined.
-    if not (
-        phase_model or phase_provider or allow_delegation or allowed_tools or sandbox
-    ):
+    if not (phase_model or phase_provider or allow_delegation or allowed_tools or sandbox):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,

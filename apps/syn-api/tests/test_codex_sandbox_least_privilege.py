@@ -63,9 +63,7 @@ class TestDeclaredLevelIsHonoured:
             (PhaseSandbox.FULL_ACCESS, "danger-full-access"),
         ],
     )
-    def test_each_level_maps_to_its_codex_flag(
-        self, level: PhaseSandbox, expected: str
-    ) -> None:
+    def test_each_level_maps_to_its_codex_flag(self, level: PhaseSandbox, expected: str) -> None:
         assert _sandbox_arg(_build_codex_command("p", "gpt-5.6-sol", level)) == expected
 
     def test_every_level_has_a_flag(self) -> None:

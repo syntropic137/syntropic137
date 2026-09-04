@@ -100,10 +100,10 @@ from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.agents import (
-    AgentProvider,
-    ModelAlias,
     CODEX_SANDBOX_FLAGS,
     DEFAULT_PHASE_SANDBOX,
+    AgentProvider,
+    ModelAlias,
     PhaseSandbox,
     UnsupportedAgentProviderError,
     UnsupportedPhaseSandboxError,

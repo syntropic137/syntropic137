@@ -6,14 +6,13 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX
-
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 class WorkflowType(StrEnum):

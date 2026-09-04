@@ -22,8 +22,6 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX
-
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
@@ -42,7 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
     require_supported_execution_type,
 )
-from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDER, AgentProvider
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
