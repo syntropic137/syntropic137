@@ -32,6 +32,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
@@ -305,6 +306,24 @@ async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
     assert launches == 0
 
 
+# The one case here whose expected status is decided by the host rather than by
+# this repo. Every other exit code in this file is either chosen by the test's
+# own fake agent or is the POSIX "command not found" convention that all shells
+# share; this one comes from the kernel refusing a shebang, and the shells
+# disagree about how to report it: Linux /bin/sh (dash) exits 127, macOS
+# /bin/sh exits 1 (#1170). 127 is the true answer for the Linux workspace
+# image, which is the only place this code runs, so asserting it on a host that
+# answers differently tests the host. Skipped there rather than relaxed to
+# "non-zero": settle() keys on _COULD_NOT_EXEC = {126, 127}, so 1 and 127 mean
+# opposite things to the retraction and a loosened assertion would re-admit the
+# over-retraction #1065 closed.
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason=(
+        "exec of a missing shebang interpreter exits 127 under Linux /bin/sh (dash) "
+        "and 1 under macOS /bin/sh; 127 is the workspace image's answer (#1170)"
+    ),
+)
 async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
     fake_docker: Callable[[str], _FakeDocker],
     tmp_path: Path,
@@ -344,6 +363,38 @@ async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
         f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
     )
     assert launches == 0
+
+
+def test_the_missing_interpreter_case_still_runs_where_it_is_true() -> None:
+    """That the guard above narrows this file's coverage and does not delete it.
+
+    A platform skip is the one kind of fix that cannot fail loudly when it is
+    wrong: widen it by a character - invert the comparison, name the wrong
+    platform, drop the condition for a bare ``skip`` while chasing a red suite -
+    and the case that #1065 was rejected on stops being checked ANYWHERE, on
+    every host including CI, while the file still reports all green. Nothing
+    else here would notice, because every other test in it passes with this one
+    skipped.
+
+    So the guard is asserted from outside rather than trusted: Linux is where
+    the 127 is true, and Linux is therefore where this case must really run.
+    """
+    # getattr, not attribute access: a function carrying no marks at all has no
+    # ``pytestmark``, and that is exactly the "someone deleted the guard" case
+    # this test exists to report - it must arrive as the message below, not as
+    # an AttributeError the reader has to decode.
+    marks = getattr(test_an_agent_whose_interpreter_is_missing_is_not_evidence, "pytestmark", [])
+    guards = [mark for mark in marks if mark.name == "skipif"]
+
+    assert guards, (
+        "the missing-interpreter case has lost its platform guard; on macOS it "
+        "fails with the host's exit code rather than skipping (#1170)"
+    )
+    assert not (sys.platform == "linux" and any(mark.args[0] for mark in guards)), (
+        "the platform guard skips the missing-interpreter case on Linux, which is "
+        "the one host whose /bin/sh really does exit 127 - so the counterexample "
+        "that #1065's pre-exec guard was rejected on is now checked nowhere"
+    )
 
 
 async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
