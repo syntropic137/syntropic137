@@ -26,13 +26,22 @@ JSONL events:
 None of these are malformed JSON *events* - they are plain CLI noise that
 happens to land on stdout. Treating every non-JSON line as fatal would fail
 this golden recording, which does terminate normally with a single
-``turn.completed``. So the parser only treats a line as a parse failure (and
-sets ``StreamResult.error_reason``) when the line looks like it was meant to
-be a JSON event (starts with ``{``) but fails to parse. Anything else is
-inert stream noise: recorded into ``conversation_lines`` (provider-native,
+``turn.completed``. So no single line fails a run: unrecognised lines are
+inert stream noise, recorded into ``conversation_lines`` (provider-native,
 NOT claude-shaped - downstream ``ConversationRecorder`` readers must tolerate
 raw codex JSONL, including these interleaved non-JSON lines) and otherwise
 ignored.
+
+That holds for ``{``-leading lines too (issue #1146). stdout carries the
+agent's OWN subprocess output as well as the codex event stream (ADR-043,
+deliberately), so a leading ``{`` is not evidence a line was meant to be an
+event - JSX/TSX interpolation, JSON-with-comments, ``{{ handlebars }}`` and
+shell brace expansion all start that way, and a codex phase asked to read a
+dashboard file will echo them. Treating one as a protocol fault failed a
+``verify`` phase over a line of TSX from the repository under review. Such a
+line is therefore held as a CANDIDATE reason and promoted only if the stream
+never reaches ``turn.completed``; a run that echoes one and then completes
+normally succeeds.
 
 Also verified from the real fixture (contra the plan's documented schema,
 which assumed ``item.item.id``): ``item`` fields live directly under the
@@ -358,6 +367,12 @@ class CodexStreamProcessor:
         #: A fault codex reported on `error` / `turn.failed`, held until
         #: end-of-stream so a recovered turn is not failed by it (#1117).
         self._turn_fault_candidate: str | None = None
+        #: A `{`-leading line that would not parse, held until end-of-stream
+        #: for the same reason (#1146). LAST one wins, unlike the two above:
+        #: these lines carry no specificity gradient to preserve, and when the
+        #: candidate is informative at all it is because the stream was cut
+        #: off - which is the last such line, not the first.
+        self._parse_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -394,13 +409,25 @@ class CodexStreamProcessor:
             await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
+            # THE single place `_error_reason` is decided. Nothing mid-stream
+            # writes it: every fault the parser can see is held as a candidate
+            # and settled here, so a stream that recovers and reaches
+            # `turn.completed` cannot be failed by something it recovered from.
+            #
             # Order is deliberate, most specific first: a fault codex itself
-            # reported beats an inferred auth fault, which beats the generic
-            # "it just stopped".
+            # reported beats an inferred auth fault, which beats an unparseable
+            # `{`-leading line, which beats the generic "it just stopped".
+            #
+            # The parse fault ranks LAST of the three because it is the weakest
+            # evidence - the line may be output the agent echoed, wholly
+            # unrelated to why the stream stopped (#1146). It still outranks
+            # `MISSING_TERMINAL_TURN_REASON` because when a stream IS cut off
+            # mid-event, quoting the truncated line names the cause and the
+            # generic reason does not.
             self._error_reason = (
-                self._error_reason
-                or self._turn_fault_candidate
+                self._turn_fault_candidate
                 or self._auth_fault_candidate
+                or self._parse_fault_candidate
                 or MISSING_TERMINAL_TURN_REASON
             )
 
@@ -471,12 +498,13 @@ class CodexStreamProcessor:
     def _parse_event(self, line: str) -> _CodexEvent | None:
         """Parse one stdout line into a codex event, or ``None`` to skip it.
 
-        Lines that don't even look like JSON (don't start with ``{``) are inert
-        CLI noise (warnings, banners, interleaved log lines - see module
-        docstring) and are silently skipped: neither recorded nor treated as
-        failures. A ``{``-prefixed line that fails to parse is a real broken
-        event - it sets ``error_reason`` (the handler forces a non-zero phase
-        exit) and is skipped.
+        Every line here is skipped or dispatched; NONE of them fails the run on
+        its own. Lines that don't look like JSON at all are inert CLI noise
+        (warnings, banners, interleaved log lines - see module docstring). A
+        ``{``-leading line that won't parse is held as a CANDIDATE reason,
+        promoted by ``process_stream`` only if no ``turn.completed`` ever
+        arrived - see the ``_parse_fault_candidate`` comment in ``__init__``
+        for why it cannot be a verdict.
         """
         stripped = line.strip()
         if not stripped:
@@ -488,10 +516,8 @@ class CodexStreamProcessor:
         try:
             event: _CodexEvent = json.loads(stripped)
         except json.JSONDecodeError:
-            logger.debug("Malformed codex JSON line: %s", stripped[:100])
-            self._error_reason = self._error_reason or (
-                f"malformed codex JSON line: {stripped[:100]}"
-            )
+            logger.debug("Unparseable `{`-leading codex line: %s", stripped[:100])
+            self._parse_fault_candidate = f"malformed codex JSON line: {stripped[:100]}"
             return None
 
         if not isinstance(event, dict):

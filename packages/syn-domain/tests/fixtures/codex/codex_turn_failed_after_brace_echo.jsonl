@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"019f9a01-1111-7000-8000-0000000000cc"}
+{"type":"turn.started"}
+{tokens.settled ? formatTokens(tokens.total) : `${formatTokens(tokens.total)} so far`}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}
