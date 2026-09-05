@@ -49,7 +49,8 @@ These are injected automatically by syn137 when creating workspaces:
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
-| `SYN_ALL_REPOS` | Colon-separated list of pre-cloned repo paths (e.g. `/workspace/repos/acme__api:/workspace/repos/acme__web`). Empty string when no repos are configured. See [Workspace Hydration](/docs/workspaces/hydration). |
+| `GH_REPO` | The primary repo as `owner/repo`, so `gh` resolves a repository without a working tree to infer one from. See [Workspace Hydration](/docs/workspaces/hydration). |
+| `CLAUDE_SESSION_ID` | The session this phase's events are keyed by |
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
 

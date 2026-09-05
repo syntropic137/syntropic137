@@ -48,7 +48,8 @@ phases:
     model: sonnet
 ```
 
-Every execution of this workflow will pre-clone both repos unless overridden at run time.
+Every execution of this workflow will pre-clone both repos into every phase, unless
+overridden at run time or opted out per phase with [`clone_repos`](#phases-that-need-credentials-but-not-a-checkout).
 
 ### Execute Override
 
@@ -95,53 +96,48 @@ The double underscore prevents namespace collisions when two orgs have repos wit
 The double-underscore separator (`__`) was chosen specifically because it cannot appear in a GitHub org or repo name, making it an unambiguous delimiter that requires no escaping.
 </Callout>
 
-## `$SYN_ALL_REPOS`
+## `$GH_REPO`
 
-Every phase prompt has access to `$SYN_ALL_REPOS` - a colon-separated list of all pre-cloned repo paths. This lets prompts reference repos without hardcoding paths:
+Every phase has `$GH_REPO` set to the primary repo's `owner/repo`:
 
 ```
-$SYN_ALL_REPOS=/workspace/repos/acme__api-service:/workspace/repos/acme__web-app
+$GH_REPO=acme/api-service
 ```
 
-Use it in a phase prompt:
+It names the repository `gh` acts on. `gh` normally infers that from the git remotes
+of the surrounding working tree and fails before making any API call when there is no
+tree, so `$GH_REPO` is what makes `gh pr create` work from a phase that declared
+`clone_repos: false`. It is keyed on the same primary repo the prompt is told to work
+on, so the two cannot disagree.
 
-```markdown
-You have access to the following repositories:
-
-$SYN_ALL_REPOS
-
-Review each repository and identify cross-cutting concerns.
-```
-
-Or split it in a script:
+There is no environment variable listing all of a workspace's repo paths. To iterate
+them, use the naming rule above - the paths are `/workspace/repos/<owner>__<repo>/`
+and are derivable from the repos the workflow declares:
 
 ```bash
-IFS=':' read -ra REPOS <<< "$SYN_ALL_REPOS"
-for repo in "${REPOS[@]}"; do
+for repo in /workspace/repos/*/; do
   echo "Processing $repo"
 done
 ```
 
-`$SYN_ALL_REPOS` is empty (not unset) when no repos are configured. Scripts that iterate over it will correctly handle the zero-repo case.
-
 ## AGENTS.md and CLAUDE.md Injection
 
-When one or more repos are configured, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Each file contains `$import` directives that pull in the AGENTS.md and CLAUDE.md from every cloned repo that has one:
+When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Both files receive identical content: `@`-imports of the AGENTS.md and the CLAUDE.md of every cloned repo:
 
 ```markdown
-# /workspace/AGENTS.md (synthesized by Syntropic137)
-
 @/workspace/repos/acme__api-service/AGENTS.md
+@/workspace/repos/acme__api-service/CLAUDE.md
 @/workspace/repos/acme__web-app/AGENTS.md
+@/workspace/repos/acme__web-app/CLAUDE.md
 ```
 
 The agent loads these files automatically via Claude Code's standard context injection. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
 
-If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are configured, no synthesis happens and `/workspace/AGENTS.md` is not created.
+If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are cloned - because none are configured, or because the phase set `clone_repos: false` - no synthesis happens and neither file is created.
 
 ## Workspace Directory Structure
 
-A hydrated workspace looks like this:
+A hydrated workspace for a phase that clones looks like this:
 
 ```
 /workspace/
@@ -159,6 +155,43 @@ A hydrated workspace looks like this:
   version.json           # Image version manifest
   entrypoint.sh
 ```
+
+## Phases That Need Credentials But Not a Checkout
+
+Credentials and a checkout are different needs. A phase that only opens a PR, comments
+on an issue or reads the API needs to be authenticated against the repos - it does not
+need them on disk, and cloning them costs time and disk for nothing.
+
+Set `clone_repos: false` on that phase:
+
+```yaml
+phases:
+  - id: open-pr
+    name: Open PR
+    order: 2
+    prompt_file: phases/open-pr.md
+    clone_repos: false
+```
+
+It is a phase-level field and defaults to `true`. The repos stay configured on the
+workflow either way - do not drop them to skip the clone, because the repo list is
+what routes the GitHub App token to the right installation.
+
+What the phase still gets:
+
+- A GitHub App installation token per repo, and the matching `~/.git-credentials` entries
+- `gh` CLI configured, so `gh pr create` works
+- `$GH_REPO`
+
+What it does not get:
+
+- `/workspace/repos/` - the directory is not created
+- The synthesized `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`. Both are built
+  from what was actually cloned, so for this phase there is nothing to import and
+  neither file is written
+
+The workspace prompt the agent receives is rendered to match: it describes a tree with
+no `repos/`, and it does not tell the agent to `cd` into a checkout that is not there.
 
 ## GitHub App Token Lifecycle
 
@@ -185,7 +218,7 @@ Configured repos are surfaced throughout the platform:
 
 ## Related
 
-- [Workspace Configuration](/docs/workspaces/configuration) - environment variables including `$SYN_ALL_REPOS`
+- [Workspace Configuration](/docs/workspaces/configuration) - environment variables including `$GH_REPO`
 - [Workspace Security](/docs/workspaces/security) - secret injection lifecycle (ADR-024)
 - [GitHub Integration](/docs/guide/github-integration) - GitHub App setup and permissions
 - [CLI: syn workflow](/docs/cli/workflow) - `--repo` and `--repos` flag reference
