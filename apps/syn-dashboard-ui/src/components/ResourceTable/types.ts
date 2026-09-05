@@ -10,7 +10,11 @@
 
 import type { ReactNode } from 'react'
 import type { SortState } from '../../hooks/useSortUrlState'
-import type { SelectionClickModifiers } from '../../hooks/useRowSelection'
+
+// The selection contract belongs to the hook that produces it, not to the
+// table that consumes it; re-exported here so table callers have one import.
+export type { SelectionProps } from '../../hooks/useRowSelection'
+import type { SelectionProps } from '../../hooks/useRowSelection'
 
 export interface ColumnDef<Row, K extends string = string> {
   /** Stable id used as the React key. */
@@ -26,13 +30,6 @@ export interface ColumnDef<Row, K extends string = string> {
   cellTitle?: (row: Row) => string | undefined
   /** Optional Tailwind className applied to <td> for column-specific styling. */
   cellClassName?: string
-}
-
-export interface SelectionProps {
-  selectedIds: Set<string>
-  onToggleRow: (id: string, modifiers: SelectionClickModifiers) => void
-  onSelectAll: () => void
-  onClearSelection: () => void
 }
 
 export interface SortProps<K extends string> {
