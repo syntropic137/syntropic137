@@ -32,9 +32,32 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class _SessionError:
+    """The three fields `_record_terminal_status` writes, read back by name.
+
+    Reading by attribute instead of by key is what makes a lost field fail:
+    `data["error_message"]` on a payload that no longer carries one raises
+    somewhere inside the manager's own `except Exception`, which swallows it.
+    `from_payload` runs in the test body, where a missing key is reported as a
+    missing key. #1196 was exactly a field that went absent and read back blank.
+    """
+
+    status: str
+    error_message: str
+    model: str | None
+
+    @classmethod
+    def from_payload(cls, data: Mapping[str, str | None]) -> _SessionError:
+        status, message = data.get("status"), data.get("error_message")
+        assert isinstance(status, str), f"session_error carries no status: {data}"
+        assert isinstance(message, str), f"session_error carries no error_message: {data}"
+        return cls(status=status, error_message=message, model=data.get("model"))
+
+
+@dataclass(frozen=True)
 class _Recorded:
     observation_type: str
-    data: Mapping[str, object]
+    data: Mapping[str, str | None]
 
 
 class _RecordingWriter:
@@ -45,7 +68,7 @@ class _RecordingWriter:
         self,
         session_id: str,
         observation_type: object,
-        data: Mapping[str, object],
+        data: Mapping[str, str | None],
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
@@ -128,10 +151,10 @@ async def _fail_a_phase(error: Exception, writer: _RecordingWriter) -> None:
     )
 
 
-def _only_session_error(writer: _RecordingWriter) -> Mapping[str, object]:
+def _only_session_error(writer: _RecordingWriter) -> _SessionError:
     errors = [o for o in writer.observations if o.observation_type == SESSION_ERROR]
     assert len(errors) == 1, f"expected exactly one session_error, got {writer.observations}"
-    return errors[0].data
+    return _SessionError.from_payload(errors[0].data)
 
 
 @pytest.mark.unit
@@ -141,7 +164,7 @@ async def test_failing_phase_records_a_session_error_carrying_the_message() -> N
     writer = _RecordingWriter()
     await _fail_a_phase(RuntimeError("verify phase exited 1"), writer)
 
-    message = str(_only_session_error(writer)["error_message"])
+    message = _only_session_error(writer).error_message
     assert message.strip(), "a session_error with a blank message is the #1196 defect"
     assert "verify phase exited 1" in message
 
@@ -153,7 +176,7 @@ async def test_exception_with_no_message_still_records_a_description() -> None:
     writer = _RecordingWriter()
     await _fail_a_phase(TimeoutError(), writer)
 
-    message = str(_only_session_error(writer)["error_message"])
+    message = _only_session_error(writer).error_message
     assert message.strip(), "an unnamed exception must still leave a usable reason"
     assert "TimeoutError" in message, message
 
@@ -172,8 +195,7 @@ async def test_a_blank_reason_from_any_caller_is_replaced() -> None:
 
     await manager.complete_failure(error_message="   ")
 
-    data = _only_session_error(writer)
-    message = str(data["error_message"])
+    message = _only_session_error(writer).error_message
     assert message.strip()
     assert "failed" in message, message
 

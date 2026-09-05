@@ -17,7 +17,7 @@ tests assert what a client actually receives, because every previous hop
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -32,7 +32,43 @@ if TYPE_CHECKING:
 WHEN = datetime(2026, 9, 5, 2, 51, 43, 414696, tzinfo=UTC)
 
 
-async def _operations_over_http(rows: list[dict[str, Any]]) -> list[PhaseOperationInfo]:
+class _SessionErrorPayload(TypedDict, total=False):
+    """The JSONB `data` a session_error row carries.
+
+    `SessionLifecycleManager._record_terminal_status` writes these three keys.
+    `total=False` is the fact test (e) rests on: rows stored before #1196 have
+    no `error_message` key at all and are already in Timescale, so a fixture
+    that omits it has to stay expressible.
+    """
+
+    status: str
+    error_message: str
+    model: str
+
+
+class _ToolPayload(TypedDict, total=False):
+    """The JSONB `data` a tool_execution_* row carries."""
+
+    tool_name: str
+    tool_use_id: str
+    error: str
+
+
+class _Row(TypedDict):
+    """One `agent_events` row as `SessionToolsProjection` reads it back.
+
+    Named because the row is the fixture: `time` is what `operation_id` is
+    built from and `event_type` is what the verdict is keyed on, so a fixture
+    that quietly lost either would still typecheck as a bare mapping while
+    testing something other than the defect.
+    """
+
+    event_type: str
+    time: datetime
+    data: _SessionErrorPayload | _ToolPayload
+
+
+async def _operations_over_http(rows: list[_Row]) -> list[PhaseOperationInfo]:
     """Every hop a stored observation crosses on its way to a client.
 
     Timescale row -> SessionToolsProjection -> the adapters dataclass ->
@@ -58,7 +94,7 @@ async def _operations_over_http(rows: list[dict[str, Any]]) -> list[PhaseOperati
     return _map_phase_to_response(phase).operations
 
 
-def _session_error_row(data: dict[str, Any]) -> dict[str, Any]:
+def _session_error_row(data: _SessionErrorPayload) -> _Row:
     return {"event_type": "session_error", "time": WHEN, "data": data}
 
 
