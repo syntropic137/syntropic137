@@ -93,11 +93,13 @@ export function SessionList() {
         searchPlaceholder="Search sessions..."
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedCount={selection.selectedCount}
-        onCopyIds={() => formatSessionIds(selection.selectedItems.map((s) => s.id))}
-        onCopyForAgent={() => formatSessionsForAgent(selection.selectedItems)}
-        onClearSelection={selection.clear}
-        resourceLabel="session"
+        selection={{
+          selectedCount: selection.selectedCount,
+          onCopyIds: () => formatSessionIds(selection.selectedItems.map((s) => s.id)),
+          onCopyForAgent: () => formatSessionsForAgent(selection.selectedItems),
+          onClearSelection: selection.clear,
+          resourceLabel: 'session',
+        }}
       />
 
       <ResourceFilterBar

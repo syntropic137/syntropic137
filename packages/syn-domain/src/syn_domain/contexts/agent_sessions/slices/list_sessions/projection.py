@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Collection
 
     from event_sourcing import ProjectionStore
 
@@ -20,7 +20,13 @@ from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
-from syn_domain.pagination import Page, matches_search, paginate, within_window
+from syn_domain.pagination import (
+    Page,
+    ProjectionRecord,
+    matches_search,
+    paginate,
+    within_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +334,19 @@ class SessionListProjection(AutoDispatchProjection):
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [SessionSummary.from_dict(d) for d in data]
 
+    async def get_by_id(self, session_id: str) -> SessionSummary | None:
+        """One session by its full id, or None.
+
+        The detail endpoint used to read 10000 sessions and scan them for one
+        id, which meant the session detail page stopped working past the
+        ten-thousandth row -- the same "a cap decides what exists" defect as
+        the unpaged list surfaces (#1159, #1204), on the path a client falls
+        back to when the list cannot reach far enough. The store is keyed by
+        id.
+        """
+        data = await self._store.get(self.PROJECTION_NAME, session_id)
+        return SessionSummary.from_dict(data) if data else None
+
     async def get_by_workflow(self, workflow_id: str) -> list[SessionSummary]:
         """Get sessions for a specific workflow."""
         data = await self._store.query(
@@ -410,7 +429,7 @@ class SessionListProjection(AutoDispatchProjection):
         """
         filters = _build_query_filters(workflow_id, None, None, parent_session_id)
 
-        def base(record: Mapping[str, object]) -> bool:
+        def base(record: ProjectionRecord) -> bool:
             return within_window(
                 record.get("started_at"), started_after, started_before
             ) and matches_search(search, record.get("id"), record.get("workflow_id"))

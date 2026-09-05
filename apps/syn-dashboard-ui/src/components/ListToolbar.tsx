@@ -13,10 +13,8 @@
 import { Search } from 'lucide-react'
 import { SelectionActionBar } from './SelectionActionBar'
 
-export interface ListToolbarProps {
-  searchPlaceholder: string
-  searchQuery: string
-  onSearchChange: (value: string) => void
+/** What a surface offers to do with the rows an operator has picked out. */
+export interface ListToolbarSelection {
   /** The selection actions appear only while this is above zero. */
   selectedCount: number
   /** Returns the text to put on the clipboard. */
@@ -28,15 +26,23 @@ export interface ListToolbarProps {
   resourceLabel: string
 }
 
+export interface ListToolbarProps {
+  searchPlaceholder: string
+  searchQuery: string
+  onSearchChange: (value: string) => void
+  /**
+   * Omitted by a surface whose rows cannot be selected, such as Artifacts.
+   * Grouped rather than four optional props so the five cannot be supplied
+   * half-way.
+   */
+  selection?: ListToolbarSelection
+}
+
 export function ListToolbar({
   searchPlaceholder,
   searchQuery,
   onSearchChange,
-  selectedCount,
-  onCopyIds,
-  onCopyForAgent,
-  onClearSelection,
-  resourceLabel,
+  selection,
 }: ListToolbarProps) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -50,14 +56,14 @@ export function ListToolbar({
           className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] md:py-2"
         />
       </div>
-      {selectedCount > 0 && (
+      {selection && selection.selectedCount > 0 && (
         <div className="flex-1">
           <SelectionActionBar
-            count={selectedCount}
-            onCopyIds={onCopyIds}
-            onCopyForAgent={onCopyForAgent}
-            onClear={onClearSelection}
-            resourceLabel={resourceLabel}
+            count={selection.selectedCount}
+            onCopyIds={selection.onCopyIds}
+            onCopyForAgent={selection.onCopyForAgent}
+            onClear={selection.onClearSelection}
+            resourceLabel={selection.resourceLabel}
           />
         </div>
       )}

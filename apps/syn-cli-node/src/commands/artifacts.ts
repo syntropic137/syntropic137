@@ -12,7 +12,7 @@ import { style, BOLD, CYAN, DIM, GREEN } from "../output/ansi.js";
 import { formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
 
-type ArtifactSummary = components["schemas"]["ArtifactSummaryResponse"];
+type ArtifactList = components["schemas"]["ArtifactListResponse"];
 type ArtifactDetail = components["schemas"]["ArtifactResponse"];
 type ArtifactContent = components["schemas"]["ArtifactContentResponse"];
 type CreateArtifact = components["schemas"]["CreateArtifactResponse"];
@@ -24,26 +24,34 @@ const listCommand: CommandDef = {
     workflow: { type: "string", short: "w", description: "Filter by workflow ID" },
     phase: { type: "string", short: "p", description: "Filter by phase ID" },
     type: { type: "string", short: "t", description: "Filter by artifact type" },
-    limit: { type: "string", description: "Max results (max 200)", default: "50" },
+    page: { type: "string", description: "Page number", default: "1" },
+    "page-size": { type: "string", description: "Items per page (max 200)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
-    const items = unwrap<ArtifactSummary[]>(
+    const page = parseInt((parsed.values["page"] as string | undefined) ?? "1", 10);
+    const pageSize = parseInt((parsed.values["page-size"] as string | undefined) ?? "50", 10);
+
+    const data: ArtifactList = unwrap(
       await api.GET("/artifacts", {
         params: {
           query: {
             workflow_id: (parsed.values["workflow"] as string | undefined) ?? null,
             phase_id: (parsed.values["phase"] as string | undefined) ?? null,
             artifact_type: (parsed.values["type"] as string | undefined) ?? null,
-            limit: Number((parsed.values["limit"] as string | undefined) ?? "50"),
+            page,
+            page_size: pageSize,
           },
         },
       }),
       "List artifacts",
     );
 
+    const items = data.artifacts ?? [];
+    const total = data.total;
+
     if (items.length === 0) { printDim("No artifacts found."); return; }
 
-    const table = new Table({ title: "Artifacts" });
+    const table = new Table({ title: `Artifacts (page ${page}, ${total} total)` });
     table.addColumn("ID", { style: CYAN });
     table.addColumn("Type");
     table.addColumn("Title");
@@ -62,6 +70,7 @@ const listCommand: CommandDef = {
       );
     }
     table.print();
+    if (total > page * pageSize) printDim(`Showing page ${page}. Use --page ${page + 1} for more.`);
   },
 };
 

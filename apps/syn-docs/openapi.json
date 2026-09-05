@@ -1456,7 +1456,7 @@
           "artifacts"
         ],
         "summary": "List Artifacts Endpoint",
-        "description": "List artifacts with optional filtering.",
+        "description": "List artifacts with optional filtering.\n\nThe window is named after ``created_at`` because that is the timestamp an\nartifact has; the siblings bound ``started_at`` and spell it\n``started_after``. The validation is the same one (#1186): a bound with no\noffset is refused rather than guessed at.",
         "operationId": "list_artifacts_endpoint_artifacts_get",
         "parameters": [
           {
@@ -1496,6 +1496,24 @@
             "description": "Filter by phase ID"
           },
           {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by session ID",
+              "title": "Session Id"
+            },
+            "description": "Filter by session ID"
+          },
+          {
             "name": "artifact_type",
             "in": "query",
             "required": false,
@@ -1514,18 +1532,115 @@
             "description": "Filter by artifact type"
           },
           {
-            "name": "limit",
+            "name": "created_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 lower bound on created_at (timezone required)",
+              "title": "Created After"
+            },
+            "description": "Inclusive ISO 8601 lower bound on created_at (timezone required)"
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive ISO 8601 upper bound on created_at (timezone required)",
+              "title": "Created Before"
+            },
+            "description": "Inclusive ISO 8601 upper bound on created_at (timezone required)"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match against artifact id, title, workflow id and phase id",
+              "title": "Q"
+            },
+            "description": "Case-insensitive substring match against artifact id, title, workflow id and phase id"
+          },
+          {
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 200,
               "minimum": 1,
-              "description": "Max items to return",
-              "default": 50,
+              "description": "Page number",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Items per page",
+              "title": "Page Size"
+            },
+            "description": "Items per page"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 200,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Deprecated alias for page_size. Ignored when page_size is given.",
+              "deprecated": true,
               "title": "Limit"
             },
-            "description": "Max items to return"
+            "description": "Deprecated alias for page_size. Ignored when page_size is given.",
+            "deprecated": true
           }
         ],
         "responses": {
@@ -1534,11 +1649,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ArtifactSummaryResponse"
-                  },
-                  "title": "Response List Artifacts Endpoint Artifacts Get"
+                  "$ref": "#/components/schemas/ArtifactListResponse"
                 }
               }
             }
@@ -5399,6 +5510,42 @@
           "size_bytes"
         ],
         "title": "ArtifactContentResponse"
+      },
+      "ArtifactListResponse": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactSummaryResponse"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size",
+            "default": 50
+          },
+          "type_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Type Counts"
+          }
+        },
+        "type": "object",
+        "title": "ArtifactListResponse",
+        "description": "One page of artifacts, and the numbers describing what it is a page of.\n\nThe same envelope ``/executions`` and ``/sessions`` answer with, for the\nsame reason: this endpoint used to return a bare array, so a response of 50\nrows was indistinguishable from a collection of 50 and a client had no\nnumber to page against (#1204). ``limit`` was the only parameter it\nhonoured and it capped at 200, which made 200 artifacts the whole of\nreachable history."
       },
       "ArtifactResponse": {
         "properties": {
