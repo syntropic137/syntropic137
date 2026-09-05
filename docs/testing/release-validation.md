@@ -2586,28 +2586,51 @@ for one row makes that unmistakable in the transcript.
 > **The acceptance criterion is that `total` changes. It is never that the visible
 > rows change.** Do not add a row-comparison step here; it cannot decide anything.
 
-**PASS** requires both:
+**PASS** requires all of:
 
-1. `total(24h) <= total(7d) <= total(all-time)` - monotonic, no exceptions.
-2. `total(24h) < total(7d) < total(all-time)` - strict, for the result to be
-   conclusive.
+1. `total(24h) <= total(7d) <= total(all-time)` - monotonic, no exceptions. A
+   DECREASE anywhere is an unconditional **FAIL** on its own - a wider window
+   reporting fewer rows than a narrower one is broken regardless of the
+   preconditions below.
+2. When the precondition in the table above holds (rows exist in more than one
+   age band): `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)` -
+   BOTH strict. Either equality on its own is not sufficient for PASS; it must
+   be resolved by the discriminator below, and an unresolved equality is
+   **FAIL**, never PASS by default.
+3. When the precondition does NOT hold, the result is **NOT RUN** - never
+   PASS. A stack with history in only one age band cannot exercise the
+   narrowing at all, and reporting PASS for it claims a check that did not run.
 
 **If two totals are equal**, the window is either being ignored or the band is
-genuinely empty. These look identical and must be told apart. Discriminator, using
-the oldest reachable timestamp from 8.1.3:
+genuinely empty. These look identical and must be told apart. There are THREE
+places this equality can occur, not one - cover all of them. Discriminator,
+using the oldest reachable timestamp from 8.1.3:
 
-| Observation | Verdict |
-|---|---|
-| `total(24h) == total(all)` and the oldest row is OLDER than 24h | **FAIL** - the window is not being applied |
-| `total(24h) == total(all)` and the oldest row is YOUNGER than 24h | **NOT RUN** - the stack holds under a day of history |
+| Observation | Discriminator | Verdict |
+|---|---|---|
+| `total(24h) == total(7d)` (with `total(7d) < total(all)`) | oldest reachable row OLDER than 24h | **FAIL** - the 24h window is not being applied |
+| `total(24h) == total(7d)` (with `total(7d) < total(all)`) | oldest reachable row YOUNGER than 24h | **NOT RUN** - all reachable history is under a day old, so the 24h band cannot be exercised |
+| `total(7d) == total(all)` (with `total(24h) < total(7d)`) | oldest reachable row OLDER than 168h | **FAIL** - the 7d window is not being applied |
+| `total(7d) == total(all)` (with `total(24h) < total(7d)`) | oldest reachable row YOUNGER than 168h | **NOT RUN** - all reachable history is under 7 days old, so the 7d band cannot be exercised |
+| `total(24h) == total(7d) == total(all)` | oldest reachable row OLDER than 24h | **FAIL** - neither window is being applied |
+| `total(24h) == total(7d) == total(all)` | oldest reachable row YOUNGER than 24h | **NOT RUN** - the stack holds under a day of history |
 
 **FAIL** - all three totals equal while history demonstrably spans more than 7
 days. This is the #1159 shape where the window was applied in the browser to 50
-already-fetched rows, so it could never change a server count.
+already-fetched rows, so it could never change a server count. (This is the same
+row as the last two lines of the table above, stated separately because it is
+the shape #1159 actually shipped.)
 
-- [ ] executions: three totals, monotonic non-decreasing
-- [ ] executions: at least one strict increase, or the equality discriminated above
-- [ ] sessions: same two assertions
+- [ ] executions: precondition recorded (rows present in more than one age
+      band) - if not met, the result below is **NOT RUN** and no other box in
+      this item may be ticked PASS
+- [ ] executions: `total(24h) <= total(7d) <= total(all-time)` with no
+      decrease anywhere
+- [ ] executions: `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)`
+      both strict - a single strict increase is not sufficient. Any equality is
+      resolved via the discriminator table above; an equality left
+      undischriminated is **FAIL**, not PASS
+- [ ] sessions: same three assertions
 - [ ] artifacts: `started_after` is not accepted at all - record as FAIL against #1204
 - [ ] workflows: **not applicable** - `/workflows` takes no time bound, so there is no
       window to narrow. This is a real gap in the surface (a 36-workflow list is
@@ -2767,11 +2790,13 @@ Read off the page:
 | Status chips (`Pending`, `Running`, `Completed`, `Failed`, `Cancelled`) | see the chip arithmetic below |
 
 **Chip arithmetic.** `status_counts` is tallied over every filter EXCEPT status, so
-with no status selected the chips describe the same collection as `total` and must
-account for all of it. The dashboard renders a FIXED list of five statuses, while
-the executions projection can also emit `interrupted` - a status with no chip. So
-the sum falls short by exactly the unrendered counts, and the check has to say so
-or it produces a false P0 on a healthy stack:
+with no status selected the chips describe the same collection as `total` and MUST
+sum to it. The dashboard renders a FIXED list of five statuses. There is exactly
+ONE status the executions projection can emit that has no chip: `interrupted`. That
+is the entire, named, enumerated exception - not a residual that absorbs whatever a
+`status_counts` response happens to contain. Any status outside the five rendered
+chips AND outside `interrupted` is not this exception and must not be folded into
+the arithmetic; it is investigated on its own, below.
 
 ```bash
 api "executions?page=1&page_size=50" | jq -r '
@@ -2779,28 +2804,45 @@ api "executions?page=1&page_size=50" | jq -r '
   | (.status_counts | to_entries) as $c
   | {
       total,
-      chips_sum:      ([$c[] | select(.key | IN($rendered[]))       | .value] | add // 0),
-      unrendered:     ([$c[] | select(.key | IN($rendered[]) | not)] | from_entries),
-      unrendered_sum: ([$c[] | select(.key | IN($rendered[]) | not) | .value] | add // 0)
+      chips_sum:   ([$c[] | select(.key | IN($rendered[]))                                   | .value] | add // 0),
+      interrupted: ([$c[] | select(.key == "interrupted")                                     | .value] | add // 0),
+      unexpected:  [$c[] | select(((.key | IN($rendered[])) or (.key == "interrupted")) | not) | .key]
     }'
 ```
 
-Expected shape:
+Expected shape on executions:
 
 ```json
-{"total":330,"chips_sum":310,"unrendered":{"interrupted":20},"unrendered_sum":20}
+{"total":330,"chips_sum":310,"interrupted":20,"unexpected":[]}
 ```
 
-**PASS**: `chips_sum + unrendered_sum == total`, AND every chip on screen shows the
-value `status_counts` reports for it.
+Sessions has no `interrupted` status at all (`SessionStatus` is
+`running`/`completed`/`failed`/`cancelled` - a subset of the five rendered chips,
+`_shared/value_objects.py`), so on `/sessions` the named exception is EMPTY:
+`interrupted` is always `0` and PASS requires `chips_sum == total` outright.
 
-**FAIL** - `chips_sum + unrendered_sum < total` with `unrendered` empty. The chips
-are counting a page, which is what produced "completed 35" against a true 235.
+**PASS**: `chips_sum + interrupted == total`, `unexpected` is empty, AND every chip
+on screen shows the value `status_counts` reports for it. On `/sessions`,
+`interrupted` is always `0`, so this reduces to `chips_sum == total`.
 
-**Finding, not a failure of this check** - a non-empty `unrendered` means a status
-exists that the dashboard cannot display or filter by. Report it at P2 with the
-status name and count; it is a smaller version of the same class (history the UI
-cannot show), and it is not covered by #1159, #1160 or #1204.
+**FAIL** - `chips_sum + interrupted != total`. This is the "completed 35 against a
+true 235" shape: the visible chips (plus the one named, enumerated exception) do not
+account for the total. The shortfall is real regardless of what else
+`status_counts` contains - there is no other term available to balance the
+equation.
+
+**FAIL / escalate immediately** - `unexpected` is non-empty. A status exists outside
+the five rendered chips and outside the single named exception. This is NOT
+`interrupted` in another shape and must not be absorbed by widening the exception
+list after the fact; investigate what emitted it and whether the dashboard needs a
+sixth chip, and record it as its own finding.
+
+**Finding, not a failure of this check** - `interrupted` is non-zero on executions.
+Report it at P2 with the count; it is a smaller version of the same class (history
+the UI cannot show), and it is not covered by #1159, #1160 or #1204. This finding
+is independent of the PASS/FAIL verdict above: the check PASSES while this finding
+is STILL recorded, because `interrupted` is a known, named, deliberate gap - not an
+unexplained one.
 
 **Selecting a status must move `total` to that chip's number.** This is the
 "completed 35 against a true 235" symptom stated as an equation. Take the chip
@@ -2848,11 +2890,16 @@ indistinguishably from 500. Record against #1204.
 
 - [ ] `/executions`: `Showing 1-50 of N` matches API `total`
 - [ ] `/executions`: `Page 1 of M` matches `ceil(total / 50)`
-- [ ] `/executions`: chip arithmetic balances, and any unrendered status is reported
+- [ ] `/executions`: `chips_sum + interrupted == total` and `unexpected` is empty -
+      an unresolved shortfall or a non-empty `unexpected` is FAIL, never PASS
+- [ ] `/executions`: any non-zero `interrupted` is reported as its own P2 finding
+      (this does not change the PASS/FAIL verdict of the item above)
 - [ ] `/executions`: selecting a status moves `total` to exactly that chip's count
 - [ ] `/executions`: `status_counts` unchanged by selecting a status
 - [ ] `/executions`: paging to page 2 leaves `N` unchanged
-- [ ] `/sessions`: same six assertions
+- [ ] `/sessions`: same five assertions, with the named exception empty - `interrupted`
+      is always `0` on this surface (`SessionStatus` has no such status), so PASS here
+      requires `chips_sum == total` outright and ANY non-empty `unexpected` is FAIL
 - [ ] `/workflows`: `Showing 1-20 of N` and `Page 1 of M` match the API (no chips on this surface)
 - [ ] `/artifacts`: absence of a count line recorded against #1204
 
