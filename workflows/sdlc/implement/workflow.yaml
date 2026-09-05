@@ -109,9 +109,23 @@ phases:
     # NO WORKING TREE (#1187). This phase reads the verify artifact, checks a
     # remote ref and calls `gh pr create`. Its prompt already says the branch
     # is on origin and that it must not push, so the checkout it was paying
-    # for was never used - it cloned the repo and every submodule, plus the
-    # @-imported CLAUDE.md that comes with a clone, to do about 30s of work,
-    # then ran out of the shortest budget in the workflow in ~30% of runs.
+    # for was never used: it cloned the repo and every submodule, plus the
+    # @-imported CLAUDE.md that comes with a clone, to do about 30s of work.
+    # Dropping an unused clone is worth it on its own, and that is the whole
+    # of the justification for `clone_repos: false`.
+    #
+    # CORRECTED (this note used to say the clone "ran out of the shortest
+    # budget in the workflow in ~30% of runs"). It cannot have. The clone
+    # happens in the setup phase, under its own separate
+    # SYN_SETUP_PHASE_TIMEOUT_SECONDS; the 600s above is handed only
+    # to the agent process, on a workspace that already exists. See
+    # workflows/sdlc/README.md, "What `timeout_seconds` actually bounds".
+    #
+    # So the ~30% failure rate #1187 saw was real but MISATTRIBUTED, and
+    # removing the clone did not necessarily fix it. If this phase is still
+    # timing out, the cause is in the agent's own work and this comment is not
+    # the place to look. Do not raise the 600s to make room for a clone that
+    # was never spending it.
     #
     # `gh` still works: the repo is still resolved to its installation, still
     # gets a token, and still gets a hosts.yml entry. Only the clone is gone.
