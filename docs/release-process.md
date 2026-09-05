@@ -530,8 +530,10 @@ Build the images, move them to the host, recreate two containers. No tag, no
 release entry, no npm publish. Follow the
 [Test Deploy runbook](deployment/test-deploy.md) - it covers the drain check
 that must precede any container recreation, the four version-carrying files
-`just bump-version` does not touch, and the `INCLUDE_DOCKER_CLI` build arg that
-`just release-local` cannot pass ([#1216](https://github.com/syntropic137/syntropic137/issues/1216)).
+`just bump-version` does not touch, and the tag-prefix reconciliation
+`release-local` needs. The `INCLUDE_DOCKER_CLI` build arg it once could not pass
+is fixed and asserted at build time
+([#1216](https://github.com/syntropic137/syntropic137/issues/1216)).
 
 ### Published beta (a release entry with an audience)
 

@@ -247,19 +247,14 @@ rather than being pushed to. It builds all six core images
 is a single known architecture, half of that build is discarded - which is most
 of the wall-clock cost of the recipe.
 
-It also does not pass build args. See below.
+It passes the build args each image needs and verifies the result before
+reporting success. See below.
 
 ### How this lies to you: the missing docker CLI (#1216)
 
 **This is the section that broke the beta.9 deploy.**
 
-`infra/docker/images/syn-api/Dockerfile:70` declares `ARG INCLUDE_DOCKER_CLI=0`.
-CI overrides it - `.github/workflows/release-containers.yaml` sets it to `1` for
-`syn-api` and `0` for everything else. `just release-local` passes no
-`--build-arg` at all, so a locally built `syn-api` takes the default and ships
-**with no docker CLI**.
-
-The API needs that binary to resolve workspace images before creating a
+The API needs a `docker` binary to resolve workspace images before creating a
 workspace. Without it, every workflow execution fails at bootstrap:
 
 ```
@@ -276,31 +271,26 @@ them create a workspace. The defect is confined to the one code path no
 smoke check exercises, so a deploy can be declared good and stay broken until
 the next person dispatches something.
 
-Until [#1216](https://github.com/syntropic137/syntropic137/issues/1216) is
-fixed, a local `syn-api` build **must** pass the arg:
+`ARG INCLUDE_DOCKER_CLI` used to default to `0`, so every builder had to
+remember to pass `1` and `just release-local` did not. Since
+[#1216](https://github.com/syntropic137/syntropic137/issues/1216) the default is
+`1`, `release-local` passes it explicitly anyway, and the recipe runs
+`just verify-image-capabilities` against each image it pushes - so a syn-api
+image with no `docker` on PATH now fails the release instead of the deploy. The
+other five images declare no such ARG, and CI's explicit `0` for them is
+unaffected by the syn-api default.
+
+**Path (b) therefore needs no follow-up rebuild.** `release-local` pushes a
+usable `syn-api` on its own, and `syn-api` still needs no retag in
+[section 4](#the-tag-convention-does-not-match) because `release-local` already
+wrote the tag you want. Retag `syn-gateway` only.
+
+You can confirm any image directly, which is what the release recipe now does
+for you:
 
 ```bash
-docker buildx build --platform linux/amd64 \
-  --build-arg INCLUDE_DOCKER_CLI=1 \
-  -f infra/docker/images/syn-api/Dockerfile \
-  -t ghcr.io/syntropic137/syn-api:v0.28.0-beta.9 --push .
+just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0-beta.9
 ```
-
-Path (a) already passes it. Path (b) cannot - `just release-local` passes no
-build args at all - so after `release-local`, rebuild and re-push `syn-api` with
-the command above. The other five images take `INCLUDE_DOCKER_CLI=0` in CI too,
-so for them `release-local` matches CI.
-
-**On path (b), that rebuild must be the last thing that writes the `v`-prefixed
-`syn-api` tag.** It pushes `v0.28.0-beta.9` directly, so `syn-api` needs no
-retag in [section 4](#the-tag-convention-does-not-match) - and running one there
-afterwards copies the argless `release-local` manifest back over this tag,
-restoring the exact defect this section is about. Retag `syn-gateway` only.
-
-Note the platform: this command builds `linux/amd64` only, and pushing it
-replaces the multi-arch index `release-local` published for that tag. That is
-fine for the single known-architecture host a test deploy targets; build
-`linux/arm64` instead if that is what the host is.
 
 The verification for this is in
 [section 5, step 5](#step-5-verify-the-deploy-took) and it is one line. Run it
@@ -353,21 +343,22 @@ The compose uses **`v`-prefixed** tags (`v0.28.0-beta.9`), because that is what
 pushes the **bare** form (`0.28.0-beta.9`) - the recipe interpolates
 `{{version}}` with no prefixing logic. Pulling then 404s.
 
-Retag rather than rebuild - **`syn-gateway` only**:
+Retag rather than rebuild - **both moving images**:
 
 ```bash
+just release-retag syn-api     0.28.0-beta.9 v0.28.0-beta.9
 just release-retag syn-gateway 0.28.0-beta.9 v0.28.0-beta.9
 ```
 
 It calls `docker buildx imagetools create`, which copies the manifest
 server-side: no pull, no rebuild, and the multi-arch index survives.
 
-`syn-api` is deliberately absent. Its `v`-prefixed tag was already pushed by the
-`INCLUDE_DOCKER_CLI=1` rebuild in
-[section 3](#how-this-lies-to-you-the-missing-docker-cli-1216), and retagging it
-from the bare `release-local` tag would copy the argless manifest over that -
-reintroducing #1216, which step 5 then catches after the deploy, one round trip
-too late.
+`syn-api` used to be excluded here, because the bare tag `release-local` pushed
+was the argless one from #1216 and copying it over the hand-rebuilt `v` tag
+reintroduced the defect. `release-local` now produces a `syn-api` it has
+verified, so the bare tag is the one you want and retagging it is safe. It also
+means the earlier build is the only build: nothing after this point rewrites the
+`syn-api` tag.
 
 None of this applies to the direct path (3a). It never touches a registry, so
 the tags are whatever you passed to `-t`: write them `v`-prefixed there and
@@ -520,7 +511,10 @@ ssh root@<host> "docker exec syn137-api sh -c 'command -v docker'"
 ```
 
 Empty output with a non-zero exit is the failure. Every execution will fail at
-bootstrap; rebuild with `--build-arg INCLUDE_DOCKER_CLI=1` and redeploy.
+bootstrap; rebuild and redeploy. Since #1216 `just release-local` asserts this
+on the image before it reports success, so reaching a host in this state means
+the image came from somewhere else - check it before deploying with
+`just verify-image-capabilities syn-api <ref>`.
 
 **3. Dispatch one real workflow and confirm it gets past bootstrap.**
 
