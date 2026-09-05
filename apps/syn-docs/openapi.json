@@ -5783,6 +5783,66 @@
         ],
         "title": "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post"
       },
+      "BranchObservationInfo": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
+          },
+          "remote_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Commit"
+          },
+          "remote_commit_at_phase_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Commit At Phase Start"
+          },
+          "unpushed_commits": {
+            "type": "integer",
+            "title": "Unpushed Commits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "branch",
+          "remote",
+          "remote_commit",
+          "remote_commit_at_phase_start",
+          "unpushed_commits"
+        ],
+        "title": "BranchObservationInfo",
+        "description": "One branch of a failed phase's workspace, as git had it (#1200).\n\nTHE ANSWER TO \"WHERE DO I LOOK\", made machine-readable. A phase can push\ncomplete work and still fail - most often because it wrote no deliverable,\nwhich #1167 correctly refuses to pass - and the failure then named no\nbranch, so nothing pointed at commits that were merged by hand twice in one\nday once a human found them.\n\nEVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the\nREMOTE ITSELF answered, asked while the workspace was still alive, and\n`remote_commit_at_phase_start` is where this clone's tracking ref pointed\nwhen the phase was handed that workspace. The two differing means the ref\nmoved. It does NOT mean this phase moved it, and no field here says so: a\npush carries no author, so the same evidence is produced by a concurrent\nprocess or a person. Two earlier versions of this claimed otherwise.\n\nA RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the\nrepository - the ref moved, or commits are sitting on no remote. The FIELD\nis three-valued and the two empty answers must not be merged: absent/null\nmeans nothing could look, `[]` means the workspace was read and every\nbranch is exactly where the phase found it. Only a moved ref can be\nrecovered by fetching."
+      },
       "CancelRequest": {
         "properties": {
           "reason": {
@@ -9077,6 +9137,20 @@
               }
             ],
             "title": "Agent Session Ids"
+          },
+          "observed_branches": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BranchObservationInfo"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Branches"
           },
           "operations": {
             "items": {
