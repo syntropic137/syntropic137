@@ -2603,8 +2603,9 @@ for one row makes that unmistakable in the transcript.
    DECREASE anywhere is an unconditional **FAIL** on its own - a wider window
    reporting fewer rows than a narrower one is broken regardless of the
    preconditions below.
-2. When the precondition in the table above holds (rows exist in more than one
-   age band): `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)` -
+2. When the precondition in the table above holds (rows exist in ALL THREE age
+   bands: within 24h, from 24h through 7d, and older than 7d):
+   `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)` -
    BOTH strict. Either equality on its own is not sufficient for PASS; it must
    be resolved by the discriminator below, and an unresolved equality is
    **FAIL**, never PASS by default.
@@ -2612,19 +2613,19 @@ for one row makes that unmistakable in the transcript.
    PASS. A stack with history in only one age band cannot exercise the
    narrowing at all, and reporting PASS for it claims a check that did not run.
 
-**If two totals are equal**, the window is either being ignored or the band is
-genuinely empty. These look identical and must be told apart. There are THREE
-places this equality can occur, not one - cover all of them. Discriminator,
-using the oldest reachable timestamp from 8.1.3:
+**If two totals are equal**, the window is either being ignored or a required age
+band is genuinely empty. Establish the precondition by querying or inspecting rows
+in EACH of the three bands; the oldest row alone cannot prove that the middle band
+contains a row. There are THREE equality shapes, not one - cover all of them:
 
-| Observation | Discriminator | Verdict |
+| Observation | Age-band evidence | Verdict |
 |---|---|---|
-| `total(24h) == total(7d)` (with `total(7d) < total(all)`) | oldest reachable row OLDER than 24h | **FAIL** - the 24h window is not being applied |
-| `total(24h) == total(7d)` (with `total(7d) < total(all)`) | oldest reachable row YOUNGER than 24h | **NOT RUN** - all reachable history is under a day old, so the 24h band cannot be exercised |
-| `total(7d) == total(all)` (with `total(24h) < total(7d)`) | oldest reachable row OLDER than 168h | **FAIL** - the 7d window is not being applied |
-| `total(7d) == total(all)` (with `total(24h) < total(7d)`) | oldest reachable row YOUNGER than 168h | **NOT RUN** - all reachable history is under 7 days old, so the 7d band cannot be exercised |
-| `total(24h) == total(7d) == total(all)` | oldest reachable row OLDER than 24h | **FAIL** - neither window is being applied |
-| `total(24h) == total(7d) == total(all)` | oldest reachable row YOUNGER than 24h | **NOT RUN** - the stack holds under a day of history |
+| `total(24h) == total(7d) < total(all)` | a row exists in the 24h-through-7d band | **FAIL** - the 24h window is not being applied |
+| `total(24h) == total(7d) < total(all)` | no row exists in the 24h-through-7d band | **NOT RUN** - the middle band cannot be exercised |
+| `total(24h) < total(7d) == total(all)` | a row exists older than 7d | **FAIL** - the 7d window is not being applied |
+| `total(24h) < total(7d) == total(all)` | no row exists older than 7d | **NOT RUN** - the oldest band cannot be exercised |
+| `total(24h) == total(7d) == total(all)` | rows demonstrably exist in all three bands | **FAIL** - neither window is being applied |
+| `total(24h) == total(7d) == total(all)` | any of the three bands has no row | **NOT RUN** - the full narrowing precondition is unmet |
 
 **FAIL** - all three totals equal while history demonstrably spans more than 7
 days. This is the #1159 shape where the window was applied in the browser to 50
@@ -2632,8 +2633,8 @@ already-fetched rows, so it could never change a server count. (This is the same
 row as the last two lines of the table above, stated separately because it is
 the shape #1159 actually shipped.)
 
-- [ ] executions: precondition recorded (rows present in more than one age
-      band) - if not met, the result below is **NOT RUN** and no other box in
+- [ ] executions: precondition recorded (rows present in ALL THREE age
+      bands) - if not met, the result below is **NOT RUN** and no other box in
       this item may be ticked PASS
 - [ ] executions: `total(24h) <= total(7d) <= total(all-time)` with no
       decrease anywhere
