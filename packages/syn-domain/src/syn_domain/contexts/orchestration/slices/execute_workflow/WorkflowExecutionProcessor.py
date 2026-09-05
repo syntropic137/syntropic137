@@ -74,6 +74,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     refuse_to_complete_unsaved_phase,
+    where_the_work_went,
 )
 from syn_shared.agents import runner_for_provider
 
@@ -467,9 +468,26 @@ class WorkflowExecutionProcessor:
         """
         # BEFORE any await: teardown clears the session-id map, so reading it
         # afterwards timed the phase to the end of cleanup and lost the
-        # session_id entirely (#1036).
+        # session_id entirely (#1036). Snapshotted rather than merely read early
+        # because the workspace inspection below is an await, and this processor
+        # is shared across concurrent dispatches whose teardown clears the same
+        # maps.
+        started_at_by_phase = dict(self._phase_started_at)
+        session_id_by_phase = dict(self._phase_session_ids)
+        workspaces = dict(self._active_workspaces)
+
+        # The one window in which "where did this phase's work go" can still be
+        # answered: the workspace is alive until _close_phase_workspace_cms
+        # below, and after that the branch it pushed is undiscoverable from
+        # here (#1200). Never raises, so it cannot displace `error`.
+        stranded = await where_the_work_went(workspaces, failed_phase_id)
+
         failure = failed_phase_outcome(
-            error, failed_phase_id, self._phase_started_at, self._phase_session_ids
+            error,
+            failed_phase_id,
+            started_at_by_phase,
+            session_id_by_phase,
+            stranded=stranded,
         )
         if failure.result is not None:
             phase_results.append(failure.result)
@@ -486,6 +504,7 @@ class WorkflowExecutionProcessor:
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
             failed_phase_duration_seconds=failure.duration_seconds,
+            pushed_work=failure.pushed_work,
         )
         try:
             aggregate.fail_execution(fail_cmd)

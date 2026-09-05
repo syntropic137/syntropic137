@@ -255,6 +255,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
             failed_phase_duration_seconds=command.failed_phase_duration_seconds,
+            # list() rather than a default, and None rather than []: the event
+            # has to preserve the difference between "asked, nothing on a
+            # remote" and "nobody could ask" (#1200).
+            pushed_work=None if command.pushed_work is None else list(command.pushed_work),
         )
         self._apply(event)
 

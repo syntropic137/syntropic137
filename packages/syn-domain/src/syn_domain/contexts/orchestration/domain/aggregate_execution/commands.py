@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         PhaseDefinition,
+        PushedWork,
     )
 
 
@@ -79,6 +80,7 @@ class FailExecutionCommand:
         completed_phases: int,
         total_phases: int,
         failed_phase_duration_seconds: float | None = None,
+        pushed_work: tuple[PushedWork, ...] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -87,6 +89,12 @@ class FailExecutionCommand:
         self.completed_phases = completed_phases
         self.total_phases = total_phases
         self.failed_phase_duration_seconds = failed_phase_duration_seconds
+        #: Where the failed phase's work already is, when it pushed any (#1200).
+        #: THREE-VALUED: records name branches confirmed on a remote, `()` says
+        #: the workspace was asked and had nothing on one, and None says nobody
+        #: could ask. A failure that pushed work and one that lost it are
+        #: different incidents, and this is what keeps them apart downstream.
+        self.pushed_work = pushed_work
 
 
 class StartPhaseCommand:

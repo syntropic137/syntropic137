@@ -1,7 +1,19 @@
-"""The gate that stops a phase completing while holding unreachable work (#1184).
+"""What a phase's workspace is holding, asked while it is still alive.
 
-Every phase runs in an ephemeral workspace that is destroyed when the phase
-ends. Until this gate existed, nothing checked that the phase had pushed: the
+TWO QUESTIONS, ONE WINDOW, one place that knows how to ask git anything in a
+live workspace. `refuse_to_complete_unsaved_phase` asks "would anything here be
+lost" before a phase is allowed to complete (#1184). `where_the_work_went` asks
+the opposite question on the opposite path - "what did it already push" - while
+a phase is failing (#1200), because a phase that pushed and then failed the
+#1167 output contract leaves finished work on a branch that nothing points at.
+Both run in the same narrow window before teardown, and both are wrong in the
+same way if they read an unanswered command as an answer, which is why they
+share `_checked` rather than being two modules that each own half a git.
+
+
+THE GATE (#1184). Every phase runs in an ephemeral workspace that is destroyed
+when the phase ends. Until this gate existed, nothing checked that the phase had
+pushed: the
 instruction lived in a prompt, and a phase that committed without pushing still
 reported ``completed`` while its commits went into the bin with the container.
 
@@ -34,9 +46,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Final, Protocol
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PushedWork,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
     QuarantinedWork,
+    StrandedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
@@ -170,6 +186,110 @@ async def quarantine_unpushed_work(
         ) from unreadable
     if quarantined:
         raise UnpushedWorkQuarantinedError(phase_id=phase_id, quarantined=tuple(quarantined))
+
+
+async def where_the_work_went(
+    workspaces: Mapping[str, GitWorkspace],
+    phase_id: str | None,
+) -> StrandedWork | None:
+    """What a FAILING phase already put on a remote, or None when nobody looked.
+
+    MUST be called while the failing phase's workspace is still alive - the
+    same window `refuse_to_complete_unsaved_phase` needs, for the same reason:
+    once teardown has run, the branch a phase pushed is a fact nothing in this
+    process can still discover. A phase that pushed its work and then failed
+    the #1167 output-artifact contract has complete, reviewed-by-nobody commits
+    on a branch, and until #1200 the failure record said only that the
+    contract was unmet (#1200).
+
+    NEVER RAISES, and that is the whole of its contract to the failure path.
+    It is called while an execution is already dying, and an inspection that
+    threw would replace the reason the phase failed with the reason the
+    inspection failed - a strictly worse error, about a different subject. A
+    workspace that stops answering becomes `StrandedWork.unreadable`, which
+    reports the absence of a verdict rather than a verdict of "nothing".
+
+    Returns:
+        Where the work is, or None when there was no workspace for this phase
+        to look in - a failure between phases, or before provisioning. None is
+        "nobody looked", never "nothing was pushed"; the two are different
+        incidents and stay different all the way to the API.
+    """
+    workspace = workspaces.get(phase_id) if phase_id is not None else None
+    if workspace is None:
+        return None
+
+    pushed: list[PushedWork] = []
+    try:
+        for repo in await _repositories(workspace):
+            found = await _pushed_tip(workspace, repo)
+            if found is not None:
+                pushed.append(found)
+    except WorkspaceInspectionFailedError as unreadable:
+        # Partial progress is kept for the same reason the quarantine loop keeps
+        # it: every record already built names a ref that was found to exist,
+        # and a command failing later does not unmake it. What the records
+        # cannot do is stand in for the repositories never reached, so the
+        # reason is carried beside them rather than being logged and dropped.
+        logger.warning("Could not finish looking for pushed work: %s", unreadable.summary)
+        return StrandedWork(pushed=tuple(pushed), unreadable=unreadable.summary)
+    return StrandedWork(pushed=tuple(pushed))
+
+
+async def _pushed_tip(workspace: GitWorkspace, repo: str) -> PushedWork | None:
+    """This repository's HEAD if a remote has it, else None.
+
+    THE QUESTION IS ASKED OF THE REFS, NOT OF THE BRANCH NAME. "The phase was
+    on branch X" is true of work that never left the container, so the claim
+    comes from `git branch --remotes --contains`: a remote-tracking ref that
+    contains this exact commit. No such ref, no record - the caller reports
+    nothing rather than a location an operator would fetch and not find.
+
+    Remote-tracking refs are the same basis `_unsaved_work` uses for the
+    inverse question, and they are exact for the case that matters: a push from
+    this clone updates them as it lands, so a ref here means a push here
+    succeeded. They are a cache of the remote, not the remote, so a branch
+    someone else deleted meanwhile would still be named; that error direction
+    costs a fetch, and the opposite one costs the work.
+
+    KNOWN LIMIT: it reports HEAD or nothing. A phase that pushed, committed
+    again, and then failed has commits this will not mention - they are
+    genuinely unrecoverable, and #1184's quarantine is what saves that shape of
+    work on the completion path.
+    """
+    head = (await _git(workspace, repo, "rev-parse", "--revs-only", "HEAD")).strip()
+    if not head:
+        return None
+    containing = await _git(
+        workspace, repo, "branch", "--remotes", "--contains", head, "--format=%(refname:short)"
+    )
+    on_remote = _remote_branch_names(containing)
+    if not on_remote:
+        return None
+    # The branch the phase checked out is the one a PR would be opened from, so
+    # it is the name to print when a remote has it. Several remote branches can
+    # contain one commit (a branch that is also main's tip, a fork's copy), and
+    # the fallback is sorted rather than first-seen so the report does not
+    # depend on git's listing order.
+    local = (await _git(workspace, repo, "rev-parse", "--abbrev-ref", "HEAD")).strip()
+    branch = local if local in on_remote else on_remote[0]
+    return PushedWork(repo=repo.rsplit("/", 1)[-1], branch=branch, commit=head)
+
+
+def _remote_branch_names(refs: str) -> list[str]:
+    """Fetchable branch names from `refname:short` lines, remote prefix removed.
+
+    `origin/fix/x` is printed as `fix/x` because that is what an operator types
+    to fetch it. `origin/HEAD` is dropped: it is the remote's symbolic default
+    and names no branch of this phase's.
+    """
+    names = set()
+    for line in refs.splitlines():
+        ref = line.strip()
+        _, _, branch = ref.partition("/")
+        if branch and not branch.endswith("HEAD"):
+            names.add(branch)
+    return sorted(names)
 
 
 class _UnsavedWork:

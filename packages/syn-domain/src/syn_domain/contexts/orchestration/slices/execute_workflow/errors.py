@@ -8,6 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PushedWork,
+)
+
 
 def describe_exception(error: BaseException) -> str:
     """What to record about `error` when something has to be recorded.
@@ -366,6 +370,17 @@ class WorkspaceInspectionFailedError(Exception):
         self.quarantined = quarantined
         super().__init__(_render_inspection_failure(doing, failure, quarantined))
 
+    @property
+    def summary(self) -> str:
+        """The same failure in one line, for a report that is about something else.
+
+        The full message explains at length why silence cannot be read as a
+        clean verdict, which is the right length when this error IS the
+        failure. A caller that merely could not finish looking needs the fact
+        and not the essay.
+        """
+        return f"{self.doing}: the command {' '.join(self.failure.command)!r} {_why(self.failure)}"
+
 
 #: What is true of the walk so far, keyed by ``(a ref exists, a push failed)``.
 #: A table rather than a chain of ``if``s because these four ARE the state
@@ -412,12 +427,17 @@ _REST_IS_UNVERIFIED: Final[str] = (
 )
 
 
+def _why(failure: FailedWorkspaceCommand) -> str:
+    """Why a command produced no answer, said the same way wherever it is said."""
+    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+
+
 def _render_inspection_failure(
     doing: str,
     failure: FailedWorkspaceCommand,
     quarantined: tuple[QuarantinedWork, ...],
 ) -> str:
-    why = "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    why = _why(failure)
     stderr = failure.stderr.strip()
     lines = [
         f"The unpushed-work gate could not verify this phase's workspace while "
@@ -516,4 +536,124 @@ def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork,
             saved=_repositories(len(saved)), lost=_repositories(len(lost))
         )
     )
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class StrandedWork:
+    """Where a FAILED phase's work already is, when nothing else will say (#1200).
+
+    THE MIRROR OF `QuarantinedWork`, and deliberately shaped like it. #1184
+    covers the phase that ended holding work nobody had pushed: it saves that
+    work to a ref and fails naming it. This covers the phase that DID push and
+    then failed anyway - most often on the #1167 output-artifact contract,
+    which is unmet the moment the phase writes no deliverable, however good the
+    code it pushed. The commits are already durable and already on a branch;
+    the only thing missing is anyone being told. It happened three times in one
+    day, and twice a human found the branch by hand and opened the PR - both
+    merged, so the work was never the problem.
+
+    NOTHING HERE PUSHES, QUARANTINES OR PUBLISHES. Opening the PR on the
+    author's behalf is a different decision (#1197), and pushing on its behalf
+    would risk overwriting a remote nobody inspected. Saying where the work is
+    costs nothing and cannot be wrong in that direction.
+
+    THE CLAIM IS COUNTED, NEVER ASSUMED. `pushed` holds one record per
+    repository confirmed to have its HEAD on a remote, so "is any of this
+    recoverable" is the size of that tuple - never the truthiness of a branch
+    name that may never have left the workspace. That substitution is the exact
+    defect #1184 needed four review passes to remove from its own reporting.
+
+    `unreadable` says why the inspection stopped early, and exists so that an
+    answer nobody obtained can never be printed as an answer of "nothing". The
+    two are kept apart the whole way to the API; see `confirmed_locations`.
+    """
+
+    pushed: tuple[PushedWork, ...]
+    unreadable: str | None = None
+
+    @property
+    def confirmed_locations(self) -> tuple[PushedWork, ...] | None:
+        """What an API client is told, in the one place that decides it.
+
+        THREE-VALUED, in the shape this codebase already uses for
+        `agent_session_ids` (#1176): records are what was found, `()` means the
+        inspection FINISHED and nothing in this workspace was on any remote,
+        and `None` means nothing could tell us. Collapsing the last two would
+        report a phase whose workspace had already died as one that verifiably
+        pushed nothing - the recoverable incident wearing the unrecoverable
+        one's clothes, which is the whole failure this module exists to stop.
+
+        Records survive an incomplete inspection because each one is a fact
+        about a ref that exists; not finishing does not unmake them.
+        """
+        if self.pushed:
+            return self.pushed
+        return None if self.unreadable else ()
+
+
+#: What is true of a failed phase's work, keyed by ``(something is on a remote,
+#: the inspection stopped early)``. A table for the same reason
+#: ``_INSPECTION_HEADLINE`` is one: these four ARE the state space, and a reader
+#: checking them against each other should not have to reconstruct them from a
+#: chain of ``if``s. Formatted with the count of repositories a ref was found
+#: for, so the number read is the number of places to look.
+_STRANDED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
+    # 1. The ordinary failure: nothing was pushed and nothing is claimed.
+    (False, False): (
+        "  NOTHING OF THIS PHASE'S WORK IS ON A REMOTE: no commit in its "
+        "workspace was found on any remote branch, so there is no branch to "
+        "open a PR from and nothing to fetch back. If it committed anything, "
+        "the workspace took it."
+    ),
+    # 2. The inspection could not finish and found nothing before it stopped.
+    #    NOT the same as (1) and never merged with it: this says nobody looked.
+    (False, True): (
+        "  WHERE THIS PHASE'S WORK WENT IS UNKNOWN: the workspace stopped "
+        "answering before anything was found ({unreadable}), so this is not a "
+        "report that nothing was pushed - it is the absence of a report. Check "
+        "the remote for a branch from this execution before assuming either."
+    ),
+    # 3. Found something, then stopped. The records below are still true.
+    (True, True): (
+        "  PART OF THIS PHASE'S WORK IS ON A REMOTE - a branch exists for "
+        "{found} - and the inspection then stopped ({unreadable}), so there "
+        "may be more it never reached. What it did confirm:"
+    ),
+    # 4. The incident this exists for: the work is fine, and nothing said so.
+    (True, False): (
+        "  THIS PHASE'S WORK IS ON A REMOTE. It pushed {found} and then failed "
+        "before anything opened a PR for it, so the commits below are complete "
+        "and unreferenced. Nothing was pushed or published on its behalf:"
+    ),
+}
+
+
+def _render_pushed_work(work: PushedWork) -> list[str]:
+    """How one repository's pushed work is described.
+
+    Deliberately the same shape as `_render_quarantined_work`: an operator
+    reading a failed execution should not have to learn two layouts to answer
+    the one question both errors are about.
+    """
+    return [
+        f"  {work.repo} (branch {work.branch}):",
+        f"    pushed at {work.commit}",
+        f"    look at it with: git fetch origin {work.branch} && git checkout {work.commit}",
+    ]
+
+
+def describe_stranded_work(work: StrandedWork) -> str:
+    """Say where a failed phase's work went, in the words an operator reads.
+
+    Appended to the failure's own message rather than replacing it: WHY the
+    phase failed and WHERE its work is are different questions, and #1167's
+    answer to the first must stay exactly as loud as it is.
+    """
+    lines = [
+        _STRANDED_HEADLINE[bool(work.pushed), bool(work.unreadable)].format(
+            found=_repositories(len(work.pushed)), unreadable=work.unreadable
+        )
+    ]
+    lines.extend(line for record in work.pushed for line in _render_pushed_work(record))
     return "\n".join(lines)

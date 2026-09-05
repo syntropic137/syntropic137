@@ -7,6 +7,8 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -141,6 +143,43 @@ class PhaseResult:
     total_tokens: int = 0
     error_message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class PushedWork(BaseModel):
+    """One repository's work that a failing phase had already put on a remote (#1200).
+
+    THE FACT AN OPERATOR NEEDS AT 2AM, and the one a failed execution used to
+    throw away. A phase can commit, push, and still fail - most often on the
+    #1167 output-artifact contract - and when it does, no PR is opened and no
+    surface names the branch. The work is complete, reviewed by nobody, and
+    findable only by someone who thinks to go looking through the remote's
+    refs. Twice in one day that someone was a human doing it by hand; both
+    rescues merged.
+
+    EVERY INSTANCE IS A TRUE CLAIM ABOUT THE REMOTE. One is only ever built
+    after a remote-tracking ref was found to contain ``commit``, never from
+    "the phase had a branch name", which is the mistake #1184 took four review
+    passes to get out of its own recoverability reporting. A phase that pushed
+    nothing therefore produces NO instances rather than an instance saying so:
+    absence is the honest shape for "there is nothing to fetch", because a
+    record shaped like a location invites being read as one.
+
+    A Pydantic model rather than a dataclass because it travels on
+    ``WorkflowFailedEvent`` and must serialise as event data.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repo: str
+    """The repository directory's name, as the workspace had it cloned."""
+
+    branch: str
+    """A branch on the remote that contains ``commit``, without its remote
+    prefix - i.e. the name to fetch, and the name a PR would be opened from."""
+
+    commit: str
+    """The commit an operator should look at: the workspace's HEAD, reported
+    only because a remote-tracking ref was found to contain it."""
 
 
 @dataclass(frozen=True)
