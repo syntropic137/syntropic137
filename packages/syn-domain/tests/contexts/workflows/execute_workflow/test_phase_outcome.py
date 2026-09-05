@@ -188,27 +188,33 @@ def test_a_phase_that_started_and_died_produces_a_result_to_count() -> None:
     Pairs with the metrics test: that one proves `from_results` counts a failed
     result correctly, this one proves one exists to be counted.
 
-    KNOWN GAP, stated rather than implied: neither covers the two lines in
-    `WorkflowExecutionProcessor._fail_execution` that actually append it.
-    Deleting them leaves this whole file green. Closing that needs a
-    processor-level test with real repository plumbing, which is a larger piece
-    than this PR - and a gap named is worth more than a gap assumed covered.
+    The gap this docstring used to name - that nothing covered the lines in
+    `WorkflowExecutionProcessor._fail_execution` which actually append the
+    result - is closed by
+    `test_session_error_carries_its_error.test_every_record_of_the_failure_says_the_same_thing`,
+    which drives the real `_fail_execution` and reads the appended result back
+    off the returned `WorkflowExecutionResult`.
     """
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
         failed_phase_outcome,
     )
 
-    duration, result = failed_phase_outcome(
-        "implement", {"implement": _START}, {"implement": "sess-9"}, "timed out"
+    failure = failed_phase_outcome(
+        TimeoutError("timed out"), "implement", {"implement": _START}, {"implement": "sess-9"}
     )
 
-    assert result is not None
-    assert result.phase_id == "implement"
-    assert duration is not None and duration > 0
+    assert failure.result is not None
+    assert failure.result.phase_id == "implement"
+    assert failure.duration_seconds is not None and failure.duration_seconds > 0
 
-    # A phase with no recorded start yields neither, rather than a zero-duration
-    # result that would enter the metrics as a phase that ran instantly.
-    assert failed_phase_outcome("implement", {}, {}, "timed out") == (None, None)
+    # A phase with no recorded start yields neither a duration nor a result,
+    # rather than a zero-duration result that would enter the metrics as a phase
+    # that ran instantly. The failure itself is still described: the execution
+    # died whether or not a phase had begun.
+    never_started = failed_phase_outcome(TimeoutError("timed out"), "implement", {}, {})
+    assert (never_started.duration_seconds, never_started.result) == (None, None)
+    assert never_started.reason == "timed out"
+    assert never_started.error_type == "TimeoutError"
 
 
 async def test_a_failed_run_adds_to_workflow_duration_rather_than_replacing_it() -> None:
@@ -267,14 +273,15 @@ def test_the_failed_phase_duration_matches_its_own_completed_at() -> None:
     )
 
     ended = _START + timedelta(seconds=5)
-    duration, result = failed_phase_outcome(
+    failure = failed_phase_outcome(
+        TimeoutError("timed out"),
         "implement",
         {"implement": _START},
         {"implement": "sess-2"},
-        "timed out",
         now=ended,
     )
 
+    result, duration = failure.result, failure.duration_seconds
     assert result is not None
     assert duration is not None
     assert (result.completed_at - result.started_at).total_seconds() == duration

@@ -27,6 +27,9 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    describe_exception,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
 )
@@ -62,30 +65,65 @@ def failed_phase_elapsed_seconds(
     return ((now or datetime.now(UTC)) - started_at).total_seconds()
 
 
+@dataclass(frozen=True)
+class PhaseFailure:
+    """Everything a dying execution records about the exception that killed it.
+
+    Four sinks describe one failure - the phase's `PhaseResult`, the session's
+    `session_error` observation, the `FailExecutionCommand` the aggregate
+    stores, and the execution result handed back to the caller - and each used
+    to spell the description itself as `str(error)`. That is "" for an
+    exception raised with no arguments, so the four went blank together; #1196
+    is what one of them looked like by the time it reached a user.
+
+    Deciding it here is what stops a fifth sink deciding it again. A caller
+    reads `reason` and cannot tell whether the exception named itself, which is
+    the point: that is not a question a call site should be answering.
+
+    `reason` and `error_type` describe the failure and are always present.
+    `duration_seconds` and `result` describe the phase and are None together
+    when the execution died before any phase started - there is no phase to
+    report on, but there is still a failure to describe.
+    """
+
+    reason: str
+    error_type: str
+    duration_seconds: float | None
+    result: PhaseResult | None
+
+
 def failed_phase_outcome(
+    error: BaseException,
     phase_id: str | None,
     started_at_by_phase: Mapping[str, DateTime],
     session_id_by_phase: Mapping[str, str],
-    error_message: str,
     now: DateTime | None = None,
-) -> tuple[float | None, PhaseResult | None]:
-    """The duration and result for a phase that failed.
+) -> PhaseFailure:
+    """What a failed run reports, derived from the exception that ended it.
 
-    One call rather than three lookups at the call site: the processor is over
-    its file-size threshold, and the caller does not need to know that "how long
-    did it run" and "what result does it produce" share a start timestamp.
+    One call rather than three lookups and a description at the call site: the
+    processor is at its file-size threshold, and the caller does not need to
+    know that "how long did it run" and "what result does it produce" share a
+    start timestamp, nor how an exception with nothing to say gets named.
+
+    Takes the exception rather than a rendered message so that the rendering
+    happens once. The processor used to do it and hand the string in, which put
+    the decision back at the call site the moment a second call site appeared.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
-    return (
-        failed_phase_elapsed_seconds(started_at, now=ended_at),
-        failed_phase_result(
+    reason = describe_exception(error)
+    return PhaseFailure(
+        reason=reason,
+        error_type=type(error).__name__,
+        duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
+        result=failed_phase_result(
             phase_id,
             started_at,
             session_id_by_phase.get(phase_id or "", ""),
-            error_message,
+            reason,
             ended_at=ended_at,
         ),
     )

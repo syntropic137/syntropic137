@@ -467,24 +467,24 @@ class WorkflowExecutionProcessor:
         # BEFORE any await: teardown clears the session-id map, so reading it
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
-        failed_phase_duration, failed_result = failed_phase_outcome(
-            failed_phase_id, self._phase_started_at, self._phase_session_ids, str(error)
+        failure = failed_phase_outcome(
+            error, failed_phase_id, self._phase_started_at, self._phase_session_ids
         )
-        if failed_result is not None:
-            phase_results.append(failed_result)
+        if failure.result is not None:
+            phase_results.append(failure.result)
 
         for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_failure(error_message=str(error))
+            await mgr.complete_failure(error_message=failure.reason)
         await self._close_phase_workspace_cms(context="failure")
 
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
-            error=str(error),
-            error_type=type(error).__name__,
+            error=failure.reason,
+            error_type=failure.error_type,
             failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
             total_phases=len(phases),
-            failed_phase_duration_seconds=failed_phase_duration,
+            failed_phase_duration_seconds=failure.duration_seconds,
         )
         try:
             aggregate.fail_execution(fail_cmd)
@@ -497,7 +497,7 @@ class WorkflowExecutionProcessor:
             started_at=started_at,
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
-            error_message=str(error),
+            error_message=failure.reason,
         )
 
     async def _close_phase_workspace_cms(self, context: str) -> None:

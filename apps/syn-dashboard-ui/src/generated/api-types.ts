@@ -3178,6 +3178,8 @@ export interface components {
              * @default true
              */
             success: boolean;
+            /** Error Message */
+            error_message?: string | null;
             /** Input Tokens */
             input_tokens?: number | null;
             /** Output Tokens */
@@ -3435,6 +3437,8 @@ export interface components {
              * @default true
              */
             success: boolean;
+            /** Error Message */
+            error_message?: string | null;
         };
         /**
          * PhaseRefResponse
@@ -4877,6 +4881,8 @@ export interface components {
             duration_ms?: number | null;
             /** Success */
             success?: boolean | null;
+            /** Error Message */
+            error_message?: string | null;
         };
         /**
          * ToolTimelineResponse
