@@ -201,8 +201,10 @@ What it does not get:
   from what was actually cloned, so for this phase there is nothing to import and
   neither file is written
 
-The workspace prompt the agent receives is rendered to match: it describes a tree with
-no `repos/`, and it does not tell the agent to `cd` into a checkout that is not there.
+The workspace prompt the agent receives is rendered to match: its tree shows `repos/`
+present and empty, and it does not tell the agent to `cd` into a checkout that is not
+there. The directory is shown rather than omitted for the reason above - an agent told
+`repos/` does not exist has been told the opposite of what the workspace guarantees.
 
 ## GitHub App Token Lifecycle
 
