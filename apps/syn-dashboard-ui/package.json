@@ -1,7 +1,7 @@
 {
   "name": "syn-dashboard-ui",
   "private": true,
-  "version": "0.28.0-beta.8",
+  "version": "0.28.0-beta.9",
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules ] || npm install",
