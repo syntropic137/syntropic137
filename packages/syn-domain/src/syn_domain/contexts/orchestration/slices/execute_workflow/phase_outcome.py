@@ -98,8 +98,8 @@ class PhaseFailure:
     duration_seconds: float | None
     result: PhaseResult | None
     pushed_work: tuple[PushedWork, ...] | None = None
-    """Locations confirmed on a remote, `()` for "checked, nothing there", and
-    None for "nothing could tell us". Straight from
+    """Locations this phase put on a remote, `()` for "checked, this phase put
+    nothing there", and None for "nothing could tell us". Straight from
     `StrandedWork.confirmed_locations`, because deciding it twice is how the
     two would come to disagree."""
 

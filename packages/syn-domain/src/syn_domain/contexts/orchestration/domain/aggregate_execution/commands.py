@@ -91,9 +91,12 @@ class FailExecutionCommand:
         self.failed_phase_duration_seconds = failed_phase_duration_seconds
         #: Where the failed phase's work already is, when it pushed any (#1200).
         #: THREE-VALUED: records name branches confirmed on a remote, `()` says
-        #: the workspace was asked and had nothing on one, and None says nobody
-        #: could ask. A failure that pushed work and one that lost it are
-        #: different incidents, and this is what keeps them apart downstream.
+        #: the workspace was asked and this phase had put nothing on one, and
+        #: None says nobody could ask. A failure that pushed work and one that
+        #: lost it are different incidents, and this is what keeps them apart
+        #: downstream. THIS PHASE, not the repository: the branch it started on
+        #: is normally already pushed, so counting that gives every failure a
+        #: location and merges the two incidents again.
         self.pushed_work = pushed_work
 
 
