@@ -57,13 +57,24 @@ PACKAGE_JSON_FILES = [
 # The four files `bump-version` used to miss. They carry the version too, and
 # `--check` reporting "OK: All 11 files" while these were stale is how a build
 # shipped schemas advertising the previous version (see the v0.28.0-beta.9 bump).
-SCHEMA_FILES = [
-    ROOT / "schemas/plugin/workflow.schema.json",
-    ROOT / "schemas/plugin/triggers.schema.json",
-    ROOT / "schemas/plugin/phase-frontmatter.schema.json",
-]
+# Relative, resolved against ROOT at call time. Absolute constants baked at
+# import cannot be redirected by monkeypatching ROOT, which is how the tests
+# isolate the filesystem.
+SCHEMA_RELPATHS = (
+    "schemas/plugin/workflow.schema.json",
+    "schemas/plugin/triggers.schema.json",
+    "schemas/plugin/phase-frontmatter.schema.json",
+)
 
-LOCKFILE = ROOT / "uv.lock"
+LOCKFILE_RELPATH = "uv.lock"
+
+
+def schema_files() -> list[Path]:
+    return [ROOT / rel for rel in SCHEMA_RELPATHS]
+
+
+def lockfile() -> Path:
+    return ROOT / LOCKFILE_RELPATH
 
 # Only OUR workspace members. `agentic-*` and `event-sourcing-python` are
 # submodules with independent versioning and must never be touched here.
@@ -118,10 +129,11 @@ def read_schema_version(path: Path) -> str | None:
 
 def read_lockfile_versions() -> dict[str, str]:
     """Version recorded for each of OUR workspace members in uv.lock."""
-    if not LOCKFILE.exists():
+    path = lockfile()
+    if not path.exists():
         return {}
     found: dict[str, str] = {}
-    for block in LOCKFILE.read_text().split("[[package]]"):
+    for block in path.read_text().split("[[package]]"):
         nm = re.search(r'^name = "([^"]+)"', block, re.MULTILINE)
         vm = re.search(r'^version = "([^"]+)"', block, re.MULTILINE)
         if nm and vm and nm.group(1) in LOCKFILE_PACKAGES:
@@ -265,7 +277,7 @@ def check_consistency() -> bool:
     # Schema $id values and uv.lock records carry the version too. This check
     # used to stop at the manifests and report OK while these were stale, which
     # is how a build shipped schemas advertising the previous version.
-    for path in SCHEMA_FILES:
+    for path in schema_files():
         got = read_schema_version(path)
         if got != version:
             stale.append(f"{path.relative_to(ROOT)}: {got} (expected {version})")
@@ -286,7 +298,7 @@ def check_consistency() -> bool:
         print("\nRun `just bump-version <version>`, which regenerates them.", file=sys.stderr)
         return False
 
-    total = len(versions) + len(SCHEMA_FILES) + 1
+    total = len(versions) + len(SCHEMA_RELPATHS) + 1
     print(f"OK: all {total} version-carrying files at v{version}")
     return True
 
@@ -331,7 +343,7 @@ def bump(target: str) -> None:
         else:
             pending.append((path, new_text))
 
-    for path in SCHEMA_FILES:
+    for path in schema_files():
         text = path.read_text()
         new_text = SCHEMA_ID_RE.sub(rf"\g<1>{target}\2", text)
         if new_text == text:

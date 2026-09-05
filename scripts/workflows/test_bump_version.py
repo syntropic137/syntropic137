@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
+
+from bump_version import to_pep440 as bv_to_pep440
 from typing import TYPE_CHECKING
 
 import pytest
@@ -99,8 +101,31 @@ class TestCompareVersions:
 # =============================================================================
 
 
+
+_PYPROJECTS = (
+    "pyproject.toml",
+    "apps/syn-api/pyproject.toml",
+    "packages/syn-adapters/pyproject.toml",
+    "packages/syn-collector/pyproject.toml",
+    "packages/syn-domain/pyproject.toml",
+    "packages/syn-perf/pyproject.toml",
+    "packages/syn-shared/pyproject.toml",
+    "packages/syn-tokens/pyproject.toml",
+)
+
+_PACKAGE_JSONS = (
+    "apps/syn-cli-node/package.json",
+    "apps/syn-dashboard-ui/package.json",
+    "apps/syn-docs/package.json",
+)
+
 def _make_version_files(tmp_path: Path, version: str) -> None:
-    """Write all 11 version files at the given version into tmp_path."""
+    """Write every version-carrying file at the given version into tmp_path.
+
+    All 15: 11 manifests, 3 plugin schemas, and uv.lock. The fixture models
+    the real repo, so a check that reads a file the repo always has cannot
+    pass here by finding it absent.
+    """
     pyprojects = [
         "pyproject.toml",
         "apps/syn-api/pyproject.toml",
@@ -131,6 +156,38 @@ def _make_version_files(tmp_path: Path, version: str) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"name": "placeholder", "version": version}, indent=2) + "\n")
 
+    for rel in (
+        "schemas/plugin/workflow.schema.json",
+        "schemas/plugin/triggers.schema.json",
+        "schemas/plugin/phase-frontmatter.schema.json",
+    ):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            '{\n  "$id": "https://syntropic137.dev/schemas/plugin/v'
+            + version
+            + '/x.schema.json"\n}\n'
+        )
+
+    # uv writes PEP 440, not semver: 0.28.0-beta.9 is recorded as 0.28.0b9.
+    lock_version = bv_to_pep440(version)
+    lock = tmp_path / "uv.lock"
+    lock.write_text(
+        "".join(
+            f'[[package]]\nname = "{name}"\nversion = "{lock_version}"\n'
+            f"source = {{ editable = \".\" }}\n\n"
+            for name in (
+                "syntropic137",
+                "syn-adapters",
+                "syn-api",
+                "syn-collector",
+                "syn-domain",
+                "syn-perf",
+                "syn-shared",
+                "syn-tokens",
+            )
+        )
+    )
 
 class TestCheckConsistency:
     def test_all_match(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -319,3 +376,74 @@ class TestBump:
 
         with pytest.raises(SystemExit):
             bump("not-a-version")
+
+
+class TestDerivedFilesAreChecked:
+    """The four files `--check` used to ignore.
+
+    `check_consistency` reported "OK: All 11 files" while uv.lock and the three
+    plugin schema `$id` values were stale, so a green check was not evidence the
+    bump was complete. These pin that it now fails, and names the offender.
+    """
+
+    def _patch(self, bv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(bv, "ROOT", tmp_path)
+        monkeypatch.setattr(
+            bv, "PYPROJECT_FILES", [tmp_path / p for p in _PYPROJECTS]
+        )
+        monkeypatch.setattr(
+            bv, "PACKAGE_JSON_FILES", [tmp_path / p for p in _PACKAGE_JSONS]
+        )
+
+    def test_stale_schema_id_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _make_version_files(tmp_path, "0.28.0")
+        import bump_version as bv
+
+        self._patch(bv, tmp_path, monkeypatch)
+        stale = tmp_path / "schemas/plugin/triggers.schema.json"
+        stale.write_text(stale.read_text().replace("/v0.28.0/", "/v0.27.0/"))
+
+        assert bv.check_consistency() is False
+        assert "triggers.schema.json" in capsys.readouterr().err
+
+    def test_stale_lockfile_record_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _make_version_files(tmp_path, "0.28.0")
+        import bump_version as bv
+
+        self._patch(bv, tmp_path, monkeypatch)
+        lock = tmp_path / "uv.lock"
+        lock.write_text(lock.read_text().replace('version = "0.28.0"', 'version = "0.27.0"', 1))
+
+        assert bv.check_consistency() is False
+        assert "uv.lock" in capsys.readouterr().err
+
+    def test_prerelease_lockfile_uses_pep440(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """uv writes 0.28.0b9, not 0.28.0-beta.9. Comparing semver to the lock
+        would report every prerelease bump as stale."""
+        _make_version_files(tmp_path, "0.28.0-beta.9")
+        import bump_version as bv
+
+        self._patch(bv, tmp_path, monkeypatch)
+        assert '0.28.0b9' in (tmp_path / "uv.lock").read_text()
+        assert bv.check_consistency() is True
+
+    def test_bump_rewrites_schema_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_version_files(tmp_path, "0.28.0")
+        import bump_version as bv
+
+        self._patch(bv, tmp_path, monkeypatch)
+        bv.bump("0.29.0")
+        for rel in (
+            "schemas/plugin/workflow.schema.json",
+            "schemas/plugin/triggers.schema.json",
+            "schemas/plugin/phase-frontmatter.schema.json",
+        ):
+            assert "/v0.29.0/" in (tmp_path / rel).read_text()
