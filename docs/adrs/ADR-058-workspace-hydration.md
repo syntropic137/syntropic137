@@ -333,12 +333,20 @@ auto-loaded context.
 **Default is `true`**, for the same reason `requires_repos` defaults that way:
 every phase already in the event store was written assuming a checkout.
 
-### Known Gap
+### The Prompt Follows the Checkout Too
 
-`SYN_WORKSPACE_PROMPT`
-(`packages/syn-domain/.../execute_workflow/workspace_prompt.py`) is injected
-into every phase and still describes `repos/` as "pre-cloned repositories
-(ready to use)". For a `clone_repos: false` phase that is now inaccurate. It was
-left unchanged deliberately: it is one shared preamble for all phases, so making
-it conditional is a prompt change affecting every workflow, and #1187 was scoped
-to configuration. Tracked as a follow-up.
+The shared preamble at
+`packages/syn-domain/.../execute_workflow/workspace_prompt.py` was injected into
+every phase and described `repos/` as "pre-cloned repositories (ready to use)",
+with step one of a coding task being to navigate into
+`/workspace/repos/<name>`. For a `clone_repos: false` phase both claims are
+false, which meant the gate above could not be switched on: doing so sent the
+agent into a directory that does not exist. `open_pr.md`'s "this workspace is a
+fresh clone" said the same thing one layer up.
+
+That constant is now `render_workspace_prompt(clone_repos=...)`, called from
+`_build_workspace_prompt` with `phase.clone_repos`. A phase that clones renders
+byte-for-byte what it rendered before - `test_open_pr_needs_no_working_tree`
+holds a literal golden that fails on any drift - and a phase that does not is
+told what it actually has: git credentials, a `gh` hosts.yml entry, and
+`GH_REPO`, which is the whole of what this ADR provisions for it.

@@ -132,7 +132,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
     WorkflowExecutionProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
-    SYN_WORKSPACE_PROMPT,
+    render_workspace_prompt,
 )
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
@@ -152,7 +152,6 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "RESERVED_INPUT_NAMES",
-    "SYN_WORKSPACE_PROMPT",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
@@ -230,6 +229,7 @@ __all__ = [
     "announce_as",
     "build_command_from_definition",
     "mint_wrapper_name",
+    "render_workspace_prompt",
     "require_supported_execution_type",
     "validate_phase_declarations",
     "validate_workflow_yaml",
