@@ -32,17 +32,33 @@ describe("artifacts commands", () => {
   describe("list", () => {
     const handler = artifactsGroup.getCommand("list")!.handler;
 
+    /**
+     * One page of the envelope /artifacts answers with since #1204. Field
+     * names are the ArtifactListResponse model's, verbatim — the endpoint
+     * returned a bare array before, and a fixture still shaped like one is
+     * how a client that never learned the difference keeps passing.
+     */
+    function artifactPage(
+      artifacts: unknown[],
+      { total, page = 1, pageSize = 50 }: { total: number; page?: number; pageSize?: number },
+    ): Response {
+      return jsonResponse({ artifacts, total, page, page_size: pageSize, type_counts: {} });
+    }
+
     it("renders artifacts table", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse([
-          {
-            id: "art-001-abcdef123456",
-            artifact_type: "code",
-            title: "my-artifact",
-            size_bytes: 2048,
-            created_at: "2026-01-01T00:00:00Z",
-          },
-        ]),
+        artifactPage(
+          [
+            {
+              id: "art-001-abcdef123456",
+              artifact_type: "code",
+              title: "my-artifact",
+              size_bytes: 2048,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          { total: 137 },
+        ),
       );
 
       await handler({ positionals: [], values: {} });
@@ -54,26 +70,74 @@ describe("artifacts commands", () => {
     });
 
     it("shows empty message when no artifacts", async () => {
-      mockFetch.mockResolvedValue(jsonResponse([]));
+      mockFetch.mockResolvedValue(artifactPage([], { total: 0 }));
       await handler({ positionals: [], values: {} });
       expect(stdout()).toContain("No artifacts found");
     });
 
     it("formats small sizes in bytes", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse([
-          {
-            id: "art-002-abcdef123456",
-            artifact_type: "text",
-            title: "tiny",
-            size_bytes: 512,
-            created_at: "2026-01-01T00:00:00Z",
-          },
-        ]),
+        artifactPage(
+          [
+            {
+              id: "art-002-abcdef123456",
+              artifact_type: "text",
+              title: "tiny",
+              size_bytes: 512,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          { total: 1 },
+        ),
       );
 
       await handler({ positionals: [], values: {} });
       expect(stdout()).toContain("512B");
+    });
+
+    it("reports the collection total, not the number of rows on the page", async () => {
+      mockFetch.mockResolvedValue(
+        artifactPage(
+          [
+            {
+              id: "art-003-abcdef123456",
+              artifact_type: "code",
+              title: "one-of-many",
+              size_bytes: 10,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          { total: 137 },
+        ),
+      );
+
+      await handler({ positionals: [], values: {} });
+      const out = stdout();
+      expect(out).toContain("137 total");
+      expect(out).not.toContain("1 total");
+      expect(out).toContain("Use --page 2 for more.");
+    });
+
+    it("omits the next-page hint once the page reaches the end of the collection", async () => {
+      mockFetch.mockResolvedValue(
+        artifactPage(
+          [
+            {
+              id: "art-004-abcdef123456",
+              artifact_type: "code",
+              title: "last-page",
+              size_bytes: 10,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          { total: 137, page: 3 },
+        ),
+      );
+
+      await handler({ positionals: [], values: { page: "3" } });
+      const out = stdout();
+      expect(out).toContain("137 total");
+      expect(out).not.toContain("Use --page");
     });
   });
 

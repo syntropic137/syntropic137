@@ -20,13 +20,14 @@ export interface ListQuery {
   /** OR'd status filter. Empty or absent means every status. */
   statuses?: string[]
   /**
-   * Inclusive lower bound on started_at, ISO 8601 WITH an offset.
+   * Inclusive lower bound on the row's timestamp, ISO 8601 WITH an offset.
    *
    * The API rejects a timezone-less bound with 422 (#1183), so build these
-   * with `timeWindowToStartedAfter` rather than by hand.
+   * with `timeWindowToStartedAfter` rather than by hand. Which timestamp it
+   * bounds is the endpoint's business - see `TimeField`.
    */
   started_after?: string
-  /** Inclusive upper bound on started_at, same offset requirement. */
+  /** Inclusive upper bound on the same timestamp, same offset requirement. */
   started_before?: string
   /** Case-insensitive substring match; the server decides which fields. */
   q?: string
@@ -53,16 +54,29 @@ export interface ListPage<TRow> {
   statusCounts: Record<string, number>
 }
 
-/** Serialise a query into the query string both endpoints parse. */
-export function listQueryParams(query: ListQuery): URLSearchParams {
+/**
+ * Which of a row's timestamps the window bounds.
+ *
+ * An execution starts and a session starts; an artifact is only ever created.
+ * The bound means the same thing on all three - "the oldest row I want" - so
+ * it stays one field on `ListQuery` and is spelled per endpoint here rather
+ * than making each caller remember which noun its endpoint chose (#1204).
+ */
+export type TimeField = 'started' | 'created'
+
+/** Serialise a query into the query string these endpoints parse. */
+export function listQueryParams(
+  query: ListQuery,
+  timeField: TimeField = 'started',
+): URLSearchParams {
   const params = new URLSearchParams()
   params.set('page', String(query.page))
   params.set('page_size', String(query.page_size))
   if (query.statuses && query.statuses.length > 0) {
     params.set('statuses', query.statuses.join(','))
   }
-  if (query.started_after) params.set('started_after', query.started_after)
-  if (query.started_before) params.set('started_before', query.started_before)
+  if (query.started_after) params.set(`${timeField}_after`, query.started_after)
+  if (query.started_before) params.set(`${timeField}_before`, query.started_before)
   if (query.q) params.set('q', query.q)
   return params
 }

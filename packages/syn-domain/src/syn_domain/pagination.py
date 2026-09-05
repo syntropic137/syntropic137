@@ -27,7 +27,17 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Sequence
+    from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+
+#: One row as a projection store hands it back: JSON, so its values are
+#: whatever the event carried.
+#:
+#: Named here because every caller of :func:`paginate` writes a predicate over
+#: this shape and they were each spelling it out, which is one erased
+#: annotation per list surface rather than one for the concept. It is still
+#: erased - a record IS heterogeneous at this layer - so the fix, when the
+#: projections gain typed read models, is one edit here.
+type ProjectionRecord = Mapping[str, object]
 
 
 @dataclass(frozen=True)

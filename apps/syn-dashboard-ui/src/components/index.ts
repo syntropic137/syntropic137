@@ -14,7 +14,11 @@ export { ExecutionCostSummary } from './ExecutionCostSummary'
 export { Layout } from './Layout'
 export { ListPageHeader, type ListPageHeaderProps } from './ListPageHeader'
 export { ListPagination, type ListPaginationProps } from './ListPagination'
-export { ListToolbar, type ListToolbarProps } from './ListToolbar'
+export {
+  ListToolbar,
+  type ListToolbarProps,
+  type ListToolbarSelection,
+} from './ListToolbar'
 export { Loader, PageLoader } from './Loader'
 export { MetricCard } from './MetricCard'
 export { ModelBreakdown, type ModelBreakdownProps } from './ModelBreakdown'

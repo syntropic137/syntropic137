@@ -268,6 +268,13 @@ export interface ArtifactSummary {
   created_at: string | null;
 }
 
+export interface ArtifactListResponse {
+  artifacts: ArtifactSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface ArtifactDetail {
   id: string;
   workflow_id: string | null;
