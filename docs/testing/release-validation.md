@@ -2387,8 +2387,8 @@ Navigate to `http://localhost:8137` via Playwright.
 
 The three list surfaces named by the issues - **executions, sessions, artifacts** -
 each shipped the same defect independently: a `total` that described the PAGE rather
-than the collection, and history that no amount of paging could reach. #1159 (executions)
-and #1160 (sessions) are fixed; #1204 (artifacts) is open. The repository owner
+than the collection, and history that no amount of paging could reach. #1159 (executions),
+#1160 (sessions) and #1204 (artifacts) are all fixed. The repository owner
 found all of it in a browser, because this runbook had no check that compared a
 displayed count against anything.
 
@@ -2406,7 +2406,8 @@ third instance ship.
 > deliberately left out and recorded in `## Untested Areas`: `/triggers` (returns
 > `total=len(rows)`, truthful only because the endpoint has no paging at all - a
 > latent instance of the same shape) and `/costs/sessions` + `/costs/executions`
-> (bare arrays capped at 200, the artifacts shape, not covered by #1204).
+> (bare arrays capped at `limit<=200` with no `total` - the shape `/artifacts` had
+> before #1204, and the last two surfaces still carrying it).
 
 ### How a list surface lies to you
 
@@ -2462,7 +2463,7 @@ export SYN_API_USER="${SYN_API_USER:-admin}"
 api() { curl -sS -u "$SYN_API_USER:$SYN_API_PASSWORD" "$SYN_API_URL/$1"; }
 
 # The two numbers every list surface owes a client, however each one spells them.
-rows_of()  { jq '(if type == "array" then . else (.executions // .sessions // .workflows // []) end) | length'; }
+rows_of()  { jq '(if type == "array" then . else (.executions // .sessions // .workflows // .artifacts // []) end) | length'; }
 total_of() { jq -r 'if type == "array" then "ABSENT" else (.total | tostring) end'; }
 
 # Percent-encode a value before it goes into a query string (see 8.1.5).
@@ -2484,23 +2485,25 @@ The four surfaces, and where they differ:
 | executions | `GET /executions` | `.executions` | yes | `page`, `page_size` (max 200) | `started_at` |
 | sessions | `GET /sessions` | `.sessions` | yes | `page`, `page_size` (max 200; `limit` deprecated alias) | `started_at` |
 | workflows | `GET /workflows` | `.workflows` | yes | `page`, `page_size` (**max 100** - 200 returns 422) | `created_at` |
-| artifacts | `GET /artifacts` | bare JSON array | **absent** | `limit` only (max 200) | `created_at` |
+| artifacts | `GET /artifacts` | `.artifacts` | yes | `page`, `page_size` (max 200; `limit` deprecated alias) | `created_at` |
 
 Executions and sessions share one contract by construction
 (`apps/syn-api/src/syn_api/list_query.py`), so a difference between those two is
 always a finding. Workflows implements the same `total`/`page`/`page_size` shape
 independently, so it can drift from them without any code changing on either side -
-which is why it is checked here rather than assumed. Artifacts answers a different
-shape, which is #1204.
-
-> **Artifacts is EXPECTED TO FAIL 8.1.1, 8.1.2, 8.1.3 and 8.1.4 today.** Record the
-> failures against #1204 rather than skipping the surface. **If artifacts PASSES,
-> #1204 has been fixed** - say so in the report and delete this note along with the
-> `artifacts` rows in `## Untested Areas`.
+which is why it is checked here rather than assumed. Artifacts answered a bare array
+with no `total` and no `page` until #1204; it now carries the same envelope as
+sessions, down to the deprecated `limit` alias, and is checked like one.
 
 Because unrecognised query parameters are ignored by all four endpoints, a single
 URL carrying every spelling works against all of them - so one loop can ask all four
 the same question, and the surface that answers differently is the finding.
+
+> **Artifacts bounds its window on `created_at`, not `started_at`.** An unrecognised
+> parameter is IGNORED rather than rejected, so `?started_after=...` against
+> `/artifacts` returns the unfiltered collection and a `total` that looks like a
+> window that was applied and did nothing. Send `created_after` / `created_before`
+> to that surface; the table above is the authority on which noun each one takes.
 
 ### 8.1.1 `total` is invariant under page size
 
@@ -2531,10 +2534,10 @@ workflows   page_size=1    rows=1    total=36
 workflows   page_size=10   rows=10   total=36
 workflows   page_size=50   rows=36   total=36
 workflows   page_size=100  rows=36   total=36
-artifacts   page_size=1    rows=1    total=ABSENT
-artifacts   page_size=10   rows=10   total=ABSENT
-artifacts   page_size=50   rows=50   total=ABSENT
-artifacts   page_size=100  rows=100  total=ABSENT
+artifacts   page_size=1    rows=1    total=214
+artifacts   page_size=10   rows=10   total=214
+artifacts   page_size=50   rows=50   total=214
+artifacts   page_size=100  rows=100  total=214
 ```
 
 **PASS** for a surface requires all three:
@@ -2552,8 +2555,9 @@ executions  page_size=10   rows=10   total=10
 ```
 
 **FAIL** - `total=ABSENT`. The surface returns a bare array and states no count at
-all, so a client cannot page and cannot know what it is missing. Expected for
-artifacts today (#1204).
+all, so a client cannot page and cannot know what it is missing. No surface in this
+section should read `ABSENT` any more; `/artifacts` was the last one and #1204 fixed
+it, so an `ABSENT` here is a regression, not a known gap.
 
 - [ ] precondition, per surface: at least two rungs returned DIFFERENT `rows`
       values (PASS condition 3). If every rung returned the same `rows`, the
@@ -2567,18 +2571,21 @@ artifacts today (#1204).
       is a FAIL, not a rounding detail
 - [ ] sessions: conditions 1 AND 2, both
 - [ ] workflows: conditions 1 AND 2, both
-- [ ] all three of executions, sessions and workflows satisfied conditions 1 and
-      2. A surface whose `total` tracks `rows` is reporting a page length, not a
-      count, however self-consistent its response looks
-- [ ] artifacts: result recorded (expected `ABSENT`; if it now reports a `total`, #1204 is fixed)
+- [ ] all four of executions, sessions, workflows and artifacts satisfied
+      conditions 1 and 2. A surface whose `total` tracks `rows` is reporting a page
+      length, not a count, however self-consistent its response looks
+- [ ] artifacts: conditions 1 AND 2, both - the same bar as sessions since #1204
 
 ### 8.1.2 Time windows actually narrow
 
 ```bash
-for surface in executions sessions; do
+# The bound's noun differs per surface - see the surface table. Sending the wrong
+# one is not an error, it is an ignored parameter and a silently unfiltered total.
+for surface in executions sessions artifacts; do
+  case "$surface" in artifacts) bound=created_after;; *) bound=started_after;; esac
   for hours in 24 168; do
     printf '%-11s last %-5s total=%s\n' "$surface" "${hours}h" \
-      "$(api "$surface?page_size=1&started_after=$(iso_ago "$hours" | urlenc)" | total_of)"
+      "$(api "$surface?page_size=1&$bound=$(iso_ago "$hours" | urlenc)" | total_of)"
   done
   printf '%-11s all time  total=%s\n' "$surface" \
     "$(api "$surface?page_size=1" | total_of)"
@@ -2594,6 +2601,9 @@ executions  all time   total=330
 sessions    last 24h   total=6
 sessions    last 168h  total=31
 sessions    all time   total=97
+artifacts   last 24h   total=11
+artifacts   last 168h  total=58
+artifacts   all time   total=214
 ```
 
 `page_size=1` is deliberate: this check reads `total` and nothing else, and asking
@@ -2653,7 +2663,10 @@ the shape #1159 actually shipped.)
       resolved via the discriminator table above; an equality left
       undiscriminated is **FAIL**, not PASS
 - [ ] sessions: same three assertions
-- [ ] artifacts: `started_after` is not accepted at all - record as FAIL against #1204
+- [ ] artifacts: the same three assertions, bounded on `created_after` (#1204). A
+      run that sent `started_after` here measured nothing: the parameter is ignored,
+      so all three totals come back equal and the surface reads as broken when it is
+      the query that was wrong
 - [ ] workflows: **not applicable** - `/workflows` takes no time bound, so there is no
       window to narrow. This is a real gap in the surface (a 36-workflow list is
       browsable, a 3,000-workflow one is not) but it is not the defect under test
@@ -2714,11 +2727,12 @@ Expected: `beyond-last HTTP 200`.
 some fixed recent window. Take the oldest reachable timestamp and ask the server
 whether anything older exists - no date is hardcoded, so this check does not rot.
 
-**Executions and sessions only** - `/workflows` has no `started_before`, and FastAPI
-IGNORES an unrecognised query parameter rather than rejecting it, so running this
-against workflows returns the unfiltered first page and reads as a catastrophic
-failure that is really just a parameter that does not exist. See the workflows note
-below for what to do instead.
+**Not `/workflows`** - it has no upper bound at all, and FastAPI IGNORES an
+unrecognised query parameter rather than rejecting it, so running this against
+workflows returns the unfiltered first page and reads as a catastrophic failure that
+is really just a parameter that does not exist. See the workflows note below for what
+to do instead. Artifacts DOES take one, spelled `created_before`; the same trap
+applies to sending it `started_before`.
 
 ```bash
 oldest=$(api "$surface?page=$pages&page_size=$ps" | jq -r "${rows_key}[-1]${ts_key}")
@@ -2755,7 +2769,10 @@ the top. Nothing else changes:
 ```bash
 surface=sessions;  rows_key=.sessions;  id_key=.id; ts_key=.started_at;  ps=50; cap=200
 surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; cap=100
+surface=artifacts; rows_key=.artifacts; id_key=.id; ts_key=.created_at;  ps=50; cap=200
 ```
+
+For artifacts, assertion 4's bound is `created_before` rather than `started_before`.
 
 > **Workflows gets assertions 1-3 but not 4.** There is no `started_before` on the
 > endpoint, so "is there anything older than the oldest reachable row" cannot be
@@ -2798,7 +2815,9 @@ surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; 
       200); assertion 4 is not available on this surface, so it is recorded as
       NOT RUN rather than ticked
 - [ ] workflows: `order_by` behaves as the known limitation above, and no worse
-- [ ] artifacts: no `page` parameter exists, so history beyond the 200-row cap is unreachable - record as FAIL against #1204
+- [ ] artifacts: the precondition and the same four assertions, with assertion 4
+      bounded on `created_before` (#1204). Before it, `limit` was the only control
+      and history past 200 rows could not be reached at all
 
 ### 8.1.4 The UI agrees with the API
 
@@ -2961,12 +2980,21 @@ api "workflows?page=1&page_size=20" | jq -c '{total, page, page_size}'
 - `Showing 1-20 of N workflows` where `N` == API `total`
 - `Page 1 of M` where `M` == `ceil(total / 20)`
 
-Finally, `/artifacts`:
+Finally, `/artifacts`, which renders the same count line at a page size of 50 and
+has a type dropdown where the others have status chips - so it gets the count
+assertions, and the dropdown's counts in place of the chip arithmetic:
 
-**PASS**: a count line is present and matches the API. **FAIL (expected today)**:
-there is no `Showing X-Y of N` line on `/artifacts` at all, and the page fetches
-`limit=100` with no statement that it is a page - so 101 artifacts render
-indistinguishably from 500. Record against #1204.
+```bash
+api "artifacts?page=1&page_size=50" | jq -c '{total, page, page_size, type_counts}'
+```
+
+- `Showing 1-50 of N artifacts` where `N` == API `total`
+- each type option's parenthesised count == `type_counts` for that type
+
+**PASS**: the count line is present and matches the API. **FAIL**: no
+`Showing X-Y of N` line at all - that was the pre-#1204 page, which fetched
+`limit=100` with no statement that it was a page, so 101 artifacts rendered
+indistinguishably from 500.
 
 - [ ] precondition, per surface: API `total >= 1`. With `total == 0` every chip
       reads `0`, the arithmetic closes against nothing, and the result is
@@ -2999,7 +3027,11 @@ indistinguishably from 500. Record against #1204.
       `ListPagination` hides the control at one page, so with `total <= 20` that
       half is **NOT RUN**; absent while `total > 20` is FAIL. No chips on this
       surface
-- [ ] `/artifacts`: absence of a count line recorded against #1204
+- [ ] `/artifacts`: `Showing 1-50 of N` matches API `total` (range == `1-min(50,
+      total)`), and `Page 1 of M` == `ceil(total / 50)` when `total > 50` -
+      `ListPagination` hides the control at one page, so with `total <= 50` that half
+      is **NOT RUN**. `type_counts` is tallied over every filter EXCEPT type, so
+      selecting a type must not collapse the other options' counts to zero
 
 ### 8.1.5 A bound with no timezone is refused, not guessed
 
@@ -3052,8 +3084,10 @@ indicate it. A 500 is also a FAIL (that was the pre-#1183 behaviour).
 > ```
 
 - [ ] Naive `started_after` returns 422 on `/executions`
-- [ ] Naive `started_after` returns 422 on `/sessions` - the two endpoints share the
+- [ ] Naive `started_after` returns 422 on `/sessions` - the endpoints share the
       bound type, so a difference between them is a finding on its own
+- [ ] Naive `created_after` returns 422 on `/artifacts` - same `WindowBound` type
+      since #1204, on the surface that took no bound at all before it
 - [ ] Aware (`Z`) bound returns 200 on both
 - [ ] The 422 message names the fix
 - [ ] The percent-encoded `%2B00%3A00` form returns 200
@@ -3417,9 +3451,8 @@ after fixes are applied. Include which runbook section(s) to re-run.
 
 | Area | Blocked By | Runbook Section |
 |------|------------|-----------------|
-| `/artifacts` count, time window and pagination (8.1.1-8.1.4) | #1204 - endpoint returns a bare array with no `total` and no `page` | 8.1 |
 | `/triggers` count and pagination | Not checked. `total` is `len(rows)`, truthful only because the endpoint is unpaged - a latent instance of the 8.1 shape that becomes a lie the moment a `limit` is added | 8.1 |
-| `/costs/sessions`, `/costs/executions` count and pagination | Not checked. Bare arrays capped at `limit<=200` with no `total` - the artifacts shape, not covered by #1204 | 8.1 |
+| `/costs/sessions`, `/costs/executions` count and pagination | Not checked. Bare arrays capped at `limit<=200` with no `total` - the shape `/artifacts` carried until #1204, and the last two surfaces still carrying it | 8.1 |
 | `/workflows` time-window filtering | No `started_after` / `started_before` parameter exists on the endpoint, so 8.1.2 has nothing to assert | 8.1.2 |
 | `/workflows` global `order_by` | Known limitation: sorts the current page, not the collection (text-column ordering in the store). Not a regression - do not file | 8.1.3 |
 | Statuses with no dashboard chip (e.g. `interrupted`) | The UI renders a fixed five-status chip list; a status outside it can be neither displayed nor filtered. Report the count if seen, but the UI behaviour is unvalidated | 8.1.4 |
