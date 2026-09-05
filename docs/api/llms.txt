@@ -169,9 +169,53 @@ match result:
 | `created_at` | `datetime \| None` | Creation timestamp |
 | `runs_count` | `int` | Number of executions |
 
+### InputDeclarationResponse
+
+Describes an expected workflow input. Used for validation, documentation, and UI form generation.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Input variable name (e.g., `"task"`, `"topic"`) |
+| `description` | `str \| None` | Human-readable description |
+| `required` | `bool` | Whether this input must be provided (default `true`) |
+| `default` | `str \| None` | Default value if not provided |
+
+### PhaseDefinitionResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `phase_id` | `str` | Phase identifier |
+| `name` | `str` | Phase name |
+| `order` | `int` | Execution order |
+| `description` | `str \| None` | Phase description |
+| `prompt_template` | `str \| None` | Prompt template (may contain `$ARGUMENTS` and `{{variable}}` placeholders) |
+| `prompt_file` | `str \| None` | Path to an external `.md` prompt file (YAML-only; resolved at load time into `prompt_template`). Mutually exclusive with `prompt_template`. |
+| `argument_hint` | `str \| None` | Hint for what `$ARGUMENTS` represents (e.g., `"[task-description]"`) |
+| `model` | `str \| None` | Per-phase model override (e.g., `"sonnet"`, `"opus"`) |
+| `timeout_seconds` | `int` | Phase timeout (default 300) |
+| `allowed_tools` | `list[str]` | Tools allowed during execution |
+
 ### WorkflowDetail
 
-Extends WorkflowSummary with `phases: list[PhaseDefinitionResponse]`.
+Extends WorkflowSummary with:
+- `phases: list[PhaseDefinitionResponse]` — phase definitions
+- `input_declarations: list[InputDeclarationResponse]` — declared workflow inputs (ISS-211)
+
+### UpdatePhasePromptRequest
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `prompt_template` | `str` | New prompt template (required, non-empty) |
+| `model` | `str \| None` | Model override — omit or `null` to keep existing |
+| `timeout_seconds` | `int \| None` | Timeout override — omit or `null` to keep existing |
+| `allowed_tools` | `list[str] \| None` | Allowed tools — omit or `null` to keep existing, `[]` to clear |
+
+### UpdatePhaseResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflow_id` | `str` | The updated workflow template ID |
+| `phase_id` | `str` | The updated phase ID |
 
 ### ExecutionSummary
 
@@ -408,6 +452,7 @@ async def execute_workflow(
     workflow_id: str,
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
+    task: str | None = None,
     auth: AuthContext | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]
 ```
@@ -417,8 +462,9 @@ async def execute_workflow(
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `workflow_id` | `str` | required | Workflow template ID |
-| `inputs` | `dict[str, str] \| None` | `None` | Input variables matching `{{variable}}` placeholders |
+| `inputs` | `dict[str, str] \| None` | `None` | Named input variables — substituted for `{{variable}}` placeholders in prompts |
 | `execution_id` | `str \| None` | `None` | Custom execution ID (auto-generated if omitted) |
+| `task` | `str \| None` | `None` | Primary task description — substituted for `$ARGUMENTS` in prompts (ISS-211) |
 | `auth` | `AuthContext \| None` | `None` | Optional auth context |
 
 **Returns:** `Ok(ExecutionSummary)` on success.
@@ -426,6 +472,107 @@ async def execute_workflow(
 **Errors:**
 - `WorkflowError.NOT_FOUND` if the workflow doesn't exist
 - `WorkflowError.EXECUTION_FAILED` on execution error
+
+### Prompt Substitution
+
+When a workflow executes, phase prompts are resolved in this order:
+
+1. **Built-in variables:** `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
+2. **Named inputs:** Each key in `inputs` replaces `{{key}}` in the prompt
+3. **Phase outputs:** Previous phase artifacts replace `{{phase-id}}` placeholders inline (e.g., `{{discovery}}` is replaced with the discovery phase's output). Phase outputs are also appended as a separate "Context from Previous Phases" section as a fallback.
+4. **$ARGUMENTS:** The `task` string replaces `$ARGUMENTS` in the prompt (also available as `inputs["task"]`)
+
+The `task` field is merged into `inputs` as `inputs["task"]`, so `$ARGUMENTS` and `{{task}}` are equivalent. When both the top-level `task` field and `inputs["task"]` are provided, the top-level `task` wins.
+
+**Example:**
+
+```python
+# Using task for the primary goal + named inputs for context
+result = await syn_api.v1.executions.execute(
+    workflow_id="research-workflow-v2",
+    task="Investigate how the auth middleware handles token rotation",
+    inputs={"topic": "authentication"},
+)
+
+# Legacy style (still works — task injected via inputs)
+result = await syn_api.v1.executions.execute(
+    workflow_id="research-workflow-v2",
+    inputs={"task": "Investigate auth middleware", "topic": "authentication"},
+)
+```
+
+**HTTP API:**
+
+```bash
+curl -X POST /api/v1/workflows/research-workflow-v2/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Investigate auth middleware", "inputs": {"topic": "authentication"}}'
+```
+
+---
+
+## update_phase_prompt()
+
+Update the prompt template and configuration for a single phase in a workflow template.
+
+**Signature:**
+
+```python
+async def update_phase_prompt(
+    workflow_id: str,
+    phase_id: str,
+    prompt_template: str,
+    model: str | None = None,
+    timeout_seconds: int | None = None,
+    allowed_tools: list[str] | None = None,
+) -> Result[str, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_id` | `str` | required | Workflow template ID |
+| `phase_id` | `str` | required | Phase to update |
+| `prompt_template` | `str` | required | New prompt template (non-empty) |
+| `model` | `str \| None` | `None` | Model override — `None` preserves existing value |
+| `timeout_seconds` | `int \| None` | `None` | Timeout override — `None` preserves existing value |
+| `allowed_tools` | `list[str] \| None` | `None` | Allowed tools — `None` preserves existing, `[]` clears |
+
+**Returns:** `Ok(workflow_id)` on success.
+
+**Errors:**
+- `WorkflowError.NOT_FOUND` if the workflow or phase doesn't exist
+- `WorkflowError.INVALID_INPUT` on validation failure (e.g., empty prompt)
+
+**"Keep existing" semantics:** Optional fields (`model`, `timeout_seconds`, `allowed_tools`) use `None` to mean "don't change." To explicitly clear a field, pass an empty value (e.g., `allowed_tools=[]`).
+
+**Example:**
+
+```python
+result = await syn_api.v1.workflows.update_phase_prompt(
+    workflow_id="wf-abc123",
+    phase_id="discovery",
+    prompt_template="You are a senior researcher.\n\n## Task\n$ARGUMENTS",
+    model="opus",
+)
+match result:
+    case Ok(wf_id):
+        print(f"Updated phase in workflow {wf_id}")
+    case Err(error, message):
+        print(f"Failed: {message}")
+```
+
+**HTTP API:**
+
+```bash
+curl -X PUT /api/v1/workflows/wf-abc123/phases/discovery \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_template": "You are a senior researcher.\n\n## Task\n$ARGUMENTS",
+    "model": "opus"
+  }'
+```
 
 ---
 
@@ -616,11 +763,11 @@ async def complete_session(
 
 Artifact storage and retrieval.
 
-**Status:** Stub — all functions return `Err(ArtifactError.NOT_IMPLEMENTED)`.
+**Status:** Implemented — list, get, create, and upload operations with event-sourced aggregate and artifact storage.
 
 ## list_artifacts()
 
-List artifacts, optionally filtered by workflow or session.
+List artifacts, optionally filtered, as one page of a known collection.
 
 **Signature:**
 
@@ -628,11 +775,19 @@ List artifacts, optionally filtered by workflow or session.
 async def list_artifacts(
     workflow_id: str | None = None,
     session_id: str | None = None,
-    limit: int = 100,
+    phase_id: str | None = None,
+    artifact_type: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    search: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
-    auth: AuthContext | None = None,
-) -> Result[list[ArtifactSummary], ArtifactError]
+) -> Result[Page[ArtifactSummary], ArtifactError]
 ```
+
+Returns a `Page` - rows plus the `total` and the per-type facet counts, each
+counted over every filter - rather than a bare list (#1204). `DEFAULT_PAGE_SIZE`
+is 50.
 
 ---
 
@@ -679,11 +834,13 @@ async def upload_artifact(
 
 GitHub App integration — repositories, installations, and triggers.
 
-**Status:** Stub — all functions return `Err(GitHubError.NOT_IMPLEMENTED)`.
+**Status:** Partially implemented — `list_repos()` is live; remaining functions return `Err(GitHubError.NOT_IMPLEMENTED)`.
 
 ## list_repos()
 
-List GitHub repositories accessible via the GitHub App.
+List GitHub repositories accessible via the GitHub App. Returns repository metadata (name, owner, visibility, default branch, URL) for all installations, optionally filtered by `installation_id`.
+
+**Route:** `GET /api/v1/github/repos`
 
 **Signature:**
 
