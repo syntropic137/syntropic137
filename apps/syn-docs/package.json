@@ -1,6 +1,6 @@
 {
   "name": "syn-docs",
-  "version": "0.28.0-beta.9",
+  "version": "0.28.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
