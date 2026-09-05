@@ -433,7 +433,7 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
         command_builder=MagicMock(return_value=["claude"]),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
-    processor._active_workspaces[_PHASE_ID] = clone.workspace  # type: ignore[assignment]
+    processor._runtime._workspaces[_PHASE_ID] = clone.workspace  # type: ignore[assignment]
     aggregate = MagicMock(workflow_id="wf-1")
     completed_phase_ids: list[str] = []
 
@@ -666,12 +666,16 @@ class _PhaseRun:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.processor._active_workspaces[_PHASE_ID] = workspace  # type: ignore[assignment]
-        self.processor._session_managers[_PHASE_ID] = self.session  # type: ignore[assignment]
+        self.processor._runtime._workspaces[_PHASE_ID] = workspace  # type: ignore[assignment]
+        self.processor._runtime.begin(
+            _PHASE_ID,
+            session_manager=self.session,  # type: ignore[arg-type]
+            started_at=datetime.now(UTC),
+        )
 
     @property
     def workspace_still_held(self) -> bool:
-        return _PHASE_ID in self.processor._active_workspaces
+        return _PHASE_ID in self.processor._runtime.live_workspaces
 
     async def complete(self) -> None:
         await self.processor._handle_complete_phase(

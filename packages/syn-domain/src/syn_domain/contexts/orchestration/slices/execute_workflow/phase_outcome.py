@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CompleteExecutionCommand,
     FailExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -344,4 +345,124 @@ def completed_phase(
         cache_creation_tokens=cache_creation,
         cache_read_tokens=cache_read,
         total_tokens=total,
+    )
+
+
+@dataclass(frozen=True)
+class CompletedExecution:
+    """Everything a successfully completed execution reports.
+
+    The third terminal outcome, and the last one the processor was still
+    assembling by hand. `PhaseFailure` above already decides what a DYING
+    execution tells its aggregate and its caller; leaving the other two paths
+    to answer the same question inline is what let the failure half go
+    uncomputed for so long (see this module's docstring). All three now answer
+    it here.
+
+    Split into `as_command` and `execution_result` for the same reason
+    `PhaseFailure` is: the command is issued before the save and the result is
+    built after it, so a single builder would have to stamp `completed_at`
+    before the execution was durably recorded.
+    """
+
+    metrics: ExecutionMetrics
+    phase_results: list[PhaseResult]
+    artifact_ids: list[str]
+
+    def as_command(self, execution_id: str, *, total_phases: int) -> CompleteExecutionCommand:
+        """The aggregate's command for this completion."""
+        return CompleteExecutionCommand(
+            execution_id=execution_id,
+            completed_phases=self.metrics.completed_phases,
+            total_phases=total_phases,
+            total_input_tokens=self.metrics.total_input_tokens,
+            total_output_tokens=self.metrics.total_output_tokens,
+            total_cache_creation_tokens=self.metrics.total_cache_creation_tokens,
+            total_cache_read_tokens=self.metrics.total_cache_read_tokens,
+            duration_seconds=self.metrics.total_duration_seconds,
+            artifact_ids=self.artifact_ids,
+        )
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller."""
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="completed",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=self.phase_results,
+            artifact_ids=self.artifact_ids,
+            metrics=self.metrics,
+        )
+
+
+def completed_execution(
+    phase_results: list[PhaseResult], artifact_ids: list[str]
+) -> CompletedExecution:
+    """Total up a finished run, ONCE, for both of the sinks that report it.
+
+    The command and the result both carry the run's totals. Deriving them
+    twice is how the two would come to disagree about the same execution - the
+    failure this module exists to make unrepresentable, one level up.
+    """
+    return CompletedExecution(
+        metrics=ExecutionMetrics.from_results(phase_results),
+        phase_results=phase_results,
+        artifact_ids=artifact_ids,
+    )
+
+
+@dataclass(frozen=True)
+class CancelledExecution:
+    """What a cancelled execution reports.
+
+    No command: the aggregate is already CANCELLED by the time the to-do list
+    empties, so there is nothing left to tell it. `reason` is still resolved
+    here rather than at the call site, because the open sessions are closed
+    with it and the caller is handed it, and two sinks spelling the same
+    default two ways is a difference nothing downstream can attribute.
+    """
+
+    reason: str
+    phase_results: list[PhaseResult]
+    artifact_ids: list[str]
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller."""
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=self.phase_results,
+            artifact_ids=self.artifact_ids,
+            metrics=ExecutionMetrics.from_results(self.phase_results),
+            error_message=self.reason,
+        )
+
+
+def cancelled_execution(
+    reason: str | None, phase_results: list[PhaseResult], artifact_ids: list[str]
+) -> CancelledExecution:
+    """Name what was cancelled and why, before anything is torn down."""
+    return CancelledExecution(
+        reason=reason or "Cancelled by user",
+        phase_results=phase_results,
+        artifact_ids=artifact_ids,
     )

@@ -12,27 +12,28 @@ both halves.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    PhaseStartingPoints,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
-    WorkflowExecutionProcessor,
-)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 
 from .test_processor_smoke import _make_processor
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+
     from syn_adapters.workspace_backends.agentic.capture_probe import (
         WorkspaceExecutor,
     )
     from syn_adapters.workspace_backends.agentic.capture_result import (
         AuthoritativeCapture,
     )
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCapturePort,
+    )
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 
 PHASE = "p-1"
 
@@ -81,44 +82,46 @@ class _Capture:
         return None
 
 
-def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecutionProcessor:
-    """Build the processor without its full dependency graph.
+def _runtime(capture: object, workspace: object, cm: object) -> PhaseRuntime:
+    """A runtime holding one phase that has run its agent, and nothing else.
 
-    _finalize_phase touches a known, small set of attributes. Constructing the
-    real object would drag in a workspace service, repositories and builders
-    that have nothing to do with the ordering under test.
+    Both orderings under test live in `PhaseRuntime`, which the processor
+    delegates to; building it directly leaves out the workspace service,
+    repositories and builders that have nothing to do with the ordering.
     """
-    p = object.__new__(WorkflowExecutionProcessor)
-    p._session_managers = {}  # type: ignore[attr-defined]
-    p._active_workspaces = {PHASE: workspace}  # type: ignore[attr-defined]
-    p._phase_starting_points = PhaseStartingPoints()  # type: ignore[attr-defined]
-    p._phase_session_ids = {PHASE: "s-1"}  # type: ignore[attr-defined]
-    p._active_envs = {}  # type: ignore[attr-defined]
-    p._active_cmds = {}  # type: ignore[attr-defined]
-    p._active_workspace_cms = {PHASE: cm}  # type: ignore[attr-defined]
-    p._session_capture = capture  # type: ignore[attr-defined]
-    # Delegate import runs on this same path (#895). None here keeps this
-    # test about capture ORDERING: with no store there is nothing to import,
-    # so the import is a no-op and cannot mask the ordering under test.
-    p._session_store = None  # type: ignore[attr-defined]
-    p._observability_writer = None  # type: ignore[attr-defined]
-    p._phase_leader_native_ids = {}  # type: ignore[attr-defined]  # keyed (execution_id, phase_id)
-    # No ledger: these tests are about capture ORDER, not billing. The import
-    # path treats None as "not wired" and bills the full transcript, which is
-    # irrelevant here and exercised in test_import_ledger.py.
-    p._import_ledger = None  # type: ignore[attr-defined]
-    return p
+    runtime = PhaseRuntime(
+        capture_port=cast("SessionCapturePort | None", capture),
+        # Delegate import runs on this same path (#895). None here keeps this
+        # test about capture ORDERING: with no store there is nothing to
+        # import, so the import is a no-op and cannot mask the ordering.
+        session_store=None,
+        writer=None,
+        # No ledger: these tests are about capture ORDER, not billing. The
+        # import path treats None as "not wired" and bills the full
+        # transcript, which is irrelevant here and covered by
+        # test_import_ledger.py.
+        ledger=None,
+    )
+    runtime.attach_workspace(
+        PHASE,
+        workspace=cast("ManagedWorkspace", workspace),
+        workspace_cm=cast("AbstractAsyncContextManager[ManagedWorkspace]", cm),
+        agent_env={},
+        claude_cmd=[],
+    )
+    runtime._session_ids[PHASE] = "s-1"  # pyright: ignore[reportPrivateUsage]
+    return runtime
 
 
-async def _finalize(p: WorkflowExecutionProcessor) -> None:
-    await p._finalize_phase(  # pyright: ignore[reportPrivateUsage]
+async def _finalize(runtime: PhaseRuntime) -> None:
+    await runtime.finalize(
         PHASE,
         input_tokens=0,
         output_tokens=0,
         cache_creation_tokens=0,
         cache_read_tokens=0,
         total_tokens=0,
-        duration=0.0,
+        duration_seconds=0.0,
     )
 
 
@@ -128,7 +131,7 @@ class TestCaptureRunsBeforeTeardown:
     async def test_the_probe_execs_before_the_workspace_is_torn_down(self) -> None:
         log: list[str] = []
         capture = _Capture(log)
-        await _finalize(_processor(capture, _Workspace(log), _WorkspaceCm(log)))
+        await _finalize(_runtime(capture, _Workspace(log), _WorkspaceCm(log)))
 
         # The exec is what matters, not merely the call: it is the operation
         # that stops working once the container is gone.
@@ -139,7 +142,7 @@ class TestCaptureRunsBeforeTeardown:
     async def test_the_capture_is_attributed_to_this_phase(self) -> None:
         log: list[str] = []
         capture = _Capture(log)
-        await _finalize(_processor(capture, _Workspace(log), _WorkspaceCm(log)))
+        await _finalize(_runtime(capture, _Workspace(log), _WorkspaceCm(log)))
 
         assert capture.seen["session_id"] == "s-1"
         assert capture.seen["phase_id"] == PHASE
@@ -153,7 +156,7 @@ class TestCaptureRunsBeforeTeardown:
     async def test_teardown_still_happens_when_capture_is_off(self) -> None:
         """None means "no store configured", not "skip cleanup"."""
         log: list[str] = []
-        await _finalize(_processor(None, _Workspace(log), _WorkspaceCm(log)))
+        await _finalize(_runtime(None, _Workspace(log), _WorkspaceCm(log)))
 
         assert log == ["teardown"]
 
@@ -161,10 +164,10 @@ class TestCaptureRunsBeforeTeardown:
 class TestCaptureOnCancelAndFailure:
     """A phase that never finalized still ran an agent.
 
-    Cancel and failure tear workspaces down through
-    _close_phase_workspace_cms, which bypasses _finalize_phase entirely. Before
-    this was covered, every cancelled or failed execution destroyed its spool
-    unprobed - losing exactly the transcripts most worth reading.
+    Cancel and failure tear workspaces down through `abandon_all`, which
+    bypasses `finalize` entirely. Before this was covered, every cancelled or
+    failed execution destroyed its spool unprobed - losing exactly the
+    transcripts most worth reading.
     """
 
     @pytest.mark.unit
@@ -172,38 +175,39 @@ class TestCaptureOnCancelAndFailure:
     async def test_a_cancelled_phase_is_probed_before_teardown(self) -> None:
         log: list[str] = []
         capture = _Capture(log)
-        p = _processor(capture, _Workspace(log), _WorkspaceCm(log))
+        runtime = _runtime(capture, _Workspace(log), _WorkspaceCm(log))
 
-        await p._close_phase_workspace_cms("cancel")  # pyright: ignore[reportPrivateUsage]
+        await runtime.abandon_all("cancel")
 
         assert log == ["capture", "exec", "teardown"]
         assert capture.seen["session_id"] == "s-1"
 
 
 class TestTheRealConstructorSetsWhatFinalizeReads:
-    """The ordering tests above bypass __init__, so they cannot see this.
+    """The ordering tests above build the runtime themselves, so they cannot see this.
 
-    They populate the attributes directly, which means they stay green if the
-    constructor stops setting one - and the failure in production would be an
-    AttributeError inside teardown, or capture silently never running. Asserted
-    against the REAL constructor for that reason.
+    They hand `PhaseRuntime` its capture port directly, which means they stay
+    green if the PROCESSOR stops passing one down - and the failure in
+    production would be capture silently never running. Asserted against the
+    real constructor for that reason.
     """
 
     @pytest.mark.unit
     def test_capture_state_is_initialised(self) -> None:
         p = _make_processor(FakeAgentExecutionHandler())
+        runtime = p._runtime  # pyright: ignore[reportPrivateUsage]
 
         # Defaults to off: a processor built without a capture service must
         # still finalize phases rather than raise.
-        assert p._session_capture is None  # pyright: ignore[reportPrivateUsage]
-        assert p._phase_session_ids == {}  # pyright: ignore[reportPrivateUsage]
+        assert runtime._capture_port is None  # pyright: ignore[reportPrivateUsage]
+        assert runtime._session_ids == {}  # pyright: ignore[reportPrivateUsage]
 
     @pytest.mark.unit
     def test_an_injected_service_is_kept(self) -> None:
         capture = _Capture([])
         p = _make_processor(FakeAgentExecutionHandler(), session_capture=capture)
 
-        assert p._session_capture is capture  # pyright: ignore[reportPrivateUsage]
+        assert p._runtime._capture_port is capture  # pyright: ignore[reportPrivateUsage]
 
 
 class TestCaptureCannotFailAPhase:
@@ -219,7 +223,7 @@ class TestCaptureCannotFailAPhase:
                 log.append("boom")
                 raise RuntimeError("capture is broken")
 
-        await _finalize(_processor(_Exploding(), _Workspace(log), _WorkspaceCm(log)))
+        await _finalize(_runtime(_Exploding(), _Workspace(log), _WorkspaceCm(log)))
 
         # Teardown still happened. A leaked container is a worse outcome than
         # a missing observation, and an hour of agent work must not be lost
@@ -237,4 +241,4 @@ class TestCaptureCannotFailAPhase:
                 raise asyncio.CancelledError
 
         with pytest.raises(asyncio.CancelledError):
-            await _finalize(_processor(_Cancelled(), _Workspace(log), _WorkspaceCm(log)))
+            await _finalize(_runtime(_Cancelled(), _Workspace(log), _WorkspaceCm(log)))
