@@ -99,8 +99,10 @@ async def quarantine_unpushed_work(
             affected repository, and the error names those refs.
         WorkspaceInspectionFailedError: a command this gate depends on did not
             run, so there is no verdict to give for the repositories it had
-            not reached yet. Any it HAD already quarantined are named in the
-            error: work saved before the failure is not unsaved by it.
+            not reached yet. Every repository it HAD finished with is named in
+            the error, each said to be recoverable or not according to whether
+            its push landed: work saved before the failure is not unsaved by
+            it, and work whose push failed is not saved by being listed.
     """
     ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
     quarantined: list[QuarantinedWork] = []
@@ -120,8 +122,12 @@ async def quarantine_unpushed_work(
         # does not go looking for a ref that exists. That is #1184 itself -
         # a confident statement nobody checked - pointing the other way.
         #
-        # Empty when the FIRST repository is the one that failed, and the
-        # message then says nothing was saved, because nothing was.
+        # HANDED OVER UNFILTERED, including the records whose push failed.
+        # Those name work that is gone, and dropping them would hide a loss;
+        # keeping them is only safe because the error counts pushed_ref rather
+        # than records, so a list of failed pushes cannot become a claim that
+        # something survived. Empty when the first repository is the one that
+        # failed, or when everything before it was clean.
         raise WorkspaceInspectionFailedError(
             doing=unreadable.doing,
             failure=unreadable.failure,

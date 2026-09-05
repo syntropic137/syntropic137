@@ -39,11 +39,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    QuarantinedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
+    GitWorkspace,
     quarantine_unpushed_work,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
@@ -461,9 +463,15 @@ class _BreaksOn:
     workspace needs: without it "status fails" means status fails everywhere,
     and then no repository ever gets far enough to be quarantined before the
     failure - which is precisely the transition worth testing.
+
+    ``inner`` is the gate's own port rather than `_Workspace`, so these NEST.
+    The mixed cell - one repository quarantined, one whose push failed, and a
+    third that stopped answering - needs two different commands to fail in two
+    different repositories, and wrapping twice says that without this class
+    growing a second way to describe a failure.
     """
 
-    def __init__(self, inner: _Workspace, failing: str, *, in_repo: str | None = None) -> None:
+    def __init__(self, inner: GitWorkspace, failing: str, *, in_repo: str | None = None) -> None:
         self._inner = inner
         self._failing = failing
         self._in_repo = in_repo
@@ -827,3 +835,276 @@ async def test_a_failure_in_the_first_repository_still_says_nothing_was_quaranti
     assert not [ref for ref in first.origin_refs() if ref.startswith("refs/syn/lost/")]
     assert not [ref for ref in second.origin_refs() if ref.startswith("refs/syn/lost/")]
     run.aggregate.complete_phase.assert_not_called()
+
+
+# --------------------------------------------------------------------------
+# The four states a partial walk can end in, and the message each one gets.
+#
+# THE CLASS OF DEFECT THESE PIN, which three reviews found three separate
+# instances of. Every one was a categorical claim about durable state that was
+# never checked against durable state: an unreachable workspace called clean,
+# "NOTHING WAS QUARANTINED" while a ref existed, and "go and get them" while
+# none did. The third came from a renderer that branched on whether its record
+# tuple was EMPTY - so a tuple of nothing but FAILED pushes took the branch
+# that says work is recoverable, four lines above its own NOT RECOVERABLE.
+#
+# Emptiness has three answers ("nothing reached", "all lost", "some lost")
+# collapsed into one, so the whole space is enumerated here instead: zero
+# entries, all pushes failed, some pushed, all pushed.
+#
+# EVERY ONE OF THESE ASSERTS AGAINST THE ORIGINS. The message is the thing
+# under test and therefore cannot also be the oracle - each of the three
+# failures above was invisible to a test that only read the exception payload.
+# `_origins_holding_the_ref` queries refs/syn/lost in each bare origin, and
+# the headline's own count is checked against what it returns.
+# --------------------------------------------------------------------------
+
+
+def _origins_holding_the_ref(*clones: _Clone) -> tuple[str, ...]:
+    """Names of the repositories whose OWN origin really holds the quarantine ref."""
+    return tuple(clone.name for clone in clones if _QUARANTINE_REF in clone.origin_refs())
+
+
+async def test_cell_1_a_walk_that_saved_nothing_says_nothing_was_quarantined(
+    tmp_path: Path,
+) -> None:
+    """Zero records: the walk got somewhere, and still has nothing to offer.
+
+    Not the same as "the first repository failed" - `alpha` is inspected in
+    full here and simply has nothing to save, so the failure in `beta` arrives
+    with progress made and an empty tuple. A gate that reasoned "we got past a
+    repository, so something must have survived" would be wrong exactly here,
+    and `beta` is holding real work while it happens.
+    """
+    alpha, beta = _clone_repository(tmp_path, "alpha"), _clone_repository(tmp_path, "beta")
+    beta.commit("never-pushed.py", "work that never got its turn\n")
+
+    run = _PhaseRun(_BreaksOn(alpha.workspace, "status", in_repo=str(beta.path)))
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    assert _origins_holding_the_ref(alpha, beta) == ()
+    message = str(raised.value)
+    assert "NOTHING WAS QUARANTINED: this phase's work is unverified" in message
+    assert "quarantined at" not in message
+    assert "NOT RECOVERABLE" not in message
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
+
+
+async def test_cell_2_records_whose_every_push_failed_are_not_work_that_survived(
+    tmp_path: Path,
+) -> None:
+    """THE PASS-3 DEFECT, reproduced: a non-empty tuple with nothing durable.
+
+    `alpha` holds work, its quarantine push fails, and the record for it is
+    carried into the error when `beta` stops answering. The tuple is non-empty
+    and NOT ONE BYTE of it reached a remote - the renderer used to read the
+    tuple's length as evidence of survival and print "SOME WORK WAS ALREADY
+    QUARANTINED ... go and get them" above its own "NOT RECOVERABLE".
+
+    The origins are queried because they are the only thing that can settle
+    it: no `refs/syn/lost` ref exists in either of them.
+    """
+    alpha, beta = _clone_repository(tmp_path, "alpha"), _clone_repository(tmp_path, "beta")
+    alpha.commit("stranded.py", "work whose only hope was the quarantine push\n")
+
+    workspace = _BreaksOn(
+        _BreaksOn(alpha.workspace, "push", in_repo=str(alpha.path)),
+        "status",
+        in_repo=str(beta.path),
+    )
+    run = _PhaseRun(workspace)
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    assert "push" in workspace.attempted, "alpha's quarantine push never ran"
+    assert _origins_holding_the_ref(alpha, beta) == (), (
+        "this test needs a state where NOTHING is durable"
+    )
+
+    message = str(raised.value)
+    assert "NOTHING WAS QUARANTINED: work was found in 1 repository" in message, (
+        f"a tuple of failed pushes was reported as work that survived:\n{message}"
+    )
+    assert "alpha" in message, "the operator is not told where the lost work was"
+    assert "NOT RECOVERABLE" in message
+    assert "quarantined at" not in message
+    assert "recover with: git fetch origin" not in message
+    assert "go and get them" not in message
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
+
+
+async def test_cell_3_a_mixed_walk_names_the_refs_that_exist_and_only_those(
+    tmp_path: Path,
+) -> None:
+    """Some pushed, some not: the count must match the refs that exist.
+
+    `alpha` is quarantined, `beta`'s push fails, `gamma` stops answering. An
+    operator reading this has to be able to tell which repository they can
+    actually recover, so the headline states how many refs exist and the
+    per-repository lines say which. Both numbers are checked against the three
+    origins rather than against the error.
+    """
+    alpha = _clone_repository(tmp_path, "alpha")
+    beta = _clone_repository(tmp_path, "beta")
+    gamma = _clone_repository(tmp_path, "gamma")
+    saved_commit = alpha.commit("saved.py", "work the quarantine ref will hold\n")
+    beta.commit("stranded.py", "work whose push will fail\n")
+
+    run = _PhaseRun(
+        _BreaksOn(
+            _BreaksOn(alpha.workspace, "push", in_repo=str(beta.path)),
+            "status",
+            in_repo=str(gamma.path),
+        )
+    )
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    holding = _origins_holding_the_ref(alpha, beta, gamma)
+    assert holding == ("alpha",), "this test needs exactly one durable ref"
+    assert alpha.reachable_in_origin(saved_commit, _QUARANTINE_REF)
+
+    message = str(raised.value)
+    assert "PART OF THIS PHASE'S WORK WAS QUARANTINED" in message, (
+        f"a mixed walk was reported as though all of it survived:\n{message}"
+    )
+    assert f"a ref exists for {len(holding)} repository and not for 1 repository" in message
+    assert "NOTHING WAS QUARANTINED" not in message
+    assert f"    quarantined at {_QUARANTINE_REF}" in message
+    assert f"recover with: git fetch origin {_QUARANTINE_REF}" in message
+    assert "NOT RECOVERABLE" in message
+    assert "alpha" in message
+    assert "beta" in message
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
+
+
+async def test_cell_4_a_walk_whose_pushes_all_landed_says_go_and_get_them(
+    tmp_path: Path,
+) -> None:
+    """All pushed: the one state in which "go and get them" is true.
+
+    Two repositories quarantined before a third stops answering, and the
+    headline's count is read back out of the origins that actually hold a ref.
+    This is the state the old renderer printed for all three of the others.
+    """
+    alpha = _clone_repository(tmp_path, "alpha")
+    beta = _clone_repository(tmp_path, "beta")
+    gamma = _clone_repository(tmp_path, "gamma")
+    alpha_commit = alpha.commit("one.py", "work\n")
+    beta_commit = beta.commit("two.py", "more work\n")
+
+    run = _PhaseRun(_BreaksOn(alpha.workspace, "status", in_repo=str(gamma.path)))
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    holding = _origins_holding_the_ref(alpha, beta, gamma)
+    assert holding == ("alpha", "beta")
+    assert alpha.reachable_in_origin(alpha_commit, _QUARANTINE_REF)
+    assert beta.reachable_in_origin(beta_commit, _QUARANTINE_REF)
+
+    message = str(raised.value)
+    assert f"the gate finished {len(holding)} repositories before it stopped" in message
+    assert "go and get them" in message
+    assert "NOTHING WAS QUARANTINED" not in message
+    assert "NOT RECOVERABLE" not in message
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
+
+
+# --------------------------------------------------------------------------
+# The same question asked of the OTHER error, where the walk finished.
+#
+# `UnpushedWorkQuarantinedError` lists the same records and shares the same
+# per-repository rendering, and a push can fail there too. Its report ends by
+# counting the refs that exist, from the same split, so a reader learns whether
+# all, some or none of it can be fetched without adding the lines up
+# themselves - and so neither error can drift away from the other.
+# --------------------------------------------------------------------------
+
+
+async def test_a_completed_walk_whose_pushes_all_failed_says_none_of_it_survived(
+    tmp_path: Path,
+) -> None:
+    """Every push failed, so the summary must not leave that to be inferred."""
+    alpha, beta = _clone_repository(tmp_path, "alpha"), _clone_repository(tmp_path, "beta")
+    alpha.commit("one.py", "work\n")
+    beta.commit("two.py", "more work\n")
+
+    run = _PhaseRun(_BreaksOn(alpha.workspace, "push"))
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _origins_holding_the_ref(alpha, beta) == ()
+    message = str(raised.value)
+    assert "NONE OF IT IS RECOVERABLE" in message
+    assert "quarantined at" not in message
+    assert "recover with: git fetch origin" not in message
+    run.aggregate.complete_phase.assert_not_called()
+
+
+async def test_a_completed_walk_with_one_failed_push_says_which_half_survived(
+    tmp_path: Path,
+) -> None:
+    """Mixed, with the walk finishing: the count comes from the origins."""
+    alpha, beta = _clone_repository(tmp_path, "alpha"), _clone_repository(tmp_path, "beta")
+    alpha.commit("one.py", "work whose push will fail\n")
+    saved_commit = beta.commit("two.py", "work that reaches its ref\n")
+
+    run = _PhaseRun(_BreaksOn(alpha.workspace, "push", in_repo=str(alpha.path)))
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    holding = _origins_holding_the_ref(alpha, beta)
+    assert holding == ("beta",)
+    assert beta.reachable_in_origin(saved_commit, _QUARANTINE_REF)
+
+    message = str(raised.value)
+    assert f"PARTLY RECOVERABLE: a ref exists for {len(holding)} repository" in message
+    assert "and not for 1 repository" in message
+    assert "NOT RECOVERABLE" in message
+    assert f"    quarantined at {_QUARANTINE_REF}" in message
+
+
+async def test_a_completed_walk_whose_pushes_all_landed_says_all_of_it_survived(
+    tmp_path: Path,
+) -> None:
+    """The fourth cell of the same enumeration, on the completed-walk error."""
+    alpha, beta = _clone_repository(tmp_path, "alpha"), _clone_repository(tmp_path, "beta")
+    alpha.commit("one.py", "work\n")
+    beta.commit("two.py", "more work\n")
+
+    run = _PhaseRun(alpha.workspace)
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    holding = _origins_holding_the_ref(alpha, beta)
+    assert holding == ("alpha", "beta")
+    message = str(raised.value)
+    assert f"All of it is recoverable: a ref exists for {len(holding)} repositories" in message
+    assert "NOT RECOVERABLE" not in message
+
+
+def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
+    """A fifth entry shape must fail loudly rather than be given a message.
+
+    The four cells above are exhaustive only because every record answers
+    exactly one of "where is it" and "why is it nowhere". A record answering
+    both or neither would make `is_recoverable` an interpretation rather than a
+    fact, and the headline derived from it a guess - which is the whole family
+    of defect this file exists to close. So the shape is refused where it is
+    built, and no renderer downstream ever has to decide.
+    """
+    for pushed_ref, push_error in ((None, None), ("refs/syn/lost/x", "it also failed")):
+        with pytest.raises(ValueError, match="exactly one of them"):
+            QuarantinedWork(
+                repo="alpha",
+                branch="main",
+                commit_count=1,
+                files=(),
+                pushed_ref=pushed_ref,
+                push_error=push_error,
+            )
