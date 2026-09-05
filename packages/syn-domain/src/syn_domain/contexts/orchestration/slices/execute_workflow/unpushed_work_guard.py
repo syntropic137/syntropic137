@@ -311,6 +311,72 @@ async def record_phase_starting_point(workspace: GitWorkspace) -> PhaseStartingP
         )
 
 
+class PhaseStartingPoints:
+    """The starting points of the phases currently holding a workspace.
+
+    ONE OBJECT SO THE PROCESSOR NEVER HOLDS HALF THE INVARIANT. Reading where
+    a phase's branches stand needs two readings taken at two moments in two
+    different methods of a long-lived processor - taken at provision, read at
+    failure, dropped at teardown - and every one of those is a chance to keep
+    a snapshot one beat too long or throw it away one beat too early. Wiring
+    that from the call sites meant the processor knew there was a map, what
+    was in it, and which of the four moments it was in; none of that is
+    anything the processor decides. It says which phase was handed which
+    workspace and asks where that phase's branches stand.
+
+    WHY IT IS READ AT PROVISION AND NOT AT FAILURE (#1200): at failure time a
+    ref is just a ref. `origin/fix/x` at some commit says nothing about
+    whether it is where the workspace found it, so a reading taken before the
+    phase ran is the only thing that makes "this is not where it was" sayable
+    at all. `record` is therefore called on the success path of every phase,
+    including the overwhelming majority that never fail, and there is no way
+    to pay it only on the ones that will.
+
+    A STARTING POINT LIVES EXACTLY AS LONG AS THE WORKSPACE IT DESCRIBES.
+    `PhaseStartingPoint` carries its own workspace precisely because the two
+    are only ever useful as a pair, and one that outlived its container could
+    only ever be paired with the wrong one. `forget` and `forget_all` are the
+    two ways a workspace goes away - one phase finishing, and an execution
+    dying with several still open - and they exist so that pairing stays
+    unrepresentable rather than merely unlikely.
+
+    NOTHING HERE RAISES on either path. `record` runs on phases that are
+    fine, and `observe` runs on a phase that is already dying; in both cases
+    an inspection that threw would replace a real outcome with the inspection's
+    own failure. A workspace that stops answering becomes a recorded absence
+    of a verdict, never a verdict of "nothing changed".
+    """
+
+    def __init__(self) -> None:
+        self._by_phase: dict[str, PhaseStartingPoint] = {}
+
+    async def record(self, phase_id: str, workspace: GitWorkspace) -> None:
+        """Take this phase's starting point, before its agent is allowed to run."""
+        self._by_phase[phase_id] = await record_phase_starting_point(workspace)
+
+    async def observe(self, phase_id: str | None) -> ObservedBranches | None:
+        """Where a failing phase's branches stand, or None when nobody looked.
+
+        MUST be called while the phase's workspace is still alive: once
+        teardown has run, where a branch stood is a fact nothing in this
+        process can still discover.
+
+        The lookup happens before the first await, so a concurrent teardown
+        cannot empty the map out from under a reading that has already begun -
+        the same discipline the caller applies to its own per-phase maps, kept
+        here because this is where the map is.
+        """
+        return await observe_branches(self._by_phase, phase_id)
+
+    def forget(self, phase_id: str) -> None:
+        """Drop one phase's starting point, as its workspace is closed."""
+        self._by_phase.pop(phase_id, None)
+
+    def forget_all(self) -> None:
+        """Drop every starting point, as a terminal path closes all workspaces."""
+        self._by_phase.clear()
+
+
 async def _cached_remote_refs(workspace: GitWorkspace, repo: str) -> Mapping[str, str]:
     """What this clone last HEARD its remotes say, short name to commit.
 

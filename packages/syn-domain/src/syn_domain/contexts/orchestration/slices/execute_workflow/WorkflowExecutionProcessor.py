@@ -19,7 +19,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
     CompleteExecutionCommand,
-    FailExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
@@ -54,7 +53,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_phase,
-    failed_execution_result,
     failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
@@ -73,9 +71,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
     SessionLifecycleManager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    PhaseStartingPoint,
-    observe_branches,
-    record_phase_starting_point,
+    PhaseStartingPoints,
     refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
@@ -184,10 +180,7 @@ class WorkflowExecutionProcessor:
         self._import_ledger = import_ledger
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
-        # Where each phase's remote-tracking refs pointed when it was handed
-        # the workspace (#1200). Read at provision time because at failure time
-        # a ref carries no record of where it used to be.
-        self._phase_starting_points: dict[str, PhaseStartingPoint] = {}
+        self._phase_starting_points = PhaseStartingPoints()
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
@@ -474,27 +467,14 @@ class WorkflowExecutionProcessor:
         """
         # BEFORE any await: teardown clears the session-id map, so reading it
         # afterwards timed the phase to the end of cleanup and lost the
-        # session_id entirely (#1036). Snapshotted rather than merely read early
-        # because the workspace inspection below is an await, and this processor
-        # is shared across concurrent dispatches whose teardown clears the same
-        # maps.
+        # session_id entirely (#1036). Copied, not merely read early, because
+        # the observation below awaits and concurrent dispatches share the maps.
         started_at_by_phase = dict(self._phase_started_at)
         session_id_by_phase = dict(self._phase_session_ids)
-        starting_points = dict(self._phase_starting_points)
-
-        # The one window in which "where do this phase's branches stand" can
-        # still be answered: the workspace is alive until
-        # _close_phase_workspace_cms below, and after that the branches in it
-        # are undiscoverable from here (#1200). Never raises, so it cannot
-        # displace `error`.
-        observed = await observe_branches(starting_points, failed_phase_id)
-
+        # Before the teardown below, the only window in which it is askable (#1200).
+        observed = await self._phase_starting_points.observe(failed_phase_id)
         failure = failed_phase_outcome(
-            error,
-            failed_phase_id,
-            started_at_by_phase,
-            session_id_by_phase,
-            observed=observed,
+            error, failed_phase_id, started_at_by_phase, session_id_by_phase, observed=observed
         )
         if failure.result is not None:
             phase_results.append(failure.result)
@@ -503,28 +483,20 @@ class WorkflowExecutionProcessor:
             await mgr.complete_failure(error_message=failure.reason)
         await self._close_phase_workspace_cms(context="failure")
 
-        fail_cmd = FailExecutionCommand(
-            execution_id=execution_id,
-            error=failure.reason,
-            error_type=failure.error_type,
-            failed_phase_id=failed_phase_id,
-            completed_phases=len(completed_phase_ids),
-            total_phases=len(phases),
-            failed_phase_duration_seconds=failure.duration_seconds,
-            observed_branches=failure.observed_branches,
+        fail_cmd = failure.as_command(
+            execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
         )
         try:
             aggregate.fail_execution(fail_cmd)
             await self._save_and_sync(aggregate)
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
-        return failed_execution_result(
-            workflow_id=workflow_id,
-            execution_id=execution_id,
+        return failure.execution_result(
+            workflow_id,
+            execution_id,
             started_at=started_at,
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
-            error_message=failure.reason,
         )
 
     async def _close_phase_workspace_cms(self, context: str) -> None:
@@ -544,7 +516,7 @@ class WorkflowExecutionProcessor:
         # closing workspaces; they differ only in how they complete sessions.
         self._session_managers.clear()
         self._active_workspaces.clear()
-        self._phase_starting_points.clear()
+        self._phase_starting_points.forget_all()
         self._active_envs.clear()
         self._active_cmds.clear()
 
@@ -597,13 +569,7 @@ class WorkflowExecutionProcessor:
             phase_outputs=phase_outputs,
         )
         self._active_workspaces[todo.phase_id] = result.workspace
-        # BEFORE the agent runs, which is the only moment "what was already
-        # here" can be read. Never raises: a workspace that will not answer
-        # produces a starting point that says so, and must not fail a phase
-        # that is otherwise fine (#1200).
-        self._phase_starting_points[todo.phase_id] = await record_phase_starting_point(
-            result.workspace
-        )
+        await self._phase_starting_points.record(todo.phase_id, result.workspace)
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
@@ -865,10 +831,7 @@ class WorkflowExecutionProcessor:
             )
 
         workspace = self._active_workspaces.pop(phase_id, None)
-        # Dropped with the workspace it describes: the two are only meaningful
-        # as a pair, so a surviving starting point could only ever be paired
-        # with the wrong container.
-        self._phase_starting_points.pop(phase_id, None)
+        self._phase_starting_points.forget(phase_id)
         session_id = self._phase_session_ids.pop(phase_id, "")
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)

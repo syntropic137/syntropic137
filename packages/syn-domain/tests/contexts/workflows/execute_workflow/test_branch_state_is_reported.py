@@ -40,7 +40,6 @@ them apart - which is why the API carries the structure and not a sentence.
 
 from __future__ import annotations
 
-import sys
 import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
@@ -65,6 +64,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard
 from syn_domain.contexts.orchestration.slices.execute_workflow import (
     unpushed_work_guard as guard,
 )
@@ -80,6 +80,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_wor
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     GitWorkspace,
     PhaseStartingPoint,
+    PhaseStartingPoints,
     record_phase_starting_point,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
@@ -153,7 +154,7 @@ def _running_aggregate() -> WorkflowExecutionAggregate:
     return agg
 
 
-async def _provisioned(workspace: object) -> PhaseStartingPoint:
+async def _provisioned(workspace: object) -> PhaseStartingPoints:
     """What the processor records the moment a workspace is handed to a phase.
 
     CALLED BEFORE THE PHASE DOES ANYTHING, in every test, because that ordering
@@ -161,11 +162,29 @@ async def _provisioned(workspace: object) -> PhaseStartingPoint:
     hold whatever the agent pushed, and every ref would then look unmoved.
     Tests therefore call this on their first line and commit afterwards, so the
     sequence a reader sees is the sequence production performs.
+
+    Returns the registry rather than the reading, because the registry is what
+    the processor owns: `record` here is the same call `_handle_provision`
+    makes, so these tests fail if that recording stops working.
     """
-    return await record_phase_starting_point(cast("GitWorkspace", workspace))
+    points = PhaseStartingPoints()
+    await points.record(_PHASE_ID, cast("GitWorkspace", workspace))
+    return points
 
 
-async def _fail_after(start: PhaseStartingPoint | None) -> WorkflowFailedEvent:
+def _holding(start: PhaseStartingPoint) -> PhaseStartingPoints:
+    """A registry seeded with a reading the test built by hand.
+
+    Only for the cases that need a starting point production could not produce
+    - a snapshot paired with a workspace that has since died. Everything else
+    goes through `_provisioned`, which takes the reading the real way.
+    """
+    points = PhaseStartingPoints()
+    points._by_phase[_PHASE_ID] = start
+    return points
+
+
+async def _fail_after(start: PhaseStartingPoints | None) -> WorkflowFailedEvent:
     """Drive the real #1167 failure for a phase that began at `start`.
 
     Returns the `WorkflowFailedEvent` the aggregate emitted, because the event
@@ -176,7 +195,7 @@ async def _fail_after(start: PhaseStartingPoint | None) -> WorkflowFailedEvent:
     processor = _make_processor()
     processor._execution_repo.save = AsyncMock()  # keep the events inspectable
     if start is not None:
-        processor._phase_starting_points[_PHASE_ID] = start
+        processor._phase_starting_points = start
 
     started_at = datetime.now(UTC) - timedelta(seconds=1671.8)
     processor._phase_started_at[_PHASE_ID] = started_at
@@ -710,12 +729,12 @@ async def test_a_workspace_that_died_after_starting_records_no_verdict(
     half a comparison. Where those refs point NOW is exactly what nobody can
     find out any more.
     """
-    start = await _provisioned(clone.workspace)
+    start = await record_phase_starting_point(cast("GitWorkspace", clone.workspace))
     died = PhaseStartingPoint(
         workspace=cast("GitWorkspace", _Unreachable()), remote_refs=start.remote_refs
     )
 
-    failed = await _fail_after(died)
+    failed = await _fail_after(_holding(died))
 
     assert failed.observed_branches is None, (
         "a workspace that died mid-phase was recorded as one where nothing "
@@ -847,11 +866,9 @@ async def test_a_phase_that_writes_its_deliverable_is_never_even_asked(
     def _never_ask(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("the success path asked where a phase's branches stood")
 
-    # Reached through `sys.modules` because the module and the class it holds
-    # share a name, and importing that name gives the class.
-    monkeypatch.setattr(
-        sys.modules[WorkflowExecutionProcessor.__module__], "observe_branches", _never_ask
-    )
+    # Patched where the question is asked rather than where it is wired in, so
+    # this fails for ANY success-path caller, not only the one wired today.
+    monkeypatch.setattr(unpushed_work_guard, "observe_branches", _never_ask)
 
     fake = FakeAgentExecutionHandler.success(
         produces=[("artifacts/output/deliverable.md", b"# Real output")]
@@ -892,8 +909,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
     route. So the spy records how many agent runs had happened when it was
     asked, and the answer for phase N must be N.
     """
-    module = sys.modules[WorkflowExecutionProcessor.__module__]
-    real = module.record_phase_starting_point
+    real = unpushed_work_guard.record_phase_starting_point
     fake = FakeAgentExecutionHandler.success(
         produces=[("artifacts/output/deliverable.md", b"# Real output")]
     )
@@ -903,7 +919,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         agent_runs_before.append(fake.call_count)
         return await real(workspace)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(module, "record_phase_starting_point", _spy)
+    monkeypatch.setattr(unpushed_work_guard, "record_phase_starting_point", _spy)
 
     processor = _make_smoke_processor(fake)
     result = await processor.run(
@@ -919,7 +935,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         "each phase must record its starting point once, before its own agent "
         f"runs and after the previous one finished; got {agent_runs_before}"
     )
-    assert processor._phase_starting_points == {}, (
+    assert not processor._phase_starting_points._by_phase, (
         "starting points outlived their phases - a later failure would compare "
         "against a workspace that no longer exists"
     )

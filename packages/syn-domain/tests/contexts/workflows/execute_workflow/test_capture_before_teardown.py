@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    PhaseStartingPoints,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -88,7 +91,7 @@ def _processor(capture: object, workspace: object, cm: object) -> WorkflowExecut
     p = object.__new__(WorkflowExecutionProcessor)
     p._session_managers = {}  # type: ignore[attr-defined]
     p._active_workspaces = {PHASE: workspace}  # type: ignore[attr-defined]
-    p._phase_starting_points = {}  # type: ignore[attr-defined]
+    p._phase_starting_points = PhaseStartingPoints()  # type: ignore[attr-defined]
     p._phase_session_ids = {PHASE: "s-1"}  # type: ignore[attr-defined]
     p._active_envs = {}  # type: ignore[attr-defined]
     p._active_cmds = {}  # type: ignore[attr-defined]

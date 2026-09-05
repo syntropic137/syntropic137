@@ -24,6 +24,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    FailExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
 )
@@ -102,6 +105,66 @@ class PhaseFailure:
     differs from how the phase found it", and None for "nothing could tell us".
     Straight from `ObservedBranches.recorded`, because deciding it twice is how
     the two would come to disagree."""
+    phase_id: str | None = None
+    """Which phase this describes, None when the execution died before one
+    started. Carried so the command below names the phase this failure is
+    about rather than one the caller names again alongside it."""
+
+    def as_command(
+        self, execution_id: str, *, completed_phases: int, total_phases: int
+    ) -> FailExecutionCommand:
+        """The aggregate's command for this failure.
+
+        ASSEMBLED WHERE THE FAILURE IS DESCRIBED, for the reason the rest of
+        this class exists. Four of the command's fields are this object's, and
+        a call site that copies them across by hand is one edit away from
+        sending the aggregate a different account of the failure than the one
+        every other sink got - which is the shape #1196 arrived in, and the
+        shape a fifth field made likelier rather than less (#1200).
+
+        The three parameters are the ones that are genuinely not the failure's:
+        which execution it belongs to, and how far through its phases it got.
+        """
+        return FailExecutionCommand(
+            execution_id=execution_id,
+            error=self.reason,
+            error_type=self.error_type,
+            failed_phase_id=self.phase_id,
+            completed_phases=completed_phases,
+            total_phases=total_phases,
+            failed_phase_duration_seconds=self.duration_seconds,
+            observed_branches=self.observed_branches,
+        )
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        phase_results: list[PhaseResult],
+        artifact_ids: list[str],
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller.
+
+        The fourth sink, assembled here for the same reason as the third. It
+        was already pure assembly living beside `completed_phase` rather than
+        in the processor; what it was still taking from the call site was
+        `error_message`, hand-copied from `reason` - the one field this class
+        exists to decide exactly once.
+        """
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="failed",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=artifact_ids,
+            metrics=ExecutionMetrics.from_results(phase_results),
+            error_message=self.reason,
+        )
 
 
 def failed_phase_outcome(
@@ -140,6 +203,7 @@ def failed_phase_outcome(
         reason=reason,
         error_type=type(error).__name__,
         observed_branches=observed.recorded if observed is not None else None,
+        phase_id=phase_id,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
         result=failed_phase_result(
             phase_id,
@@ -280,33 +344,4 @@ def completed_phase(
         cache_creation_tokens=cache_creation,
         cache_read_tokens=cache_read,
         total_tokens=total,
-    )
-
-
-def failed_execution_result(
-    *,
-    workflow_id: str,
-    execution_id: str,
-    started_at: DateTime,
-    phase_results: list[PhaseResult],
-    artifact_ids: list[str],
-    error_message: str,
-    now: DateTime | None = None,
-) -> WorkflowExecutionResult:
-    """Assemble the result an execution returns when it dies.
-
-    Pure assembly, so it lives beside `completed_phase` rather than in the
-    processor: the two are the same statement made on opposite paths, and the
-    failure half is the one that historically drifted.
-    """
-    return WorkflowExecutionResult(
-        workflow_id=workflow_id,
-        execution_id=execution_id,
-        status="failed",
-        started_at=started_at,
-        completed_at=now or datetime.now(UTC),
-        phase_results=phase_results,
-        artifact_ids=artifact_ids,
-        metrics=ExecutionMetrics.from_results(phase_results),
-        error_message=error_message,
     )
