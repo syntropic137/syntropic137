@@ -266,20 +266,73 @@ will not help`, or you interrupting it while it still prints
 > that wedges partway through reports both.
 
 > **If `/api/v1/health` is unreachable or has no `subscription` block,** read the
-> checkpoint table directly - it is the source these fields are computed from:
+> checkpoint table directly - it is the source these fields are computed from.
+> The store head must be read in the *same* query: a checkpoint position means
+> nothing on its own, only relative to the head it is chasing.
 >
 > ```bash
-> docker exec syn137-postgres psql -U syntropic -d syntropic137 -c \
->   "SELECT projection_name, global_position, version, updated_at
->      FROM projection_checkpoints
->     WHERE projection_name IN ('session_summaries','workflow_execution_details','workflow_phase_metrics')
->     ORDER BY projection_name;"
+> docker exec syn137-timescaledb psql -U syn -d syn -c \
+>   "WITH head AS (
+>        SELECT COALESCE(MAX(global_nonce), 0) AS position
+>          FROM events
+>         WHERE tenant_id = 'syn'
+>    ),
+>    expected (projection_name, version) AS (
+>        VALUES ('session_summaries', 4),
+>               ('workflow_execution_details', 9),
+>               ('workflow_phase_metrics', 5)
+>    )
+>    SELECT e.projection_name,
+>           COALESCE(c.global_position, 0) AS position,
+>           head.position                  AS head,
+>           COALESCE(c.version, 0)         AS version,
+>           e.version                      AS want_version,
+>           c.updated_at,
+>           COALESCE(c.global_position, 0) >= head.position
+>             AND COALESCE(c.version, 0) = e.version AS done
+>      FROM expected e
+>      CROSS JOIN head
+>      LEFT JOIN projection_checkpoints c USING (projection_name)
+>     ORDER BY e.projection_name;"
 > ```
 >
-> Container name, user and database are whatever your deployment's `.env` sets -
-> confirm them with `docker ps` and `~/.syntropic137/.env` rather than assuming
-> these. Done is `global_position` equal across all three rows and no longer
-> advancing between two reads, with `version` reading 4, 9 and 5 respectively.
+> **Done is the `done` column reading `t` on all three rows.** Nothing less.
+> The query always returns exactly three rows, so a projection that is missing,
+> behind, or still on its old version shows up as `f` rather than vanishing from
+> the output.
+>
+> **Equal, stable positions are NOT done, and must not be read as done.** Three
+> checkpoints agreeing with each other and not advancing between two reads is
+> exactly what a replay wedged partway through looks like: with the head at 500,
+> three rows stuck at 400 are equal and perfectly stable while the read path is
+> 100 events behind and executions are still 404ing. That is why the comparison
+> above is against `head`, not against the other rows. Position equality across
+> rows is not a completion signal in either direction - discard it.
+>
+> The three parts of the `done` condition each rule out a different way of being
+> behind, which is why all three are required:
+>
+> | Term | Rules out |
+> |---|---|
+> | `position >= head` | The wedged replay above, and any projection still catching up |
+> | `COALESCE(c.global_position, 0)` | A **missing** checkpoint row. A version bump deletes the row before replaying, so during this very window a not-yet-started projection has no row at all. `IN (...)` would have returned two rows that look finished; the `LEFT JOIN` from the literal list returns three, and the absent one reads `position 0`, `done f`. |
+> | `version = want_version` | A projection fully caught up to head on its **old** schema - it never rebuilt, so its checkpoint is at head and its data is still v0.27 shaped |
+>
+> Because `head` and the checkpoints are read in one statement, they come from a
+> single snapshot and cannot skew. On a stack still taking writes the head keeps
+> advancing, so a healthy projection may briefly read `f` and then `t` on the
+> next run; a wedged one never reaches `t`. Repeat the query rather than
+> relaxing the condition.
+>
+> Container name, user, database and `tenant_id` are whatever your deployment
+> sets - the values above are the compose defaults (`POSTGRES_USER`,
+> `POSTGRES_DB` and `EVENT_STORE_TENANT_ID`, all defaulting to `syn`). Confirm
+> them with `docker ps` and `~/.syntropic137/.env` rather than assuming these.
+> Both tables live in the same database, which is what lets one query join them:
+> the event store and the API's checkpoint store are pointed at the same
+> Postgres by `DATABASE_URL` and `SYN_OBSERVABILITY_DB_URL` respectively. If a
+> deployment ever separates them, this fallback cannot establish done at all and
+> `/api/v1/health` is the only source that can.
 
 ### The rollback asymmetry
 
