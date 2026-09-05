@@ -28,12 +28,22 @@ the clone" is a claim, and this is the file that has to prove it.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from syn_api._wiring import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
@@ -60,6 +70,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     PhaseOutputCache,
     WorkflowExecutionResult,
 )
+from syn_shared.env_constants import ENV_CLAUDE_CODE_OAUTH_TOKEN, ENV_GH_REPO, ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -178,10 +189,17 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
 class _Provisioned:
     """Everything the workspace was actually told to do, for one phase."""
 
-    def __init__(self, setup_script: str, injected: dict[str, bytes], argv: list[str]) -> None:
+    def __init__(
+        self,
+        setup_script: str,
+        injected: dict[str, bytes],
+        argv: list[str],
+        agent_env: dict[str, str],
+    ) -> None:
         self.setup_script = setup_script
         self.injected = injected
         self.argv = argv
+        self.agent_env = agent_env
 
     @property
     def prompt(self) -> str:
@@ -252,7 +270,9 @@ async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _P
         for call in workspace.inject_files.call_args_list
         for rel_path, content in call.args[0]
     }
-    return _Provisioned(secrets.build_setup_script(), injected, result.claude_cmd)
+    return _Provisioned(
+        secrets.build_setup_script(), injected, result.claude_cmd, dict(result.agent_env)
+    )
 
 
 class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
@@ -379,3 +399,354 @@ class TestTheRefusalSurvivesTheChange:
         # Comma-joined into a single `--tools` value, not one argv element per
         # tool - so this reads the grant the CLI actually parses.
         assert "Bash" in provisioned.argv[provisioned.argv.index("--tools") + 1].split(",")
+
+
+#: Where `gh` really is, or None. Named once so the guard below and the
+#: subprocess call cannot disagree about which binary was checked for.
+_GH = shutil.which("gh")
+
+#: `SSL_CERT_FILE` is how `_FakeGitHubApi` becomes trusted, and Go reads it on
+#: Linux only - on darwin the system trust store is consulted instead and the
+#: variable is ignored, so these tests would fail there for a reason that has
+#: nothing to do with the code. Linux is where the workspace image and CI run,
+#: which is where the claim needs to hold. `test_the_gh_tests_still_run_where_
+#: they_are_true` asserts from outside that this guard has not widened.
+_NEEDS_REAL_GH = pytest.mark.skipif(
+    sys.platform != "linux" or _GH is None,
+    reason=(
+        "needs the real `gh` binary, and a Linux host: the fake API is trusted "
+        "via SSL_CERT_FILE, which Go honours on Linux and ignores on darwin"
+    ),
+)
+
+
+class _FakeGitHubApi:
+    """`api.github.com`, served locally, so a real `gh` command can SUCCEED.
+
+    WHY A SERVER AND NOT AN ASSERTION ON AN ERROR MESSAGE. The claim is about
+    a consumer: given the configuration provisioning writes, does `gh` target
+    the right repository? Only `gh` can answer that, and every
+    repository-sensitive `gh` command reaches the API before it will do
+    anything - `gh browse --no-browser` HEADs `/repos/OWNER/REPO` first.
+    Reading a failure string instead would pass against a `gh` that resolved
+    nothing, and a test that reaches the real api.github.com is not a unit
+    test.
+
+    HOW `gh` IS REDIRECTED HERE, and what is deliberately NOT touched. Two
+    variables Go's HTTP client reads: `HTTPS_PROXY` routes the connection here
+    as a CONNECT tunnel, and `SSL_CERT_FILE` makes the certificate minted
+    below trusted for `api.github.com`. The provisioned hosts.yml and GH_REPO
+    are used verbatim - the host stays `github.com`. That is the point: the
+    real generated configuration talking to a fake server, rather than a
+    rewritten configuration talking to a real one.
+
+    The interface is two members: `client_env`, and `requests` - the request
+    lines that actually arrived, which is what says WHICH repository `gh`
+    resolved rather than merely that it resolved one.
+
+    `cryptography` is a dependency of syn-adapters, which the workspace root
+    depends on, so it is present wherever this suite runs.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        self.requests: list[str] = []
+        self._ca_file = directory / "fake-github-ca.pem"
+        key_file = directory / "fake-github-key.pem"
+        self._mint_certificate(self._ca_file, key_file)
+
+        self._tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self._tls.load_cert_chain(self._ca_file, key_file)
+
+        self._listener = socket.socket()
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+
+    @staticmethod
+    def _mint_certificate(cert_file: Path, key_file: Path) -> None:
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "api.github.com")])
+        now = datetime.now(UTC)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5))
+            .not_valid_after(now + timedelta(hours=1))
+            .add_extension(
+                x509.SubjectAlternativeName([x509.DNSName("api.github.com")]), critical=False
+            )
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+        cert_file.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_file.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+
+    @property
+    def client_env(self) -> dict[str, str]:
+        """What an HTTP client needs to reach this server believing it is GitHub."""
+        host, port = self._listener.getsockname()
+        return {"HTTPS_PROXY": f"http://{host}:{port}", "SSL_CERT_FILE": str(self._ca_file)}
+
+    def __enter__(self) -> _FakeGitHubApi:
+        threading.Thread(target=self._accept_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._listener.close()
+
+    def _accept_forever(self) -> None:
+        while True:
+            try:
+                connection, _ = self._listener.accept()
+            except OSError:  # the listener was closed by __exit__
+                return
+            threading.Thread(target=self._serve, args=(connection,), daemon=True).start()
+
+    def _serve(self, connection: socket.socket) -> None:
+        """Answer one CONNECT tunnel, then one request inside it."""
+        try:
+            if not _read_request_line(connection).startswith("CONNECT "):
+                return
+            connection.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            tunnel = self._tls.wrap_socket(connection, server_side=True)
+        except (OSError, ssl.SSLError):
+            connection.close()
+            return
+
+        with tunnel:
+            method, _, rest = _read_request_line(tunnel).partition(" ")
+            path = rest.split(" ")[0]
+            self.requests.append(f"{method} {path}")
+            body = b'{"full_name":"syntropic137/syntropic137","default_branch":"main"}'
+            tunnel.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n" + (b"" if method == "HEAD" else body)
+            )
+
+
+def _read_request_line(connection: socket.socket) -> str:
+    """The request line of one HTTP message, with its headers consumed."""
+    with connection.makefile("rb", buffering=0) as stream:
+        request_line = stream.readline().decode(errors="replace").strip()
+        while stream.readline() not in (b"\r\n", b"\n", b""):
+            pass
+    return request_line
+
+
+def _the_workspace_the_setup_script_leaves_behind(
+    setup_script: str, tmp_path: Path
+) -> tuple[Path, Path]:
+    """Run the generated setup script for real; return its (home, working dir).
+
+    The script is run rather than read because hosts.yml is written by a
+    heredoc inside it: pinning the text proves the substring is present, not
+    that a file `gh` can parse ends up on disk. The `/workspace` prefix is
+    rewritten to a tmpdir because these tests do not run as root; nothing else
+    about the script is altered.
+    """
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    script_file = tmp_path / "setup.sh"
+    script_file.write_text(setup_script.replace("/workspace", str(workspace)))
+
+    completed = subprocess.run(
+        ["bash", str(script_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            # A unit test must not be able to wait on a human (#1136).
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "/bin/false",
+            "SSH_ASKPASS": "/bin/false",
+        },
+    )
+    assert completed.returncode == 0, completed.stderr
+    return home, workspace
+
+
+def _run_gh(
+    args: list[str], *, home: Path, working_directory: Path, agent_env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run `gh` with the provisioned environment and NOTHING else.
+
+    Built from an explicit dict rather than a copy of `os.environ`: the suite
+    itself frequently runs inside an agent workspace that already exports
+    GH_TOKEN and GH_REPO, and inheriting either would make this test pass
+    against a provisioner that injected nothing at all.
+    """
+    assert _GH is not None
+    return subprocess.run(
+        [_GH, *args],
+        cwd=working_directory,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "NO_COLOR": "1",
+            "GH_NO_UPDATE_NOTIFIER": "1",
+            "GH_PROMPT_DISABLED": "1",
+            **agent_env,
+        },
+    )
+
+
+class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
+    """The hop the first cut of #1187 missed, tested at the consumer.
+
+    Removing the clone removed something nobody had noticed was load-bearing.
+    `gh` resolves the repository a command targets from the git remotes of the
+    surrounding working tree; the checkout supplied that tree as a side
+    effect, so repository identity had never been provisioned. With
+    `clone_repos: false` there is nothing to infer from, and `gh pr create` -
+    the phase's entire job - fails before it makes an API call:
+
+        $ gh pr list --limit 1
+        failed to run git: fatal: not a git repository
+
+    The sibling test above asserts hosts.yml exists. That is the assertion
+    that let this ship: the credential was fine, and a file existing is not
+    its consumer working. These run the real `gh` against the real generated
+    configuration instead.
+    """
+
+    @_NEEDS_REAL_GH
+    async def test_gh_succeeds_and_targets_the_repo_the_phase_was_given(
+        self, tmp_path: Path
+    ) -> None:
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["open_pr"], completed={})
+        home, workspace = _the_workspace_the_setup_script_leaves_behind(
+            provisioned.setup_script, tmp_path
+        )
+
+        # (a) There is genuinely nothing for `gh` to infer from - not in the
+        # working directory and not in any parent, which is the loophole that
+        # would otherwise let the suite's own checkout answer the question.
+        assert not any(
+            (directory / ".git").exists() for directory in (workspace, *workspace.parents)
+        ), f"{workspace} sits under a git tree, so this proves nothing about a no-clone phase"
+
+        # (b) A repository-sensitive operation, run exactly as provisioned.
+        with _FakeGitHubApi(tmp_path) as github:
+            result = _run_gh(
+                ["browse", "--no-browser"],
+                home=home,
+                working_directory=workspace,
+                agent_env={**provisioned.agent_env, **github.client_env},
+            )
+
+        assert result.returncode == 0, (
+            f"`gh browse` failed with the provisioned configuration: {result.stderr}"
+        )
+        # (c) The right repository, not merely a repository. Asserted on what
+        # reached the server: `gh` cannot have got the answer from anywhere
+        # but the environment provisioning built.
+        assert github.requests == ["HEAD /repos/syntropic137/syntropic137"]
+        assert result.stdout.strip() == "https://github.com/syntropic137/syntropic137"
+
+    @_NEEDS_REAL_GH
+    async def test_the_generated_hosts_yml_is_the_credential_that_makes_that_work(
+        self, tmp_path: Path
+    ) -> None:
+        """Without this, hosts.yml could be empty and the test above stays green.
+
+        The provisioned environment also carries GITHUB_TOKEN, and `gh`
+        prefers it (#1129). So the file is exercised by taking that token
+        away, leaving hosts.yml as the only credential - and the deletion
+        control below is what stops THIS test passing on an unauthenticated
+        `gh` that never needed a credential at all.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["open_pr"], completed={})
+        home, workspace = _the_workspace_the_setup_script_leaves_behind(
+            provisioned.setup_script, tmp_path
+        )
+        hosts_yml = home / ".config" / "gh" / "hosts.yml"
+        without_token = {
+            name: value for name, value in provisioned.agent_env.items() if name != ENV_GITHUB_TOKEN
+        }
+
+        with _FakeGitHubApi(tmp_path) as github:
+            on_hosts_yml_alone = _run_gh(
+                ["browse", "--no-browser"],
+                home=home,
+                working_directory=workspace,
+                agent_env={**without_token, **github.client_env},
+            )
+            hosts_yml.unlink()
+            with_no_credential_at_all = _run_gh(
+                ["browse", "--no-browser"],
+                home=home,
+                working_directory=workspace,
+                agent_env={**without_token, **github.client_env},
+            )
+
+        assert on_hosts_yml_alone.returncode == 0, on_hosts_yml_alone.stderr
+        assert with_no_credential_at_all.returncode != 0, (
+            "`gh` succeeded with no credential, so the run above proves nothing "
+            "about the generated hosts.yml"
+        )
+
+    async def test_a_codex_phase_is_told_the_repository_too(self) -> None:
+        """The provider-independence claim, and the one a claude-only fix fails.
+
+        A codex phase gets an EMPTY agent env by design: it authenticates from
+        ~/.codex/auth.json and must not be handed claude credentials. So the
+        obvious place to put GH_REPO - beside GITHUB_TOKEN in
+        `_build_agent_env` - is the one place it must not go, because that
+        function does not run for codex at all. Asserted on the real `verify`
+        phase, which is the codex phase this workflow ships.
+        """
+        phases = await _executable_phases()
+        verify = await _provision(phases["verify"], completed={})
+
+        assert phases["verify"].agent_config.provider == "codex", (
+            "the workflow's verify phase is no longer codex, so this asserts "
+            "nothing about the codex path"
+        )
+        assert verify.agent_env.get(ENV_GH_REPO) == "syntropic137/syntropic137"
+        assert ENV_CLAUDE_CODE_OAUTH_TOKEN not in verify.agent_env, (
+            "a codex phase must not receive claude credentials; if it now does, "
+            "GH_REPO may be arriving via the claude branch and this test has "
+            "stopped covering the codex path"
+        )
+
+
+def test_the_gh_tests_still_run_where_they_are_true() -> None:
+    """A platform guard is the one fix that cannot fail loudly when it is wrong.
+
+    Widen it by a character - invert the comparison, drop the condition for a
+    bare `skip` while chasing a red suite - and the only tests that exercise
+    the real `gh` stop running everywhere, including CI, while the file still
+    reports green. Nothing else would notice: every other test here passes
+    with these two skipped.
+    """
+    (condition,) = _NEEDS_REAL_GH.mark.args
+
+    assert isinstance(condition, bool), (
+        "the gh guard has lost its condition and now skips unconditionally"
+    )
+    assert not (sys.platform == "linux" and _GH is not None and condition), (
+        "the gh guard is skipping on a Linux host that has gh - which is exactly "
+        "where the no-working-tree resolution claim has to be checked"
+    )

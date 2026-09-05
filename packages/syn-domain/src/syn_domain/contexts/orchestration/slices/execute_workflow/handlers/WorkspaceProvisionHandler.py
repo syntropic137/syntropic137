@@ -32,6 +32,7 @@ from syn_shared.env_constants import (
     ENV_ANTHROPIC_BASE_URL,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CLAUDE_SESSION_ID,
+    ENV_GH_REPO,
     ENV_GITHUB_TOKEN,
 )
 
@@ -270,6 +271,37 @@ def _repo_full_names(repos: Sequence[str]) -> list[str]:
             if name not in names:
                 names.append(name)
     return names
+
+
+def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
+    """The environment that tells `gh` WHICH repository this phase acts on.
+
+    Empty when the phase has no repository to name, so the caller adds it
+    unconditionally rather than branching on the answer.
+
+    WHY THIS IS PROVISIONED RATHER THAN INFERRED (#1187). `gh` resolves the
+    repository a command targets from the git remotes of the surrounding
+    working tree, and fails there - before it makes any API call - when there
+    is no tree::
+
+        $ gh pr list --limit 1
+        failed to run git: fatal: not a git repository
+
+    The clone used to supply that tree, so repository identity was never
+    provisioned; it was a by-product of the checkout. A `clone_repos: false`
+    phase still calls `gh pr create`, and after the checkout went there was
+    nothing left to infer from. `GH_REPO` states the answer instead of leaving
+    the agent to reconstruct it, which is why it is here and not in a prompt.
+
+    KEYED ON THE PRIMARY REPO - the same `effective_repos[0]` that becomes
+    `{{repo_url}}` in the prompt - so what the agent is told to work on and
+    what `gh` acts on cannot disagree. An unparseable primary therefore yields
+    no variable at all rather than falling through to the next repo's name:
+    silently retargeting `gh pr create` at a different repository is a worse
+    failure than the resolution error it would replace.
+    """
+    primary = _repo_full_names(repos[:1])
+    return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
 async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
@@ -675,6 +707,14 @@ class WorkspaceProvisionHandler:
             if needs_claude_env
             else {}
         )
+        # OUTSIDE the branch above, deliberately. A codex phase gets an empty
+        # agent env by design - it authenticates from ~/.codex/auth.json and
+        # must not see claude credentials - so `_build_agent_env` is the one
+        # place repository identity must NOT live: put it there and it reaches
+        # claude phases only, leaving every codex phase with the defect this
+        # fixes. It is provider-independent, and this is the single point both
+        # providers pass through on their way to `workspace.stream(...)`.
+        agent_env.update(_repo_identity_env(effective_repos))
         assert todo.phase_id is not None
         command = ProvisionWorkspaceCompletedCommand(
             execution_id=todo.execution_id,

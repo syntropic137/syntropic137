@@ -60,6 +60,15 @@ ENV_ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
 ENV_CLAUDE_CODE_ENABLE_TELEMETRY = "CLAUDE_CODE_ENABLE_TELEMETRY"
 ENV_OTEL_EXPORTER_OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 
+#: WHICH repository `gh` acts on, in `owner/repo` form (#1187).
+#:
+#: Read by the `gh` CLI inside the workspace, not by anything here. `gh`
+#: otherwise resolves the repository from the git remotes of the working tree
+#: and fails BEFORE any API call when there is no tree, so a phase that
+#: declares `clone_repos: false` has no way to answer the question. This
+#: variable is that answer.
+ENV_GH_REPO = "GH_REPO"
+
 # ---------------------------------------------------------------------------
 # Workspace infrastructure env vars
 # Read by the workspace adapter at initialisation; not in pydantic Settings.
@@ -145,6 +154,7 @@ __all__ = [
     "ENV_CLAUDE_CODE_OAUTH_TOKEN",
     "ENV_CLAUDE_SESSION_ID",
     "ENV_CODEX_AUTH_JSON",
+    "ENV_GH_REPO",
     "ENV_GITHUB_APP_TOKEN",
     "ENV_GITHUB_TOKEN",
     "ENV_GIT_AUTHOR_EMAIL",
