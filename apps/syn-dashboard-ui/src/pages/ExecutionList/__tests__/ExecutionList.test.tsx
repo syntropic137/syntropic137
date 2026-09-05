@@ -16,6 +16,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { serveListEndpoint } from '../../../test/fakeListServer'
+import { EXECUTIONS, matchesExecutionSearch, within } from '../../../test/listFixtures'
 import { LIST_PAGE_SIZE } from '../../../hooks/useServerList'
 import { ExecutionList } from '../ExecutionList'
 
@@ -25,100 +26,29 @@ vi.mock('../../../hooks/useActivityStream', () => ({
 
 type User = ReturnType<typeof userEvent.setup>
 
-const HOUR_MS = 60 * 60 * 1000
-const DAY_MS = 24 * HOUR_MS
-
-interface FakeExecution {
-  workflow_execution_id: string
-  workflow_id: string
-  workflow_name: string
-  status: string
-  started_at: string
-  completed_at: string | null
-  completed_phases: number
-  total_phases: number
-  total_tokens: number
-  total_tokens_display: string
-  total_input_tokens: number
-  total_output_tokens: number
-  total_cache_creation_tokens: number
-  total_cache_read_tokens: number
-  total_cost_usd: string
-  total_cost_display: string
-  unpriced_observation_count: number
-  duration_seconds: number | null
-  duration_display: string
-  tool_call_count: number
-  repos: string[]
-}
-
-function makeExecution(index: number, hoursAgo: number, status: string): FakeExecution {
-  return {
-    workflow_execution_id: `exec-${String(index).padStart(3, '0')}`,
-    workflow_id: 'wf-1',
-    workflow_name: `Run ${String(index).padStart(3, '0')}`,
-    status,
-    started_at: new Date(Date.now() - hoursAgo * HOUR_MS).toISOString(),
-    completed_at: null,
-    completed_phases: 1,
-    total_phases: 1,
-    total_tokens: 10,
-    total_tokens_display: '10',
-    total_input_tokens: 5,
-    total_output_tokens: 5,
-    total_cache_creation_tokens: 0,
-    total_cache_read_tokens: 0,
-    total_cost_usd: '0',
-    total_cost_display: '$0.00',
-    unpriced_observation_count: 0,
-    duration_seconds: 1,
-    duration_display: '1s',
-    tool_call_count: 0,
-    repos: [],
-  }
-}
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
- * 120 executions, newest first, shaped like a real installation rather than
- * like an easy assertion:
- *   000-029   within the last 24h   (the default window)
- *   030-079   1-7 days old          (so 7d holds 80: more than one page)
- *   080-119   older than 7 days     (so All holds 120: also more than one page)
+ * The same 120-row, three-page collection the hook tests use.
  *
- * Both of the windows the widening test uses therefore overflow a page. That
- * is the production shape and it is the whole difficulty: widening a lower
- * bound on a newest-first list CANNOT change the first page, so a fixture
- * where the narrow window fits on one page quietly dodges the case (#1159).
- * Statuses are dealt so `completed` alone exceeds a page.
+ * Shared rather than restated: this shape - both windows overflowing a page -
+ * is the only reason any of these assertions can fail, and a second copy of it
+ * is a second chance to quietly shrink it back under one page.
  */
-const COLLECTION: FakeExecution[] = Array.from({ length: 120 }, (_, i) => {
-  const hoursAgo = i < 30 ? (i + 1) * 0.5 : i < 80 ? 25 + (i - 30) * 2 : 200 + (i - 80) * 24
-  const status = i % 5 === 0 ? 'failed' : i % 17 === 0 ? 'cancelled' : 'completed'
-  return makeExecution(i, hoursAgo, status)
-})
-
+const COLLECTION = EXECUTIONS
 const TOTAL = COLLECTION.length
-const within = (ms: number) =>
-  COLLECTION.filter((e) => e.started_at >= new Date(Date.now() - ms).toISOString())
-const WITHIN_24H = within(DAY_MS).length
-const WITHIN_7D = within(7 * DAY_MS).length
-const COMPLETED_IN_24H = within(DAY_MS).filter((e) => e.status === 'completed').length
+const startedAt = (row: { started_at: string }) => row.started_at
+const within24h = () => within(COLLECTION, DAY_MS, startedAt)
+const WITHIN_24H = within24h().length
+const WITHIN_7D = within(COLLECTION, 7 * DAY_MS, startedAt).length
+const COMPLETED_IN_24H = within24h().filter((e) => e.status === 'completed').length
 /** The oldest row: reachable only under "All", and only past the first page. */
 const OLDEST = COLLECTION[TOTAL - 1]
-
-function matchesSearch(row: FakeExecution, term: string): boolean {
-  const needle = term.toLowerCase()
-  return (
-    row.workflow_execution_id.toLowerCase().includes(needle) ||
-    row.workflow_id.toLowerCase().includes(needle) ||
-    row.workflow_name.toLowerCase().includes(needle)
-  )
-}
 
 const server = serveListEndpoint({
   path: '/api/v1/executions',
   collection: COLLECTION,
-  matchesSearch,
+  matchesSearch: matchesExecutionSearch,
 })
 
 function renderPage(url = '/executions') {
