@@ -2421,6 +2421,7 @@ states.
 | Same rows under "24h" and "7d" | The window is ignored - or is honoured, and page 1 is legitimately identical | 8.1.2 - read `total`, never the rows |
 | History begins in June | Paging stops before the beginning of history | 8.1.3 - walk to the last page, then ask for older |
 | A chip reading "completed 35" | 35 is this page's completed rows, against a true 235 | 8.1.4 - sum the chips against `total` |
+| A time-bounded query answering 200 with a full result set | The bound's name does not exist on that surface, so FastAPI dropped it and filtered nothing | Send the same bound a value that must exclude everything: a real bound answers `total=0`, an ignored one answers the unbounded total |
 
 The first one is the load-bearing one. **A surface where `total == len(rows)` at
 every page size is self-consistently lying**: every field agrees with every other
@@ -2681,6 +2682,7 @@ are required.
 ```bash
 surface=executions; rows_key=.executions; id_key=.workflow_execution_id; ts_key=.started_at
 ps=50; cap=200          # cap = this surface's max page_size; see the surface table
+bound=started_before    # the upper bound's noun, which differs per surface (as in 8.1.2)
 
 total=$(api "$surface?page_size=1" | total_of)
 pages=$(( (total + ps - 1) / ps ))
@@ -2727,19 +2729,27 @@ Expected: `beyond-last HTTP 200`.
 some fixed recent window. Take the oldest reachable timestamp and ask the server
 whether anything older exists - no date is hardcoded, so this check does not rot.
 
-**Not `/workflows`** - it has no upper bound at all, and FastAPI IGNORES an
-unrecognised query parameter rather than rejecting it, so running this against
-workflows returns the unfiltered first page and reads as a catastrophic failure that
-is really just a parameter that does not exist. See the workflows note below for what
-to do instead. Artifacts DOES take one, spelled `created_before`; the same trap
-applies to sending it `started_before`.
+**Which bound to send is per surface, and getting it wrong is silent.** FastAPI
+IGNORES an unrecognised query parameter rather than rejecting it: the request returns
+200 and the unfiltered collection, so `started_before` sent to `/artifacts` reads as
+a catastrophic failure that is really just a parameter that does not exist. That is
+why the bound's name is the `$bound` variable set with the others and not a literal
+in the block below - executions and sessions take `started_before`, artifacts takes
+`created_before`, and `/workflows` has no upper bound at all.
 
 ```bash
 oldest=$(api "$surface?page=$pages&page_size=$ps" | jq -r "${rows_key}[-1]${ts_key}")
 echo "oldest reachable: $oldest"
 
-api "$surface?page_size=$cap&started_before=$(printf '%s' "$oldest" | urlenc)" \
-  | jq -r "${rows_key}[]${ts_key}" | sort -u
+# Empty $bound means the surface has no upper time bound, so assertion 4 cannot be
+# asked of it. Say so, rather than sending a nameless parameter and reading the
+# unfiltered answer as a result.
+if [ -z "$bound" ]; then
+  echo "assertion 4 NOT RUN: $surface has no upper time bound"
+else
+  api "$surface?page_size=$cap&$bound=$(printf '%s' "$oldest" | urlenc)" \
+    | jq -r "${rows_key}[]${ts_key}" | sort -u
+fi
 ```
 
 Expected: exactly one distinct value, equal to `$oldest`.
@@ -2749,30 +2759,33 @@ oldest reachable: 2026-04-28T09:12:33.421000Z
 2026-04-28T09:12:33.421000Z
 ```
 
-`started_before` is INCLUSIVE, so the boundary row coming back is the check
-working, not an off-by-one.
+The bound is INCLUSIVE on every surface that has one, so the boundary row coming
+back is the check working, not an off-by-one.
 
 **PASS** requires all four:
 
 1. `(pages - 1) * page_size + last_page_rows == total`.
 2. Page `pages + 1` returns 0 rows (and a 200, not a 404 or a 500).
 3. Pages 1 and 2 share zero ids.
-4. The `started_before=$oldest` query returns no timestamp EARLIER than `$oldest`.
+4. The `$bound=$oldest` query returns no timestamp EARLIER than `$oldest`.
 
 **FAIL** - assertion 4 returns older timestamps. Those rows are history that exists
 in the store and that no sequence of page requests can reach. Report each distinct
 timestamp; that set is the extent of the unreachable history.
 
-Repeat the whole block for the other two paged surfaces by setting the variables at
-the top. Nothing else changes:
+Repeat the whole block for the other three paged surfaces by setting the variables
+at the top. Nothing else changes:
 
 ```bash
-surface=sessions;  rows_key=.sessions;  id_key=.id; ts_key=.started_at;  ps=50; cap=200
-surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; cap=100
-surface=artifacts; rows_key=.artifacts; id_key=.id; ts_key=.created_at;  ps=50; cap=200
+surface=sessions;  rows_key=.sessions;  id_key=.id; ts_key=.started_at;  ps=50; cap=200; bound=started_before
+surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; cap=100; bound=          # none; see below
+surface=artifacts; rows_key=.artifacts; id_key=.id; ts_key=.created_at;  ps=50; cap=200; bound=created_before
 ```
 
-For artifacts, assertion 4's bound is `created_before` rather than `started_before`.
+`bound` is in that list precisely because it is the one variable a reader is likely
+to leave at the previous surface's value, and doing so costs nothing visible: the
+request still returns 200 and a full result set. `/workflows` has no upper bound at
+all, which is why its `bound` is empty and why it gets assertions 1-3 only.
 
 > **Workflows gets assertions 1-3 but not 4.** There is no `started_before` on the
 > endpoint, so "is there anything older than the oldest reachable row" cannot be
@@ -3372,6 +3385,12 @@ hit this? How bad is the experience?
 
 Copy and fill in after completing the runbook.
 
+Every relative link inside the block below resolves from where the REPORT lands,
+`docs/testing/output/`, not from this file. That is why the runbook link starts
+`../` and looks wrong from here. Resolving it against this file instead turns it
+into `./release-validation.md`, which is green in the source and broken in every
+report ever generated from it.
+
 ```markdown
 # v<VERSION> Release Validation
 
@@ -3380,7 +3399,7 @@ Copy and fill in after completing the runbook.
 **Validated by:** <name or agent>
 **Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
-**Runbook:** [docs/testing/release-validation.md](./release-validation.md)
+**Runbook:** [docs/testing/release-validation.md](../release-validation.md)
 
 ## What Passed
 
