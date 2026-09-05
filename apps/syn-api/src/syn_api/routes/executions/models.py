@@ -6,7 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from syn_api.types import PushedWorkInfo
+# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
+from syn_api.types import PushedWorkInfo  # noqa: TC001
 from syn_shared.display import EM_DASH
 
 

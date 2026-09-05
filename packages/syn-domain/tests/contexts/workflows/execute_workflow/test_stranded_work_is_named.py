@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +39,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     PhaseDefinition,
+    PushedWork,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     StartExecutionCommand,
@@ -47,6 +48,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+    WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
@@ -128,13 +132,13 @@ def _running_aggregate() -> WorkflowExecutionAggregate:
     return agg
 
 
-async def _fail_with_workspace(workspace: object | None) -> dict[str, Any]:
+async def _fail_with_workspace(workspace: object | None) -> WorkflowFailedEvent:
     """Drive the real #1167 failure with `workspace` still alive for the phase.
 
-    Returns the serialized `WorkflowFailedEvent` - the same dict production
-    hands its projections - because the event is where the fix has to land. A
-    version that only put the branch in the exception message would satisfy an
-    assertion on `str(error)` and change nothing an operator can query.
+    Returns the `WorkflowFailedEvent` the aggregate emitted, because the event
+    is where the fix has to land: a version that only put the branch in the
+    exception message would satisfy an assertion on `str(error)` and change
+    nothing an operator can query.
     """
     processor = _make_processor()
     processor._execution_repo.save = AsyncMock()  # keep the events inspectable
@@ -166,10 +170,12 @@ async def _fail_with_workspace(workspace: object | None) -> dict[str, Any]:
         if type(envelope.event).__name__ == "WorkflowFailedEvent"
     ]
     assert len(failed) == 1, "expected exactly one WorkflowFailedEvent"
-    return WorkflowExecutionProcessor._serialize_event(failed[0])
+    event = failed[0]
+    assert isinstance(event, WorkflowFailedEvent)
+    return event
 
 
-async def _read_back(event_data: dict[str, Any]) -> PhaseExecutionDetail:
+async def _read_back(event: WorkflowFailedEvent) -> PhaseExecutionDetail:
     """The failed phase as the get_execution_detail API would serve it.
 
     Goes through the projection AND `WorkflowExecutionDetail.from_dict`, which
@@ -187,7 +193,9 @@ async def _read_back(event_data: dict[str, Any]) -> PhaseExecutionDetail:
     await detail.on_phase_started(
         {"execution_id": _EXECUTION_ID, "phase_id": _PHASE_ID, "phase_name": "Implement"}
     )
-    await detail.on_workflow_failed(event_data)
+    # Serialized exactly as production serializes it, so a field that survives
+    # the event object but not `model_dump` is caught here.
+    await detail.on_workflow_failed(WorkflowExecutionProcessor._serialize_event(event))
 
     execution = await detail.get_by_id(_EXECUTION_ID)
     assert execution is not None
@@ -234,16 +242,14 @@ async def test_a_pushed_branch_and_sha_are_named_on_the_failure(clone: _Clone) -
     clone.git("push", "origin", _BRANCH)
     on_remote = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
 
-    event_data = await _fail_with_workspace(clone.workspace)
+    failed = await _fail_with_workspace(clone.workspace)
 
-    assert event_data["pushed_work"] == [
-        {"repo": _REPO, "branch": _BRANCH, "commit": on_remote}
-    ], (
+    assert failed.pushed_work == [PushedWork(repo=_REPO, branch=_BRANCH, commit=on_remote)], (
         "the failure must name the branch and the commit the phase pushed; "
-        f"got {event_data['pushed_work']!r}"
+        f"got {failed.pushed_work!r}"
     )
 
-    phase = await _read_back(event_data)
+    phase = await _read_back(failed)
     assert phase.pushed_work is not None
     assert [(w.branch, w.commit) for w in phase.pushed_work] == [(_BRANCH, on_remote)], (
         "the branch and SHA did not survive the projection and read model - "
@@ -263,9 +269,9 @@ async def test_the_reason_the_phase_failed_is_not_replaced_by_where_it_went(
     clone.commit("implementation.py", "work\n")
     clone.git("push", "origin", _BRANCH)
 
-    event_data = await _fail_with_workspace(clone.workspace)
+    failed = await _fail_with_workspace(clone.workspace)
 
-    message = event_data["error_message"]
+    message = failed.error_message
     assert message.index("produced none") < message.index(_BRANCH), (
         "the phase's own failure must come first; the location follows it"
     )
@@ -296,14 +302,14 @@ async def test_a_phase_whose_work_never_reached_a_remote_claims_no_branch(
         "this test is only meaningful while the local commit is off the remote"
     )
 
-    event_data = await _fail_with_workspace(clone.workspace)
+    failed = await _fail_with_workspace(clone.workspace)
 
-    assert event_data["pushed_work"] == [], (
+    assert failed.pushed_work == [], (
         "a phase that pushed nothing must record 'checked, nothing there' - "
-        f"got {event_data['pushed_work']!r}"
+        f"got {failed.pushed_work!r}"
     )
 
-    phase = await _read_back(event_data)
+    phase = await _read_back(failed)
     assert phase.pushed_work == ()
     assert lost not in (phase.error_message or ""), (
         "the failure offers an unpushed SHA as a place to fetch from"
@@ -320,22 +326,22 @@ async def test_a_workspace_that_cannot_answer_records_no_verdict(clone: _Clone) 
     deliberately different data - which is the whole reason the API carries a
     nullable list rather than prose.
     """
-    event_data = await _fail_with_workspace(_Unreachable())
+    failed = await _fail_with_workspace(_Unreachable())
 
-    assert event_data["pushed_work"] is None, (
+    assert failed.pushed_work is None, (
         "a workspace that stopped answering must not be recorded as 'nothing "
-        f"was pushed'; got {event_data['pushed_work']!r}"
+        f"was pushed'; got {failed.pushed_work!r}"
     )
-    phase = await _read_back(event_data)
+    phase = await _read_back(failed)
     assert phase.pushed_work is None
 
 
 async def test_a_failure_with_no_workspace_at_all_records_no_verdict() -> None:
     """A run that dies before provisioning has nobody to ask. Also None."""
-    event_data = await _fail_with_workspace(None)
+    failed = await _fail_with_workspace(None)
 
-    assert event_data["pushed_work"] is None
-    assert (await _read_back(event_data)).pushed_work is None
+    assert failed.pushed_work is None
+    assert (await _read_back(failed)).pushed_work is None
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +357,10 @@ async def test_the_unreachable_workspace_still_fails_for_its_own_reason() -> Non
     about a different subject, on the path where the reader most needs the
     original.
     """
-    event_data = await _fail_with_workspace(_Unreachable())
+    failed = await _fail_with_workspace(_Unreachable())
 
-    assert "produced none" in event_data["error_message"]
-    assert event_data["error_type"] == "PhaseProducedNoDeclaredOutputError"
+    assert "produced none" in failed.error_message
+    assert failed.error_type == "PhaseProducedNoDeclaredOutputError"
 
 
 # ---------------------------------------------------------------------------

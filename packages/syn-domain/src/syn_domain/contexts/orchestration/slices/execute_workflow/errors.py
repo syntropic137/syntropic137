@@ -6,11 +6,12 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    PushedWork,
-)
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        PushedWork,
+    )
 
 
 def describe_exception(error: BaseException) -> str:
