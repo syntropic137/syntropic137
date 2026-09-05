@@ -44,6 +44,77 @@ def _repo_full_name(url: str) -> str:
     return f"{parts[-2]}/{parts[-1].removesuffix('.git')}"
 
 
+class RepoNameCollisionError(Exception):
+    """Raised when two different repositories would clone into one directory."""
+
+    def __init__(self, destination: str, first_url: str, second_url: str) -> None:
+        self.destination = destination
+        self.first_url = first_url
+        self.second_url = second_url
+        super().__init__(
+            f"Repository name collision on {destination}: {first_url} and "
+            f"{second_url} are different repositories that would both be cloned "
+            f"there. Only the first would be cloned; the second would be silently "
+            f"skipped by the idempotency guard, leaving any phase that works in "
+            f"{destination} on the wrong repository - and able to push to it. "
+            f"Remove one of them from this workflow's repos list, or run them as "
+            f"separate executions."
+        )
+
+
+def _clone_destinations(urls: list[str]) -> list[tuple[str, str]]:
+    """Map each repository URL to the directory it is cloned into.
+
+    The destination is the bare repo name under ``/workspace/repos`` - the
+    shape ADR-058 specifies, and the one ``$SYN_ALL_REPOS``, the workspace
+    prompt's tree and ``unpushed_work_guard``'s ``find`` all already read.
+    That shape cannot express two orgs owning the same repo name, so this is
+    where that is caught rather than discovered later (#1223).
+
+    Listing one repository more than once is DE-DUPLICATED, not refused. The
+    ``.git`` and trailing-slash spellings name the same repo, the destination
+    is unambiguous, and cloning it twice is precisely the no-op that the
+    ``[ -d ... ]`` guard on each clone line exists to make safe. Refusing it
+    would break a harmless list assembled from two overlapping sources and
+    buy no correctness.
+
+    Two DIFFERENT repositories claiming one directory IS refused, because
+    there is no right answer available: whichever clones first owns the
+    directory, the second is silently skipped, and a phase told to work in
+    that directory then reads - and can push to - the wrong org's code.
+
+    Comparison is case-SENSITIVE, matching the filesystem it describes:
+    ``/workspace`` is ext4 in the workspace image, where ``API-Service`` and
+    ``api-service`` are two directories. Both clone, both are reachable at
+    the paths a prompt would name, so refusing them would refuse a working
+    configuration. On a case-insensitive filesystem they would collide and
+    this comparison would have to case-fold to stay correct.
+
+    Args:
+        urls: Full repository URLs, in the order they were configured.
+
+    Returns:
+        ``(url, destination)`` in configured order, one entry per distinct
+        repository.
+
+    Raises:
+        RepoNameCollisionError: Two different repositories map to one
+            destination directory.
+    """
+    claimed_by: dict[str, str] = {}
+    destinations: list[tuple[str, str]] = []
+    for url in urls:
+        destination = f"/workspace/repos/{_repo_name(url)}"
+        incumbent = claimed_by.get(destination)
+        if incumbent is not None:
+            if _repo_full_name(incumbent) == _repo_full_name(url):
+                continue
+            raise RepoNameCollisionError(destination, incumbent, url)
+        claimed_by[destination] = url
+        destinations.append((url, destination))
+    return destinations
+
+
 def _resolve_claude_credentials() -> tuple[str | None, str | None]:
     """Resolve Claude API credentials from settings."""
     from syn_shared.settings import get_settings
@@ -336,6 +407,12 @@ class SetupPhaseSecrets:
 
         Returns:
             Complete bash script string to run during the setup phase.
+
+        Raises:
+            RepoNameCollisionError: Two configured repositories would be cloned
+                into the same directory (#1223). Raised here, during
+                provisioning, so the execution is refused before any agent runs
+                rather than one repo being silently skipped.
         """
         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
         self._append_codex_auth(lines)
@@ -407,6 +484,9 @@ class SetupPhaseSecrets:
     def _append_repo_clones(self, lines: list[str]) -> None:
         """Append repository clone commands with idempotency guards.
 
+        Destinations come from ``_clone_destinations``, which owns both the
+        naming scheme and the refusal when two repos claim one directory.
+
         Submodules are initialized in a separate step rather than via
         ``git clone --recurse-submodules``. A submodule URL points wherever the
         repo author put it, which is frequently a repo the installation token
@@ -416,6 +496,10 @@ class SetupPhaseSecrets:
         tolerant means a repo with an unreachable submodule still lands, and
         the reason is visible in the setup log.
         """
+        # Resolved BEFORE any line is appended: a collision refuses the whole
+        # execution, so no half-built script should exist to be reasoned about.
+        destinations = _clone_destinations(self.repositories)
+
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
@@ -449,9 +533,8 @@ class SetupPhaseSecrets:
             lines.append(
                 f'git config --global --add url."https://github.com/".insteadOf "{ssh_prefix}"'
             )
-        for url in self.repositories:
+        for url, dest in destinations:
             name = _repo_name(url)
-            dest = f"/workspace/repos/{name}"
             lines.append(
                 f"[ -d {shlex.quote(dest)} ] || git clone {shlex.quote(url)} {shlex.quote(dest)}"
             )
