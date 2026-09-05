@@ -154,6 +154,9 @@ class OperationInfo(BaseModel):
     timestamp: datetime | str | None = None
     duration_seconds: float | None = None
     success: bool = True
+    """See `PhaseOperationInfo.success` - same field, same rule, other endpoint."""
+    error_message: str | None = None
+    """Why this operation's subject went wrong, when something did (#1196)."""
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
@@ -760,7 +763,9 @@ def _to_operation_info(op: ToolOperation) -> OperationInfo:
         operation_type=op.operation_type,
         timestamp=str(op.timestamp) if op.timestamp else None,
         duration_seconds=(op.duration_ms / 1000.0) if op.duration_ms else None,
+        # See `_map_phase_to_response` for why None still renders as True.
         success=op.success if op.success is not None else True,
+        error_message=op.error_message,
         tool_name=op.tool_name,
         tool_use_id=op.tool_use_id,
         tool_input=_parse_tool_input(op.input_preview),

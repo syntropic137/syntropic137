@@ -16,6 +16,26 @@ class PhaseOperationInfo(BaseModel):
     tool_name: str | None = None
     tool_use_id: str | None = None
     success: bool = True
+    """Whether this operation's subject went wrong.
+
+    A row whose type IS a failure (`session_error`, `error`,
+    `tool_execution_failed`) now reports False, decided once in
+    `session_tools_verdict.read_verdict` (#1196). It used to report True here
+    for every one of them, because the projection had nothing to say and this
+    layer read that silence as a yes.
+
+    True still means "nothing reported a failure", not "it finished and
+    succeeded" - a `tool_execution_started` row has no verdict yet. That
+    remaining default is a DISPLAY choice, kept because the dashboard renders
+    this field as a strict boolean; see `_map_phase_to_response`.
+    """
+    error_message: str | None = None
+    """What went wrong, when something did.
+
+    Never the empty string: an operation that reports a failure and no reason
+    is the defect this field exists to close, so the projection substitutes
+    `NO_REASON_RECORDED` rather than leaving it blank.
+    """
 
 
 class PhaseExecutionInfo(BaseModel):

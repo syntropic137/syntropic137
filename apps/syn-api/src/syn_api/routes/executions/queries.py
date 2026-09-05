@@ -371,7 +371,15 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
             timestamp=str(op.timestamp) if op.timestamp else None,
             tool_name=op.tool_name,
             tool_use_id=op.tool_use_id,
+            # `None` here means the row carries no verdict (a tool that has
+            # only started), NOT that it went fine. It is rendered True
+            # because the dashboard reads this field as a strict boolean and
+            # would paint every in-flight operation red otherwise. What
+            # changed in #1196 is that a row which DID fail no longer arrives
+            # as None: `read_verdict` settles it to False upstream, so this
+            # default can no longer swallow a failure.
             success=op.success if op.success is not None else True,
+            error_message=op.error_message,
         )
         for op in (phase.operations or [])
     ]

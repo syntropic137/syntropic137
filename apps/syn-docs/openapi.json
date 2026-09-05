@@ -8474,6 +8474,17 @@
             "title": "Success",
             "default": true
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "input_tokens": {
             "anyOf": [
               {
@@ -9196,6 +9207,17 @@
             "type": "boolean",
             "title": "Success",
             "default": true
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
           }
         },
         "type": "object",
@@ -11641,6 +11663,17 @@
               }
             ],
             "title": "Success"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
           }
         },
         "type": "object",
