@@ -1859,6 +1859,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Type Counts */
             type_counts?: {
                 [key: string]: number;
@@ -2701,6 +2706,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;
@@ -4213,6 +4223,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;

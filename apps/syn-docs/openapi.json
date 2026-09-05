@@ -5535,6 +5535,11 @@
             "title": "Page Size",
             "default": 50
           },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
+          },
           "type_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -7394,6 +7399,11 @@
             "type": "integer",
             "title": "Page Size",
             "default": 50
+          },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
           },
           "status_counts": {
             "additionalProperties": {
@@ -10404,6 +10414,11 @@
             "type": "integer",
             "title": "Page Size",
             "default": 50
+          },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
           },
           "status_counts": {
             "additionalProperties": {

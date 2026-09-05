@@ -62,6 +62,7 @@ export function ExecutionList() {
     page,
     pageSize,
     total,
+    excludedUndated,
     setPage,
   } = useExecutionList()
 
@@ -129,6 +130,7 @@ export function ExecutionList() {
         page={page}
         pageSize={pageSize}
         total={total}
+        excludedUndated={excludedUndated}
         onPageChange={setPage}
         itemLabel="execution"
       />

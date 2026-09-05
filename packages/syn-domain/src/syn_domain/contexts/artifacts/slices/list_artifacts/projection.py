@@ -22,7 +22,6 @@ from syn_domain.pagination import (
     ProjectionRecord,
     matches_search,
     paginate,
-    within_window,
 )
 
 
@@ -158,6 +157,26 @@ class ArtifactListProjection(AutoDispatchProjection):
         )
         return [ArtifactSummary.from_dict(d) for d in data]
 
+    async def on_artifact_creation_time_recovered(self, event_data: dict) -> None:
+        """Handle ArtifactCreationTimeRecovered event (#1215).
+
+        Fills the date, never moves it. The aggregate already refuses to emit
+        this event for an artifact that has one, so this is the second of two
+        independent guards; it is here as well because a projection is replayed
+        against whatever is in the store, including events written before that
+        rule existed, and an out-of-order replay must not let a recovered value
+        overwrite the real one from ArtifactCreated.
+        """
+        artifact_id = event_data.get("artifact_id", "")
+        created_at = event_data.get("created_at")
+        if not artifact_id or not created_at:
+            return
+        data = await self._store.get(self.PROJECTION_NAME, artifact_id)
+        if data is None or data.get("created_at"):
+            return
+        data["created_at"] = created_at
+        await self._store.save(self.PROJECTION_NAME, artifact_id, data)
+
     async def on_artifact_updated(self, event_data: dict) -> None:
         """Handle ArtifactUpdated event."""
         artifact_id = event_data.get("artifact_id", "")
@@ -278,9 +297,7 @@ class ArtifactListProjection(AutoDispatchProjection):
         }
 
         def base(record: ProjectionRecord) -> bool:
-            return within_window(
-                record.get("created_at"), created_after, created_before
-            ) and matches_search(
+            return matches_search(
                 search,
                 record.get("id"),
                 record.get("name"),
@@ -299,7 +316,9 @@ class ArtifactListProjection(AutoDispatchProjection):
             base_predicate=base,
             status_of=lambda r: str(r.get("artifact_type") or ""),
             statuses=artifact_types,
-            sort_key=lambda r: str(r.get("created_at") or ""),
+            timestamp_of=lambda r: r.get("created_at"),
+            after=created_after,
+            before=created_before,
             to_row=ArtifactSummary.from_dict,
             offset=offset,
             limit=limit,

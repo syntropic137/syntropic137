@@ -182,6 +182,18 @@ class ExecutionListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 50
+    excluded_undated: int = 0
+    """Executions dropped from this window because they carry no date at all.
+
+    ``total`` cannot say why a row is missing: "older than the bound" and
+    "undated" leave it looking identical, so narrowing a window showed an
+    unexplained gap (#1215). With this the reader gets "755 of 1037, 274
+    undated" instead.
+
+    Zero when the request gave no window - an unbounded query evaluates every
+    row and returns the undated ones. Non-zero means rows exist that this
+    filter could not judge, NOT that they failed it.
+    """
     status_counts: dict[str, int] = Field(default_factory=dict)
     """Matching executions tallied by status, ignoring the status filter itself.
 

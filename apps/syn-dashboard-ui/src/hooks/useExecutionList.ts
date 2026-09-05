@@ -82,6 +82,7 @@ export function useExecutionList(): UseExecutionListResult {
         rows: response.executions.map(toExecutionListItem),
         total: response.total,
         statusCounts: response.status_counts ?? {},
+        excludedUndated: response.excluded_undated,
       }
     },
     [],
