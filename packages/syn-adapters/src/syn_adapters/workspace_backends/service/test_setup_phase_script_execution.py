@@ -392,3 +392,93 @@ class TestSshSubmoduleFormsAreRewritten:
         ).stdout.split()
         assert "git@github.com:" in got
         assert "ssh://git@github.com/" in got
+
+
+class TestCloneReposFalseSkipsOnlyTheCheckout:
+    """A phase can be credentialed for a repo without being given a copy of it.
+
+    Issue #1187: `open_pr` reads one artifact, checks a remote ref and calls
+    `gh pr create`. It was paying a full clone plus recursive submodule init
+    for that, under the shortest timeout in the workflow, and timing out in
+    roughly a third of runs. Before `clone_repos`, the only way to skip the
+    clone was to pass no repositories at all -- which also dropped
+    ~/.git-credentials and the gh hosts.yml entry, i.e. the credential the
+    phase's entire job depends on.
+
+    So the claim under test is a CONJUNCTION, and both halves matter equally:
+    the checkout does not happen, AND everything else still does. A change
+    that satisfied only the first half would leave the phase unable to open
+    a PR at all, which is worse than the timeout it replaced.
+
+    These run the real script rather than reading the flag back, because "the
+    flag is set" and "git was never asked to clone" are different claims and
+    only the second one is the bug.
+    """
+
+    def test_git_is_never_asked_to_clone_but_is_still_asked_to_store_credentials(
+        self, harness, tmp_path: Path
+    ) -> None:
+        """Both runs share one argv log, so the counts below are cumulative.
+
+        Ordering is load-bearing and deliberate: the no-clone script runs
+        FIRST against an empty log, so its zero cannot be an artifact of the
+        clone guard finding an existing directory. The default script then
+        runs against the same log and takes the count to one. That contrast
+        is the point -- a `clone_repos` that changed nothing would leave the
+        first assertion reading 1, and asserting only the second would pass
+        just as well with the field deleted.
+        """
+        no_clone = harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert no_clone.proc.returncode == 0, no_clone.proc.stderr
+        assert no_clone.count("CALL:clone") == 0
+        assert no_clone.count("CALL:submodule GIT_ALLOW_PROTOCOL=https") == 0
+        # Not merely "git was not asked to clone" -- git WAS asked to do the
+        # credential setup, in the same run. Without this the test would pass
+        # against a script that did nothing at all.
+        assert no_clone.count("CALL:other") > 0
+
+        with_clone = harness(_one_repo())
+        assert with_clone.count("CALL:clone") == 1
+
+    def test_the_gh_credential_the_phase_actually_uses_is_still_written(
+        self, harness, tmp_path: Path
+    ) -> None:
+        """`gh pr create` reads hosts.yml. Skipping the clone must not skip this."""
+        run = harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert run.proc.returncode == 0, run.proc.stderr
+
+        hosts = tmp_path / "home" / ".config" / "gh" / "hosts.yml"
+        assert hosts.exists(), "gh would have no credential for this repo"
+        assert "tok-a" in hosts.read_text()
+
+        credentials = tmp_path / "home" / ".git-credentials"
+        assert credentials.exists()
+        assert "github.com/org/repo-a" in credentials.read_text()
+
+    def test_no_repos_directory_is_created(self, harness, tmp_path: Path) -> None:
+        """The observable consequence, checked on the filesystem.
+
+        `mkdir -p /workspace/repos` lives inside the clone block, so a
+        no-clone workspace should not have the directory at all. Asserted
+        against the rewritten workspace root rather than the script text.
+        """
+        harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert not (tmp_path / "ws" / "repos").exists()

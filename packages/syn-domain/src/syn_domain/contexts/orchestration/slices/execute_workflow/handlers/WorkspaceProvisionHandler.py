@@ -449,6 +449,7 @@ class WorkspaceProvisionHandler:
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
+                clone_repos=phase.clone_repos,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -477,13 +478,22 @@ class WorkspaceProvisionHandler:
         workspace: ManagedWorkspace,
         effective_repos: list[str],
         *,
+        clone_repos: bool,
         include_codex_auth: bool,
     ) -> None:
-        """Run setup phase and inject synthetic context files (ADR-058)."""
+        """Run setup phase and inject synthetic context files (ADR-058).
+
+        ``clone_repos=False`` (#1187) still hands the full repo list to
+        ``SetupPhaseSecrets``, so the phase keeps its per-repo git credentials
+        and its gh hosts.yml entry; only the checkout is skipped. What the
+        workspace ends up CONTAINING is the one thing that changes, which is
+        why the synthetic context below is derived from it too.
+        """
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
+            clone_repos=clone_repos,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
         )
@@ -498,13 +508,18 @@ class WorkspaceProvisionHandler:
         # Both files are identical: direct @-imports of each repo's AGENTS.md and
         # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
         # preserving maximum @import depth for repo-internal context.
-        context = self._generate_workspace_context(effective_repos)
+        #
+        # Only for repos that are actually ON DISK. Every line of this file is
+        # `@/workspace/repos/<name>/...`, so emitting it for a phase that did
+        # not clone would point the agent at paths that do not exist.
+        cloned_repos = effective_repos if clone_repos else []
+        context = self._generate_workspace_context(cloned_repos)
         if context:
             await workspace.inject_files(
                 [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
             )
             logger.info(
-                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(effective_repos)
+                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(cloned_repos)
             )
 
     async def _materialize_claude_plugins(
