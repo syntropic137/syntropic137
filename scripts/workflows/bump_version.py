@@ -76,6 +76,7 @@ def schema_files() -> list[Path]:
 def lockfile() -> Path:
     return ROOT / LOCKFILE_RELPATH
 
+
 # Only OUR workspace members. `agentic-*` and `event-sourcing-python` are
 # submodules with independent versioning and must never be touched here.
 LOCKFILE_PACKAGES = (

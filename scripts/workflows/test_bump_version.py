@@ -10,11 +10,10 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
-
-from bump_version import to_pep440 as bv_to_pep440
 from typing import TYPE_CHECKING
 
 import pytest
+from bump_version import to_pep440 as bv_to_pep440
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -101,7 +100,6 @@ class TestCompareVersions:
 # =============================================================================
 
 
-
 _PYPROJECTS = (
     "pyproject.toml",
     "apps/syn-api/pyproject.toml",
@@ -118,6 +116,7 @@ _PACKAGE_JSONS = (
     "apps/syn-dashboard-ui/package.json",
     "apps/syn-docs/package.json",
 )
+
 
 def _make_version_files(tmp_path: Path, version: str) -> None:
     """Write every version-carrying file at the given version into tmp_path.
@@ -175,7 +174,7 @@ def _make_version_files(tmp_path: Path, version: str) -> None:
     lock.write_text(
         "".join(
             f'[[package]]\nname = "{name}"\nversion = "{lock_version}"\n'
-            f"source = {{ editable = \".\" }}\n\n"
+            f'source = {{ editable = "." }}\n\n'
             for name in (
                 "syntropic137",
                 "syn-adapters",
@@ -188,6 +187,7 @@ def _make_version_files(tmp_path: Path, version: str) -> None:
             )
         )
     )
+
 
 class TestCheckConsistency:
     def test_all_match(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -388,12 +388,8 @@ class TestDerivedFilesAreChecked:
 
     def _patch(self, bv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(bv, "ROOT", tmp_path)
-        monkeypatch.setattr(
-            bv, "PYPROJECT_FILES", [tmp_path / p for p in _PYPROJECTS]
-        )
-        monkeypatch.setattr(
-            bv, "PACKAGE_JSON_FILES", [tmp_path / p for p in _PACKAGE_JSONS]
-        )
+        monkeypatch.setattr(bv, "PYPROJECT_FILES", [tmp_path / p for p in _PYPROJECTS])
+        monkeypatch.setattr(bv, "PACKAGE_JSON_FILES", [tmp_path / p for p in _PACKAGE_JSONS])
 
     def test_stale_schema_id_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -430,7 +426,7 @@ class TestDerivedFilesAreChecked:
         import bump_version as bv
 
         self._patch(bv, tmp_path, monkeypatch)
-        assert '0.28.0b9' in (tmp_path / "uv.lock").read_text()
+        assert "0.28.0b9" in (tmp_path / "uv.lock").read_text()
         assert bv.check_consistency() is True
 
     def test_bump_rewrites_schema_ids(
