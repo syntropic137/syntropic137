@@ -510,6 +510,31 @@ Merge the PR as a merge commit (not squash, not rebase). This triggers `release-
 
 ## Beta Release
 
+**Two different things share this name. Pick one before you start.** They differ
+in whether anyone other than you is meant to install the result.
+
+| | Test deploy | Published beta |
+|---|---|---|
+| **Question** | "Can I look at the current code running on a host?" | "Can these people install and try this?" |
+| **Audience** | You | Someone else |
+| **Produces** | Container images | Git tag, GitHub Release, images, npm CLI on `next` |
+| **`gh release create`** | **No** | Yes |
+
+Seven `v0.28.0-beta.*` prereleases were created in roughly 48 hours, one per test
+deploy, because only the published-beta path was written down. A release entry
+should mark something worth marking, not every image move.
+
+### Test deploy (images only, no GitHub release)
+
+Build the images, move them to the host, recreate two containers. No tag, no
+release entry, no npm publish. Follow the
+[Test Deploy runbook](deployment/test-deploy.md) - it covers the drain check
+that must precede any container recreation, the four version-carrying files
+`just bump-version` does not touch, and the `INCLUDE_DOCKER_CLI` build arg that
+`just release-local` cannot pass ([#1216](https://github.com/syntropic137/syntropic137/issues/1216)).
+
+### Published beta (a release entry with an audience)
+
 Betas bypass the `release` branch entirely:
 
 ```bash
