@@ -64,6 +64,7 @@ class ArtifactCollectionHandler:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        last_agent_message: str | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
 
@@ -77,6 +78,10 @@ class ArtifactCollectionHandler:
                 produces. Empty means it declared nothing and may legitimately
                 produce nothing; non-empty and unproduced is a failure the
                 collector raises on (#1167).
+            last_agent_message: The last thing this phase's agent said on its
+                stream. Used only when a file it wrote turns out to be empty,
+                as the fallback that stops a lost write failing the whole
+                execution (#1195).
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
@@ -91,6 +96,7 @@ class ArtifactCollectionHandler:
             session_id=session_id,
             phase_name=phase_name,
             output_artifact_types=output_artifact_types,
+            last_agent_message=last_agent_message,
         )
 
         command = ArtifactsCollectedCommand(

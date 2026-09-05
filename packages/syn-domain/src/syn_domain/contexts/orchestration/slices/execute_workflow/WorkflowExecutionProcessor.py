@@ -203,6 +203,7 @@ class WorkflowExecutionProcessor:
             str, tuple[int, int, int, int]
         ] = {}  # (input, output, cache_creation, cache_read)
         self._phase_artifact_ids: dict[str, list[str]] = {}
+        self._phase_said: dict[str, str] = {}  # last agent message, for #1195 recovery
         self._phase_started_at: dict[str, datetime] = {}
 
     async def run(
@@ -595,9 +596,7 @@ class WorkflowExecutionProcessor:
             skill_materializer=self._skill_materializer,
         )
         artifacts = ArtifactCollector(
-            self._artifact_repo,
-            self._artifact_content_storage,
-            self._artifact_query,
+            self._artifact_repo, self._artifact_content_storage, self._artifact_query
         )
         return await provision_handler.handle(
             todo=todo,
@@ -676,6 +675,7 @@ class WorkflowExecutionProcessor:
             started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
         )
         self._phase_tokens[todo.phase_id] = result.tokens
+        self._phase_said[todo.phase_id] = result.stream_result.last_agent_message or ""
         # Store authoritative totals from CLI result event (includes cache tokens)
         self._phase_auth_tokens[todo.phase_id] = (
             result.command.input_tokens,
@@ -745,9 +745,7 @@ class WorkflowExecutionProcessor:
             )
             return
         artifacts = ArtifactCollector(
-            self._artifact_repo,
-            self._artifact_content_storage,
-            self._artifact_query,
+            self._artifact_repo, self._artifact_content_storage, self._artifact_query
         )
         collection_handler = ArtifactCollectionHandler(artifact_collector=artifacts)
         result = await collection_handler.handle(
@@ -757,6 +755,7 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
+            last_agent_message=self._phase_said.pop(todo.phase_id, None),
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
