@@ -2257,11 +2257,21 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 11 package files
+# Bump version across every version-carrying file (manifests, schemas, uv.lock)
 bump-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The script writes the manifests and the schema $id values. uv.lock is
+    # owned by uv and is regenerated rather than hand-edited - a hand-edited
+    # lockfile drifts back the next time anyone runs `uv lock`.
     python3 scripts/workflows/bump_version.py {{version}}
+    echo ""
+    echo "Regenerating uv.lock..."
+    uv lock
+    echo ""
+    python3 scripts/workflows/bump_version.py --check
 
-# Validate all 11 package files have the same version
+# Validate every version-carrying file has the same version
 check-version:
     python3 scripts/workflows/bump_version.py --check
 

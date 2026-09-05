@@ -54,6 +54,32 @@ PACKAGE_JSON_FILES = [
     ROOT / "apps/syn-docs/package.json",
 ]
 
+# The four files `bump-version` used to miss. They carry the version too, and
+# `--check` reporting "OK: All 11 files" while these were stale is how a build
+# shipped schemas advertising the previous version (see the v0.28.0-beta.9 bump).
+SCHEMA_FILES = [
+    ROOT / "schemas/plugin/workflow.schema.json",
+    ROOT / "schemas/plugin/triggers.schema.json",
+    ROOT / "schemas/plugin/phase-frontmatter.schema.json",
+]
+
+LOCKFILE = ROOT / "uv.lock"
+
+# Only OUR workspace members. `agentic-*` and `event-sourcing-python` are
+# submodules with independent versioning and must never be touched here.
+LOCKFILE_PACKAGES = (
+    "syntropic137",
+    "syn-adapters",
+    "syn-api",
+    "syn-collector",
+    "syn-domain",
+    "syn-perf",
+    "syn-shared",
+    "syn-tokens",
+)
+
+SCHEMA_ID_RE = re.compile(r"(/schemas/plugin/v)[^/]+(/)")
+
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")[^"]*(")', re.MULTILINE)
 PACKAGE_JSON_VERSION_RE = re.compile(r'^(\s*"version"\s*:\s*")[^"]*(")', re.MULTILINE)
 
@@ -74,6 +100,33 @@ def read_pyproject_version(path: Path) -> str | None:
 def read_package_json_version(path: Path) -> str | None:
     data = json.loads(path.read_text())
     return data.get("version")
+
+
+def to_pep440(version: str) -> str:
+    """semver -> the form uv writes in uv.lock (0.28.0-beta.9 -> 0.28.0b9)."""
+    for tag, short in (("-alpha.", "a"), ("-beta.", "b"), ("-rc.", "rc")):
+        if tag in version:
+            base, num = version.split(tag, 1)
+            return f"{base}{short}{num}"
+    return version
+
+
+def read_schema_version(path: Path) -> str | None:
+    m = re.search(r"/schemas/plugin/v([^/]+)/", path.read_text())
+    return m.group(1) if m else None
+
+
+def read_lockfile_versions() -> dict[str, str]:
+    """Version recorded for each of OUR workspace members in uv.lock."""
+    if not LOCKFILE.exists():
+        return {}
+    found: dict[str, str] = {}
+    for block in LOCKFILE.read_text().split("[[package]]"):
+        nm = re.search(r'^name = "([^"]+)"', block, re.MULTILINE)
+        vm = re.search(r'^version = "([^"]+)"', block, re.MULTILINE)
+        if nm and vm and nm.group(1) in LOCKFILE_PACKAGES:
+            found[nm.group(1)] = vm.group(1)
+    return found
 
 
 def read_all_versions() -> dict[Path, str | None]:
@@ -191,7 +244,7 @@ def check_release_bump(release_ref: str = "origin/release") -> bool:
 
 
 def check_consistency() -> bool:
-    """Validate all 11 files have the same version. Returns True if consistent."""
+    """Validate every version-carrying file agrees. Returns True if consistent."""
     versions = read_all_versions()
     unique = set(versions.values())
 
@@ -200,19 +253,46 @@ def check_consistency() -> bool:
         print(f"ERROR: Could not read version from: {', '.join(missing)}", file=sys.stderr)
         return False
 
-    if len(unique) == 1:
-        print(f"OK: All 11 files at v{unique.pop()}")
-        return True
+    if len(unique) != 1:
+        print("ERROR: Version mismatch across manifests:", file=sys.stderr)
+        for path, version in sorted(versions.items(), key=lambda x: str(x[0])):
+            print(f"  {path.relative_to(ROOT)}: {version}", file=sys.stderr)
+        return False
 
-    print("ERROR: Version mismatch across files:", file=sys.stderr)
-    for path, version in sorted(versions.items(), key=lambda x: str(x[0])):
-        rel = path.relative_to(ROOT)
-        print(f"  {rel}: {version}", file=sys.stderr)
-    return False
+    version = unique.pop()
+    stale: list[str] = []
+
+    # Schema $id values and uv.lock records carry the version too. This check
+    # used to stop at the manifests and report OK while these were stale, which
+    # is how a build shipped schemas advertising the previous version.
+    for path in SCHEMA_FILES:
+        got = read_schema_version(path)
+        if got != version:
+            stale.append(f"{path.relative_to(ROOT)}: {got} (expected {version})")
+
+    expected_lock = to_pep440(version)
+    lock_versions = read_lockfile_versions()
+    missing = [n for n in LOCKFILE_PACKAGES if n not in lock_versions]
+    if missing:
+        stale.append(f"uv.lock: no record for {', '.join(sorted(missing))}")
+    for name, got in sorted(lock_versions.items()):
+        if got != expected_lock:
+            stale.append(f"uv.lock [{name}]: {got} (expected {expected_lock})")
+
+    if stale:
+        print("ERROR: manifests agree but derived files are stale:", file=sys.stderr)
+        for line in stale:
+            print(f"  {line}", file=sys.stderr)
+        print("\nRun `just bump-version <version>`, which regenerates them.", file=sys.stderr)
+        return False
+
+    total = len(versions) + len(SCHEMA_FILES) + 1
+    print(f"OK: all {total} version-carrying files at v{version}")
+    return True
 
 
 def bump(target: str) -> None:
-    """Update all 11 files to the target version.
+    """Update every version-carrying file except uv.lock, which uv owns.
 
     Pre-validates all files before writing any changes. If any file
     is missing a version field, fails without modifying anything.
@@ -251,6 +331,14 @@ def bump(target: str) -> None:
         else:
             pending.append((path, new_text))
 
+    for path in SCHEMA_FILES:
+        text = path.read_text()
+        new_text = SCHEMA_ID_RE.sub(rf"\g<1>{target}\2", text)
+        if new_text == text:
+            errors.append(str(path.relative_to(ROOT)))
+        else:
+            pending.append((path, new_text))
+
     if errors:
         print(f"ERROR: No version field found in: {', '.join(errors)}", file=sys.stderr)
         print("No files were modified.", file=sys.stderr)
@@ -262,7 +350,9 @@ def bump(target: str) -> None:
         print(f"  ✓ {path.relative_to(ROOT)}")
 
     print(f"\nDone. Updated {len(pending)} files to v{target}.")
-    print(f"Next: git add -A && git commit -m 'chore: bump version to v{target}'")
+    print("uv.lock is owned by uv and is NOT written here - `just bump-version`")
+    print("runs `uv lock` for it. If you called this script directly, run that")
+    print("now, or --check will fail.")
 
 
 def main() -> None:
