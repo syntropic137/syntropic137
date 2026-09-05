@@ -228,6 +228,13 @@ class ExecutablePhase:
     # Timeout for this phase (can override agent config)
     timeout_seconds: int | None = None
 
+    # Whether this phase's workspace gets the repos checked out (#1187).
+    # Provisioning was phase-blind: the only opt-out was workflow-level
+    # `requires_repos: false`, which applies to every phase at once. Carried
+    # here rather than on `agent_config` because it decides what the WORKSPACE
+    # contains, not how the agent is invoked.
+    clone_repos: bool = True
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.
