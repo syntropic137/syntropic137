@@ -98,14 +98,35 @@ async def quarantine_unpushed_work(
             pushed to ``refs/syn/lost/<execution-id>/<phase-id>`` in each
             affected repository, and the error names those refs.
         WorkspaceInspectionFailedError: a command this gate depends on did not
-            run, so there is no verdict to give. Nothing was quarantined.
+            run, so there is no verdict to give for the repositories it had
+            not reached yet. Any it HAD already quarantined are named in the
+            error: work saved before the failure is not unsaved by it.
     """
     ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
     quarantined: list[QuarantinedWork] = []
-    for repo in await _repositories(workspace):
-        work = await _unsaved_work(workspace, repo)
-        if work is not None:
-            quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
+    try:
+        for repo in await _repositories(workspace):
+            work = await _unsaved_work(workspace, repo)
+            if work is not None:
+                quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
+    except WorkspaceInspectionFailedError as unreadable:
+        # PARTIAL PROGRESS IS STILL PROGRESS, and this loop is the only place
+        # that knows there was any. Repositories are done ONE AT A TIME, so by
+        # the time the third one stops answering, the first two's quarantine
+        # refs have already been pushed and are durable in their origins.
+        # Re-raised carrying them because the bare "NOTHING WAS QUARANTINED"
+        # the error would otherwise print is, in that case, false in the one
+        # direction that costs the work: an operator told nothing was saved
+        # does not go looking for a ref that exists. That is #1184 itself -
+        # a confident statement nobody checked - pointing the other way.
+        #
+        # Empty when the FIRST repository is the one that failed, and the
+        # message then says nothing was saved, because nothing was.
+        raise WorkspaceInspectionFailedError(
+            doing=unreadable.doing,
+            failure=unreadable.failure,
+            quarantined=tuple(quarantined),
+        ) from unreadable
     if quarantined:
         raise UnpushedWorkQuarantinedError(phase_id=phase_id, quarantined=tuple(quarantined))
 

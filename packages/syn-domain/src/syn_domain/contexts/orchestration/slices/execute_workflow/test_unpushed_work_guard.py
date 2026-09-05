@@ -127,12 +127,20 @@ class _Workspace:
 
 
 class _Clone:
-    """A clone of a bare origin, plus the reads the assertions need."""
+    """A named clone of its own bare origin, plus the reads the assertions need.
 
-    def __init__(self, root: Path) -> None:
+    NAMED because the gate walks a workspace's repositories one at a time, so
+    a workspace holding two of them is a different program from one holding
+    one - and each needs its own origin for "is this work durable" to be a
+    question about that repository rather than a shared one.
+    """
+
+    def __init__(self, root: Path, name: str) -> None:
         self.root = root
-        self.origin = root / "origin.git"
-        self.path = root / "repos" / _REPO
+        self.name = name
+        self.origin = root / f"{name}.origin.git"
+        self.seed = root / f"{name}.seed"
+        self.path = root / "repos" / name
         self.workspace = _Workspace(root)
 
     def git(self, *args: str) -> str:
@@ -162,7 +170,7 @@ class _Clone:
 
     def advance_origin_main(self, name: str, content: str) -> None:
         """Move origin/main on, the way another PR merging does, and fetch it."""
-        seed = self.root / "seed"
+        seed = self.seed
         (seed / name).write_text(content)
         _git("add", name, cwd=seed, home=self.root / "home")
         _git("commit", "-m", f"add {name}", cwd=seed, home=self.root / "home")
@@ -188,27 +196,36 @@ class _Clone:
         )
 
 
-@pytest.fixture
-def clone(tmp_path: Path) -> _Clone:
-    """A pushed-up-to-date clone on a feature branch - a phase's starting point."""
-    repo = _Clone(tmp_path)
-    (tmp_path / "home").mkdir(exist_ok=True)
+def _clone_repository(root: Path, name: str = _REPO) -> _Clone:
+    """A bare origin, a seeded main, and a clone of it on a feature branch.
+
+    A function rather than only a fixture because the interesting workspace
+    has TWO repositories in it, and pytest cannot hand the same fixture out
+    twice under different names.
+    """
+    repo = _Clone(root, name)
+    (root / "home").mkdir(exist_ok=True)
     repo.origin.mkdir(parents=True)
-    _git("init", "--bare", "--initial-branch=main", ".", cwd=repo.origin, home=tmp_path / "home")
+    _git("init", "--bare", "--initial-branch=main", ".", cwd=repo.origin, home=root / "home")
 
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    _git("init", "--initial-branch=main", ".", cwd=seed, home=tmp_path / "home")
-    (seed / "README.md").write_text("seed\n")
-    _git("add", "README.md", cwd=seed, home=tmp_path / "home")
-    _git("commit", "-m", "seed", cwd=seed, home=tmp_path / "home")
-    _git("push", str(repo.origin), "main", cwd=seed, home=tmp_path / "home")
+    repo.seed.mkdir()
+    _git("init", "--initial-branch=main", ".", cwd=repo.seed, home=root / "home")
+    (repo.seed / "README.md").write_text("seed\n")
+    _git("add", "README.md", cwd=repo.seed, home=root / "home")
+    _git("commit", "-m", "seed", cwd=repo.seed, home=root / "home")
+    _git("push", str(repo.origin), "main", cwd=repo.seed, home=root / "home")
 
-    repo.path.parent.mkdir(parents=True)
-    _git("clone", str(repo.origin), str(repo.path), cwd=tmp_path, home=tmp_path / "home")
+    repo.path.parent.mkdir(parents=True, exist_ok=True)
+    _git("clone", str(repo.origin), str(repo.path), cwd=root, home=root / "home")
     repo.git("checkout", "-b", _BRANCH)
     repo.git("push", "-u", "origin", _BRANCH)
     return repo
+
+
+@pytest.fixture
+def clone(tmp_path: Path) -> _Clone:
+    """A pushed-up-to-date clone on a feature branch - a phase's starting point."""
+    return _clone_repository(tmp_path)
 
 
 async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clone) -> None:
@@ -438,17 +455,24 @@ def _operation(command: list[str]) -> str:
 
 
 class _BreaksOn:
-    """The real workspace, except one command answers like a dead container."""
+    """The real workspace, except one command answers like a dead container.
 
-    def __init__(self, inner: _Workspace, failing: str) -> None:
+    ``in_repo`` narrows that to a single repository, which a multi-repository
+    workspace needs: without it "status fails" means status fails everywhere,
+    and then no repository ever gets far enough to be quarantined before the
+    failure - which is precisely the transition worth testing.
+    """
+
+    def __init__(self, inner: _Workspace, failing: str, *, in_repo: str | None = None) -> None:
         self._inner = inner
         self._failing = failing
+        self._in_repo = in_repo
         self.attempted: list[str] = []
 
     async def execute(self, command: list[str]) -> ExecutionResult:
         operation = _operation(command)
         self.attempted.append(operation)
-        if operation == self._failing:
+        if operation == self._failing and (self._in_repo is None or self._in_repo in command):
             return _UNREACHABLE
         return await self._inner.execute(command)
 
@@ -712,3 +736,94 @@ async def test_a_repository_with_no_commits_yet_is_not_an_unreachable_one(
     message = str(raised.value)
     assert "brand-new (branch (no commits))" in message
     assert "written.py" in message
+
+
+# --------------------------------------------------------------------------
+# More than one repository, which is where "nothing was saved" can be a lie.
+#
+# `quarantine_unpushed_work` walks a workspace's repositories SEQUENTIALLY, so
+# the first one's work can already be pushed and durable in its own origin at
+# the moment a command for the second one fails. Every fixture above holds
+# exactly ONE repository, and at that size the program that reports those
+# survivors and the program that discards them are indistinguishable.
+# --------------------------------------------------------------------------
+
+
+async def test_work_quarantined_before_a_later_repository_failed_is_reported_as_saved(
+    clone: _Clone, tmp_path: Path
+) -> None:
+    """The gate must not tell an operator nothing was saved when something was.
+
+    THE DEFECT THIS PINS. `WorkspaceInspectionFailedError` used to append
+    NOTHING WAS QUARANTINED unconditionally. On a workspace where an earlier
+    repository's quarantine ref had ALREADY been pushed, that sentence was
+    false in the one direction that costs the work: an operator told nothing
+    was saved does not go looking for a ref that exists. That is #1184 itself -
+    a confident claim nobody checked - pointing the other way, which is why the
+    wording is a correctness surface here and not prose.
+
+    The surviving ref is read back out of `alpha`'s OWN origin rather than off
+    the error object, because the claim under test is that the work is durable
+    and only the origin can answer that.
+    """
+    saved, doomed = _clone_repository(tmp_path, "alpha"), clone
+    assert saved.path.name < doomed.path.name, (
+        "the gate walks repositories in sorted order, and this test needs "
+        "'alpha' fully quarantined BEFORE the other repository stops answering"
+    )
+    lost = saved.commit("stranded.py", "work only the quarantine ref will hold\n")
+
+    workspace = _BreaksOn(clone.workspace, "status", in_repo=str(doomed.path))
+    run = _PhaseRun(workspace)
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    # (1) alpha's work IS durable - the ref exists in alpha's origin and the
+    #     commit that would have been lost is reachable from it.
+    assert saved.origin_git("rev-parse", "--verify", f"{_QUARANTINE_REF}^{{commit}}")
+    assert saved.reachable_in_origin(lost, _QUARANTINE_REF), (
+        "alpha's unpushed commit is not reachable from its quarantine ref"
+    )
+    # (2) The repository that stopped answering got no ref: the gate failed
+    #     before it had anything to write, which is what makes (3) a partial
+    #     rather than a total.
+    assert not [ref for ref in doomed.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+    # (3) THE ASSERTION THIS TEST EXISTS FOR: the error text is TRUE.
+    message = str(raised.value)
+    assert "NOTHING WAS QUARANTINED" not in message, (
+        f"the gate claimed nothing was saved while alpha's quarantine ref "
+        f"exists in its origin:\n{message}"
+    )
+    assert "alpha" in message, "the operator is not told WHICH repository survived"
+    assert f"quarantined at {_QUARANTINE_REF}" in message
+    assert f"recover with: git fetch origin {_QUARANTINE_REF}" in message
+
+    # And the phase still fails: naming the survivors is not softening the verdict.
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
+
+
+async def test_a_failure_in_the_first_repository_still_says_nothing_was_quarantined(
+    clone: _Clone, tmp_path: Path
+) -> None:
+    """The other half: when nothing WAS saved, the message must still say so.
+
+    Fixing the multi-repository lie by making the wording vague would trade one
+    lost half of the truth for the other. So this is the same two-repository
+    workspace with the failure moved to the FIRST repository - genuinely
+    nothing durable - and the categorical claim has to come back.
+    """
+    first, second = _clone_repository(tmp_path, "alpha"), clone
+    second.commit("never-pushed.py", "work that never got its turn\n")
+
+    run = _PhaseRun(_BreaksOn(clone.workspace, "status", in_repo=str(first.path)))
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    message = str(raised.value)
+    assert "NOTHING WAS QUARANTINED" in message
+    assert "quarantined at" not in message
+    assert not [ref for ref in first.origin_refs() if ref.startswith("refs/syn/lost/")]
+    assert not [ref for ref in second.origin_refs() if ref.startswith("refs/syn/lost/")]
+    run.aggregate.complete_phase.assert_not_called()

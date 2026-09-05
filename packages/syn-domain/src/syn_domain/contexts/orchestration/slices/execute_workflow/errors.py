@@ -146,6 +146,50 @@ class FailedWorkspaceCommand:
     timed_out: bool = False
 
 
+@dataclass(frozen=True)
+class QuarantinedWork:
+    """What one repository was holding when its phase ended, and where it went.
+
+    ``pushed_ref`` is None when the quarantine push itself failed - the work is
+    then genuinely gone, and saying so is the whole point of carrying the field.
+    """
+
+    repo: str
+    branch: str
+    commit_count: int
+    files: tuple[str, ...]
+    pushed_ref: str | None
+    push_error: str | None = None
+
+
+#: Enough of the file list to identify the work without burying the refs.
+_MAX_FILES_REPORTED: Final[int] = 20
+
+
+def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
+    """How one repository's quarantined work is described, wherever it appears.
+
+    Shared by both errors that report quarantined work, so that neither can
+    drift into calling a failed push recoverable: ``pushed_ref is None`` is
+    read in exactly one place, and the recovery line is only ever printed
+    beside a ref that exists.
+    """
+    lines = [f"  {work.repo} (branch {work.branch}):"]
+    if work.commit_count:
+        lines.append(f"    {work.commit_count} commit(s) on no remote")
+    if work.files:
+        shown = work.files[:_MAX_FILES_REPORTED]
+        lines.extend(f"    uncommitted: {entry}" for entry in shown)
+        if len(work.files) > len(shown):
+            lines.append(f"    ... and {len(work.files) - len(shown)} more uncommitted")
+    if work.pushed_ref is None:
+        lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+    else:
+        lines.append(f"    quarantined at {work.pushed_ref}")
+        lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
+    return lines
+
+
 class WorkspaceInspectionFailedError(Exception):
     """The gate could not read the workspace, so it refused to call it clean (#1184).
 
@@ -162,48 +206,76 @@ class WorkspaceInspectionFailedError(Exception):
     A failed command has no output, so there is nothing to parse and no verdict
     to give. Refusing to guess is the whole content of this error.
 
-    WHAT IT DOES NOT CLAIM. Nothing has been quarantined when this is raised.
-    Raising stops a false ``completed``; it cannot reach into a container that
-    is already gone and make what was inside it durable. The work this phase
-    held is unverified, and may already be unrecoverable.
+    WHAT IT SAYS ABOUT WHAT SURVIVED, which is why it carries ``quarantined``.
+    Repositories are inspected ONE AT A TIME, so a workspace holding several
+    can have the first one's work already pushed to its quarantine ref by the
+    time a command for the second fails. This error used to answer that case
+    with an unconditional NOTHING WAS QUARANTINED, which was false in the one
+    direction that costs the work: an operator told nothing was saved does not
+    go looking for a ref that exists. The caller therefore hands over whatever
+    it had already made durable, and the message names those refs.
+
+    WITH NOTHING TO NAME IT STILL SAYS SO PLAINLY. That is the common case -
+    one repository, or the first one being the one that failed - and it is a
+    different fact, not a weaker version of the same one. Softening the
+    message into something true of both would trade one lost half of the truth
+    for the other.
+
+    What it never claims either way is a verdict on the repositories it did not
+    reach. Raising stops a false ``completed``; it cannot reach into a
+    container that is already gone and make what was inside it durable.
     """
 
-    def __init__(self, *, doing: str, failure: FailedWorkspaceCommand) -> None:
+    def __init__(
+        self,
+        *,
+        doing: str,
+        failure: FailedWorkspaceCommand,
+        quarantined: tuple[QuarantinedWork, ...] = (),
+    ) -> None:
         self.doing = doing
         self.failure = failure
-        super().__init__(_render_inspection_failure(doing, failure))
+        #: Work made durable BEFORE this failure, in the repositories the gate
+        #: had already finished with. Empty is the ordinary case and means
+        #: exactly what it says: nothing was saved.
+        self.quarantined = quarantined
+        super().__init__(_render_inspection_failure(doing, failure, quarantined))
 
 
-def _render_inspection_failure(doing: str, failure: FailedWorkspaceCommand) -> str:
+def _render_inspection_failure(
+    doing: str,
+    failure: FailedWorkspaceCommand,
+    quarantined: tuple[QuarantinedWork, ...],
+) -> str:
     why = "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
     stderr = failure.stderr.strip()
-    return (
+    lines = [
         f"The unpushed-work gate could not verify this phase's workspace while "
         f"{doing}: the command {' '.join(failure.command)!r} {why}. A command "
         f"that failed has no output to read, and empty output from a broken "
         f"workspace is indistinguishable from empty output from a clean one - "
         f"so the phase fails here rather than being reported completed on a "
         f"verdict nobody actually got."
-        + (f"\n  stderr: {stderr}" if stderr else "")
-        + "\n  NOTHING WAS QUARANTINED: this phase's work is unverified and, if "
-        "the workspace is already gone, unrecoverable."
+    ]
+    if stderr:
+        lines.append(f"  stderr: {stderr}")
+    if not quarantined:
+        lines.append(
+            "  NOTHING WAS QUARANTINED: this phase's work is unverified and, if "
+            "the workspace is already gone, unrecoverable."
+        )
+        return "\n".join(lines)
+    lines.append(
+        "  SOME WORK WAS ALREADY QUARANTINED before this command failed. "
+        "Repositories are inspected one at a time, and these were reached "
+        "first - go and get them:"
     )
-
-
-@dataclass(frozen=True)
-class QuarantinedWork:
-    """What one repository was holding when its phase ended, and where it went.
-
-    ``pushed_ref`` is None when the quarantine push itself failed - the work is
-    then genuinely gone, and saying so is the whole point of carrying the field.
-    """
-
-    repo: str
-    branch: str
-    commit_count: int
-    files: tuple[str, ...]
-    pushed_ref: str | None
-    push_error: str | None = None
+    lines.extend(line for work in quarantined for line in _render_quarantined_work(work))
+    lines.append(
+        "  Every repository after those is unverified and, if the workspace is "
+        "already gone, unrecoverable."
+    )
+    return "\n".join(lines)
 
 
 class UnpushedWorkQuarantinedError(Exception):
@@ -238,27 +310,10 @@ class UnpushedWorkQuarantinedError(Exception):
         super().__init__(_render_quarantine_report(phase_id, quarantined))
 
 
-#: Enough of the file list to identify the work without burying the refs.
-_MAX_FILES_REPORTED: Final[int] = 20
-
-
 def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork, ...]) -> str:
     lines = [
         f"Phase '{phase_id}' ended holding work that its workspace would have "
         f"destroyed, so it failed instead of reporting completed:",
     ]
-    for work in quarantined:
-        lines.append(f"  {work.repo} (branch {work.branch}):")
-        if work.commit_count:
-            lines.append(f"    {work.commit_count} commit(s) on no remote")
-        if work.files:
-            shown = work.files[:_MAX_FILES_REPORTED]
-            lines.extend(f"    uncommitted: {entry}" for entry in shown)
-            if len(work.files) > len(shown):
-                lines.append(f"    ... and {len(work.files) - len(shown)} more uncommitted")
-        if work.pushed_ref is None:
-            lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
-        else:
-            lines.append(f"    quarantined at {work.pushed_ref}")
-            lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
+    lines.extend(line for work in quarantined for line in _render_quarantined_work(work))
     return "\n".join(lines)
