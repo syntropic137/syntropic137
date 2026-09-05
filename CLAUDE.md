@@ -140,26 +140,28 @@ The distinction that DOES matter when adding a new check:
 "Does this specific field have a production consumer" is the second, however
 architectural it sounds.
 
-#### Known gap: `untyped-dicts` counts TEXT, not types
+#### `untyped-dicts` counts the AST, not the text
 
-`just check-untyped-dicts` is a regex over source files:
+`just check-untyped-dicts` parses every file and counts str-keyed mappings
+whose value type constrains nothing. The logic and the full definition of what
+counts live in `scripts/check_untyped_dicts.py`, pinned by
+`scripts/tests/test_check_untyped_dicts.py`.
 
-```python
-re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text())
-```
+One shape, all spellings: `dict`, `Dict`, `Mapping` and `MutableMapping`,
+plain or dotted, parameterised with `Any` or `object` — quoted, aliased, or
+wrapped across lines. Docstrings and comments are not code and do not count.
+An alias counts where it is defined, not at each use.
 
-It matches one spelling. `Mapping[str, object]`, `MutableMapping[str, Any]`,
-`Dict[str, Any]`, aliases, and annotations hidden behind
-`from __future__ import annotations` all pass unseen. So the count can fall
-while the typing is unchanged, and an agent optimising against the number will
-find that seam - one did, swapping `dict[str, object]` for
-`Mapping[str, object]` in a parameter and moving the count without improving
-anything.
+This was a regex until #1188, and it measured spelling. Renaming
+`dict[str, object]` to `Mapping[str, object]` moved the number without typing
+anything, and one agent found that seam under ratchet pressure on PR #1186.
+`Mapping` for a read-only parameter is still the better annotation on its
+merits — it just no longer buys you budget.
 
-`Mapping` for a read-only parameter is the better annotation on its merits, so
-prefer it. Just do not read a falling count as evidence of stricter typing. If
-this check ever needs to bite properly it wants an AST pass over resolved
-annotations, not a text search.
+Re-measuring re-baselined all five packages (#1188). `syn-api` went 94 -> 139:
+a third of its untyped surface had never been visible to the gate. Those are
+re-baselines of the same debt, not a relaxed ratchet, and the values may only
+decrease from there.
 
 ### API → CLI Type Pipeline
 
