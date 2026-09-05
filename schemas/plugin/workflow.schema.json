@@ -274,6 +274,11 @@
           "title": "Allowed Tools",
           "type": "array"
         },
+        "clone_repos": {
+          "default": true,
+          "title": "Clone Repos",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {

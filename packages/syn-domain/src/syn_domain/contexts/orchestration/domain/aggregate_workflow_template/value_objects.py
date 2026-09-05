@@ -146,6 +146,14 @@ class PhaseDefinition(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     """Tools allowed during this phase execution."""
 
+    clone_repos: bool = True
+    """Whether the workflow's repos are checked out for this phase (#1187).
+
+    Sourced from the workflow YAML ``clone_repos`` field. False credentials
+    the repos without checking them out, for a phase that talks to GitHub but
+    needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
+    repo list is deliberately still passed when this is False."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""

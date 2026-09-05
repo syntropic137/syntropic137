@@ -106,6 +106,16 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 600
+    # NO WORKING TREE (#1187). This phase reads the verify artifact, checks a
+    # remote ref and calls `gh pr create`. Its prompt already says the branch
+    # is on origin and that it must not push, so the checkout it was paying
+    # for was never used - it cloned the repo and every submodule, plus the
+    # @-imported CLAUDE.md that comes with a clone, to do about 30s of work,
+    # then ran out of the shortest budget in the workflow in ~30% of runs.
+    #
+    # `gh` still works: the repo is still resolved to its installation, still
+    # gets a token, and still gets a hosts.yml entry. Only the clone is gone.
+    clone_repos: false
     allowed_tools:
       - Read
       - Bash
