@@ -24,8 +24,9 @@ the host are operator-reported from that run, and every one of them has a
 command here to re-derive it - run the command, do not trust the sample.
 
 **Order matters.** Sections 2 to 4 are preparation and can take as long as they
-take. Section 1 is the only one that must be re-run immediately before section 5,
-and section 5 is the only one that touches the running host.
+take. Section 1 must be re-run immediately before any container is recreated
+([section 5, step 3](#step-3-re-run-the-drain-check)), and section 5 is the only
+one that touches the running host.
 
 ---
 
@@ -113,9 +114,10 @@ On the beta.9 deploy the drain check passed, then a new workflow was dispatched
 minutes later while the build was still running, and it had to be cancelled at
 deploy time. A drain check is a statement about one instant.
 
-**Do the drain check last, immediately before section 5, and do not dispatch
-work while preparing a deploy.** If preparation takes an hour, the check you ran
-at the start of it is worth nothing.
+**Do the drain check last, immediately before you recreate containers
+([section 5, step 3](#step-3-re-run-the-drain-check)), and do not dispatch work
+while preparing a deploy.** If preparation takes an hour, the check you ran at
+the start of it is worth nothing.
 
 Until [PR #1181](https://github.com/syntropic137/syntropic137/pull/1181) lands
 this is entirely manual - nothing refuses to deploy on your behalf.
@@ -188,7 +190,9 @@ Two paths. Neither requires `gh release create`.
 
 ### (a) Direct - simplest for one host of known architecture
 
-No registry, no login, no tags to reconcile:
+No registry, no login, no tags to reconcile. **Both** tag-pinned images have to
+move - [section 4](#4-which-images-actually-need-to-move) is where you confirm
+it is exactly these two - so build both:
 
 ```bash
 docker buildx build --platform linux/amd64 \
@@ -196,14 +200,39 @@ docker buildx build --platform linux/amd64 \
   -t ghcr.io/syntropic137/syn-api:v0.28.0-beta.9 --load \
   -f infra/docker/images/syn-api/Dockerfile .
 
-docker save ghcr.io/syntropic137/syn-api:v0.28.0-beta.9 | ssh root@<host> 'docker load'
+docker buildx build --platform linux/amd64 \
+  -t ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9 --load \
+  -f infra/docker/images/gateway/Dockerfile .
 ```
 
-Expected tail from the `docker load`:
+`syn-gateway` takes no `INCLUDE_DOCKER_CLI`: its Dockerfile
+(`infra/docker/images/gateway/Dockerfile` - note the directory is `gateway`, not
+`syn-gateway`) declares no such arg, and CI passes `0` for it. Only `syn-api`
+needs it, for the reason in
+[the #1216 trap](#how-this-lies-to-you-the-missing-docker-cli-1216).
+
+Transfer both in one stream. `docker save` takes several images and writes their
+shared layers once:
+
+```bash
+docker save \
+  ghcr.io/syntropic137/syn-api:v0.28.0-beta.9 \
+  ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9 \
+  | ssh root@<host> 'docker load'
+```
+
+Expected tail from the `docker load` - **two** lines, one per image. One line
+means one image never moved, and the deploy will be half old:
 
 ```
 Loaded image: ghcr.io/syntropic137/syn-api:v0.28.0-beta.9
+Loaded image: ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9
 ```
+
+Those tags now exist **only in the host's docker daemon**. Nothing pushed them
+anywhere. That is the point of this path, and it is why
+[section 5, step 4](#step-4-recreate-branch-by-build-path) must not run
+`docker compose pull` after it.
 
 ### (b) Registry - for reproducibility, or a host you cannot reach
 
@@ -257,13 +286,25 @@ docker buildx build --platform linux/amd64 \
   -t ghcr.io/syntropic137/syn-api:v0.28.0-beta.9 --push .
 ```
 
-This applies to **both** paths above: `just release-local` cannot pass it, so if
-you used (b), rebuild and re-push `syn-api` with this command afterwards. The
-other five images take `INCLUDE_DOCKER_CLI=0` in CI too, so for them
-`release-local` matches CI.
+Path (a) already passes it. Path (b) cannot - `just release-local` passes no
+build args at all - so after `release-local`, rebuild and re-push `syn-api` with
+the command above. The other five images take `INCLUDE_DOCKER_CLI=0` in CI too,
+so for them `release-local` matches CI.
 
-The verification for this is in [section 5](#5-update-recreate-and-verify) and
-it is one line. Run it every time.
+**On path (b), that rebuild must be the last thing that writes the `v`-prefixed
+`syn-api` tag.** It pushes `v0.28.0-beta.9` directly, so `syn-api` needs no
+retag in [section 4](#the-tag-convention-does-not-match) - and running one there
+afterwards copies the argless `release-local` manifest back over this tag,
+restoring the exact defect this section is about. Retag `syn-gateway` only.
+
+Note the platform: this command builds `linux/amd64` only, and pushing it
+replaces the multi-arch index `release-local` published for that tag. That is
+fine for the single known-architecture host a test deploy targets; build
+`linux/arm64` instead if that is what the host is.
+
+The verification for this is in
+[section 5, step 5](#step-5-verify-the-deploy-took) and it is one line. Run it
+every time.
 
 ---
 
@@ -278,17 +319,22 @@ has been pinned to since:
 ssh root@<host> "grep -E '^\s+image:' /root/.syntropic137/docker-compose.syntropic137.yaml | sort -u"
 ```
 
-On the VPS as deployed for beta.9 the operator reported only two pinned by
-**tag** (digests elided):
+Run on the VPS before the beta.9 deploy, the operator reported only two pinned
+by **tag**, and both still on the version then deployed - beta.8, not the one
+being deployed (digests elided):
 
 ```
-    image: ghcr.io/syntropic137/syn-api:v0.28.0-beta.9
-    image: ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9
+    image: ghcr.io/syntropic137/syn-api:v0.28.0-beta.8
+    image: ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.8
     image: ghcr.io/syntropic137/event-store@sha256:...
     image: ghcr.io/syntropic137/sidecar-proxy@sha256:...
     image: ghcr.io/syntropic137/syn-collector@sha256:...
     image: ghcr.io/syntropic137/token-injector@sha256:...
 ```
+
+**Write down the tag you see.** It is the currently deployed version, and
+[section 5, step 2](#step-2-repoint-the-tag-pins-to-the-new-version) needs it
+twice: to name the backup, and as the string it replaces.
 
 A **digest**-pinned service does not move when you change `SYN_VERSION`, by
 definition - the reference names content, not a version. So only `syn-api` and
@@ -307,52 +353,160 @@ The compose uses **`v`-prefixed** tags (`v0.28.0-beta.9`), because that is what
 pushes the **bare** form (`0.28.0-beta.9`) - the recipe interpolates
 `{{version}}` with no prefixing logic. Pulling then 404s.
 
-Retag rather than rebuild:
+Retag rather than rebuild - **`syn-gateway` only**:
 
 ```bash
-just release-retag syn-api 0.28.0-beta.9 v0.28.0-beta.9
 just release-retag syn-gateway 0.28.0-beta.9 v0.28.0-beta.9
 ```
 
-Both call `docker buildx imagetools create`, which copies the manifest
+It calls `docker buildx imagetools create`, which copies the manifest
 server-side: no pull, no rebuild, and the multi-arch index survives.
+
+`syn-api` is deliberately absent. Its `v`-prefixed tag was already pushed by the
+`INCLUDE_DOCKER_CLI=1` rebuild in
+[section 3](#how-this-lies-to-you-the-missing-docker-cli-1216), and retagging it
+from the bare `release-local` tag would copy the argless manifest over that -
+reintroducing #1216, which step 5 then catches after the deploy, one round trip
+too late.
+
+None of this applies to the direct path (3a). It never touches a registry, so
+the tags are whatever you passed to `-t`: write them `v`-prefixed there and
+there is nothing to reconcile.
 
 ---
 
 ## 5. Update, recreate, and verify
 
-Back up the deployed compose before editing it. It carries hand-applied digest
-pins that exist nowhere else:
+Five steps, in this order. Steps 1 and 2 do not touch a running container;
+step 4 does, which is why the drain check sits immediately before it and not at
+the top.
+
+### Step 1. Back up the deployed compose
+
+It carries hand-applied digest pins that exist nowhere else - not in this repo,
+not in the release assets. Name the backup after the tag it still contains, so
+whoever reaches for it later can tell what rolling back to it would get them:
 
 ```bash
 ssh root@<host> 'cd /root/.syntropic137 \
-  && cp docker-compose.syntropic137.yaml docker-compose.syntropic137.yaml.bak-$(date +%Y%m%d-%H%M%S)'
+  && cp docker-compose.syntropic137.yaml docker-compose.syntropic137.yaml.bak-beta8'
 ```
 
-**Re-run [section 1](#1-drain-check---first-last-and-unskippable) now**, then
-pull and recreate:
+### Step 2. Repoint the tag pins to the new version
+
+**This is the step whose absence makes a deploy do nothing.** `up -d` recreates
+a container from whatever the compose file names. If the file still names the
+old tag, Compose recreates the old image, reports success, and every check that
+watches only container state agrees with it.
+
+Replace both tags. The old one is what you read in
+[section 4](#4-which-images-actually-need-to-move):
 
 ```bash
 ssh root@<host> 'cd /root/.syntropic137 \
-  && docker compose -f docker-compose.syntropic137.yaml pull syn-api syn-gateway \
-  && docker compose -f docker-compose.syntropic137.yaml up -d syn-api syn-gateway'
+  && sed -i "s#syn-api:v0.28.0-beta.8#syn-api:v0.28.0-beta.9#; \
+             s#syn-gateway:v0.28.0-beta.8#syn-gateway:v0.28.0-beta.9#" \
+       docker-compose.syntropic137.yaml'
 ```
 
-### Verify the deploy took
-
-"It looks right" is not a check. Three things, in this order.
-
-**1. The container is running the image you think it is.**
+Then verify with two counts, not one:
 
 ```bash
-ssh root@<host> "docker inspect syn137-api --format '{{.Config.Image}}'"
+ssh root@<host> "grep -c 'v0.28.0-beta.8' /root/.syntropic137/docker-compose.syntropic137.yaml"
+ssh root@<host> "grep -c 'v0.28.0-beta.9' /root/.syntropic137/docker-compose.syntropic137.yaml"
+```
+
+```
+0
+2
+```
+
+Both matter. `0` old on its own is also what a `sed` that wrote a **typo'd** new
+tag produces; `2` new on its own is also what an already-current file produces
+when `sed` matched nothing. Together they say the two lines you meant to change
+are the two lines that changed.
+
+Run them as separate commands: **`grep -c` exits non-zero when the count is
+`0`**, so chaining the first with `&&` aborts on exactly the answer you wanted.
+
+If the deployed file pins with `${SYN_VERSION}` rather than a literal tag - the
+form the repo template ships - there is nothing to `sed`. Set `SYN_VERSION` in
+`/root/.syntropic137/.env` instead, and check it with
+`docker compose -f docker-compose.syntropic137.yaml config | grep image:`, which
+prints the resolved values.
+
+### Step 3. Re-run the drain check
+
+[Section 1](#1-drain-check---first-last-and-unskippable), in full, now - not the
+result you got before you started building. Nothing below step 3 is reversible
+for an execution that is mid-phase.
+
+### Step 4. Recreate (branch by build path)
+
+**The command depends on which path you built with in [section 3](#3-build).**
+This is not a style choice: the wrong one either fails outright or deploys bytes
+other than the ones you built.
+
+`api` and `gateway` below are **service** names. The images are called `syn-api`
+and `syn-gateway`; `docker compose pull` and `up` take services, and given an
+image name they exit with `no such service`.
+
+**Registry path (3b) - pull, then up:**
+
+```bash
+ssh root@<host> 'cd /root/.syntropic137 \
+  && docker compose -f docker-compose.syntropic137.yaml pull api gateway \
+  && docker compose -f docker-compose.syntropic137.yaml up -d api gateway'
+```
+
+**Direct path (3a) - up only. Do not pull.**
+
+First confirm the `docker load` from 3(a) actually landed. Expect two lines:
+
+```bash
+ssh root@<host> "docker images --format '{{.Repository}}:{{.Tag}}' | grep 'v0.28.0-beta.9'"
 ```
 
 ```
 ghcr.io/syntropic137/syn-api:v0.28.0-beta.9
+ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9
 ```
 
-A stale answer here means the pull hit cache or the compose edit did not take.
+One line means one image never transferred, and `up -d` is about to fail on the
+other with a pull it cannot satisfy. Then:
+
+```bash
+ssh root@<host> 'cd /root/.syntropic137 \
+  && docker compose -f docker-compose.syntropic137.yaml up -d api gateway'
+```
+
+`docker save`/`docker load` already put those images in the host's daemon, and
+Compose's default pull policy is `missing` - it uses a local image when one is
+present - so `up -d` alone deploys exactly the bytes you transferred. Adding a
+`pull` does one of two things, both bad. Either the tag is not in GHCR, `pull`
+fails, and the `&&` means `up` never runs at all, so nothing deploys; or a tag
+by that name **is** in GHCR from some earlier build, `pull` overwrites your
+image with it, and the deploy succeeds loudly while running code you did not
+build.
+
+### Step 5. Verify the deploy took
+
+"It looks right" is not a check. Three things, in this order.
+
+**1. The containers are running the images you think they are.** Both of them:
+
+```bash
+ssh root@<host> "docker inspect syn137-api syn137-gateway --format '{{.Name}} {{.Config.Image}}'"
+```
+
+```
+/syn137-api ghcr.io/syntropic137/syn-api:v0.28.0-beta.9
+/syn137-gateway ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9
+```
+
+A stale answer means step 2 did not take, or `up -d` found nothing to change.
+Checking only `syn137-api` is how a half-deploy passes: the gateway is the image
+the browser actually talks to.
 
 **2. The docker CLI is present** - this is the guard against
 [the #1216 trap](#how-this-lies-to-you-the-missing-docker-cli-1216):
