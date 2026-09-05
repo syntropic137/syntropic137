@@ -452,7 +452,7 @@ Pass conditions:
 just bump-version 0.20.0
 ```
 
-This updates all 11 version files atomically (8 `pyproject.toml` + 3 `package.json`). Validate with `just check-version`.
+This updates every version-carrying file atomically, regenerates `uv.lock`, and re-runs `--check`. Validate independently with `just check-version`.
 
 ### 2. Commit and Push
 
@@ -483,7 +483,7 @@ The `release-create.yml` workflow reads the merged PR body verbatim and sets it 
 
 The following checks run automatically on the PR:
 
-- **Version consistency** - all 11 files match, version > current release
+- **Version consistency** - every version-carrying file matches, version > current release
 - **Release notes** - PR body has content (minimum 20 characters)
 - **Docker dry-run** - all 6 container images build successfully (single-arch, no push)
 - **Full CI** - tests, lint, typecheck, security scans (same as any PR)
@@ -570,27 +570,32 @@ just bump-version 0.19.1
 
 ## Version Files Reference
 
-The `scripts/workflows/bump_version.py` script updates exactly these 11 files:
+`scripts/workflows/bump_version.py` does not carry a list of Python packages.
+It derives them from `[tool.uv.workspace]` in the root `pyproject.toml` - the
+same members/exclude globs uv resolves - so a package added under `apps/` or
+`packages/` is bumped and checked from the day it is added. Today that resolves
+to the root plus `syn-api`, `syn-adapters`, `syn-collector`, `syn-domain`,
+`syn-perf`, `syn-shared` and `syn-tokens`.
 
-**Python (pyproject.toml):**
-1. `pyproject.toml` (root)
-2. `apps/syn-api/pyproject.toml`
-3. `packages/syn-adapters/pyproject.toml`
-4. `packages/syn-collector/pyproject.toml`
-5. `packages/syn-domain/pyproject.toml`
-6. `packages/syn-perf/pyproject.toml`
-7. `packages/syn-shared/pyproject.toml`
-8. `packages/syn-tokens/pyproject.toml`
+**Also written by the bump:**
+- `apps/syn-cli-node/package.json`, `apps/syn-dashboard-ui/package.json`,
+  `apps/syn-docs/package.json` - the Node manifests versioned in lockstep
+- the three `schemas/plugin/*.schema.json` `$id` values
 
-**Node.js (package.json):**
-9. `apps/syn-cli-node/package.json`
-10. `apps/syn-dashboard-ui/package.json`
-11. `apps/syn-docs/package.json`
+**Written by `uv`, not by the script:** `uv.lock`. `just bump-version` runs
+`uv lock` after the script and then re-runs `--check`, which compares every
+workspace record in the lockfile against the new version.
 
 **Not included** (independent versioning):
 - `lib/agentic-primitives/` - separate project
 - `lib/event-sourcing-platform/` - separate project
 - `packages/openclaw-plugin/` - independent plugin
+
+**Accepted version forms:** `X.Y.Z` and `X.Y.Z-{alpha,beta,rc}.N`, and nothing
+else. The grammar is deliberately narrower than SemVer: uv canonicalises PEP
+440 more broadly than the script's semver-to-PEP-440 mapping, and any form the
+two spell differently would be accepted and then immediately reported stale by
+the `--check` that follows the bump.
 
 ## Workflow Architecture
 
@@ -598,7 +603,7 @@ The `scripts/workflows/bump_version.py` script updates exactly these 11 files:
 PR: main → release
   ├── ci.yml (full CI suite)
   └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
-        ├── checks/version-check.yml       - all 11 files consistent, version > release
+        ├── checks/version-check.yml       - every version file consistent, version > release
         ├── checks/changelog-check.yml     - PR body >= 20 chars
         ├── checks/codegen-sync.yml        - CLI types, CLI docs, API docs all current
         ├── checks/docker-dry-run.yml      - all container images build (single-arch, cached)
@@ -633,7 +638,7 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
-| `.github/workflows/_check-version.yml` | Version consistency: all 11 files match, bumped vs release |
+| `.github/workflows/_check-version.yml` | Version consistency: every version file matches, bumped vs release |
 | `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
 | `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
 | `.github/workflows/_check-docker-dry-run.yml` | All container images build successfully (single-arch, GHA cache) |
