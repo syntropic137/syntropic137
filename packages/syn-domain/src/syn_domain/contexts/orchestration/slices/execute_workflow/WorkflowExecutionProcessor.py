@@ -72,6 +72,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    quarantine_unpushed_work,
+)
 from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
@@ -777,6 +780,19 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
+        # BEFORE anything is popped or committed. This is the last moment at
+        # which the workspace still exists, and the aggregate has not yet been
+        # told the phase succeeded - so a phase holding work that the imminent
+        # teardown would erase fails here, from a state indistinguishable to
+        # every downstream path from any other phase failure (#1184).
+        workspace = self._active_workspaces.get(todo.phase_id)
+        if workspace is not None:
+            await quarantine_unpushed_work(
+                workspace,
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+            )
+
         self._phase_tokens.pop(todo.phase_id, None)
         auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])

@@ -5,6 +5,9 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Final
+
 
 class WorkflowNotFoundError(Exception):
     """Raised when a workflow is not found."""
@@ -131,3 +134,77 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         self.phase_id = phase_id
         self.phase_name = phase_name
         self.declared = declared
+
+
+@dataclass(frozen=True)
+class QuarantinedWork:
+    """What one repository was holding when its phase ended, and where it went.
+
+    ``pushed_ref`` is None when the quarantine push itself failed - the work is
+    then genuinely gone, and saying so is the whole point of carrying the field.
+    """
+
+    repo: str
+    branch: str
+    commit_count: int
+    files: tuple[str, ...]
+    pushed_ref: str | None
+    push_error: str | None = None
+
+
+class UnpushedWorkQuarantinedError(Exception):
+    """A phase ended holding work its workspace was about to destroy (#1184).
+
+    THE FAILURE THIS EXISTS TO STOP. Every phase runs in an ephemeral workspace
+    that is destroyed when the phase ends, and nothing checked that the phase
+    had pushed - the instruction to push lived in a prompt, not in a gate. On
+    PR #1072 the implement phase merged origin/main into its branch and the
+    merge commit stayed local. The workspace was destroyed, the execution
+    reported ``completed``, the PR head was unchanged, and hours later
+    ``git merge-base --is-ancestor origin/main HEAD`` still exited 1: the merge
+    simply never existed. It was caught a full run later, by chance.
+
+    WHY QUARANTINE AND FAIL, rather than either half alone. Failing without
+    saving would still LOSE the work - the workspace dies either way, and
+    knowing about a loss is not preventing it. Pushing to the phase's own
+    branch would save it but publish half-finished code onto a branch under
+    review whenever a phase timed out mid-task. So the work is first pushed to
+    a ref nobody reviews, unique to this phase run, and the phase then fails
+    naming it - recoverable with one ``git fetch``, visible to no reviewer, and
+    never reported as success.
+
+    A phase that legitimately produces no commits - a bootstrap that only
+    reports, a verify that only reads - never reaches here. Only work that
+    would not survive the workspace is a failure.
+    """
+
+    def __init__(self, *, phase_id: str, quarantined: tuple[QuarantinedWork, ...]) -> None:
+        self.phase_id = phase_id
+        self.quarantined = quarantined
+        super().__init__(_render_quarantine_report(phase_id, quarantined))
+
+
+#: Enough of the file list to identify the work without burying the refs.
+_MAX_FILES_REPORTED: Final[int] = 20
+
+
+def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork, ...]) -> str:
+    lines = [
+        f"Phase '{phase_id}' ended holding work that its workspace would have "
+        f"destroyed, so it failed instead of reporting completed:",
+    ]
+    for work in quarantined:
+        lines.append(f"  {work.repo} (branch {work.branch}):")
+        if work.commit_count:
+            lines.append(f"    {work.commit_count} commit(s) on no remote")
+        if work.files:
+            shown = work.files[:_MAX_FILES_REPORTED]
+            lines.extend(f"    uncommitted: {entry}" for entry in shown)
+            if len(work.files) > len(shown):
+                lines.append(f"    ... and {len(work.files) - len(shown)} more uncommitted")
+        if work.pushed_ref is None:
+            lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+        else:
+            lines.append(f"    quarantined at {work.pushed_ref}")
+            lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
+    return "\n".join(lines)
