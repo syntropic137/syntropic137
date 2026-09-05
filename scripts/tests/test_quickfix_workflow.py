@@ -124,11 +124,22 @@ class TestTheCostSettingsReachTheInstalledPhase:
         )
 
     def test_its_budget_is_the_derived_one(self, installed_phase: PhaseDefinition) -> None:
-        """1500s is derived in the workflow's own comment from measured costs.
+        """900s is derived in the workflow's own comment from measured costs.
+
+        The budget is AGENT WORK only - provisioning is a separate to-do item
+        with its own timeout and spends none of this (see
+        `workflows/sdlc/README.md`, "What `timeout_seconds` actually bounds").
+        The derivation is 456s of measured fixed cost inside the budget plus
+        ~444s of working room.
 
         Asserted as an exact value, not `is not None`: the number IS the scope
         guardrail. Raising it is how a task too big for this workflow gets
         squeezed through it instead of being sent to `sdlc-implement-v1`, so a
         change to it should have to be argued for in a diff.
+
+        Neither 900 nor the old 1500 is a default anywhere on this path -
+        `PhaseDefinition.timeout_seconds` defaults to `None` and the platform
+        default is 300 - so this fails, rather than passing vacuously, if the
+        YAML hop stops carrying the value.
         """
-        assert installed_phase.timeout_seconds == 1500
+        assert installed_phase.timeout_seconds == 900

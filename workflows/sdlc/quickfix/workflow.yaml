@@ -57,36 +57,70 @@ phases:
 
     # BUDGET, DERIVED - and it is a scope signal, not just a limit.
     #
-    # Measured fixed cost, on this repository at 9b3418e1 in a workspace
-    # container:
+    # WHAT THIS NUMBER BOUNDS. Agent work only. Provisioning - the clone and
+    # the recursive submodule init - is NOT inside it: PROVISION_WORKSPACE and
+    # RUN_AGENT are separate to-do items, and only RUN_AGENT is given this
+    # value (WorkflowExecutionProcessor.py:633,655 -> workspace.stream, via
+    # AgentExecutionHandler.py:319). The clone has its own separate budget,
+    # SYN_SETUP_PHASE_TIMEOUT_SECONDS (default 120s). The full model, and why
+    # it is written down once rather than re-derived, is in
+    # workflows/sdlc/README.md, "What `timeout_seconds` actually bounds".
     #
-    #   just preflight-agent          53.8s
-    #   uv run pytest -m unit -q     135.0s
-    #                                ------
-    #   gates                        188.8s
+    # So do NOT raise this to "leave room for provisioning". Provisioning
+    # spends none of it. What DOES spend it is everything the agent does,
+    # including the parts that feel like infrastructure: the gates, the push,
+    # and `gh pr create`.
     #
-    # Plus provisioning. #1187 found the 600s `open_pr` phase timing out in
-    # ~30% of runs while doing ~30s of work: the clone and recursive submodule
-    # init were the whole budget. This phase needs a working tree, so it pays
-    # that ~600s worst case and cannot opt out with `clone_repos: false`.
-    # Push plus `gh pr create` is the ~30s #1187 measured.
+    # MEASURED FIXED COST, all of it inside this budget. On this repository in
+    # a workspace container, twice - at 9b3418e1 and again at cec491d9:
     #
-    #   600 provisioning + 189 gates + 30 PR mechanics = 819s of fixed cost,
-    #   before the agent has read the task.
+    #   just preflight-agent          53.8s / 62s
+    #   uv run pytest -m unit -q     135.0s / 151s
+    #                                -------------
+    #   gates, one pass               189s  / 213s
     #
-    # Budget one gate re-run after a formatting fix (+189s) and the floor is
-    # ~1008s. 1500s is that floor plus ~50%.
+    # Taking the slower measurement, and budgeting ONE gate re-run after a
+    # formatting fix (the common case, and the only one worth pre-paying):
     #
-    # Deliberately less than HALF the 3600s `sdlc-implement-v1` gives its
-    # implement phase alone. A task that cannot fit in ~11 minutes of agent
-    # time after the fixed costs is not a change whose correctness is visible
-    # in its diff, and the right response to hitting this ceiling is to rerun
-    # the work on `sdlc-implement-v1`, not to raise the number.
+    #   213 gates + 30 push and `gh pr create` + 213 gate re-run = 456s
+    #
+    # The ~30s for the PR mechanics is what #1187 measured `open_pr` actually
+    # doing.
+    #
+    # WORKING ROOM: the remaining ~444s, for reading the task, finding the
+    # file, making the edit and reading gate output.
+    #
+    # Anchored to the only measured single-phase agent work on this repo, both
+    # of which are HEAVIER classes than this one:
+    #
+    #   pr-review/workflow.yaml - a cross-model review of a single PR took 5 to
+    #     25 minutes (300-1500s). Its cheap end is 300s, and even that phase
+    #     traces call paths across packages. This phase reasons about no diff
+    #     at all, so ~444s is roughly 1.5x the floor of strictly harder work.
+    #
+    #   implement/workflow.yaml - one phase doing a change AND its proof:
+    #     1113s and 1316s completed, two hit 1800s. 900s total sits below the
+    #     cheapest of those, which is the right relationship: a quickfix that
+    #     needs more agent time than the cheapest full implement-and-verify run
+    #     is not a quickfix.
+    #
+    #   456 fixed + 444 working room = 900s.
+    #
+    # NO QUICKFIX RUN HAS BEEN MEASURED YET. This is derived from adjacent
+    # measurements, and the first few real runs should replace it with this
+    # workflow's own numbers rather than being used to argue the number up.
+    #
+    # WHY IT IS ALSO A SCOPE SIGNAL. 900s is a QUARTER of the 3600s
+    # `sdlc-implement-v1` gives its implement phase alone. A task that cannot
+    # fit in ~7 minutes of agent work after the fixed costs is not a change
+    # whose correctness is visible in its diff, and the right response to
+    # hitting this ceiling is to rerun the work on `sdlc-implement-v1`, not to
+    # raise the number.
     #
     # If it does time out after the push but before the PR, the branch is on
     # origin and nothing is lost: opening the PR by hand is a safe recovery,
     # provided the provenance paragraph the prompt mandates goes in the body.
-    timeout_seconds: 1500
+    timeout_seconds: 900
 
     # MODEL. The expensive judgement in this phase is not the change, it is the
     # REFUSAL - deciding that a task advertised as mechanical is not. Haiku is

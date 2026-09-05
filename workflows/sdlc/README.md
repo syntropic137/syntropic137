@@ -73,6 +73,49 @@ on cross-model-gated PRs; one that looks the same but skipped the gate borrows
 trust it did not earn, and nothing in the diff reveals which workflow produced
 it.
 
+## What `timeout_seconds` actually bounds
+
+`timeout_seconds` is an AGENT-WORK budget, not a wall-clock budget for the
+phase. Workspace provisioning - the clone and the recursive submodule init - is
+NOT inside it, and neither is artifact collection.
+
+The path, in `WorkflowExecutionProcessor.py`:
+
+    PROVISION_WORKSPACE and RUN_AGENT are separate to-do items (:358, :367).
+    _handle_run_agent reads `phase.timeout_seconds or
+    phase.agent_config.timeout_seconds` (:633) and passes it as
+    `timeout_seconds=` to AgentExecutionHandler (:655), which hands it to
+    `workspace.stream(...)` (AgentExecutionHandler.py:319).
+
+So the timeout starts when the agent process starts, on a workspace that
+already exists. Provisioning has its own separate budget:
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS` (default 120s,
+`syn_shared/settings/config.py:355`), which bounds the setup script that does
+the cloning.
+
+**Two consequences when you tune one of these numbers.**
+
+Raising a phase's `timeout_seconds` "to leave room for provisioning" buys
+nothing - it was never spending any. A phase that is genuinely losing time to a
+slow clone needs `clone_repos: false` or a larger
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS`, and raising `timeout_seconds` will not help.
+
+Conversely, everything the AGENT does is inside the budget, including work that
+feels like infrastructure: running the gates, `git push`, `gh pr create`. Those
+belong in the arithmetic; the clone does not.
+
+This has been got wrong three times: the `open_pr` note in
+`implement/workflow.yaml`, the docstring of
+`handlers/test_open_pr_needs_no_working_tree.py`, and the budget derivation in
+`quickfix/workflow.yaml`. All three said provisioning ate a phase's budget.
+All three were corrected against the call path above; state the model from
+here rather than re-deriving it.
+
+One caveat worth keeping: #1187's `open_pr` timeouts were real and are
+recorded as ~one run in three. Removing the clone did not necessarily fix
+them, because the clone was never inside the budget that expired. If that
+phase still times out, look at the agent's own work.
+
 ## Naming
 
     sdlc-<purpose>-v<N>        id
