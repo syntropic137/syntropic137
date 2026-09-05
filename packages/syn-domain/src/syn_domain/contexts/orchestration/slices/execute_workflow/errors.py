@@ -6,6 +6,23 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 
+def describe_exception(error: BaseException) -> str:
+    """What to record about `error` when something has to be recorded.
+
+    `str(error)` is the obvious answer and it is empty for any exception
+    raised with no arguments - `TimeoutError()`, `CancelledError()`, a bare
+    `Exception()`. The failure path then wrote "" into the session's
+    `session_error` observation, and #1196's reproduction is exactly that: a
+    failed phase whose only record of the failure said nothing at all.
+
+    The class name is the one thing always available and it is genuinely
+    diagnostic - "TimeoutError" points at the phase budget, "CancelledError"
+    at a shutdown - so it is what an unnamed exception reports. Callers do not
+    branch on which they got; that is the point.
+    """
+    return str(error).strip() or f"{type(error).__name__} (no message)"
+
+
 class WorkflowNotFoundError(Exception):
     """Raised when a workflow is not found."""
 

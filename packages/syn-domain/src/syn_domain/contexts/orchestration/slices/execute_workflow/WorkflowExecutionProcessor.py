@@ -30,6 +30,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    describe_exception,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -467,22 +470,28 @@ class WorkflowExecutionProcessor:
         it always belongs to THIS execution, even with concurrent runs
         sharing the processor instance.
         """
+        # One description of the failure, written everywhere the failure is
+        # recorded. `str(error)` alone is "" for an exception raised with no
+        # arguments, and that empty string is what reached the session_error
+        # observation in #1196.
+        reason = describe_exception(error)
+
         # BEFORE any await: teardown clears the session-id map, so reading it
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         failed_phase_duration, failed_result = failed_phase_outcome(
-            failed_phase_id, self._phase_started_at, self._phase_session_ids, str(error)
+            failed_phase_id, self._phase_started_at, self._phase_session_ids, reason
         )
         if failed_result is not None:
             phase_results.append(failed_result)
 
         for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_failure(error_message=str(error))
+            await mgr.complete_failure(error_message=reason)
         await self._close_phase_workspace_cms(context="failure")
 
         fail_cmd = FailExecutionCommand(
             execution_id=execution_id,
-            error=str(error),
+            error=reason,
             error_type=type(error).__name__,
             failed_phase_id=failed_phase_id,
             completed_phases=len(completed_phase_ids),
@@ -500,7 +509,7 @@ class WorkflowExecutionProcessor:
             started_at=started_at,
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
-            error_message=str(error),
+            error_message=reason,
         )
 
     async def _close_phase_workspace_cms(self, context: str) -> None:
