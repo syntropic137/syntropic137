@@ -40,6 +40,14 @@ SYN_API_DOCKERFILE = "infra/docker/images/syn-api/Dockerfile"
 #: The compose file that names the syn-api Dockerfile. Every other compose
 #: file overlays this one, so a scan that stops seeing it measures nothing.
 BASE_COMPOSE = "docker-compose.yaml"
+# Compose overlays that intentionally configure `api` without building it.
+# Missing `build` is otherwise an unreadable shape and must fail loudly: an
+# open-ended skip here would let a newly added build path escape measurement.
+COMPOSE_API_OVERLAYS_WITHOUT_BUILD = {
+    "docker/docker-compose.syntropic137.yaml (service api)": (
+        "published environment-only overlay; inherits the measured base image"
+    ),
+}
 
 # ``${{ matrix.image == 'syn-api' && '1' || '0' }}`` - the only GitHub
 # expression any build arg in this repo uses. An unrecognised form is a hard
@@ -201,7 +209,13 @@ def _compose_build_path(config: object, source: str) -> BuildPath | None:
     if not isinstance(service, dict):
         pytest.fail(f"{source}: service `api` is {type(service).__name__}, not a mapping")
     if "build" not in service:
-        return None
+        if source in COMPOSE_API_OVERLAYS_WITHOUT_BUILD:
+            return None
+        pytest.fail(
+            f"{source}: service `api` has no `build` key and is not an explicitly "
+            "allowed non-building overlay. Add it with a reason if it intentionally "
+            "inherits an image; otherwise teach this test the new build shape."
+        )
 
     build = service["build"]
     if isinstance(build, str):
@@ -415,6 +429,7 @@ def test_a_correctly_configured_path_passes_in_either_spelling(spelling: str, ar
         ("service api as a string", {"services": {"api": "api"}}),
         ("services as a list", {"services": ["api"]}),
         ("the document as a list", ["services"]),
+        ("service api with no build key", {"services": {"api": {"environment": {}}}}),
     ],
 )
 def test_an_unreadable_build_path_is_reported_not_skipped(shape: str, document: object) -> None:
@@ -464,7 +479,6 @@ def test_the_short_form_build_is_measured_rather_than_skipped() -> None:
 @pytest.mark.parametrize(
     ("shape", "document"),
     [
-        ("an overlay that only sets environment", {"services": {"api": {"environment": {}}}}),
         ("a file with no api service", {"services": {"cloudflared": {"image": "x"}}}),
         ("an empty document", None),
     ],
@@ -474,12 +488,22 @@ def test_a_document_that_builds_no_api_service_is_not_a_build_path(
 ) -> None:
     """Not every compose file builds syn-api, and that is a true negative.
 
-    docker-compose.syntropic137.yaml overrides the api service's environment
-    and declares no `build`; the base file it layers onto is measured on its
-    own. The staleness guard in `_compose_build_paths` is what stops this
-    branch from quietly swallowing every file.
+    Files with no api service do not claim to configure an api build. An api
+    service with no `build` key is different and is refused unless its source
+    is explicitly enumerated in `COMPOSE_API_OVERLAYS_WITHOUT_BUILD`.
     """
     assert _compose_build_path(document, f"{shape}.yaml") is None
+
+
+@pytest.mark.architecture
+def test_the_known_non_building_api_overlay_is_explicitly_allowed() -> None:
+    """The published environment overlay is the one intentional exception."""
+    source = "docker/docker-compose.syntropic137.yaml (service api)"
+    document = {"services": {"api": {"environment": {}}}}
+
+    assert source in COMPOSE_API_OVERLAYS_WITHOUT_BUILD
+    assert COMPOSE_API_OVERLAYS_WITHOUT_BUILD[source]
+    assert _compose_build_path(document, source) is None
 
 
 @pytest.mark.architecture
