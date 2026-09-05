@@ -446,12 +446,19 @@ async def _build_workspace_prompt(
     2d. $ARGUMENTS → task string from inputs["task"]
     3. Context appendix: previous phase outputs appended as fallback section
     """
-    from syn_domain.contexts.orchestration import SYN_WORKSPACE_PROMPT
+    from syn_domain.contexts.orchestration import render_workspace_prompt
 
     phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
     phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
 
-    prompt_parts = [SYN_WORKSPACE_PROMPT, f"\n## Task\n{phase_prompt}"]
+    # The preamble describes the workspace this phase actually got, so it is
+    # rendered per phase rather than shared: `clone_repos: false` means no
+    # checkout, and telling that agent the repository is on disk is what made
+    # the merged gate unusable (#1187).
+    prompt_parts = [
+        render_workspace_prompt(clone_repos=phase.clone_repos),
+        f"\n## Task\n{phase_prompt}",
+    ]
 
     if phase_outputs:
         prompt_parts.append(_build_context_appendix(phase_outputs))

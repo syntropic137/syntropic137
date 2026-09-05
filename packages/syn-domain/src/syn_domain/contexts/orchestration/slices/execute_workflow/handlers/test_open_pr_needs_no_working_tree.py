@@ -203,12 +203,17 @@ class _Provisioned:
 
     @property
     def prompt(self) -> str:
-        """The prompt as the agent receives it: claude's ``-p`` argument.
+        """The prompt as the agent receives it, whichever harness runs the phase.
 
-        Read positionally off the flag rather than taken as the last element,
-        because the tool grant is appended after it.
+        Claude carries it behind ``-p``, read positionally off the flag rather
+        than taken as the last element because the tool grant is appended
+        after it. Codex - which `verify` runs on - takes it as the trailing
+        positional argument instead. Both are the SAME string, one hop past
+        the prompt builder, which is the hop worth asserting on.
         """
-        return self.argv[self.argv.index("-p") + 1]
+        if "-p" in self.argv:
+            return self.argv[self.argv.index("-p") + 1]
+        return self.argv[-1]
 
 
 async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _Provisioned:
@@ -608,6 +613,176 @@ def _run_gh(
             **agent_env,
         },
     )
+
+
+#: The preamble EXACTLY as it read before #1187 made it conditional, copied in
+#: rather than imported. A golden re-derived from the code it guards guards
+#: nothing: `render_workspace_prompt(clone_repos=True)` would agree with any
+#: edit to the cloning branch, which is the one thing this must catch. The
+#: pending experiment's baseline is these bytes, so changing them is a decision
+#: to invalidate that baseline, and should cost a deliberate edit here.
+_THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD = """\
+## Syn137 Workspace Environment
+
+You are an agent running in an ephemeral Docker workspace managed by Syntropic137.
+
+### Workspace Structure
+
+```
+/workspace/
+├── CLAUDE.md    ← @-imports each repo's CLAUDE.md (loaded automatically)
+├── AGENTS.md    ← @-imports each repo's AGENTS.md (same content)
+├── artifacts/
+│   ├── input/   ← Previous phase outputs (read-only)
+│   └── output/  ← Write YOUR deliverables here
+└── repos/       ← Pre-cloned repositories (ready to use)
+    └── {repo-name}/
+```
+
+---
+
+## Critical Rules
+
+1. **Write your actual work to `artifacts/output/`** - this is the ONLY directory collected
+2. **NEVER write placeholder text** - no "...", "[Title]", or template text
+3. **Every artifact must contain real content** you created for this specific task
+4. **Check `artifacts/input/` first** if this is not the first phase
+
+---
+
+## Completing Your Task
+
+### For coding tasks (commits, PRs, code changes):
+
+Your primary deliverable is **code on GitHub**. The artifact is your summary.
+
+1. Navigate to `/workspace/repos/{repo-name}` (repositories are **pre-cloned** — do not run `git clone`), create a feature branch
+2. Make changes, commit with clear messages
+3. Push to GitHub, create PR if needed
+4. Write summary to `artifacts/output/deliverable.md` with:
+   - What you actually changed
+   - Your actual commit hashes
+   - The actual PR URL you created
+   - Brief executive summary
+
+### For non-coding tasks (research, analysis, design, planning):
+
+Your primary deliverable is **the content in `artifacts/output/`**.
+
+Write your actual findings, analysis, or plan to `artifacts/output/deliverable.md`.
+Structure it appropriately for the task (summary, findings, recommendations, etc.).
+
+---
+
+## Reading Previous Phase Outputs
+
+Check for inputs from previous phases:
+
+```bash
+ls /workspace/artifacts/input/
+cat /workspace/artifacts/input/*.md
+```
+
+Build on this context. If the input contains only placeholder text,
+the previous phase failed - report this in your output.
+
+---
+
+## Important
+
+- **Ephemeral workspace** - all files destroyed when session ends
+- **Only `artifacts/output/` collected** - everything else is lost
+- **Push code before session ends** - unpushed commits are lost
+- **Use feature branches** - never push directly to main/master
+- **Write REAL content** - never copy example templates literally
+
+---
+
+## Task Result (REQUIRED)
+
+**The very last thing in your response must be a `TASK_RESULT` block.**
+
+If you completed the task successfully:
+```
+TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+```
+
+If you could NOT complete the task (blocked, missing access, error, etc.):
+```
+TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
+```
+
+Examples of failure reasons:
+- "GitHub App not installed on repo org/repo — cannot clone or push"
+- "Repository org/repo does not exist or is not accessible"
+- "Pull request #42 was not found"
+- "Required environment variable GH_TOKEN is not set"
+
+This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
+
+
+class TestThePromptTellsTheTruthAboutCloning:
+    """The shared preamble describes the workspace, so it must describe THIS one.
+
+    #1187's merged half made `clone_repos: false` provision credentials without
+    a checkout. This preamble still asserted, for every phase, that `repos/`
+    held pre-cloned repositories and that step one was to navigate into
+    `/workspace/repos/<name>`. Both are false for a no-checkout phase, so the
+    gate could not be switched on: turning it on sent the agent into a
+    directory that does not exist, on the shortest budget in the workflow.
+
+    Asserted on the provisioned prompt rather than on `render_workspace_prompt`,
+    because the flag has one more hop to make after the renderer - `_wiring`
+    has to read `phase.clone_repos` and pass it. A renderer that branches
+    correctly and a caller that never tells it which branch to take both look
+    right from either end.
+    """
+
+    async def test_a_cloning_phase_gets_byte_for_byte_the_prompt_it_got_before(self) -> None:
+        """The baseline guard. `verify` is the phase a pending experiment measures.
+
+        It sets no `clone_repos`, so it still clones and must still be told the
+        repository is pre-cloned. Equality, not a substring check: a baseline
+        that tolerates additions is not a baseline.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["verify"], completed={})
+
+        preamble, separator, _ = provisioned.prompt.partition("\n\n## Task\n")
+        assert separator, "the prompt no longer has a `## Task` section to split on"
+        assert preamble == _THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD
+
+    async def test_a_no_checkout_phase_is_not_told_the_repository_is_on_disk(self) -> None:
+        """The whole prompt, not the preamble: `open_pr.md` made the claim too.
+
+        Its "this workspace is a fresh clone" was written when every phase
+        cloned, and it is the sentence immediately after the refusal
+        instruction - so it is read by an agent deciding whether to open a PR.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(
+            phases["open_pr"],
+            completed={"verify": _BLOCKING_VERIFY_REPORT},
+        )
+
+        assert "pre-cloned" not in provisioned.prompt.lower()
+        assert "fresh clone" not in provisioned.prompt.lower()
+        assert "/workspace/repos" not in provisioned.prompt
+
+    async def test_a_no_checkout_phase_is_told_how_to_work_without_one(self) -> None:
+        """Deleting the paragraph would satisfy the test above and help nobody.
+
+        `GH_REPO` is the one that matters. It is provisioned into the agent's
+        environment (see the class below), and an environment variable nothing
+        mentions is one the agent has no reason to look for - it would reach
+        for a working tree instead, and there is not one.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["open_pr"], completed={})
+
+        assert "no checkout" in provisioned.prompt
+        assert "GH_REPO" in provisioned.prompt
+        assert "resolves the repository" in provisioned.prompt
 
 
 class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
