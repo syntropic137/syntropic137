@@ -3631,12 +3631,18 @@ grep 'image:.*syn-api\|image:.*syn-gateway' ~/.syntropic137/docker-compose.syntr
 #    After:  image: syntropic137_development-gateway:latest
 ```
 
-Then recreate only the affected containers:
+Then recreate only the affected containers. Check first -- restarting `api`
+orphans every running execution, discarding its work and leaving any pull
+request it already opened open and unverified (#1179):
 
 ```bash
+python3 predeploy_check.py   # infra/scripts/, copy to the host; needs only python3
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps api
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps gateway
 ```
+
+- [ ] `predeploy_check.py` exited 0 before the restart (exit 2 means it could
+      not tell, which is not an all-clear), or `--force` was a deliberate choice
 
 Verify the containers restarted with the local images:
 
