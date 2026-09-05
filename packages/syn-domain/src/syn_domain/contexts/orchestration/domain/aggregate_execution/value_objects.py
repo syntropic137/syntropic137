@@ -156,10 +156,14 @@ class PushedWork(BaseModel):
     refs. Twice in one day that someone was a human doing it by hand; both
     rescues merged.
 
-    EVERY INSTANCE IS A TRUE CLAIM ABOUT THE REMOTE. One is only ever built
-    after a remote-tracking ref was found to contain ``commit``, never from
-    "the phase had a branch name", which is the mistake #1184 took four review
-    passes to get out of its own recoverability reporting. A phase that pushed
+    EVERY INSTANCE IS A TRUE CLAIM ABOUT THE REMOTE, AND ABOUT THIS PHASE.
+    One is only ever built after a remote-tracking ref was found to contain
+    ``commit`` - never from "the phase had a branch name", which is the mistake
+    #1184 took four review passes to get out of its own recoverability
+    reporting - and only for a commit that was NOT in the workspace when the
+    phase began. Without that second half a phase that did nothing reported the
+    branch it was handed as its own output, which is a true sentence about git
+    and a false answer to "where did this phase's work go". A phase that pushed
     nothing therefore produces NO instances rather than an instance saying so:
     absence is the honest shape for "there is nothing to fetch", because a
     record shaped like a location invites being read as one.
@@ -174,12 +178,15 @@ class PushedWork(BaseModel):
     """The repository directory's name, as the workspace had it cloned."""
 
     branch: str
-    """A branch on the remote that contains ``commit``, without its remote
-    prefix - i.e. the name to fetch, and the name a PR would be opened from."""
+    """The branch the phase was on, without its remote prefix - i.e. the name
+    to fetch, and the name a PR would be opened from. Its remote-tracking ref
+    is what was found to contain ``commit``."""
 
     commit: str
-    """The commit an operator should look at: the workspace's HEAD, reported
-    only because a remote-tracking ref was found to contain it."""
+    """The commit an operator should look at: the newest one this phase
+    produced that its branch's remote is confirmed to hold. Usually HEAD, and
+    not HEAD when the phase pushed and then committed again - the later commits
+    are not on the remote, so they are not offered here."""
 
 
 @dataclass(frozen=True)

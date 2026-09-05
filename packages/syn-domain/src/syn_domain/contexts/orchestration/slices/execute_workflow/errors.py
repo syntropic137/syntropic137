@@ -560,10 +560,20 @@ class StrandedWork:
     costs nothing and cannot be wrong in that direction.
 
     THE CLAIM IS COUNTED, NEVER ASSUMED. `pushed` holds one record per
-    repository confirmed to have its HEAD on a remote, so "is any of this
-    recoverable" is the size of that tuple - never the truthiness of a branch
-    name that may never have left the workspace. That substitution is the exact
-    defect #1184 needed four review passes to remove from its own reporting.
+    repository where a commit THIS PHASE PRODUCED was confirmed to be on a
+    remote, so "is any of this recoverable" is the size of that tuple - never
+    the truthiness of a branch name that may never have left the workspace.
+    That substitution is the exact defect #1184 needed four review passes to
+    remove from its own reporting.
+
+    "THIS PHASE PRODUCED" IS ALSO COUNTED, and it is the second half of the
+    same discipline. A phase inherits a branch that is already pushed, so "the
+    workspace's HEAD is on a remote" is true of a phase that did nothing at
+    all, and reporting it made "pushed work, wrote no deliverable" and
+    "produced nothing" the same record - a recoverable incident wearing the
+    unrecoverable one's clothes again, one field further along. Only commits
+    absent from the workspace when the phase started are eligible; see
+    `PhaseStartingPoint`.
 
     `unreadable` says why the inspection stopped early, and exists so that an
     answer nobody obtained can never be printed as an answer of "nothing". The
@@ -602,10 +612,11 @@ class StrandedWork:
 _STRANDED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
     # 1. The ordinary failure: nothing was pushed and nothing is claimed.
     (False, False): (
-        "  NOTHING OF THIS PHASE'S WORK IS ON A REMOTE: no commit in its "
-        "workspace was found on any remote branch, so there is no branch to "
-        "open a PR from and nothing to fetch back. If it committed anything, "
-        "the workspace took it."
+        "  NOTHING OF THIS PHASE'S WORK IS ON A REMOTE: it advanced no branch "
+        "onto one, so there is no branch to open a PR from and nothing of its "
+        "own to fetch back. If it committed anything, the workspace took it. "
+        "This says nothing about commits that were already there when the "
+        "phase started - those are not its work and not what is being offered."
     ),
     # 2. The inspection could not finish and found nothing before it stopped.
     #    NOT the same as (1) and never merged with it: this says nobody looked.

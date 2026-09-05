@@ -37,12 +37,18 @@ class WorkflowFailedEvent(DomainEvent):
     #
     # THREE-VALUED, and the two empty answers are not the same incident. A list
     # names branches a remote was confirmed to hold; `[]` means the workspace
-    # was asked and nothing in it had reached a remote, so the work died with
-    # the container; `null` means nothing could ask - no workspace, or one that
-    # stopped answering - and asserts nothing either way. A failure that pushed
-    # complete work is recoverable by fetching a named branch; a failure that
-    # pushed nothing is not, and reporting the first as the second is what left
-    # three executions' work unfindable in one day.
+    # was asked and nothing THIS PHASE PRODUCED had reached a remote, so its
+    # work died with the container; `null` means nothing could ask - no
+    # workspace, or one that stopped answering - and asserts nothing either
+    # way. A failure that pushed complete work is recoverable by fetching a
+    # named branch; a failure that pushed nothing is not, and reporting the
+    # first as the second is what left three executions' work unfindable in one
+    # day.
+    #
+    # `[]` is about the PHASE, not about the repository: the branch it was
+    # working on is normally on a remote already, and counting that as an
+    # answer made a phase that produced nothing report the commit it inherited
+    # as its own.
     pushed_work: list[PushedWork] | None = None
 
     # Partial progress

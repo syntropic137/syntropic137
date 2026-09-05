@@ -90,9 +90,13 @@ class PhaseExecutionInfo(BaseModel):
     THREE-VALUED, same contract as `agent_session_ids` above: `null` means
     nothing could tell us - the phase did not fail, its workspace was already
     gone, or the execution predates the field - and `[]` means the workspace
-    was asked and none of its commits had reached a remote. A client
+    was asked and nothing this phase produced had reached a remote. A client
     distinguishing "the work is recoverable, go and fetch it" from "the work is
     gone" reads this, not the prose in `error_message`.
+
+    Only commits the phase itself made are counted. The branch it was handed is
+    normally already on a remote, so counting that would hand every failed
+    phase a location and make the two incidents identical again.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
 

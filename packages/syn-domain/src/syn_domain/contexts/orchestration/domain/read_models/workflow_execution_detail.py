@@ -70,7 +70,8 @@ class PhaseExecutionDetail:
 
     THREE-VALUED, and the API boundary passes all three through unchanged:
     records are where the work is, `()` means the workspace was asked and
-    nothing in it had reached a remote, and `None` means nothing could ask -
+    nothing this phase produced had reached a remote, and `None` means nothing
+    could ask -
     including every phase that did not fail and every event written before this
     field existed. A phase whose work is sitting on a branch and one whose work
     died with its container are different incidents; flattening the empties

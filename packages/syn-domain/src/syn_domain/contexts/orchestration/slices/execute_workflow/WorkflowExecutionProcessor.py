@@ -73,6 +73,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
     SessionLifecycleManager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    PhaseStartingPoint,
+    record_phase_starting_point,
     refuse_to_complete_unsaved_phase,
     where_the_work_went,
 )
@@ -182,6 +184,10 @@ class WorkflowExecutionProcessor:
         self._import_ledger = import_ledger
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
+        # What each phase's repositories could already reach when it was handed
+        # them (#1200). Read at provision time because at failure time the
+        # inherited commits are indistinguishable from the phase's own.
+        self._phase_starting_points: dict[str, PhaseStartingPoint] = {}
         self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
@@ -474,13 +480,13 @@ class WorkflowExecutionProcessor:
         # maps.
         started_at_by_phase = dict(self._phase_started_at)
         session_id_by_phase = dict(self._phase_session_ids)
-        workspaces = dict(self._active_workspaces)
+        starting_points = dict(self._phase_starting_points)
 
         # The one window in which "where did this phase's work go" can still be
         # answered: the workspace is alive until _close_phase_workspace_cms
         # below, and after that the branch it pushed is undiscoverable from
         # here (#1200). Never raises, so it cannot displace `error`.
-        stranded = await where_the_work_went(workspaces, failed_phase_id)
+        stranded = await where_the_work_went(starting_points, failed_phase_id)
 
         failure = failed_phase_outcome(
             error,
@@ -537,6 +543,7 @@ class WorkflowExecutionProcessor:
         # closing workspaces; they differ only in how they complete sessions.
         self._session_managers.clear()
         self._active_workspaces.clear()
+        self._phase_starting_points.clear()
         self._active_envs.clear()
         self._active_cmds.clear()
 
@@ -589,6 +596,13 @@ class WorkflowExecutionProcessor:
             phase_outputs=phase_outputs,
         )
         self._active_workspaces[todo.phase_id] = result.workspace
+        # BEFORE the agent runs, which is the only moment "what was already
+        # here" can be read. Never raises: a workspace that will not answer
+        # produces a starting point that says so, and must not fail a phase
+        # that is otherwise fine (#1200).
+        self._phase_starting_points[todo.phase_id] = await record_phase_starting_point(
+            result.workspace
+        )
         self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
@@ -850,6 +864,10 @@ class WorkflowExecutionProcessor:
             )
 
         workspace = self._active_workspaces.pop(phase_id, None)
+        # Dropped with the workspace it describes: the two are only meaningful
+        # as a pair, so a surviving starting point could only ever be paired
+        # with the wrong container.
+        self._phase_starting_points.pop(phase_id, None)
         session_id = self._phase_session_ids.pop(phase_id, "")
         self._active_envs.pop(phase_id, None)
         self._active_cmds.pop(phase_id, None)

@@ -779,10 +779,16 @@ class PushedWorkInfo(BaseModel):
     day once a human found them.
 
     Every instance is a claim the workspace verified against a remote-tracking
-    ref before the workspace was destroyed. The FIELD is three-valued and the
-    two empty answers must not be merged: absent/null means nothing could look,
-    `[]` means the workspace was asked and none of its commits had reached a
-    remote. Only the first can be recovered by fetching.
+    ref before the workspace was destroyed, about a commit that was not in the
+    workspace when the phase started. The FIELD is three-valued and the two
+    empty answers must not be merged: absent/null means nothing could look,
+    `[]` means the workspace was asked and nothing this phase produced had
+    reached a remote. Only the first can be recovered by fetching.
+
+    `[]` is a statement about the PHASE and not about the repository. The
+    branch a phase works on is usually on a remote before it starts, so a
+    version of this that reported "the workspace's HEAD is on a remote" gave
+    every phase a location, including phases that produced nothing at all.
     """
 
     repo: str
@@ -792,7 +798,8 @@ class PushedWorkInfo(BaseModel):
     """The branch to fetch: no remote prefix, and the name a PR opens from."""
 
     commit: str
-    """The commit to look at - the phase's HEAD, confirmed present on a remote."""
+    """The commit to look at: the newest one this phase produced that its
+    branch's remote is confirmed to hold."""
 
 
 class PhaseExecution(BaseModel):
@@ -841,7 +848,7 @@ class PhaseExecution(BaseModel):
     (#1176).
     """
     pushed_work: list[PushedWorkInfo] | None = None
-    """Where this phase's work is, when it failed after pushing some (#1200).
+    """Where this phase's OWN work is, when it failed after pushing some (#1200).
 
     Three-valued exactly as `PushedWorkInfo` describes. Defaulting to `[]`
     here, or anywhere below, would tell an API client that a phase verifiably
