@@ -32,6 +32,90 @@ plan feels like progress. Separate phases also give each its own workspace,
 tools, skills and cost line - which is what makes "did the review phase earn its
 money?" an answerable question rather than a guess.
 
+## Which implementation workflow: `implement` or `quickfix`?
+
+Two workflows produce a PR. `sdlc-implement-v1` runs four phases with an
+independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
+verification behind it at all.
+
+**The test is not size. It is: is there anything to prove?**
+
+A change whose correctness a reviewer confirms by LOOKING at the diff has
+nothing to prove, and a verify phase can tell them nothing the diff did not.
+A change a reviewer has to REASON about does, and that is the whole reason
+implement and verify are separate phases in the first place (the measured
+evidence is in `implement/workflow.yaml`).
+
+Size is a bad proxy for this and gets the interesting cases backwards:
+
+| change | verdict | why |
+|---|---|---|
+| a 200-line mechanical rename | `quickfix` | every line is the same edit, and reading it confirms it |
+| a 3-line change to error handling | `implement` | you have to work out what happens now when it throws |
+| pinning `vitest ^3.0.0` -> `3.2.6` | `quickfix` | the diff IS the specification |
+| a one-word change to a projection | `implement` | it changes what a rebuild produces |
+
+`quickfix` is for version pins, typos, dead links, config values, renaming a
+constant, and deleting dead code something else proves unreachable. It is NOT
+for behaviour, control flow, error handling, event schemas, projections,
+security or auth, or tests that assert behaviour. Its prompt carries the full
+lists, and it is required to stop and send the task to `implement` rather
+than attempt anything whose correctness it cannot see.
+
+When you are between the two, use `implement`. The tie goes to the slower
+workflow, because the two failure modes do not cost the same: routing a
+mechanical change through four phases wastes money, and routing a judgement
+call through one produces an unreviewed behaviour change that looks reviewed.
+
+That asymmetry is also why every `quickfix` PR is required to say in its body
+that it had no independent verification phase. Reviewers here have calibrated
+on cross-model-gated PRs; one that looks the same but skipped the gate borrows
+trust it did not earn, and nothing in the diff reveals which workflow produced
+it.
+
+## What `timeout_seconds` actually bounds
+
+`timeout_seconds` is an AGENT-WORK budget, not a wall-clock budget for the
+phase. Workspace provisioning - the clone and the recursive submodule init - is
+NOT inside it, and neither is artifact collection.
+
+The path, in `WorkflowExecutionProcessor.py`:
+
+    PROVISION_WORKSPACE and RUN_AGENT are separate to-do items (:358, :367).
+    _handle_run_agent reads `phase.timeout_seconds or
+    phase.agent_config.timeout_seconds` (:633) and passes it as
+    `timeout_seconds=` to AgentExecutionHandler (:655), which hands it to
+    `workspace.stream(...)` (AgentExecutionHandler.py:319).
+
+So the timeout starts when the agent process starts, on a workspace that
+already exists. Provisioning has its own separate budget:
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS` (default 120s,
+`syn_shared/settings/config.py:355`), which bounds the setup script that does
+the cloning.
+
+**Two consequences when you tune one of these numbers.**
+
+Raising a phase's `timeout_seconds` "to leave room for provisioning" buys
+nothing - it was never spending any. A phase that is genuinely losing time to a
+slow clone needs `clone_repos: false` or a larger
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS`, and raising `timeout_seconds` will not help.
+
+Conversely, everything the AGENT does is inside the budget, including work that
+feels like infrastructure: running the gates, `git push`, `gh pr create`. Those
+belong in the arithmetic; the clone does not.
+
+This has been got wrong three times: the `open_pr` note in
+`implement/workflow.yaml`, the docstring of
+`handlers/test_open_pr_needs_no_working_tree.py`, and the budget derivation in
+`quickfix/workflow.yaml`. All three said provisioning ate a phase's budget.
+All three were corrected against the call path above; state the model from
+here rather than re-deriving it.
+
+One caveat worth keeping: #1187's `open_pr` timeouts were real and are
+recorded as ~one run in three. Removing the clone did not necessarily fix
+them, because the clone was never inside the budget that expired. If that
+phase still times out, look at the agent's own work.
+
 ## Naming
 
     sdlc-<purpose>-v<N>        id
@@ -77,7 +161,8 @@ is the property that matters.
 | directory | output | status |
 |---|---|---|
 | `research-plan/` | an implementation plan | built |
-| `implement/` | a PR implementing an approved plan | next |
+| `implement/` | a PR implementing an approved plan | built |
+| `quickfix/` | a PR for a change with nothing to prove | built |
 | `tech-debt/` | a prioritised debt register | planned |
 | `architecture/` | boundary and coupling findings | planned |
 | `devops/` | merges, conflicts, release mechanics | planned |

@@ -4,8 +4,17 @@ WHAT WAS WRONG. Provisioning was phase-blind. `WorkflowExecutionProcessor`
 built one repo list from the workflow and handed it to every phase, and
 `SetupPhaseSecrets` cloned whatever it was handed, so `open_pr` -- which reads
 one artifact, checks a remote ref and calls `gh pr create` -- paid the same
-clone plus recursive submodule init as `implement`, under the shortest budget
-in the workflow. It timed out in roughly a third of runs.
+clone plus recursive submodule init as `implement`, and then never read the
+tree it had just cloned. That waste is what this change removes.
+
+NOT "under the shortest budget in the workflow": this docstring used to say
+so, and it was wrong. The clone runs in the setup phase under its own
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS`; a phase's `timeout_seconds` is handed only
+to the agent process, after the workspace exists
+(`WorkflowExecutionProcessor.py:633,655`). #1187's ~one-in-three timeouts were
+real, but the clone was not what exhausted the 600s, so removing it is not
+guaranteed to have fixed them. See `workflows/sdlc/README.md`, "What
+`timeout_seconds` actually bounds".
 
 WHY THIS FILE DRIVES THE WHOLE CHAIN. The value starts in `workflow.yaml` and
 is only useful at the far end, in the bash the workspace actually executes.
