@@ -527,10 +527,10 @@ class TestTheVocabularyOnlyAcceptsNamesTheCliActuallyGrants:
     def test_skill_is_accepted_because_the_cli_does_grant_it(self) -> None:
         """The other half of #1207: a capability the vocabulary wrongly refused.
 
-        ``claude -p --tools Skill`` reports ``tools: ['Skill']`` on CLI
-        2.1.250, the version the pinned omni-agent image was probed to carry
-        when its digest was pinned (commit da0a4951). Verified by
-        test_tool_vocabulary_matches_the_cli.py against the image itself.
+        ``claude -p --tools Skill`` reported ``tools: ['Skill']`` on CLI
+        2.1.258 run directly in an agent workspace. The pinned image was NOT
+        probed because Docker was unavailable; the integration half of
+        test_tool_vocabulary_matches_the_cli.py is the still-unrun check of it.
         """
         from syn_shared.tools import require_supported_tools
 
