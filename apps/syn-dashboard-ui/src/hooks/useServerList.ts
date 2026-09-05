@@ -16,31 +16,24 @@
  * server chose, a total it can page against, and facet counts it did not have
  * to compute.
  *
- * What a caller does NOT get is a hook into how any of that is decided. The
- * filter-to-query mapping, the page reset, the debounce and the ordering of
- * overlapping responses are all settled in here, because every one of them is
- * a way for the two lists to disagree again.
+ * What a caller does NOT get is a hook into how any of that is decided. This
+ * function is composition and nothing else; each decision belongs to one of
+ * three units and none of them is reachable from a page:
+ *
+ *   - `useListQuery`    what to ask for, and which collection that is
+ *   - `useLatestPage`   asking, and ignoring answers that were overtaken
+ *   - `useLiveRefresh`  when to ask again
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
-import type { SSEEventFrame, TimeWindow } from '../types'
-import { useActivityStream } from './useActivityStream'
-import { timeWindowToStartedAfter, useFilterUrlState } from './useFilterUrlState'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
-import { useResetView } from './useResetView'
-import { useThrottledRefetch } from './useThrottledRefetch'
+import type { TimeWindow } from '../types'
+import { LIST_PAGE_SIZE, useListQuery } from './useListQuery'
+import { useLatestPage } from './useLatestPage'
+import { useLiveRefresh } from './useLiveRefresh'
 
-const REFETCH_THROTTLE_MS = 500
-const POLL_INTERVAL_MS = 5000
-/** Long enough that typing a word is one request, short enough to feel live. */
-const SEARCH_DEBOUNCE_MS = 300
-
-export const LIST_PAGE_SIZE = 50
-
-const EMPTY_PAGE: ListPage<never> = { rows: [], total: 0, statusCounts: {} }
+export { LIST_PAGE_SIZE }
 
 export interface UseServerListOptions<TRow> {
   /**
@@ -87,128 +80,30 @@ export interface UseServerListResult<TRow> {
   lastEventAt: number | null
 }
 
-/** Settle on a value only once it has stopped changing for `delayMs`. */
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), delayMs)
-    return () => clearTimeout(timer)
-  }, [value, delayMs])
-  return settled
-}
-
 export function useServerList<TRow>({
   fetchPage,
   scopeKey = '',
   liveEvents,
   isTerminal,
 }: UseServerListOptions<TRow>): UseServerListResult<TRow> {
-  const { selectedStatuses, timeWindow, toggleStatus, setTimeWindow, clearStatuses } =
-    useFilterUrlState()
-  const resetView = useResetView()
-
-  const [searchQuery, setSearchQuery] = useState('')
-  const search = useDebounced(searchQuery.trim(), SEARCH_DEBOUNCE_MS)
-
-  const statusesKey = useMemo(
-    () => Array.from(selectedStatuses).sort().join(','),
-    [selectedStatuses],
-  )
-  const statuses = useMemo(
-    () => (statusesKey ? statusesKey.split(',') : undefined),
-    [statusesKey],
-  )
-
-  // Resolved once per window choice rather than per request: a lower bound
-  // recomputed on every 5s poll would slide the oldest end of the collection
-  // out from under the page offsets while an operator is paging through it.
-  const startedAfter = useMemo(() => timeWindowToStartedAfter(timeWindow), [timeWindow])
-
-  // Which collection is being paged. A page number means nothing except
-  // relative to this, so a change to it IS page 1 - derived rather than reset
-  // in an effect, which would fetch the old page first and then correct it.
-  const queryKey = [scopeKey, statusesKey, startedAfter ?? '', search].join(' ')
-  const [pageState, setPageState] = useState({ queryKey, page: 1 })
-  const page = pageState.queryKey === queryKey ? pageState.page : 1
-  const setPage = useCallback(
-    (next: number) => setPageState({ queryKey, page: Math.max(1, next) }),
-    [queryKey],
-  )
-
-  const [result, setResult] = useState<ListPage<TRow>>(EMPTY_PAGE)
-  const [loading, setLoading] = useState(true)
-
-  // Four things refetch this list - the filter bar, paging, SSE and two
-  // pollers - so responses overlap routinely. Only the newest request may
-  // write; an earlier one landing late would put another page's rows on screen.
-  const latestRequest = useRef(0)
-
-  const refetch = useCallback(() => {
-    const request = ++latestRequest.current
-    fetchPage({
-      page,
-      page_size: LIST_PAGE_SIZE,
-      statuses,
-      started_after: startedAfter,
-      q: search || undefined,
-    })
-      .then((next) => {
-        if (request === latestRequest.current) setResult(next)
-      })
-      .catch((error) => {
-        if (request === latestRequest.current) console.error(error)
-      })
-      .finally(() => {
-        if (request === latestRequest.current) setLoading(false)
-      })
-  }, [fetchPage, page, statuses, startedAfter, search])
-
-  useEffect(() => {
-    refetch()
-  }, [refetch])
-
-  const scheduleRefetch = useThrottledRefetch(refetch, REFETCH_THROTTLE_MS)
-
-  const handleFrame = useCallback(
-    (frame: SSEEventFrame) => {
-      if (frame.type === 'event' && liveEvents.has(frame.event_type)) scheduleRefetch()
-    },
-    [liveEvents, scheduleRefetch],
-  )
-
-  const { connected, lastEventAt } = useActivityStream({
-    onEvent: handleFrame,
-    filter: (eventType) => liveEvents.has(eventType),
+  const { query, ...filters } = useListQuery(scopeKey)
+  const { result, loading, refetch } = useLatestPage(fetchPage, query)
+  const { connected, lastEventAt } = useLiveRefresh({
+    refetch,
+    liveEvents,
+    rows: result.rows,
+    isTerminal,
   })
 
-  useEffect(() => {
-    if (connected) return
-    const id = setInterval(refetch, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [connected, refetch])
-
-  // SSE only fires on Started/Completed, but Lane 2 (tokens/cost/duration)
-  // updates continuously. Poll while any row on this page is non-terminal.
-  useRefetchWhileRunning({ items: result.rows, isTerminal, refetch })
-
   return {
+    ...filters,
     rows: result.rows,
     loading,
     total: result.total,
-    page,
-    pageSize: LIST_PAGE_SIZE,
-    totalPages: Math.max(1, Math.ceil(result.total / LIST_PAGE_SIZE)),
-    setPage,
     statusCounts: result.statusCounts,
-    searchQuery,
-    setSearchQuery,
-    selectedStatuses,
-    toggleStatus,
-    clearStatuses,
-    timeWindow,
-    setTimeWindow,
-    resetView,
-    isDefaultFilters: selectedStatuses.size === 0 && timeWindow === '24h',
+    page: query.page,
+    pageSize: query.page_size,
+    totalPages: Math.max(1, Math.ceil(result.total / query.page_size)),
     connected,
     lastEventAt,
   }
