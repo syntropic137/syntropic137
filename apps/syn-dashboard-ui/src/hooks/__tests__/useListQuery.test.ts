@@ -51,7 +51,14 @@ describe('useListQuery', () => {
     const { result } = renderHook(() => useListQuery(''), { wrapper: wrapperAt('/') })
 
     expect(result.current.query.page).toBe(1)
-    expect(result.current.query.page_size).toBe(LIST_PAGE_SIZE)
+    // Both sides written out, deliberately. `toBe(LIST_PAGE_SIZE)` compares
+    // the constant to the constant the hook read, so it holds at any value and
+    // pins nothing - and 50 is not free to move: the list fixtures are 120
+    // rows BECAUSE that is three pages of 50, and the three-page arithmetic
+    // every count assertion rests on stops meaning anything at another size.
+    // So moving it fails here first, where the reason is written down.
+    expect(LIST_PAGE_SIZE).toBe(50)
+    expect(result.current.query.page_size).toBe(50)
     expect(result.current.query.statuses).toBeUndefined()
     expect(result.current.query.q).toBeUndefined()
   })

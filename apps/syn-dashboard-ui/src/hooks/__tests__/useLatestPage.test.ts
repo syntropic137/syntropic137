@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 
 import { listAllExecutions } from '../../api/executions'
 import type { ListPage, ListQuery } from '../../api/listQuery'
@@ -158,10 +158,20 @@ describe('useLatestPage', () => {
 
     // Page 1's answer arrives late. Rendering it would put another page's rows
     // under the current page's controls.
-    first.resolve(page(['page-1-row'], 120))
-    await Promise.resolve()
+    //
+    // Resolved inside `act`, which returns only once React has run what
+    // settling that promise scheduled AND committed the result. Awaiting a
+    // microtask instead asserts before a `setResult` could have reached the
+    // screen, so it passes whether or not the response was discarded - the
+    // same shape of check-that-cannot-fail as the count this file exists to
+    // pin. Its rows AND its total differ from page 2's, so neither assertion
+    // below can be satisfied by the wrong response.
+    await act(async () => {
+      first.resolve(page(['page-1-row'], 999))
+    })
 
     expect(result.current.result.rows).toEqual([{ id: 'page-2-row' }])
+    expect(result.current.result.total).toBe(120)
   })
 
   it('refetches when the query changes identity', async () => {
