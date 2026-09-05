@@ -615,11 +615,14 @@ _OBSERVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
     # 2. The inspection could not finish and read nothing before it stopped.
     #    NOT the same as (1) and never merged with it: this says nobody looked.
     (False, True): (
-        "  THE STATE OF THIS WORKSPACE'S BRANCHES IS UNKNOWN: it stopped "
-        "answering before any repository was read ({unreadable}), so this is "
+        "  THE STATE OF THIS WORKSPACE'S BRANCHES IS UNKNOWN: the inspection "
+        "stopped before any repository was read ({unreadable}), so this is "
         "not a report that nothing changed - it is the absence of a report. "
-        "Check the remote for a branch from this execution before assuming "
-        "either."
+        "The reason names what did not answer, which is the workspace for a "
+        "local command and the REMOTE for a `ls-remote`: where a branch is "
+        "now is a question only the remote can settle, and a cached ref is "
+        "not offered in its place. Check the remote for a branch from this "
+        "execution before assuming either."
     ),
     # 3. Read something, then stopped. The records below are still readings.
     (True, True): (

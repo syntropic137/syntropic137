@@ -20,6 +20,13 @@ already pushed - and answering it offered the inherited commit as somewhere to
 go and look. The comparison is what makes "this ref is not where the phase
 found it" sayable at all.
 
+ONE HALF OF THAT COMPARISON IS A CACHE AND THE OTHER IS NOT, deliberately.
+Where a branch WAS is `refs/remotes` as the phase was handed it, which is the
+definition of where the phase found it. Where a branch IS NOW is asked of the
+remote over the network, because `refs/remotes` only ever says what this clone
+was last told, and a phase that never fetched was last told something that may
+predate everything the report is about.
+
 WHAT THE COMPARISON IS NOT is a claim about who moved the ref. Two earlier
 versions of this reported "work THIS PHASE pushed", derived from exactly this
 snapshot-then-diff: anything new relative to the snapshot was called the
@@ -110,6 +117,28 @@ _IDENTITY: Final[tuple[str, ...]] = (
     "GIT_COMMITTER_NAME=syn-bot",
     "GIT_COMMITTER_EMAIL=agent@agentic.local",
 )
+
+#: How long a remote is given to say where a branch is. Asking it is a NETWORK
+#: call on a path that runs while a phase is already failing and teardown is
+#: queued behind it, so an unreachable remote must cost a bounded wait rather
+#: than the container's remaining lifetime. `--kill-after` covers a transport
+#: helper that ignores the first signal.
+#:
+#: Carried in argv through coreutils `timeout`, for the reason `_git_argv`
+#: already carries environment through `env`: the command stays self-contained
+#: and asks nothing of the execute() port, which every backend and every
+#: double would then have to implement. The two programs ship together, so a
+#: workspace with `env` has this. One that somehow has neither exits 127 -
+#: a command that did not answer, which `_checked` already refuses to read as
+#: one.
+_REMOTE_TIMEOUT_SECONDS: Final[int] = 20
+_REMOTE_KILL_AFTER_SECONDS: Final[int] = 5
+
+#: `timeout`'s documented exit code for "the bound fired". Named here because
+#: this module is what put the wrapper in the argv, so this module is what can
+#: say that 124 means the command was cut off rather than that it answered
+#: 124. Without it an operator reads "exited 124" and has to go and look it up.
+_BOUND_FIRED_EXIT_CODE: Final[int] = 124
 
 
 class GitWorkspace(Protocol):
@@ -271,7 +300,8 @@ async def record_phase_starting_point(workspace: GitWorkspace) -> PhaseStartingP
         return PhaseStartingPoint(
             workspace=workspace,
             remote_refs={
-                repo: await _remote_refs(workspace, repo) for repo in await _repositories(workspace)
+                repo: await _cached_remote_refs(workspace, repo)
+                for repo in await _repositories(workspace)
             },
         )
     except WorkspaceInspectionFailedError as unreadable:
@@ -281,8 +311,16 @@ async def record_phase_starting_point(workspace: GitWorkspace) -> PhaseStartingP
         )
 
 
-async def _remote_refs(workspace: GitWorkspace, repo: str) -> Mapping[str, str]:
-    """This repository's remote-tracking refs, short name to commit.
+async def _cached_remote_refs(workspace: GitWorkspace, repo: str) -> Mapping[str, str]:
+    """What this clone last HEARD its remotes say, short name to commit.
+
+    `refs/remotes/*` is a cache and the name says so. It advances when THIS
+    clone fetches or pushes, and never because a remote advanced, so reading
+    it answers "what was this clone last told" and not "where is the branch".
+    Only `record_phase_starting_point` may use it, and only because at that
+    moment the two coincide: the workspace has just been cloned, and "where
+    the phase FOUND the ref" is by definition the reading the phase was handed.
+    Asking where a branch is NOW goes to `_remote_tips`, which asks the remote.
 
     `origin/HEAD` is dropped because it is the remote's symbolic default and
     names no branch of anyone's. Dropping it is also what makes a detached
@@ -297,6 +335,47 @@ async def _remote_refs(workspace: GitWorkspace, repo: str) -> Mapping[str, str]:
         for sha, _, ref in (line.strip().partition(" ") for line in listing.splitlines())
         if sha and ref and not ref.endswith("/HEAD")
     }
+
+
+async def _remote_tips(workspace: GitWorkspace, repo: str, branch: str) -> dict[str, str]:
+    """Where each of ``repo``'s remotes ACTUALLY holds ``branch``, keyed by remote.
+
+    ASKS THE REMOTE. That is the whole of this function and the reason it is
+    not a read of `refs/remotes`, which is what it replaced. A phase that
+    commits, pushes and fails updates its own cache, so the cache looked
+    right in every fixture; a phase that fails while SOMEONE ELSE pushed the
+    same branch never hears about it, and the cache then reports a commit that
+    is not where the branch is - offered to an operator as where to look.
+    `ls-remote` asks the remote itself and writes nothing on either side.
+
+    A remote missing from the result does not have the branch. A remote that
+    could not be REACHED is not in the result either - it raises, because the
+    two must never be the same value, and the cached commit must never be
+    offered in place of an answer nobody got. That is `_checked`'s rule
+    applied to the one command here that can fail without the workspace being
+    at fault, and the caller reports the absence of a reading rather than
+    inventing one.
+
+    Raises:
+        WorkspaceInspectionFailedError: a remote did not answer within
+            `_REMOTE_TIMEOUT_SECONDS`, or answered with a failure.
+    """
+    ref = f"refs/heads/{branch}"
+    tips: dict[str, str] = {}
+    for remote in (await _git(workspace, repo, "remote")).split():
+        listing = await _checked(
+            workspace,
+            _git_argv(repo, "ls-remote", remote, ref, timeout_seconds=_REMOTE_TIMEOUT_SECONDS),
+            doing=f"asking {remote} where {branch} is, in {repo}",
+        )
+        # Matched on the full refname rather than trusting ls-remote's pattern
+        # matching, so `refs/heads/x` can never be answered by some other
+        # remote's `refs/heads/team/x`.
+        for line in listing.splitlines():
+            sha, _, name = line.strip().partition("\t")
+            if sha and name == ref:
+                tips[remote] = sha
+    return tips
 
 
 def _by_remote(branch: str, refs: Mapping[str, str]) -> dict[str, str]:
@@ -394,6 +473,12 @@ async def _branch_state(start: PhaseStartingPoint, repo: str) -> list[BranchObse
     in this phase's failure record. The branch the workspace is on is the one
     a PR would come from and the only one worth naming.
 
+    WHERE IT IS NOW IS ASKED OF THE REMOTE, and where it WAS comes from the
+    snapshot. Both readings used to come from `refs/remotes`, which is this
+    clone's cache: it advances when this clone fetches or pushes and at no
+    other time, so a branch that moved on the remote while the phase held the
+    workspace read as one that had not moved at all. `_remote_tips` asks.
+
     EVERY RECORD IS FILTERED BY `is_worth_recording`, so a repository whose
     remote branch is where the phase found it and whose HEAD is fully pushed
     contributes nothing. That filter is the difference between "this phase
@@ -408,7 +493,11 @@ async def _branch_state(start: PhaseStartingPoint, repo: str) -> list[BranchObse
         return []
 
     branch = (await _git(workspace, repo, "rev-parse", "--abbrev-ref", "HEAD")).strip()
-    now = _by_remote(branch, await _remote_refs(workspace, repo))
+    # THE REMOTE ITSELF, not this clone's cache of it: see `_remote_tips`.
+    # `before` is the cache on purpose - it is the reading the phase was
+    # handed - so the two halves of the comparison come from different places
+    # and each is the right source for the moment it describes.
+    now = await _remote_tips(workspace, repo, branch)
     before = start.remote_refs_for(repo, branch)
     # The same `--not --remotes` question `_unsaved_work` asks: what this
     # workspace holds that no remote does, and so what dying would erase.
@@ -644,17 +733,34 @@ async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -
             command=tuple(command),
             exit_code=result.exit_code,
             stderr=result.stderr,
-            timed_out=result.timed_out,
+            # Two ways to be cut off and one word for it: the BACKEND says so
+            # when it enforced its own limit, and `timeout` says so with an
+            # exit code when the bound this module put in the argv fired. A
+            # reader needs "it did not finish" either way, not a number.
+            timed_out=result.timed_out
+            or (command[0] == "timeout" and result.exit_code == _BOUND_FIRED_EXIT_CODE),
         ),
     )
 
 
-def _git_argv(repo: str, *args: str, index: str | None = None, identity: bool = False) -> list[str]:
+def _git_argv(
+    repo: str,
+    *args: str,
+    index: str | None = None,
+    identity: bool = False,
+    timeout_seconds: int | None = None,
+) -> list[str]:
     """Argv for one git command in ``repo``.
 
-    Environment is carried in argv via ``env`` rather than through the
-    execute() port's environment channel, so the command is self-contained and
-    behaves identically on any backend that can merely run a process.
+    Environment and any time bound are carried in argv, via ``env`` and
+    ``timeout``, rather than through the execute() port's channels: the
+    command is then self-contained and behaves identically on any backend that
+    can merely run a process, including the doubles that only run one.
+
+    ``timeout_seconds`` is for commands that touch a NETWORK. A local git
+    command that hangs is a broken container and nothing here can help it;
+    a remote that hangs is ordinary, and this path runs with teardown waiting
+    behind it.
     """
     prefix: list[str] = []
     if index is not None:
@@ -662,7 +768,12 @@ def _git_argv(repo: str, *args: str, index: str | None = None, identity: bool = 
     if identity:
         prefix.extend(_IDENTITY)
     env = ["env", *prefix] if prefix else []
-    return [*env, "git", "-C", repo, *args]
+    bound = (
+        ["timeout", f"--kill-after={_REMOTE_KILL_AFTER_SECONDS}", str(timeout_seconds)]
+        if timeout_seconds is not None
+        else []
+    )
+    return [*bound, *env, "git", "-C", repo, *args]
 
 
 async def _git(

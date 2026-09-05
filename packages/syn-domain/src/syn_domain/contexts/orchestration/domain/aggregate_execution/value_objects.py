@@ -191,9 +191,15 @@ class BranchObservation(BaseModel):
     some rule nobody can see."""
 
     remote_commit: str | None
-    """What ``<remote>/<branch>`` points at NOW, read while the workspace was
-    still alive. ``None`` means that ref does not exist - the branch was never
-    pushed, or the ref was deleted while the phase ran."""
+    """What ``<remote>/<branch>`` points at NOW, asked of the remote itself
+    while the workspace was still alive. ``None`` means the remote does not
+    have that branch - never pushed, or deleted while the phase ran.
+
+    Read from the remote and not from `refs/remotes`, which is only what this
+    clone was last told: a phase that never fetched would report a commit that
+    predates whatever it is being compared against. A remote that could not be
+    reached produces no record at all rather than a stale one; see
+    `ObservedBranches.unreadable`."""
 
     remote_commit_at_phase_start: str | None
     """What that same ref pointed at when the phase was handed the workspace,

@@ -167,6 +167,57 @@ class _Clone:
         self.git("commit", "-m", f"add {name}")
         return self.git("rev-parse", "HEAD")
 
+    def push_from_elsewhere(self, name: str, content: str) -> str:
+        """Move `<branch>` ON THE ORIGIN from a SECOND clone, and tell this one nothing.
+
+        THE PRODUCTION INPUT EVERY OTHER HELPER OMITS, and the only one that
+        can tell a reading of the remote apart from a reading of the cache. A
+        push made from THIS clone updates its `refs/remotes` as a side effect,
+        so a fixture built that way leaves the cache correct and any
+        implementation passes. Pushing from somewhere else, and never
+        fetching, leaves this clone's cache holding a commit that is no longer
+        where the branch is - which is what a phase that pushed nothing and
+        failed while a teammate pushed actually looks like.
+
+        Returns the commit the ORIGIN now holds, read from the second clone.
+        """
+        elsewhere = self.root / f"{self.name}.elsewhere"
+        if not elsewhere.exists():
+            _git("clone", str(self.origin), str(elsewhere), cwd=self.root, home=self.root / "home")
+            _git("checkout", _BRANCH, cwd=elsewhere, home=self.root / "home")
+        (elsewhere / name).write_text(content)
+        _git("add", name, cwd=elsewhere, home=self.root / "home")
+        _git("commit", "-m", f"add {name}", cwd=elsewhere, home=self.root / "home")
+        _git("push", "origin", _BRANCH, cwd=elsewhere, home=self.root / "home")
+        return _git("rev-parse", "HEAD", cwd=elsewhere, home=self.root / "home").stdout.strip()
+
+    def cached_remote_tip(self, branch: str = _BRANCH) -> str:
+        """What THIS clone last heard `origin/<branch>` was, from `refs/remotes`."""
+        return self.git("rev-parse", f"refs/remotes/origin/{branch}")
+
+    def hang_the_remote(self, seconds: int) -> None:
+        """Point origin at a transport that answers nothing for ``seconds``.
+
+        `ext::` runs the given program as the transport helper, so `sleep`
+        gives a remote that is REACHABLE and simply never speaks - the failure
+        an unreachable-host URL cannot stage, because that one ends by itself.
+        Only this one can show that something else ends it. Enabled per
+        repository because git refuses `ext::` by default, which is a good
+        default and not one the gate has any reason to change.
+        """
+        self.git("config", "protocol.ext.allow", "always")
+        self.git("remote", "set-url", "origin", f"ext::sleep {seconds}")
+
+    def break_the_remote(self) -> None:
+        """Point origin somewhere that does not exist, so asking it fails.
+
+        A path rather than an unreachable host: it fails immediately and
+        identically on every machine, where a bad URL would spend the
+        suite's time discovering that. "The remote is gone" is one of the
+        real failure modes, and the code cannot tell it from the others.
+        """
+        self.git("remote", "set-url", "origin", str(self.root / "no-such-origin.git"))
+
     def advance_origin_main(self, name: str, content: str) -> None:
         """Move origin/main on, the way another PR merging does, and fetch it."""
         seed = self.seed

@@ -778,13 +778,13 @@ class BranchObservationInfo(BaseModel):
     branch, so nothing pointed at commits that were merged by hand twice in one
     day once a human found them.
 
-    EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is where the
-    branch's remote-tracking ref pointed while the workspace was still alive,
-    and `remote_commit_at_phase_start` is where it pointed when the phase was
-    handed that workspace. The two differing means the ref moved. It does NOT
-    mean this phase moved it, and no field here says so: a push carries no
-    author, so the same evidence is produced by a concurrent process or a
-    person. Two earlier versions of this claimed otherwise.
+    EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the
+    REMOTE ITSELF answered, asked while the workspace was still alive, and
+    `remote_commit_at_phase_start` is where this clone's tracking ref pointed
+    when the phase was handed that workspace. The two differing means the ref
+    moved. It does NOT mean this phase moved it, and no field here says so: a
+    push carries no author, so the same evidence is produced by a concurrent
+    process or a person. Two earlier versions of this claimed otherwise.
 
     A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
     repository - the ref moved, or commits are sitting on no remote. The FIELD
@@ -806,8 +806,10 @@ class BranchObservationInfo(BaseModel):
     has no remote-tracking ref and had none at phase start."""
 
     remote_commit: str | None
-    """Where ``<remote>/<branch>`` pointed when the phase failed. Null means
-    that ref does not exist: never pushed, or deleted while the phase ran."""
+    """Where the REMOTE said ``<branch>`` was when the phase failed, asked of
+    it directly. Null means the remote does not have that branch: never
+    pushed, or deleted while the phase ran. A remote that could not be reached
+    yields no record at all, never a stale one."""
 
     remote_commit_at_phase_start: str | None
     """Where that same ref pointed when the phase was handed the workspace.

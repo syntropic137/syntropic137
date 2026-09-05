@@ -41,6 +41,7 @@ them apart - which is why the API carries the structure and not a sentence.
 from __future__ import annotations
 
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -63,6 +64,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow import (
+    unpushed_work_guard as guard,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
@@ -350,6 +354,155 @@ async def test_the_reason_the_phase_failed_is_not_replaced_by_where_it_went(
     assert message.index("produced none") < message.index(_BRANCH), (
         "the phase's own failure must come first; the location follows it"
     )
+
+
+# ---------------------------------------------------------------------------
+# The reading is of the REMOTE, not of this clone's cache of it.
+# ---------------------------------------------------------------------------
+
+
+async def test_external_push_without_fetch_reports_actual_remote_tip(clone: _Clone) -> None:
+    """The blocking finding of the fourth pass, as an input the fixtures omitted.
+
+    Every other test here moves the branch by pushing FROM the phase clone,
+    and a push updates that clone's `refs/remotes` as a side effect. So the
+    cache and the remote agreed in every fixture, and reading the cache passed
+    all of them while answering a different question: `refs/remotes` says what
+    this clone was last told, and it advances only when this clone fetches or
+    pushes.
+
+    Here someone else pushes - a second clone of the same origin, which is a
+    teammate, a rerun, or a bot - and the phase clone never fetches. Its cache
+    still holds the commit it started at, the origin holds another, and the
+    two are now different questions with different answers. The record must
+    carry the ORIGIN's answer, because that is the commit an operator will
+    find when they go and fetch; the cached one is not on the remote's branch
+    any more and sends them to the wrong place.
+    """
+    started_at = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
+    start = await _provisioned(clone.workspace)
+
+    actual_now = clone.push_from_elsewhere("someone_elses_push.py", "pushed from another clone\n")
+
+    assert clone.origin_refs()[f"refs/heads/{_BRANCH}"] == actual_now != started_at, (
+        "this test is only meaningful while the origin really moved"
+    )
+    assert clone.cached_remote_tip() == started_at, (
+        "this test is only meaningful while this clone's cache is STALE - it "
+        "must not have fetched, or there is no difference left to detect"
+    )
+
+    failed = await _fail_after(start)
+
+    assert failed.observed_branches == [
+        BranchObservation(
+            repo=_REPO,
+            branch=_BRANCH,
+            remote="origin",
+            remote_commit=actual_now,
+            remote_commit_at_phase_start=started_at,
+            unpushed_commits=0,
+        )
+    ], (
+        "the record must hold the commit the ORIGIN points at, not the one "
+        f"this clone last heard about ({started_at}); got {failed.observed_branches!r}"
+    )
+
+    phase = await _read_back(failed)
+    assert phase.observed_branches is not None
+    (record,) = phase.observed_branches
+    assert record.remote_commit == actual_now, (
+        "the origin's commit reached the event but not the read model - the "
+        "hop that drops a value, one past the one this test is about"
+    )
+    assert f"is at {actual_now}" in (phase.error_message or ""), (
+        "the operator is sent to a commit the remote does not hold"
+    )
+
+
+async def test_an_unreachable_remote_is_not_answered_from_the_cache(clone: _Clone) -> None:
+    """Asking the remote is a NETWORK call, and it can simply fail.
+
+    The trap it opens is the defect itself wearing a fallback: this clone HAS
+    a cached ref, it is right there, and offering it when the remote does not
+    answer produces a record that looks exactly like a successful reading. It
+    would be a commit nobody confirmed, printed as where the branch is.
+
+    So a remote that cannot be reached yields no verdict - the same `None` the
+    API already carries for "nobody could look", which is honest here because
+    nobody could. The reason says which question went unanswered, so an
+    unreachable REMOTE is still tellable from an unreachable WORKSPACE by a
+    reader, and the cached commit appears nowhere.
+    """
+    start = await _provisioned(clone.workspace)
+    clone.commit("implementation.py", "the work the phase actually did\n")
+    clone.git("push", "origin", _BRANCH)
+    cached = clone.cached_remote_tip()
+    assert cached == clone.origin_refs()[f"refs/heads/{_BRANCH}"], (
+        "the push must have left a cached ref, or there is no fallback to resist"
+    )
+
+    clone.break_the_remote()
+
+    failed = await _fail_after(start)
+
+    assert failed.observed_branches is None, (
+        "a remote that could not be asked was answered from the cache; the "
+        f"stale reading must not become a record - got {failed.observed_branches!r}"
+    )
+
+    phase = await _read_back(failed)
+    assert phase.observed_branches is None
+    message = phase.error_message or ""
+    assert cached not in message, f"the cached commit is offered as where the branch is: {message}"
+    assert f"asking origin where {_BRANCH} is" in message, (
+        f"the failure does not say WHICH question went unanswered: {message}"
+    )
+    assert "ls-remote" in message, (
+        f"the reason must name the command, so a reader can tell an unreachable "
+        f"remote from an unreachable container: {message}"
+    )
+    assert "produced none" in message, (
+        "#1167's reason must survive a remote that could not be reached"
+    )
+
+
+async def test_a_hanging_remote_cannot_hold_up_the_failing_phase(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Teardown is queued behind this read, so the read must end by itself.
+
+    A remote that REFUSES is over in milliseconds and proves nothing about a
+    bound. A remote that accepts and then says nothing is the one that hangs,
+    and until it is bounded the phase's container stays up for as long as the
+    other end feels like - on a path that only runs when something has already
+    gone wrong.
+
+    The hang here is thirty seconds and the bound is one, so the elapsed time
+    is the assertion: anything near thirty means nothing cut it off. What the
+    phase then reports is the same absence of a verdict any unanswered command
+    produces, and #1167's own reason is still the reason it failed.
+    """
+    monkeypatch.setattr(guard, "_REMOTE_TIMEOUT_SECONDS", 1)
+    start = await _provisioned(clone.workspace)
+    clone.hang_the_remote(seconds=30)
+
+    began = time.monotonic()
+    failed = await _fail_after(start)
+    elapsed = time.monotonic() - began
+
+    assert elapsed < 15, (
+        f"the read waited {elapsed:.1f}s on a remote that never answers - the "
+        "bound is not being applied, and teardown waits behind this"
+    )
+    assert failed.observed_branches is None, (
+        f"a remote that never answered produced a verdict: {failed.observed_branches!r}"
+    )
+    message = (await _read_back(failed)).error_message or ""
+    assert "timed out, so it did not finish" in message, (
+        f"a bound that fired must read as one, not as an exit code: {message}"
+    )
+    assert "produced none" in message, "#1167's reason must survive a remote that never answered"
 
 
 # ---------------------------------------------------------------------------
