@@ -210,3 +210,60 @@ def test_describe_exception_prefers_what_the_exception_said() -> None:
     assert describe_exception(RuntimeError("  boom  ")) == "boom"
     assert describe_exception(RuntimeError()) == "RuntimeError (no message)"
     assert describe_exception(RuntimeError("")) == "RuntimeError (no message)"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_every_record_of_the_failure_says_the_same_thing() -> None:
+    """(d) The session_error was one of FOUR sinks `str(error)` left blank.
+
+    A failing run writes the same failure down four times - the `PhaseResult`
+    in the returned execution result, the `session_error` observation, the
+    `FailExecutionCommand` the aggregate stores, and the result's own
+    `error_message`. #1196 was reported against one of them, but all four read
+    `str(error)`, so fixing only the reported one would have left the identical
+    defect in three.
+
+    `TimeoutError()` is the fixture because it CANNOT arise from the old code:
+    `str(TimeoutError())` is "", so every assertion below was the empty string
+    before the description existed. A message-carrying exception would pass
+    against either version and prove nothing.
+
+    This also pins the hop `test_phase_outcome` names as its known gap - the
+    lines in `_fail_execution` that append the phase result. The description is
+    derived in `phase_outcome.failed_phase_outcome` now; if that move ever
+    stops feeding any one of these four, exactly one assertion here fails and
+    names which sink lost it.
+    """
+    writer = _RecordingWriter()
+    processor = _processor()
+    manager = _manager(writer)
+    await manager.start()
+    processor._session_managers["verify"] = manager
+    # A recorded start is what makes a PhaseResult exist at all; without it
+    # `failed_phase_outcome` correctly returns none and this test would assert
+    # over an empty list.
+    processor._phase_started_at["verify"] = datetime.now(UTC)
+    aggregate = MagicMock()
+
+    result = await processor._fail_execution(
+        error=TimeoutError(),
+        aggregate=aggregate,
+        execution_id="exec-1",
+        workflow_id="wf-1",
+        phases=[],
+        phase_results=[],
+        all_artifact_ids=[],
+        completed_phase_ids=[],
+        started_at=datetime.now(UTC),
+        failed_phase_id="verify",
+    )
+
+    [phase_result] = result.phase_results
+    command = aggregate.fail_execution.call_args.args[0]
+
+    assert "TimeoutError" in phase_result.error_message, "the phase result lost the reason"
+    assert result.error_message and "TimeoutError" in result.error_message, "the result lost it"
+    assert "TimeoutError" in command.error, "the stored failure event lost it"
+    assert command.error_type == "TimeoutError", "the event's error_type lost it"
+    assert "TimeoutError" in _only_session_error(writer).error_message, "the observation lost it"
