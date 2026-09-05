@@ -2545,10 +2545,21 @@ executions  page_size=10   rows=10   total=10
 all, so a client cannot page and cannot know what it is missing. Expected for
 artifacts today (#1204).
 
-- [ ] executions: `total` identical across all four page sizes
-- [ ] sessions: `total` identical across all four page sizes
-- [ ] workflows: `total` identical across all four page sizes
-- [ ] executions, sessions and workflows report the SAME `total` semantics (all counts, not one of them a page length)
+- [ ] precondition, per surface: at least two rungs returned DIFFERENT `rows`
+      values (PASS condition 3). If every rung returned the same `rows`, the
+      collection is smaller than two rows, and that surface's result is
+      **NOT RUN** - no box below may be ticked PASS for it. A one-row stack
+      reports `rows=1 total=1` on all four rungs, which satisfies condition 1
+      while proving nothing
+- [ ] executions: `total` identical across all four page sizes (condition 1)
+- [ ] executions: `rows == min(page_size, total)` on every rung (condition 2) -
+      a rung that returns fewer rows than the page size while `total` is larger
+      is a FAIL, not a rounding detail
+- [ ] sessions: conditions 1 AND 2, both
+- [ ] workflows: conditions 1 AND 2, both
+- [ ] all three of executions, sessions and workflows satisfied conditions 1 and
+      2. A surface whose `total` tracks `rows` is reporting a page length, not a
+      count, however self-consistent its response looks
 - [ ] artifacts: result recorded (expected `ABSENT`; if it now reports a `total`, #1204 is fixed)
 
 ### 8.1.2 Time windows actually narrow
@@ -2629,7 +2640,7 @@ the shape #1159 actually shipped.)
 - [ ] executions: `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)`
       both strict - a single strict increase is not sufficient. Any equality is
       resolved via the discriminator table above; an equality left
-      undischriminated is **FAIL**, not PASS
+      undiscriminated is **FAIL**, not PASS
 - [ ] sessions: same three assertions
 - [ ] artifacts: `started_after` is not accepted at all - record as FAIL against #1204
 - [ ] workflows: **not applicable** - `/workflows` takes no time bound, so there is no
@@ -2674,6 +2685,19 @@ comm -12 \
 ```
 
 Expected: `0`. Any shared id means the pages overlap; `50` means `page` does nothing.
+
+**Assertion 2 is a status code as well as a row count.** `rows_of` extracts
+`.executions // .sessions // .workflows // []`, so a 404 or a 500 body has no rows
+key, falls through to `[]`, and prints `0` - identical to a correctly empty page.
+Read the code, not just the count:
+
+```bash
+curl -sS -o /dev/null -w 'beyond-last HTTP %{http_code}\n' \
+  -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+  "$SYN_API_URL/$surface?page=$((pages+1))&page_size=$ps"
+```
+
+Expected: `beyond-last HTTP 200`.
 
 **The last page must be the true beginning of history**, not the oldest row inside
 some fixed recent window. Take the oldest reachable timestamp and ask the server
@@ -2748,12 +2772,20 @@ surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; 
 > **Escalate** only if the two pages share ids - that would be paging breaking, not
 > the known sort limitation.
 
-- [ ] executions: arithmetic closes, page N+1 empty, pages 1 and 2 disjoint
+- [ ] precondition, per surface: `total > page_size`, i.e. `pages >= 2`. On a
+      single-page collection the arithmetic closes trivially, page 2 is empty for
+      free and pages 1 and 2 are disjoint for free - all four assertions pass
+      having exercised no paging at all. If `pages < 2` that surface's result is
+      **NOT RUN**, never PASS
+- [ ] executions: arithmetic closes; page N+1 returns 0 rows **and HTTP 200** (a
+      404 or a 500 also reads as 0 rows and is a FAIL, not an empty page); pages
+      1 and 2 disjoint
 - [ ] executions: nothing older than the oldest reachable row exists
 - [ ] executions: `$oldest` recorded in the report as the earliest known record
-- [ ] sessions: same four assertions
-- [ ] workflows: assertions 1-3 (`page_size` caps at 100, not 200); assertion 4 is
-      not available on this surface
+- [ ] sessions: the precondition and the same four assertions
+- [ ] workflows: the precondition and assertions 1-3 (`page_size` caps at 100, not
+      200); assertion 4 is not available on this surface, so it is recorded as
+      NOT RUN rather than ticked
 - [ ] workflows: `order_by` behaves as the known limitation above, and no worse
 - [ ] artifacts: no `page` parameter exists, so history beyond the 200-row cap is unreachable - record as FAIL against #1204
 
@@ -2821,15 +2853,52 @@ Sessions has no `interrupted` status at all (`SessionStatus` is
 `_shared/value_objects.py`), so on `/sessions` the named exception is EMPTY:
 `interrupted` is always `0` and PASS requires `chips_sum == total` outright.
 
-**PASS**: `chips_sum + interrupted == total`, `unexpected` is empty, AND every chip
-on screen shows the value `status_counts` reports for it. On `/sessions`,
-`interrupted` is always `0`, so this reduces to `chips_sum == total`.
+**The numbers that decide this check are the ones ON SCREEN.** The jq above reads
+`status_counts` from the API, which is a cross-check, not the criterion: #1159 was a
+browser showing "completed 35" while the collection held 235, and an API-only
+assertion cannot see that. Read the five chips off the page and sum them
+(`ResourceFilterBar` renders a fixed five, each as a button labelled
+`<Status> <count>`):
 
-**FAIL** - `chips_sum + interrupted != total`. This is the "completed 35 against a
+```js
+await page.goto('http://127.0.0.1:8138/executions?timeWindow=all')
+const chips = {}
+for (const label of ['Pending', 'Running', 'Completed', 'Failed', 'Cancelled']) {
+  const text = await page.getByRole('button', { name: new RegExp(`^${label}\\b`) }).innerText()
+  chips[label.toLowerCase()] = Number(text.replace(/\D+/g, ''))
+}
+const visible_sum = Object.values(chips).reduce((a, b) => a + b, 0)
+console.log(JSON.stringify({ chips, visible_sum }))
+```
+
+Expected against the API response above:
+
+```json
+{"chips":{"pending":0,"running":2,"completed":235,"failed":68,"cancelled":5},"visible_sum":310}
+```
+
+**PASS** requires all three:
+
+1. `visible_sum + interrupted == total`, where `visible_sum` is the sum of the five
+   numbers READ OFF THE SCREEN and `interrupted` is the single named exception.
+   This is the acceptance criterion.
+2. `visible_sum == chips_sum` - every chip on screen shows the value
+   `status_counts` reports for it. A chip that disagrees with the API is the #1159
+   symptom exactly, and it is a FAIL even when the API's own arithmetic closes.
+3. `unexpected` is empty.
+
+On `/sessions` the named exception is empty, so condition 1 is
+`visible_sum == total` outright.
+
+**FAIL** - `visible_sum + interrupted != total`. This is the "completed 35 against a
 true 235" shape: the visible chips (plus the one named, enumerated exception) do not
 account for the total. The shortfall is real regardless of what else
 `status_counts` contains - there is no other term available to balance the
 equation.
+
+**FAIL** - `visible_sum != chips_sum` while `chips_sum + interrupted == total`. The
+API is right and the browser is wrong, which is the exact defect that reached the
+owner. Passing on the strength of the API number alone is how it was missed.
 
 **FAIL / escalate immediately** - `unexpected` is non-empty. A status exists outside
 the five rendered chips and outside the single named exception. This is NOT
@@ -2888,19 +2957,37 @@ there is no `Showing X-Y of N` line on `/artifacts` at all, and the page fetches
 `limit=100` with no statement that it is a page - so 101 artifacts render
 indistinguishably from 500. Record against #1204.
 
-- [ ] `/executions`: `Showing 1-50 of N` matches API `total`
-- [ ] `/executions`: `Page 1 of M` matches `ceil(total / 50)`
-- [ ] `/executions`: `chips_sum + interrupted == total` and `unexpected` is empty -
-      an unresolved shortfall or a non-empty `unexpected` is FAIL, never PASS
+- [ ] precondition, per surface: API `total >= 1`. With `total == 0` every chip
+      reads `0`, the arithmetic closes against nothing, and the result is
+      **NOT RUN**, never PASS
+- [ ] `/executions`: `Showing 1-50 of N` - both halves: `N` == API `total`, AND
+      the displayed range == `1-min(50, total)`
+- [ ] `/executions`: `Page 1 of M` matches `ceil(total / 50)` when `total > 50`.
+      When `total <= 50` the control is absent BY DESIGN and this box is
+      **NOT RUN**; absent while `total > 50` is FAIL
+- [ ] `/executions`: `visible_sum + interrupted == total`, where `visible_sum` is
+      summed from the five chips READ OFF THE SCREEN - an unresolved shortfall is
+      FAIL, never PASS (PASS condition 1)
+- [ ] `/executions`: `visible_sum == chips_sum` - each on-screen chip equals the
+      `status_counts` value for its status. An API total that closes while a chip
+      on screen disagrees is FAIL, not PASS (PASS condition 2)
+- [ ] `/executions`: `unexpected` is empty; any entry is FAIL and is escalated as
+      its own finding, never folded into the exception (PASS condition 3)
 - [ ] `/executions`: any non-zero `interrupted` is reported as its own P2 finding
-      (this does not change the PASS/FAIL verdict of the item above)
+      (this does not change the PASS/FAIL verdict of the three items above)
 - [ ] `/executions`: selecting a status moves `total` to exactly that chip's count
 - [ ] `/executions`: `status_counts` unchanged by selecting a status
-- [ ] `/executions`: paging to page 2 leaves `N` unchanged
-- [ ] `/sessions`: same five assertions, with the named exception empty - `interrupted`
-      is always `0` on this surface (`SessionStatus` has no such status), so PASS here
-      requires `chips_sum == total` outright and ANY non-empty `unexpected` is FAIL
-- [ ] `/workflows`: `Showing 1-20 of N` and `Page 1 of M` match the API (no chips on this surface)
+- [ ] `/executions`: paging to page 2 leaves `N` unchanged - requires `total > 50`;
+      with `total <= 50` there is no page 2 and this box is **NOT RUN**, never PASS
+- [ ] `/sessions`: every `/executions` assertion above, with the named exception
+      empty - `interrupted` is always `0` on this surface (`SessionStatus` has no
+      such status), so PASS here requires `visible_sum == total` outright, and ANY
+      non-empty `unexpected` is FAIL
+- [ ] `/workflows`: `Showing 1-20 of N` matches API `total` (range == `1-min(20,
+      total)`), and `Page 1 of M` == `ceil(total / 20)` when `total > 20` -
+      `ListPagination` hides the control at one page, so with `total <= 20` that
+      half is **NOT RUN**; absent while `total > 20` is FAIL. No chips on this
+      surface
 - [ ] `/artifacts`: absence of a count line recorded against #1204
 
 ### 8.1.5 A bound with no timezone is refused, not guessed
