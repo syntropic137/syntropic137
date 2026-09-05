@@ -208,6 +208,57 @@ The agent can push commits and open PRs using the cached credentials. The GitHub
 Repos must be accessible to the GitHub App installation registered with Syntropic137. See [GitHub Integration](/docs/guide/github-integration) for setup. Repos outside the app's installation scope will fail to clone and the execution will error before the agent starts.
 </Callout>
 
+## Unpushed Work at Phase End
+
+A workspace is destroyed when its phase ends, and everything in it that is not on a
+remote goes with it. Before teardown, and while the git credentials are still live,
+Syntropic137 checks every repo cloned into the workspace for two things: commits that
+no remote has, and changes that were never committed at all.
+
+If there are none - the normal case, and also the case for a phase that legitimately
+produces no commits at all - the phase completes as usual.
+
+If there are, the work is saved and **the phase fails**. It is never reported as
+completed. For each affected repo, a commit is written whose tree is the working tree
+as the agent left it and whose parents are the local tips carrying the unpushed
+commits, and that commit is pushed to:
+
+```
+refs/syn/lost/<execution-id>/<phase-id>
+```
+
+The namespace is deliberately outside `refs/heads` and `refs/tags`. Nothing fetches it
+by default, no pull request shows it, and no reviewer is ever shown it. It exists to be
+recovered on purpose, by someone who was given the name.
+
+### Recovering Quarantined Work
+
+The failure names the ref for every repo it saved, and prints the command beside it.
+From a clone of the affected repo:
+
+```bash
+git fetch origin refs/syn/lost/<execution-id>/<phase-id>
+git log FETCH_HEAD
+git switch -c recovered-work FETCH_HEAD
+```
+
+The unpushed commits are ancestors of `FETCH_HEAD`, so they read as the phase left
+them. Anything that was still uncommitted is folded into the quarantine commit itself,
+as its tree.
+
+<Callout type="warn">
+The quarantine push can itself fail - no network, a rejecting remote. When it does, the
+report says `NOT RECOVERABLE` for that repo and gives the push error instead of a ref,
+because that work really is gone. Read the summary line at the end of the report: it
+states whether all, some or none of the work can be fetched back, and it is counted
+from the refs that actually exist.
+</Callout>
+
+Work committed inside a **submodule** of a cloned repo is detected - the superproject
+reports a modified gitlink, so the phase still fails rather than quietly succeeding -
+but the submodule's own objects are not quarantined, because they belong to a different
+remote. Submodule commits survive only if the phase pushed them itself.
+
 ## Dashboard and Execution Detail
 
 Configured repos are surfaced throughout the platform:
