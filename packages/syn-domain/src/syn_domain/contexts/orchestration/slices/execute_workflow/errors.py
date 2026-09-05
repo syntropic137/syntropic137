@@ -137,6 +137,60 @@ class PhaseProducedNoDeclaredOutputError(Exception):
 
 
 @dataclass(frozen=True)
+class FailedWorkspaceCommand:
+    """The command that did not run, in enough detail to tell why."""
+
+    command: tuple[str, ...]
+    exit_code: int
+    stderr: str
+    timed_out: bool = False
+
+
+class WorkspaceInspectionFailedError(Exception):
+    """The gate could not read the workspace, so it refused to call it clean (#1184).
+
+    THE FAILURE THIS EXISTS TO STOP, and it is #1184 wearing a disguise. The
+    unpushed-work gate answers "is anything here about to be lost" by running
+    commands in the workspace and reading their stdout. An unreachable
+    container does not raise: the Docker backend RETURNS a non-zero
+    ``ExecutionResult`` with empty stdout. Empty stdout is also exactly what a
+    genuinely clean workspace produces. So without this error the two states
+    were one value, the gate returned silently, and the phase was reported
+    ``completed`` with its work already gone - the precise outcome the gate was
+    written to prevent, reproduced inside the gate.
+
+    A failed command has no output, so there is nothing to parse and no verdict
+    to give. Refusing to guess is the whole content of this error.
+
+    WHAT IT DOES NOT CLAIM. Nothing has been quarantined when this is raised.
+    Raising stops a false ``completed``; it cannot reach into a container that
+    is already gone and make what was inside it durable. The work this phase
+    held is unverified, and may already be unrecoverable.
+    """
+
+    def __init__(self, *, doing: str, failure: FailedWorkspaceCommand) -> None:
+        self.doing = doing
+        self.failure = failure
+        super().__init__(_render_inspection_failure(doing, failure))
+
+
+def _render_inspection_failure(doing: str, failure: FailedWorkspaceCommand) -> str:
+    why = "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    stderr = failure.stderr.strip()
+    return (
+        f"The unpushed-work gate could not verify this phase's workspace while "
+        f"{doing}: the command {' '.join(failure.command)!r} {why}. A command "
+        f"that failed has no output to read, and empty output from a broken "
+        f"workspace is indistinguishable from empty output from a clean one - "
+        f"so the phase fails here rather than being reported completed on a "
+        f"verdict nobody actually got."
+        + (f"\n  stderr: {stderr}" if stderr else "")
+        + "\n  NOTHING WAS QUARANTINED: this phase's work is unverified and, if "
+        "the workspace is already gone, unrecoverable."
+    )
+
+
+@dataclass(frozen=True)
 class QuarantinedWork:
     """What one repository was holding when its phase ended, and where it went.
 

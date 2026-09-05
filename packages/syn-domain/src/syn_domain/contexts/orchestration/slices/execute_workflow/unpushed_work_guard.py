@@ -12,6 +12,15 @@ this workspace fail to survive it", and if so puts that work somewhere durable
 before raising. Callers need nothing but that: no git, no ref naming, no
 knowledge of how many repositories a workspace holds.
 
+EVERY COMMAND IS CHECKED, and that is load-bearing rather than tidy. An
+unreachable container does not raise - the Docker backend RETURNS a non-zero
+result with empty stdout, which is byte-for-byte what a clean workspace
+returns. Reading stdout without reading the result therefore turned "I could
+not look" into "I looked and it was fine", which is #1184 itself happening
+inside the gate against it. ``_checked`` is the single point where a result
+becomes readable output, so the discipline holds for commands nobody has
+written yet.
+
 SCOPE, stated because it is a real limit. Repositories are the ones cloned
 directly under ``/workspace/repos``. Work committed inside a SUBMODULE of one
 of those is DETECTED - the superproject reports a modified gitlink, so the
@@ -26,8 +35,10 @@ import logging
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    FailedWorkspaceCommand,
     QuarantinedWork,
     UnpushedWorkQuarantinedError,
+    WorkspaceInspectionFailedError,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
@@ -79,12 +90,15 @@ async def quarantine_unpushed_work(
     Returns silently when every repository is clean and fully pushed - which is
     the normal case, and includes the phase that legitimately produced nothing
     at all (a bootstrap that only reports, a verify that only reads). Silence
-    here means "nothing is being lost", never "nothing was checked".
+    here means "nothing is being lost", and - because every command it relies
+    on is checked - never "nothing was checked".
 
     Raises:
         UnpushedWorkQuarantinedError: work was found. It has already been
             pushed to ``refs/syn/lost/<execution-id>/<phase-id>`` in each
             affected repository, and the error names those refs.
+        WorkspaceInspectionFailedError: a command this gate depends on did not
+            run, so there is no verdict to give. Nothing was quarantined.
     """
     ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
     quarantined: list[QuarantinedWork] = []
@@ -121,18 +135,20 @@ class _UnsavedWork:
 async def _repositories(workspace: GitWorkspace) -> list[str]:
     """Absolute paths of the repositories cloned into this workspace.
 
-    An empty result means the execution was configured with no repositories,
-    not that the workspace could not be reached: artifact collection copied
-    files out of this same container moments earlier, so by the time the gate
-    runs, unreachable has already failed the phase by another route.
+    Empty means the execution was configured with no repositories - a real and
+    common case, so it stays a success. It can only mean that because the
+    search itself is checked: ``/workspace/repos`` is created by the image and
+    again by the entrypoint, so on any workspace that answers at all this find
+    exits 0 whether or not it matched anything, and a non-zero one is the
+    workspace declining to answer rather than an answer of "nothing here".
     """
-    found = await workspace.execute(
-        ["find", str(WORKSPACE_REPOS_DIR), "-mindepth", "2", "-maxdepth", "2", "-name", ".git"]
+    found = await _checked(
+        workspace,
+        ["find", str(WORKSPACE_REPOS_DIR), "-mindepth", "2", "-maxdepth", "2", "-name", ".git"],
+        doing=f"listing the repositories under {WORKSPACE_REPOS_DIR}",
     )
     suffix = "/.git"
-    return sorted(
-        line.strip()[: -len(suffix)] for line in found.stdout.splitlines() if line.strip()
-    )
+    return sorted(line.strip()[: -len(suffix)] for line in found.splitlines() if line.strip())
 
 
 async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | None:
@@ -141,14 +157,18 @@ async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | No
     tips = await _git(
         workspace, repo, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"
     )
-    head = await _git(workspace, repo, "rev-parse", "--quiet", "--verify", "HEAD")
+    # --revs-only, NOT --quiet --verify. Both print the sha and print nothing
+    # when the repository has no commits yet, but --verify makes "no commits"
+    # an exit 1 - indistinguishable from the workspace being unreachable, which
+    # is the exact ambiguity this module refuses to live with. --revs-only
+    # answers the empty repository with exit 0 and empty output, so the case
+    # stops existing rather than being handled.
+    head = await _git(workspace, repo, "rev-parse", "--revs-only", "HEAD")
 
     named: list[tuple[str, str]] = [
-        (sha, name)
-        for sha, _, name in (line.partition(" ") for line in tips.stdout.splitlines())
-        if sha
+        (sha, name) for sha, _, name in (line.partition(" ") for line in tips.splitlines()) if sha
     ]
-    head_sha = head.stdout.strip()
+    head_sha = head.strip()
     # Every tip that could be carrying work, HEAD included so that a detached
     # HEAD is not a case of its own, deduplicated so that a checked-out branch
     # is not listed twice.
@@ -156,9 +176,9 @@ async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | No
     unpushed: set[str] = set()
     if candidates:
         reachable = await _git(workspace, repo, "rev-list", *candidates, "--not", "--remotes")
-        unpushed = set(reachable.stdout.split())
+        unpushed = set(reachable.split())
 
-    files = tuple(line.rstrip() for line in status.stdout.splitlines() if line.strip())
+    files = tuple(line.rstrip() for line in status.splitlines() if line.strip())
     if not unpushed and not files:
         return None
 
@@ -185,10 +205,22 @@ async def _quarantine(
     A plain push, never a force: the ref is unique to this phase run, so the
     only thing that could already occupy it is a writer nobody predicted, and
     overwriting that would trade one silent loss for another.
+
+    Only the push may fail and still return. Everything before it - clearing
+    the scratch index, staging, writing the tree, writing the commit - is
+    checked and raises, because a QuarantinedWork built on top of a command
+    that did not run would report work as quarantined that was never written.
+    That is the same false reassurance as a false ``completed``, in a smaller
+    costume, so the only failure this reports as data is the one that happens
+    after the objects exist.
     """
-    await workspace.execute(["rm", "-f", _SCRATCH_INDEX])
+    await _checked(
+        workspace,
+        ["rm", "-f", _SCRATCH_INDEX],
+        doing=f"clearing the scratch index before quarantining {repo}",
+    )
     await _git(workspace, repo, "add", "--all", index=_SCRATCH_INDEX)
-    tree = (await _git(workspace, repo, "write-tree", index=_SCRATCH_INDEX)).stdout.strip()
+    tree = (await _git(workspace, repo, "write-tree", index=_SCRATCH_INDEX)).strip()
     parents = [arg for sha in work.parents for arg in ("-p", sha)]
     commit = await _git(
         workspace,
@@ -200,7 +232,7 @@ async def _quarantine(
         _commit_message(ref),
         identity=True,
     )
-    pushed = await _git(workspace, repo, "push", "origin", f"{commit.stdout.strip()}:{ref}")
+    pushed = await _push(workspace, repo, commit=commit.strip(), ref=ref)
 
     name = repo.rsplit("/", 1)[-1]
     if pushed.exit_code != 0:
@@ -248,14 +280,45 @@ def _dedup(shas: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(sha for sha in shas if sha))
 
 
-async def _git(
-    workspace: GitWorkspace,
-    repo: str,
-    *args: str,
-    index: str | None = None,
-    identity: bool = False,
-) -> ExecutionResult:
-    """Run one git command in ``repo``.
+async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -> str:
+    """Run ``command`` and return its stdout, or raise if it did not succeed.
+
+    THE ONE PLACE a command result becomes something this module reads, and
+    therefore the one place that decides a result can be trusted. The check
+    lives here rather than in each caller on purpose: this gate is nothing but
+    a sequence of commands whose stdout it parses, and a caller that forgot to
+    check would silently read "" as "clean" - which is exactly the defect this
+    guard exists to stop, turned inward. Add a command, get the check.
+
+    Success is all three of exit 0, ``success``, and not timing out. A backend
+    that sets only one of the first two should not slip through on the other,
+    and a command that was killed part-way printed a prefix of an answer, not
+    an answer.
+
+    Returns:
+        stdout. Never the ExecutionResult - handing that back would put the
+        unchecked value in reach again.
+
+    Raises:
+        WorkspaceInspectionFailedError: the command failed, so it produced no
+            verdict and this module refuses to invent one.
+    """
+    result = await workspace.execute(command)
+    if result.success and result.exit_code == 0 and not result.timed_out:
+        return result.stdout
+    raise WorkspaceInspectionFailedError(
+        doing=doing,
+        failure=FailedWorkspaceCommand(
+            command=tuple(command),
+            exit_code=result.exit_code,
+            stderr=result.stderr,
+            timed_out=result.timed_out,
+        ),
+    )
+
+
+def _git_argv(repo: str, *args: str, index: str | None = None, identity: bool = False) -> list[str]:
+    """Argv for one git command in ``repo``.
 
     Environment is carried in argv via ``env`` rather than through the
     execute() port's environment channel, so the command is self-contained and
@@ -267,4 +330,31 @@ async def _git(
     if identity:
         prefix.extend(_IDENTITY)
     env = ["env", *prefix] if prefix else []
-    return await workspace.execute([*env, "git", "-C", repo, *args])
+    return [*env, "git", "-C", repo, *args]
+
+
+async def _git(
+    workspace: GitWorkspace,
+    repo: str,
+    *args: str,
+    index: str | None = None,
+    identity: bool = False,
+) -> str:
+    """Stdout of one git command in ``repo``, or raise if it failed."""
+    return await _checked(
+        workspace,
+        _git_argv(repo, *args, index=index, identity=identity),
+        doing=f"running 'git {args[0]}' in {repo}",
+    )
+
+
+async def _push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) -> ExecutionResult:
+    """The one command whose failure is an answer rather than the lack of one.
+
+    A push can fail for reasons that say nothing about whether the workspace
+    is reachable - no credential, no network, the remote rejecting the ref -
+    and by the time it runs the quarantine commit already exists locally. So
+    its result is returned rather than raised on, and the caller reports the
+    work as NOT recoverable. Every other command here goes through _checked.
+    """
+    return await workspace.execute(_git_argv(repo, "push", "origin", f"{commit}:{ref}"))
