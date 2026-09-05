@@ -1,7 +1,29 @@
-import { ChevronRight, FileCode, FileText, Image, Search } from 'lucide-react'
+/**
+ * Artifacts page — composition only.
+ *
+ * Mirrors the Executions page: heading + connection indicator, search, a
+ * filter row, and the shared pager. The pager is the point of #1204: before
+ * it, one page of artifacts rendered with no statement of what it was a page
+ * OF, and there was no interaction that reached row 201.
+ *
+ * Artifacts carry no status, so the status chips do not apply here; the
+ * dimension operators filter on is the artifact type, and its counts come
+ * from the server over the whole collection.
+ */
+
+import { ChevronRight, FileCode, FileText, Image } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, EmptyState, PageLoader } from '../components'
+import {
+  Card,
+  CardContent,
+  EmptyState,
+  ListPageHeader,
+  ListPagination,
+  ListToolbar,
+  PageLoader,
+  TimeWindowPicker,
+} from '../components'
 import { useArtifactList } from '../hooks/useArtifactList'
 import type { ArtifactSummary } from '../types'
 
@@ -12,6 +34,15 @@ const artifactIcons: Record<string, typeof FileText> = {
   markdown: FileText,
   json: FileCode,
 }
+
+const TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'code', label: 'Code' },
+  { value: 'text', label: 'Text' },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'json', label: 'JSON' },
+  { value: 'image', label: 'Image' },
+  { value: 'other', label: 'Other' },
+]
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -56,52 +87,60 @@ function ArtifactCard({ artifact, idx }: { artifact: ArtifactSummary; idx: numbe
 
 export function ArtifactList() {
   const {
-    filteredArtifacts,
+    artifacts,
     loading,
     searchQuery,
     setSearchQuery,
     typeFilter,
     setTypeFilter,
+    typeCounts,
+    timeWindow,
+    setTimeWindow,
+    page,
+    pageSize,
+    total,
+    setPage,
+    connected,
+    lastEventAt,
   } = useArtifactList()
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Artifacts</h1>
-        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-          Browse workflow outputs and generated files
-        </p>
-      </div>
+      <ListPageHeader
+        title="Artifacts"
+        description="Browse workflow outputs and generated files"
+        connected={connected}
+        lastEventAt={lastEventAt}
+      />
 
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-          <input
-            type="text"
-            placeholder="Search artifacts..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-          />
-        </div>
+      <ListToolbar
+        searchPlaceholder="Search artifacts..."
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <select
+          aria-label="Artifact type"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
           className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         >
           <option value="">All types</option>
-          <option value="code">Code</option>
-          <option value="text">Text</option>
-          <option value="markdown">Markdown</option>
-          <option value="json">JSON</option>
-          <option value="image">Image</option>
-          <option value="other">Other</option>
+          {TYPE_OPTIONS.map((t) => (
+            <option key={t.value} value={t.value}>
+              {/* Counted by the server over the collection, so an unselected
+                  option says what selecting it would get you. */}
+              {typeCounts[t.value] ? `${t.label} (${typeCounts[t.value]})` : t.label}
+            </option>
+          ))}
         </select>
+        <TimeWindowPicker value={timeWindow} onChange={setTimeWindow} />
       </div>
 
       {loading ? (
         <PageLoader />
-      ) : filteredArtifacts.length === 0 ? (
+      ) : artifacts.length === 0 ? (
         <Card>
           <EmptyState
             icon={FileText}
@@ -115,11 +154,19 @@ export function ArtifactList() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredArtifacts.map((artifact, idx) => (
+          {artifacts.map((artifact, idx) => (
             <ArtifactCard key={artifact.id} artifact={artifact} idx={idx} />
           ))}
         </div>
       )}
+
+      <ListPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        itemLabel="artifact"
+      />
     </div>
   )
 }

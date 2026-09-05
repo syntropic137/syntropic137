@@ -438,6 +438,11 @@ export interface paths {
         /**
          * List Artifacts Endpoint
          * @description List artifacts with optional filtering.
+         *
+         *     The window is named after ``created_at`` because that is the timestamp an
+         *     artifact has; the siblings bound ``started_at`` and spell it
+         *     ``started_after``. The validation is the same one (#1186): a bound with no
+         *     offset is refused rather than guessed at.
          */
         get: operations["list_artifacts_endpoint_artifacts_get"];
         put?: never;
@@ -1824,6 +1829,40 @@ export interface components {
             content_type: string;
             /** Size Bytes */
             size_bytes: number | null;
+        };
+        /**
+         * ArtifactListResponse
+         * @description One page of artifacts, and the numbers describing what it is a page of.
+         *
+         *     The same envelope ``/executions`` and ``/sessions`` answer with, for the
+         *     same reason: this endpoint used to return a bare array, so a response of 50
+         *     rows was indistinguishable from a collection of 50 and a client had no
+         *     number to page against (#1204). ``limit`` was the only parameter it
+         *     honoured and it capped at 200, which made 200 artifacts the whole of
+         *     reachable history.
+         */
+        ArtifactListResponse: {
+            /** Artifacts */
+            artifacts?: components["schemas"]["ArtifactSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * ArtifactResponse
@@ -6194,10 +6233,25 @@ export interface operations {
                 workflow_id?: string | null;
                 /** @description Filter by phase ID */
                 phase_id?: string | null;
+                /** @description Filter by session ID */
+                session_id?: string | null;
                 /** @description Filter by artifact type */
                 artifact_type?: string | null;
-                /** @description Max items to return */
-                limit?: number;
+                /** @description Inclusive ISO 8601 lower bound on created_at (timezone required) */
+                created_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on created_at (timezone required) */
+                created_before?: string | null;
+                /** @description Case-insensitive substring match against artifact id, title, workflow id and phase id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -6211,7 +6265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactSummaryResponse"][];
+                    "application/json": components["schemas"]["ArtifactListResponse"];
                 };
             };
             /** @description Validation Error */

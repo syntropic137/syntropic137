@@ -547,9 +547,10 @@ async def get_session(
     await ensure_connected()
     manager = get_projection_mgr()
 
-    # Look up session in the session_list projection
-    sessions = await manager.session_list.query(limit=10000)
-    session = next((s for s in sessions if s.id == session_id), None)
+    # Look up session in the session_list projection. This read 10000 sessions
+    # and scanned them for one id, so the detail page went 404 past that row
+    # (#1204, same shape as the artifact one).
+    session = await manager.session_list.get_by_id(session_id)
 
     if session is None:
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")

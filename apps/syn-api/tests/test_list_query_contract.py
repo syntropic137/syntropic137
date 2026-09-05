@@ -12,6 +12,14 @@ server-side, but there was no `page` or `offset` at all and the cap was 200, so
 roughly a day of history was reachable and the rest was not addressable at any
 parameter setting.
 
+`GET /artifacts` (#1204) was the severest form of both: a bare JSON array with
+no envelope, so there was no `total` to be wrong - a response of 50 rows was
+indistinguishable from a collection of 50, and a client could not detect
+truncation at all. `page` and `page_size` were undeclared and silently dropped,
+`limit` capped at 200, and `phase_id` and `artifact_type` were applied in Python
+to whatever rows that cap returned. On the running system 200 artifacts reached
+34 hours back while 1000+ existed.
+
 These tests drive the routes over ASGI rather than calling the endpoint
 functions, because the failure mode is a QUERY PARAMETER that never arrives.
 FastAPI ignores unknown query parameters by default, so a server that does not
@@ -28,6 +36,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import pytest
+
+from syn_api.list_query import MAX_PAGE_SIZE
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -137,6 +147,46 @@ async def _seed_session(
     )
 
 
+async def _seed_artifact(
+    row_id: str,
+    *,
+    artifact_type: str = "other",
+    created_at: str | None,
+    workflow_id: str = "wf-1",
+    phase_id: str | None = "phase-1",
+    name: str = "Deliverable",
+) -> None:
+    """One artifact row, written straight into the projection's store.
+
+    ``created_at`` is the artifact's principal timestamp, the one the window
+    bounds; artifacts have no start time, which is why the parameter is spelled
+    ``created_after`` rather than ``started_after``.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+    await manager.artifact_list._store.save(
+        "artifact_summaries",
+        row_id,
+        {
+            "id": row_id,
+            "workflow_id": workflow_id,
+            "execution_id": "ex-1",
+            "session_id": None,
+            "phase_id": phase_id,
+            "artifact_type": artifact_type,
+            "name": name,
+            "created_at": created_at,
+            "size_bytes": 12,
+            "content": "irrelevant",
+            "content_hash": None,
+            "is_primary_deliverable": True,
+            "source_path": None,
+        },
+    )
+
+
 # -- HTTP ---------------------------------------------------------------------
 
 
@@ -182,6 +232,37 @@ async def _executions_response(**params: QueryValue) -> Response:
 
 async def _sessions_response(**params: QueryValue) -> Response:
     return await _request("syn_api.routes.sessions", "/sessions", **params)
+
+
+class _ArtifactPage(NamedTuple):
+    """The envelope ``/artifacts`` answers with, read as fields not keys.
+
+    A ``Mapping[str, Any]`` would type nothing and spend the untyped-dicts
+    budget to say less than this does. The page has four numbers and a facet
+    tally, and every assertion below is about one of them; the rows are only
+    ever asked for their ids, so that is what is kept.
+    """
+
+    ids: list[str]
+    total: int
+    page: int
+    page_size: int
+    type_counts: Mapping[str, int]
+
+
+async def _artifacts(**params: QueryValue) -> _ArtifactPage:
+    body = await _get("syn_api.routes.artifacts", "/artifacts", **params)
+    return _ArtifactPage(
+        ids=[a["id"] for a in body["artifacts"]],
+        total=body["total"],
+        page=body["page"],
+        page_size=body["page_size"],
+        type_counts=body["type_counts"],
+    )
+
+
+async def _artifacts_response(**params: QueryValue) -> Response:
+    return await _request("syn_api.routes.artifacts", "/artifacts", **params)
 
 
 # -- V1: the window is not a superset of the page -----------------------------
@@ -662,3 +743,311 @@ async def test_the_reported_reproduction_against_rows_the_real_producer_wrote():
     body = await _executions(started_after=_AWARE_BOUND)
     assert {e["workflow_execution_id"] for e in body["executions"]} == {"live-recent"}
     assert body["total"] == 1
+
+
+# -- #1204: /artifacts answers about the collection, not about 50 rows --------
+#
+# The fixture size is the whole point of this section. Every bug in this class -
+# here, #1159 and #1160 - survived because no fixture was ever larger than one
+# page, which made "fetch one page" and "fetch everything" the same program.
+# `_ARTIFACT_ROWS` is deliberately more than three pages of `_ARTIFACT_PAGE`.
+
+_ARTIFACT_PAGE = 50
+_ARTIFACT_ROWS = 173
+
+#: The per-request cap. Capping one response is fine; capping what is reachable
+#: is the defect, so this is asserted as a page size and never as a ceiling.
+MAX_ARTIFACT_PAGE_SIZE = MAX_PAGE_SIZE
+
+
+async def _seed_artifact_collection(count: int = _ARTIFACT_ROWS) -> None:
+    """`count` artifacts, newest first by id: a-000 is the newest."""
+    for i in range(count):
+        await _seed_artifact(f"a-{i:03d}", created_at=_at(i * 0.1))
+
+
+async def test_artifact_total_exceeds_the_rows_it_returned():
+    """(a) The regression guard: `total` must be the collection, not the page.
+
+    173 artifacts exist and 50 come back. A `total` of 50 - which is what
+    `len(rows)` produces, and what a bare array implies by having no total at
+    all - says "you have them all" while 123 are unreached. Neither number can
+    arise by accident: 173 is not the page size and 50 is not the collection.
+    """
+    await _seed_artifact_collection()
+
+    body = await _artifacts(page_size=_ARTIFACT_PAGE)
+
+    assert len(body.ids) == _ARTIFACT_PAGE
+    assert body.total == _ARTIFACT_ROWS, (
+        "total must count every matching artifact. 50 means it describes the "
+        "page, which is the defect; a missing key means the endpoint still "
+        "answers with a bare array and truncation is undetectable"
+    )
+
+
+async def test_artifact_total_is_invariant_under_page_size():
+    """(b) The property that distinguishes a real count from a page length.
+
+    A page length changes with `page_size` by definition. A count does not.
+    Asserting them together is what makes the difference visible: at page_size
+    1 a `len(rows)` total reads 1, at 50 it reads 50, and only the invariant
+    number is the one a client can page against.
+    """
+    await _seed_artifact_collection()
+
+    totals = {size: (await _artifacts(page_size=size)).total for size in (1, 10, 50)}
+
+    assert totals == {1: _ARTIFACT_ROWS, 10: _ARTIFACT_ROWS, 50: _ARTIFACT_ROWS}, (
+        f"total moved with page_size: {totals}. A number that tracks the page "
+        "is the page length under a count's name"
+    )
+    assert len((await _artifacts(page_size=1)).ids) == 1, (
+        "page_size must also SELECT rows, or an invariant total is only "
+        "invariant because nothing is being paged"
+    )
+
+
+async def test_artifact_paging_arithmetic_closes_on_the_last_page():
+    """(c) Every row is on exactly one page, and the last page is short.
+
+    173 over 50 is 4 pages: 50 + 50 + 50 + 23. If the arithmetic closes AND the
+    union of the pages is the whole collection, no row is unreachable and none
+    is served twice - which is the property "at most 200 are reachable, ever"
+    violated.
+    """
+    await _seed_artifact_collection()
+
+    pages = [
+        await _artifacts(page_size=_ARTIFACT_PAGE, page=n)
+        for n in range(1, _ARTIFACT_ROWS // _ARTIFACT_PAGE + 2)
+    ]
+    last = pages[-1]
+
+    assert len(pages) == 4
+    assert (len(pages) - 1) * _ARTIFACT_PAGE + len(last.ids) == _ARTIFACT_ROWS
+    assert len(last.ids) == 23
+    assert last.total == _ARTIFACT_ROWS
+
+    seen = [row_id for one_page in pages for row_id in one_page.ids]
+    assert len(seen) == len(set(seen)), "a row appeared on two pages"
+    assert set(seen) == {f"a-{i:03d}" for i in range(_ARTIFACT_ROWS)}
+
+
+async def test_artifact_page_two_is_a_different_page():
+    """(d) `page` must select rows rather than be accepted and discarded.
+
+    Supplying `page=2` returned byte-identical first rows, which is worse than
+    rejecting it: a client that pages silently re-reads page 1 forever.
+    """
+    await _seed_artifact_collection()
+
+    first = set((await _artifacts(page_size=_ARTIFACT_PAGE, page=1)).ids)
+    second = set((await _artifacts(page_size=_ARTIFACT_PAGE, page=2)).ids)
+
+    assert len(first) == len(second) == _ARTIFACT_PAGE
+    assert not (first & second), "page 2 returned page 1"
+
+
+async def test_artifact_row_201_is_reachable():
+    """The ceiling the issue measured: no parameter combination reached row 201.
+
+    `limit` capped at 200 and there was no offset, so the 201st artifact was
+    unreachable at any setting. A per-request cap on `page_size` is fine; a cap
+    on what exists is not.
+    """
+    await _seed_artifact_collection(260)
+
+    body = await _artifacts(page_size=MAX_ARTIFACT_PAGE_SIZE, page=2)
+
+    assert body.total == 260
+    assert "a-200" in set(body.ids), (
+        "the 201st artifact must be addressable; it was not at any limit"
+    )
+    assert body.ids[-1] == "a-259"
+
+
+async def test_artifact_empty_is_distinguishable_from_truncated():
+    """(f) Zero rows and a truncated page are different answers.
+
+    A bare array could not express the difference: `[]` and a 50-row array both
+    described an unknown collection. The envelope carries the number that
+    settles it, and `total == 0` is the ONLY case where the rows are all of
+    them.
+    """
+    empty = await _artifacts(page_size=_ARTIFACT_PAGE)
+    assert empty.ids == []
+    assert empty.total == 0
+
+    await _seed_artifact_collection()
+    truncated = await _artifacts(page_size=_ARTIFACT_PAGE)
+    assert len(truncated.ids) == _ARTIFACT_PAGE
+    assert truncated.total > len(truncated.ids)
+
+    filtered_to_nothing = await _artifacts(page_size=_ARTIFACT_PAGE, artifact_type="no-such-type")
+    assert filtered_to_nothing.ids == []
+    assert filtered_to_nothing.total == 0, (
+        "an empty page of a non-empty collection must still report 0 matches, "
+        "not the size of the collection the filter was applied to"
+    )
+
+
+async def test_artifact_window_bounds_the_total_as_well_as_the_rows():
+    """The window is a filter on the collection, not on the page.
+
+    60 artifacts inside the window and 60 outside it. A `total` of 120 means
+    the bound reached the rows but not the count - or never arrived at all,
+    which is what an undeclared query parameter looks like from outside.
+    """
+    for i in range(60):
+        await _seed_artifact(f"recent-{i:03d}", created_at=_at(1 + i * 0.1))
+    for i in range(60):
+        await _seed_artifact(f"old-{i:03d}", created_at=_at(48 + i))
+
+    body = await _artifacts(page_size=_ARTIFACT_PAGE, created_after=_AWARE_BOUND)
+
+    assert body.total == 60
+    assert len(body.ids) == _ARTIFACT_PAGE
+    assert all(row_id.startswith("recent-") for row_id in body.ids)
+
+    rest = await _artifacts(page_size=_ARTIFACT_PAGE, page=2, created_after=_AWARE_BOUND)
+    assert len(rest.ids) == 10
+    assert rest.total == 60
+
+
+@pytest.mark.parametrize("bound", ["created_after", "created_before"])
+async def test_artifact_timezone_less_bound_is_refused_with_the_same_message(bound: str):
+    """(e) The #1186 refusal, reached through the artifacts route.
+
+    The same `WindowBound` the other two surfaces use, so the same value means
+    the same thing on all three: a bound with no offset is ambiguous and is
+    handed back with the fix in it, not read as UTC and answered confidently.
+    """
+    await _seed_artifact_collection(5)
+
+    rejection = _rejection(await _artifacts_response(**{bound: _NAIVE_BOUND}))
+
+    assert rejection.startswith(f"{bound}: ")
+    assert "timezone" in rejection
+    assert "2026-09-01T00:00:00Z" in rejection, (
+        "the message must show a value that WOULD work, not just refuse this one"
+    )
+
+
+async def test_artifact_aware_bounds_still_answer_and_still_filter():
+    """The refusal is about the missing offset and nothing else.
+
+    Without this, "refuses every bound" passes the test above.
+    """
+    for i in range(3):
+        await _seed_artifact(f"after-{i}", created_at=_at(1 + i))
+    for i in range(2):
+        await _seed_artifact(f"before-{i}", created_at=_at(30 + i))
+
+    for spelling in (_AWARE_BOUND, "2026-03-31T12:00:00Z", "2026-03-31T14:00:00+02:00"):
+        body = await _artifacts(created_after=spelling)
+        assert set(body.ids) == {"after-0", "after-1", "after-2"}, spelling
+        assert body.total == 3, spelling
+
+    upper = await _artifacts(created_before=_AWARE_BOUND)
+    assert set(upper.ids) == {"before-0", "before-1"}
+    assert upper.total == 2
+
+
+async def test_artifact_type_filter_searches_the_collection_not_the_page():
+    """The filter used to run in Python over whatever the store's cap returned.
+
+    5 plans sit behind 120 newer reports. Filtered after a page of 50, the
+    answer is "no plans"; filtered where the total is computed, it is 5. The
+    type counts describe the other types because the facet ignores the type
+    filter itself.
+    """
+    for i in range(120):
+        await _seed_artifact(f"report-{i:03d}", artifact_type="report", created_at=_at(1 + i * 0.1))
+    for i in range(5):
+        await _seed_artifact(f"plan-{i}", artifact_type="plan", created_at=_at(90 + i))
+
+    body = await _artifacts(page_size=_ARTIFACT_PAGE, artifact_type="plan")
+
+    assert set(body.ids) == {f"plan-{i}" for i in range(5)}, (
+        "the type filter must select from the collection; applied to the newest "
+        "page it finds none of these"
+    )
+    assert body.total == 5
+    assert body.type_counts == {"report": 120, "plan": 5}
+
+
+async def test_artifact_search_narrows_the_rows_and_the_total_together():
+    """Search happens where `total` is computed, or the two describe different sets."""
+    for i in range(4):
+        await _seed_artifact(f"needle-{i}", created_at=_at(1), name="Nightly Audit")
+    for i in range(8):
+        await _seed_artifact(f"other-{i}", created_at=_at(1), name="Something Else")
+
+    body = await _artifacts(q="nightly")
+
+    assert set(body.ids) == {f"needle-{i}" for i in range(4)}
+    assert body.total == 4
+
+
+async def test_artifact_limit_is_a_deprecated_alias_that_page_size_overrides():
+    """`limit` keeps working for the published CLI flag; `page_size` wins.
+
+    `limit` was the only parameter this endpoint ever honoured, so removing it
+    would break every existing caller. It survives as an alias with the same
+    precedence rule the sessions endpoint settled.
+    """
+    await _seed_artifact_collection(120)
+
+    alias_only = await _artifacts(limit=10)
+    assert len(alias_only.ids) == 10
+    assert alias_only.page_size == 10
+    assert alias_only.total == 120, "the alias must not turn the count back into a page length"
+
+    both = await _artifacts(limit=10, page_size=25)
+    assert len(both.ids) == 25, "page_size must win over limit"
+    assert both.page_size == 25
+
+    neither = await _artifacts()
+    assert len(neither.ids) == _ARTIFACT_PAGE
+    assert neither.page_size == _ARTIFACT_PAGE
+
+
+async def test_artifacts_written_by_the_real_producer_page_the_same_way():
+    """The issue's own repro, from the event that actually writes the row.
+
+    The seeding helper writes the projection's store directly, so it could
+    agree with the endpoint and disagree with production: `created_at` is
+    stamped by `on_artifact_created` and read by the window, and a value
+    dropped at that hop passes every test that checks either end. 120 rows so
+    the collection is larger than a page.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    projection = get_projection_mgr().artifact_list
+    for i in range(120):
+        await projection.on_artifact_created(
+            {
+                "artifact_id": f"live-{i:03d}",
+                "workflow_id": "wf-live",
+                "execution_id": "ex-live",
+                "phase_id": "implement",
+                "artifact_type": "deliverable",
+                "title": f"Deliverable {i}",
+                "content": "x",
+                "created_at": _at(i),
+            }
+        )
+
+    body = await _artifacts(page_size=_ARTIFACT_PAGE)
+    assert body.total == 120
+    assert len(body.ids) == _ARTIFACT_PAGE
+
+    windowed = await _artifacts(page_size=_ARTIFACT_PAGE, created_after=_AWARE_BOUND)
+    assert windowed.total == 25, (
+        "the window must reach rows the real writer produced: 25 of the 120 are "
+        "inside 24 hours (the bound is inclusive). 120 means created_at never "
+        "arrived at the comparator"
+    )
+    assert len(windowed.ids) == 25

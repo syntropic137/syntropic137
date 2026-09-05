@@ -88,13 +88,14 @@ export function ExecutionList() {
         searchPlaceholder="Search executions..."
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedCount={selection.selectedCount}
-        onCopyIds={() =>
-          formatExecutionIds(selection.selectedItems.map((e) => e.workflow_execution_id))
-        }
-        onCopyForAgent={() => formatExecutionsForAgent(selection.selectedItems)}
-        onClearSelection={selection.clear}
-        resourceLabel="execution"
+        selection={{
+          selectedCount: selection.selectedCount,
+          onCopyIds: () =>
+            formatExecutionIds(selection.selectedItems.map((e) => e.workflow_execution_id)),
+          onCopyForAgent: () => formatExecutionsForAgent(selection.selectedItems),
+          onClearSelection: selection.clear,
+          resourceLabel: 'execution',
+        }}
       />
 
       <ResourceFilterBar
