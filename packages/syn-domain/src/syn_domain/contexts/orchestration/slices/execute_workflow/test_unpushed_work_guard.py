@@ -648,7 +648,8 @@ class _PhaseRun:
         )
 
         self.aggregate = MagicMock(workflow_id="wf-1")
-        self.aggregate._uncommitted_events = []
+        # What ExecutionJournal reads off an aggregate before every save.
+        self.aggregate.get_uncommitted_events.return_value = []
         self.completed_phase_ids: list[str] = []
         self.phase_results: list[PhaseResult] = []
         self.session = AsyncMock()

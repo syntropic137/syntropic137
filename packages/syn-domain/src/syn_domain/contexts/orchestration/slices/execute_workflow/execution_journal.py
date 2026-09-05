@@ -5,9 +5,9 @@ needs the to-do list to reflect a command the processor has only just issued,
 and the subscription pipeline is eventually consistent - so the events are
 applied to a process-local projection synchronously, right after the save. The
 architecture notes call for exactly that; what they do not call for is the
-processor knowing HOW. It knew four things: that uncommitted events hang off a
-private attribute of the aggregate, that a domain event serialises by
-`model_dump`, `to_dict` or `vars` depending on what it turns out to be, that a
+processor knowing HOW. It knew four things: that the uncommitted events have to
+be read off the aggregate before the save clears them, that a domain event
+serialises by `model_dump`, `to_dict` or `vars` depending on what it is, that a
 projection handler is named by lower-snake-casing the event type behind an
 `on_` prefix, and that a missing handler is not an error. None of those is a
 dispatch decision, and all four would have to change together the day the event
@@ -17,6 +17,18 @@ A caller here says "this happened, keep my to-do list current" and finds out
 nothing else. `open` is the first save of a run and `append` every save after
 it; the difference is an expected-version rule the store enforces, not a
 sequencing rule the caller applies.
+
+WHAT THIS MODULE DELIBERATELY DOES NOT DO. It never decides that an event
+happened. By the time `open` or `append` is called the aggregate has already
+raised the events onto itself; this reads them, persists them, and projects
+them. So `_apply` and `_raise_event` are the aggregate's words and are not
+spelled here, even for a private helper with an unrelated job - the events
+travel one way, into a read model, and the name has to say so. A helper here
+called `_apply` was the whole of PR #1222's CI failure: `test_event_ownership`
+matches those two names anywhere outside `aggregate_*/` and cannot see that the
+receiver was a journal rather than an aggregate. Keeping the vocabulary
+reserved is cheaper than teaching the checker about receivers, and it keeps a
+grep for `_raise_event` answering the question people actually ask of it.
 """
 
 from __future__ import annotations
@@ -54,20 +66,20 @@ class ExecutionJournal:
         """
         uncommitted = self._pending(aggregate)
         await self._repository.save_new(aggregate)
-        await self._apply(uncommitted)
+        await self._project(uncommitted)
 
     async def append(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Record whatever the aggregate has decided since it was last saved."""
         uncommitted = self._pending(aggregate)
         await self._repository.save(aggregate)
-        await self._apply(uncommitted)
+        await self._project(uncommitted)
 
     @staticmethod
     def _pending(aggregate: WorkflowExecutionAggregate) -> list[object]:
         """The events the aggregate is about to commit, read before the save clears them."""
-        return [envelope.event for envelope in aggregate._uncommitted_events]
+        return [envelope.event for envelope in aggregate.get_uncommitted_events()]
 
-    async def _apply(self, events: Sequence[object]) -> None:
+    async def _project(self, events: Sequence[object]) -> None:
         """Feed just-saved events to the local projection, in order.
 
         A projection with no handler for an event type is not a failure: the
