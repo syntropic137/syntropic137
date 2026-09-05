@@ -467,11 +467,15 @@ class TestTheVerdictSurvivesEveryHop:
         )
 
         processor = _make_processor()
-        processor._save_and_sync = AsyncMock()
+        processor._journal.append = AsyncMock()
         workspace = MagicMock()
-        processor._active_workspaces["verify"] = workspace
-        processor._active_envs["verify"] = {}
-        processor._active_cmds["verify"] = ["agent"]
+        processor._runtime.attach_workspace(
+            "verify",
+            workspace=workspace,
+            workspace_cm=AsyncMock(),
+            agent_env={},
+            claude_cmd=["agent"],
+        )
 
         agent_result = MagicMock()
         agent_result.stream_result.last_agent_message = SAID
