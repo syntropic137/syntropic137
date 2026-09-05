@@ -518,9 +518,7 @@ class WorkspaceProvisionHandler:
             await workspace.inject_files(
                 [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
             )
-            logger.info(
-                "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(cloned_repos)
-            )
+            logger.info("Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s))", len(cloned_repos))
 
     async def _materialize_claude_plugins(
         self,

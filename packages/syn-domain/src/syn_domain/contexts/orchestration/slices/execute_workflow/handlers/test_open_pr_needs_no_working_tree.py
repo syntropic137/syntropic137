@@ -41,9 +41,6 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import Workfl
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutablePhase,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
@@ -66,6 +63,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutablePhase,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -354,10 +354,7 @@ class TestTheRefusalSurvivesTheChange:
             completed={"verify": _BLOCKING_VERIFY_REPORT},
         )
 
-        assert (
-            "If verification failed, or found a defect, do not open a PR."
-            in provisioned.prompt
-        )
+        assert "If verification failed, or found a defect, do not open a PR." in provisioned.prompt
 
     async def test_the_happy_path_opens_a_pr_from_the_remote_branch_without_pushing(
         self,
