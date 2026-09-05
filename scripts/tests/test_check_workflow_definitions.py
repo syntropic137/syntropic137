@@ -13,13 +13,18 @@ covered at all.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 import yaml
 from pydantic import ValidationError
 from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 from scripts.check_workflow_definitions import _workflow_files, validate_file
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        WorkflowDefinition,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -276,41 +281,92 @@ class TestNoShippedWorkflowDeclaresToolsItCannotGet:
     performs the frontmatter merge itself, and it covers packages.
     """
 
-    #: Workflows the loader cannot resolve standing alone: their ``shared://``
-    #: prompts and package-relative skill refs need a plugin root that only
-    #: exists when the package is validated as a whole. Listed rather than
-    #: skipped by a predicate, so ADDING one is a test failure that has to be
-    #: argued for. A silent skip is how the delegation workflow stayed hidden.
+    #: Workflows the loader cannot resolve standing alone. Every one of them
+    #: fails for the same reason: a package-relative skill ref (``./skills/x``)
+    #: only resolves against a plugin root, and ``WorkflowDefinition.from_file``
+    #: has no seam for one. (The two starter-plugin entries report their
+    #: ``shared://`` prompt first; supplying ``phase_library_dir`` only uncovers
+    #: the same skill-ref error underneath, so the exemption is not removable by
+    #: passing that argument - measured, not assumed.)
+    #:
+    #: Enumerated rather than computed by a predicate, so ADDING one is a test
+    #: failure somebody has to argue for. Exempt here is the ONLY way a workflow
+    #: may be absent from the checks below; see ``_definitions``.
     UNRESOLVABLE_ALONE: ClassVar[set[str]] = {
         "workflows/examples/starter-plugin/workflows/pr-review/workflow.yaml",
         "workflows/examples/starter-plugin/workflows/research/workflow.yaml",
         "workflows/validation/workflows/skills-injection/workflow.yaml",
     }
 
-    def _definitions(self) -> tuple[list[tuple[Path, object]], set[str]]:
+    def _load_every_shipped_workflow(
+        self,
+    ) -> tuple[list[tuple[Path, WorkflowDefinition]], dict[str, str]]:
+        """Load them all, keeping WHY each failure failed.
+
+        The reason is kept, not just the name, because it is the whole content
+        of the failure report: "delegation/workflow.yaml is unresolvable" sends
+        the reader back to the loader, while the ValidationError it raised
+        already says the codex phase cannot honour allowed_tools.
+        """
         from syn_domain.contexts.orchestration._shared.workflow_definition import (
             WorkflowDefinition,
         )
 
-        loaded: list[tuple[Path, object]] = []
-        unresolvable: set[str] = set()
+        loaded: list[tuple[Path, WorkflowDefinition]] = []
+        unresolvable: dict[str, str] = {}
         for path in _workflow_files():
             raw = yaml.safe_load(path.read_text())
             if not isinstance(raw, dict) or "phases" not in raw:
                 continue  # marketplace manifests and fragments are not workflows
             try:
                 loaded.append((path, WorkflowDefinition.from_file(path)))
-            except (ValidationError, ValueError, OSError):
-                unresolvable.add(path.relative_to(_REPO_ROOT).as_posix())
+            except (ValidationError, ValueError, OSError) as exc:
+                unresolvable[path.relative_to(_REPO_ROOT).as_posix()] = str(exc)
         return loaded, unresolvable
 
-    def test_the_set_of_workflows_this_cannot_check_has_not_grown(self) -> None:
-        """The skip list is an assertion, not an escape hatch."""
-        _, unresolvable = self._definitions()
+    def _definitions(self) -> list[tuple[Path, WorkflowDefinition]]:
+        """Every shipped workflow, loaded - or a FAILURE naming the ones that were not.
 
-        assert unresolvable == self.UNRESOLVABLE_ALONE, (
+        The checks below iterate exactly what this returns, so a workflow this
+        drops is a workflow they claim to cover and do not. This helper used to
+        drop them silently: load errors went into a set nobody downstream read,
+        which made the collection under test precisely the collection that
+        already passes. Both checks below were therefore green when the
+        delegation workflow's ``allowed_tools: []`` override was deleted - the
+        one mutation their own docstrings say they catch (review of #1210).
+
+        So an unloadable workflow is now one of two things and never a third:
+        a failure here, quoting the loader's own error, or an argued entry in
+        ``UNRESOLVABLE_ALONE``. It is never an invisible omission.
+        """
+        loaded, unresolvable = self._load_every_shipped_workflow()
+        unexpected = {
+            path: reason
+            for path, reason in unresolvable.items()
+            if path not in self.UNRESOLVABLE_ALONE
+        }
+
+        assert not unexpected, (
+            "these workflows did not load, so the checks in this class cannot "
+            "see them. Fix the workflow, or add it to UNRESOLVABLE_ALONE with "
+            "a reason: " + "; ".join(f"{path} -> {reason}" for path, reason in unexpected.items())
+        )
+
+        return loaded
+
+    def test_the_set_of_workflows_this_cannot_check_has_not_grown(self) -> None:
+        """The exemption list is an assertion, not an escape hatch.
+
+        ``_definitions`` already fails on an unlisted unloadable workflow. This
+        catches the other direction, which that cannot: an entry that has been
+        FIXED and should now be checked, kept exempt out of habit.
+        """
+        _, unresolvable = self._load_every_shipped_workflow()
+
+        assert set(unresolvable) == self.UNRESOLVABLE_ALONE, (
             "a workflow became unresolvable standing alone, so the checks below "
-            "silently stopped covering it - which is exactly how #1207 hid"
+            "silently stopped covering it - which is exactly how #1207 hid. "
+            "Errors: " + "; ".join(f"{path} -> {reason}" for path, reason in unresolvable.items())
         )
 
     def test_every_declared_tool_is_a_name_the_cli_actually_grants(self) -> None:
@@ -318,7 +374,7 @@ class TestNoShippedWorkflowDeclaresToolsItCannotGet:
 
         offenders = [
             (path, phase.id, name)
-            for path, definition in self._definitions()[0]
+            for path, definition in self._definitions()
             for phase in definition.phases
             for name in phase.allowed_tools
             if canonical_tool_name(name) is None
@@ -340,7 +396,7 @@ class TestNoShippedWorkflowDeclaresToolsItCannotGet:
         """
         offenders = [
             (path, phase.id, list(phase.allowed_tools))
-            for path, definition in self._definitions()[0]
+            for path, definition in self._definitions()
             for phase in definition.phases
             if phase.allowed_tools and (phase.agent.provider if phase.agent else None) == "codex"
         ]

@@ -23,19 +23,41 @@ to how ``allowed_tools`` becomes ``--tools`` is covered here too. That matters:
 the flag is variadic and greedy, and the ordering it depends on has already
 broken once.
 
-WHERE THIS RUNS. Anywhere Docker can pull the pinned image. It is marked
-``integration``, which CI runs as a job of its own. It SKIPS - loudly, naming
-the reason - where Docker is absent, which includes every agent workspace
-container. A skip here is a gap, not a pass: this repo has already shipped a
-green gate that checked nothing (docs/retrospectives/2026-08-17-green-checks-
-that-check-nothing.md), so read a skipped run as "unverified".
+WHY THIS IS IN TWO HALVES, AND WHY THE SPLIT IS THE POINT (review of #1210).
+The first version of this file put the whole check behind ``integration``.
+``.github/workflows/ci.yml`` runs integration tests only on schedules, manual
+dispatch, pushes to ``main``, and PRs based on ``release`` - so on a PR into
+``main``, which is every feature PR in this repo, the check was SKIPPED. It
+could only report vocabulary drift after the merge it existed to gate. A check
+that runs only after the merge it gates is a post-mortem.
+
+So the halves are:
+
+``TestTheVocabularyIsTheOneThatWasObserved`` - UNIT, no Docker, runs on every
+PR. It pins ``ToolName`` to ``tool_vocabulary_record.json``, a committed record
+of an actual probe. Editing the enum without re-probing and updating that record
+fails the PR. This half is deliberately strong enough to catch drift on its own.
+
+``TestTheVocabularyMatchesThePinnedCli`` - INTEGRATION, needs Docker. It checks
+the record itself against the CLI in the pinned image, which is the only thing
+that can catch the record going stale when Anthropic ships a release. It SKIPS -
+loudly, naming the reason - where Docker is absent, which includes every agent
+workspace container. A skip here is a gap, not a pass: this repo has already
+shipped a green gate that checked nothing (docs/retrospectives/2026-08-17-green-
+checks-that-check-nothing.md), so read a skipped run as "unverified".
+
+Together: the unit half says "the enum is what we wrote down", the integration
+half says "what we wrote down is what the CLI does". Neither alone is the check;
+only the second needs an image, so only the second is allowed to skip.
 """
 
 from __future__ import annotations
 
+import functools
 import shutil
 import subprocess
 import threading
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -54,11 +76,44 @@ _UNBILLABLE_MODEL = "definitely-not-a-model"
 
 _PROBE_TIMEOUT_SECONDS = 180
 
+_RECORD_PATH = Path(__file__).parent / "tool_vocabulary_record.json"
+
+
+class _ObservedVocabulary(BaseModel):
+    """What a probe of the CLI actually returned, committed so it can be diffed.
+
+    This exists so the unit half has something to compare ``ToolName`` against
+    that is NOT ``ToolName``. A test that derived its expectation from the enum
+    would pass for every possible enum, which is the shape of bug this whole
+    file is about.
+
+    ``provenance`` is a field rather than a comment because JSON has no
+    comments and the caveat is load-bearing: it records WHERE the observation
+    was made, and the answer is not always "the pinned image".
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: The CLI version the ``granted``/``ungranted`` lists were read from.
+    cli_version: str
+    #: What the pinned image's Dockerfile ARG selects. Read, not probed - the
+    #: integration half is what turns this into a verified claim.
+    pinned_image_cli_version: str
+    provenance: str
+    #: Names the CLI resolved to exactly themselves.
+    granted: tuple[str, ...]
+    #: Names the CLI resolved to an empty grant. The negative control: without
+    #: it, "the vocabulary matches" is satisfied by a CLI that grants nothing.
+    ungranted: tuple[str, ...]
+
+
+_RECORD = _ObservedVocabulary.model_validate_json(_RECORD_PATH.read_text(encoding="utf-8"))
+
 
 class _CliInitLine(BaseModel):
     """The ``system``/``init`` line of the CLI's ``stream-json`` output.
 
-    Parsed into a model rather than read out of a raw mapping so the two fields
+    Parsed into a model rather than read out of a raw mapping so the fields
     this check depends on are named and typed in one place. Unknown keys are
     ignored: the CLI adds fields to this line freely and none of them are ours.
     """
@@ -88,13 +143,17 @@ def _probe_argv(declared: str) -> list[str]:
     return _build_claude_command(phase, "say ok")
 
 
-def _granted_tools(declared: str) -> tuple[str, ...]:
-    """The tools the CLI in the pinned image actually grants for ``declared``.
+def _probe_init_line(declared: str) -> _CliInitLine:
+    """What the CLI in the pinned image reports when asked for ``declared``.
 
-    Returns the grant, which is empty when the CLI does not recognise the name -
-    the failure mode #1207 is about. Raises if no ``init`` line arrives at all,
-    because a broken probe reporting an empty grant looks exactly like the
-    defect it is meant to detect.
+    Returns the whole ``init`` line rather than just its grant, because the
+    version on it is part of what this file checks: a grant is only evidence
+    about the CLI that produced it.
+
+    The grant is empty when the CLI does not recognise the name - the failure
+    mode #1207 is about. Raises if no ``init`` line arrives at all, because a
+    broken probe reporting an empty grant looks exactly like the defect it is
+    meant to detect.
 
     WHY IT KILLS THE PROCESS INSTEAD OF WAITING FOR IT. The grant is on the
     first line and the run has nothing left to contribute after it: the invalid
@@ -137,7 +196,7 @@ def _granted_tools(declared: str) -> tuple[str, ...]:
             except ValueError:
                 continue
             if parsed.type == "system" and parsed.subtype == "init":
-                return parsed.tools
+                return parsed
     finally:
         watchdog.cancel()
         process.kill()
@@ -149,6 +208,7 @@ def _granted_tools(declared: str) -> tuple[str, ...]:
     raise AssertionError(msg)
 
 
+@functools.cache
 def _image_is_available() -> bool:
     if shutil.which("docker") is None:
         return False
@@ -170,60 +230,76 @@ def _image_is_available() -> bool:
     )
 
 
-needs_pinned_image = pytest.mark.skipif(
-    not _image_is_available(),
-    reason=(
-        f"needs Docker and the pinned workspace image {DEFAULT_WORKSPACE_IMAGE}. "
-        "SKIPPED means the vocabulary was NOT checked against the CLI on this "
-        "run - treat it as unverified, not as a pass (#1207)."
-    ),
-)
+@pytest.fixture
+def pinned_image() -> str:
+    """The pinned image to probe, or a loud skip.
+
+    A FIXTURE, not a module-level ``skipif``, and that is not a style choice.
+    The availability check shells out to ``docker image inspect`` and then to
+    ``docker pull``, so evaluating it at import time ran a multi-gigabyte pull
+    during COLLECTION of every pytest invocation - including ``pytest -m unit``,
+    which deselects every test here and on a machine with Docker (every CI
+    runner, most dev machines) paid for the pull anyway. Deferring it to the
+    tests that need it means the unit half touches Docker never.
+    """
+    if not _image_is_available():
+        pytest.skip(
+            f"needs Docker and the pinned workspace image {DEFAULT_WORKSPACE_IMAGE}. "
+            "SKIPPED means the vocabulary was NOT checked against the CLI on this "
+            "run - treat it as unverified, not as a pass (#1207)."
+        )
+    return DEFAULT_WORKSPACE_IMAGE
 
 
-@pytest.mark.integration
-@needs_pinned_image
-class TestTheVocabularyMatchesThePinnedCli:
-    """Every accepted name must be granted, and granted exactly once."""
+@pytest.mark.unit
+class TestTheVocabularyIsTheOneThatWasObserved:
+    """The half that gates a PR, because it needs no image (review of #1210).
 
-    @pytest.mark.parametrize("tool", list(ToolName), ids=lambda t: t.value)
-    def test_an_accepted_name_is_granted_exactly_once(self, tool: ToolName) -> None:
-        granted = _granted_tools(tool.value)
+    ``tool_vocabulary_record.json`` is a committed record of an actual probe.
+    Comparing ``ToolName`` against it means adding or removing a name is a
+    two-file change: the enum, and the evidence for it. That is the whole
+    mechanism - it makes "where did this name come from?" answerable, which is
+    the question nobody could answer about ``LS``.
 
-        assert granted == (tool.value,), (
-            f"the CLI in {DEFAULT_WORKSPACE_IMAGE} resolved --tools "
-            f"{tool.value} to {list(granted)}. An empty grant means a phase "
-            f"declaring {tool.value} runs with NO tools; anything else means "
-            "the name is not the one-to-one grant this vocabulary claims."
+    What makes this fail: editing ``ToolName`` alone. What makes it fail for
+    the RIGHT reason: the integration half below, which is what stops the
+    record from being updated to match a wrong enum.
+    """
+
+    def test_the_enum_is_exactly_the_observed_grant(self) -> None:
+        assert {tool.value for tool in ToolName} == set(_RECORD.granted), (
+            f"ToolName and {_RECORD_PATH.name} disagree. The record is a probe "
+            f"of CLI {_RECORD.cli_version}; if the CLI changed, re-probe and "
+            "update the record (TestTheVocabularyMatchesThePinnedCli does the "
+            "probing). Do NOT edit the record to match the enum - that is how "
+            "LS, TodoRead, TodoWrite and MultiEdit got in (#1207)."
         )
 
-    @pytest.mark.parametrize("ungranted", ["LS", "TodoRead", "TodoWrite", "MultiEdit"])
-    def test_the_names_removed_in_1207_really_are_ungranted(self, ungranted: str) -> None:
-        """The negative control, without which the check above proves little.
+    @pytest.mark.parametrize("ungranted", _RECORD.ungranted)
+    def test_a_name_observed_ungranted_is_refused(self, ungranted: str) -> None:
+        """The negative control, without which the check above is half a check.
 
-        If the CLI granted these after all, removing them from the vocabulary
-        was a regression and this file should say so rather than stay quiet.
+        "The enum equals the granted list" is also satisfied by a record whose
+        granted list is wrong. These are the names a probe watched resolve to
+        an empty grant, so accepting one means shipping a phase that runs with
+        no tools.
         """
-        assert _granted_tools(ungranted) == (), (
-            f"{ungranted} IS granted by the CLI in {DEFAULT_WORKSPACE_IMAGE}, so "
-            "removing it from ToolName in #1207 took away a real capability"
+        assert canonical_tool_name(ungranted) is None, (
+            f"{ungranted} is accepted by the vocabulary, but {_RECORD_PATH.name} "
+            f"records CLI {_RECORD.cli_version} resolving it to an empty grant. "
+            "A phase declaring it would run with NO tools (#1207)."
         )
 
 
 @pytest.mark.unit
 class TestAnInvalidNameIsRefusedBeforeAnyContainerStarts:
-    """The other half, and the half that needs no image.
+    """Refusal has to happen before the workspace is provisioned and paid for.
 
-    Refusing a bad name is only worth anything if it happens before the
-    workspace is provisioned and paid for. This asserts the refusal sits on the
-    path that BUILDS the command, so no container is ever started for a phase
-    whose declaration cannot be honoured.
+    This asserts the refusal sits on the path that BUILDS the command, so no
+    container is ever started for a phase whose declaration cannot be honoured.
     """
 
-    @pytest.mark.parametrize("ungranted", ["LS", "TodoRead", "TodoWrite", "MultiEdit", "git"])
-    def test_the_vocabulary_refuses_it(self, ungranted: str) -> None:
-        assert canonical_tool_name(ungranted) is None
-
-    @pytest.mark.parametrize("ungranted", ["LS", "TodoRead", "TodoWrite", "MultiEdit", "git"])
+    @pytest.mark.parametrize("ungranted", [*_RECORD.ungranted, "git"])
     def test_no_argv_can_be_built_for_it(self, ungranted: str) -> None:
         """No argv means no ``docker run``: the refusal precedes provisioning."""
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
@@ -247,3 +323,54 @@ class TestAnInvalidNameIsRefusedBeforeAnyContainerStarts:
         argv = _probe_argv(ToolName.SKILL.value)
 
         assert argv[-2:] == ["--tools", "Skill"]
+
+
+@pytest.mark.integration
+class TestTheVocabularyMatchesThePinnedCli:
+    """The half that checks the RECORD against reality. Needs Docker.
+
+    Every assertion here is about ``tool_vocabulary_record.json``, not about
+    ``ToolName`` - the unit half already ties those together. So this is the
+    thing that catches Anthropic changing the CLI under a record that still
+    looks tidy.
+    """
+
+    @pytest.mark.parametrize("tool", _RECORD.granted)
+    def test_a_recorded_grant_is_still_granted_exactly_once(
+        self, tool: str, pinned_image: str
+    ) -> None:
+        granted = _probe_init_line(tool).tools
+
+        assert granted == (tool,), (
+            f"the CLI in {pinned_image} resolved --tools {tool} to "
+            f"{list(granted)}. An empty grant means a phase declaring {tool} "
+            "runs with NO tools; anything else means the name is not the "
+            "one-to-one grant this vocabulary claims."
+        )
+
+    @pytest.mark.parametrize("ungranted", _RECORD.ungranted)
+    def test_a_recorded_non_grant_is_still_not_granted(
+        self, ungranted: str, pinned_image: str
+    ) -> None:
+        """If the CLI grants these after all, removing them was a regression."""
+        assert _probe_init_line(ungranted).tools == (), (
+            f"{ungranted} IS granted by the CLI in {pinned_image}, so removing "
+            "it from ToolName in #1207 took away a real capability"
+        )
+
+    def test_the_record_names_the_cli_version_this_image_carries(self, pinned_image: str) -> None:
+        """A grant is only evidence about the CLI that produced it.
+
+        Bumping the pinned digest silently re-points every assertion above at a
+        different program while the record still cites the old version. That is
+        the same staleness as the manifest #1207 came from, one level up, so it
+        is checked rather than trusted.
+        """
+        reported = _probe_init_line(ToolName.READ.value).claude_code_version
+
+        assert reported == _RECORD.pinned_image_cli_version, (
+            f"{pinned_image} carries claude {reported}, but "
+            f"{_RECORD_PATH.name} cites {_RECORD.pinned_image_cli_version}. "
+            "Re-probe and update the record: its grants were read from a "
+            "version this image no longer runs."
+        )
