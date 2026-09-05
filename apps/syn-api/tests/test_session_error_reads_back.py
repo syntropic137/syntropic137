@@ -43,7 +43,7 @@ class _SessionErrorPayload(TypedDict, total=False):
 
     status: str
     error_message: str
-    model: str
+    model: str | None
 
 
 class _ToolPayload(TypedDict, total=False):
