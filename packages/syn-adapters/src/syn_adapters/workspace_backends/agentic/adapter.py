@@ -12,7 +12,8 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Final
 
 from agentic_isolation import (
     SecurityConfig,
@@ -44,6 +45,8 @@ from syn_shared.env_constants import (
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentic_isolation import AgenticWorkspace
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -56,6 +59,63 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["AgenticIsolationAdapter", "WorkspaceProvisionError"]
+
+
+#: Where `just` and anything else that writes-then-executes a temp file can do
+#: so. `/tmp` is mounted `noexec` by the isolation layer
+#: (agentic_isolation/config.py: `--tmpfs=/tmp:rw,noexec,nosuid,size=256m`),
+#: alongside `/spool` and `/var/agentic`. That is deliberate hardening and is
+#: not something to weaken for a build tool.
+#:
+#: The consequence was severe and silent: `just` writes a shebang recipe to a
+#: temp file and executes it, so EVERY shebang recipe failed with
+#: `Permission denied (os error 13)` - including `qa-ci`, which is the gate the
+#: verify phase is instructed to run. A phase could spend an hour of model time
+#: and then be unable to certify its own work (#1042).
+#:
+#: Verified inside a running workspace:
+#:
+#:     $ just shebang-recipe
+#:     error: ... execution error: Permission denied (os error 13)
+#:     $ TMPDIR=/workspace/.tmp just shebang-recipe
+#:     SHEBANG_RAN_OK
+#:
+#: `/workspace` is writable and executable; `/var/tmp` and `/dev/shm` are not.
+_EXECUTABLE_TMPDIR = "/workspace/.tmp"
+
+#: Where tool caches go instead of `$HOME`.
+#:
+#: WHY (issue #1133). The workspace mounts `/home/agent` as a 128 MB tmpfs
+#: (`agentic_isolation/config.py`), and that is `$HOME` - where uv, ruff, npm
+#: and node all cache by default. A real verify phase died there:
+#:
+#:   the workspace's 128 MiB /home/agent tmpfs ran out of space
+#:   error: recipe `lint` failed on line 932 with exit code 1
+#:
+#: `/workspace` is on the container filesystem, which had 157 GB free on the
+#: same host. A prompt-level `export` cannot fix this reliably: it lasts for
+#: one shell, and the command that fills the disk is usually a dependency
+#: install the agent runs before the command carrying the export.
+_WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
+    "XDG_CACHE_HOME": "/workspace/.cache",
+    "UV_CACHE_DIR": "/workspace/.cache/uv",
+    "npm_config_cache": "/workspace/.cache/npm",
+}
+
+
+def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
+    """Point TMPDIR and the tool caches somewhere with room, unless told otherwise.
+
+    A caller-supplied value always wins: these are defaults for the common
+    case, not policy. Nothing is created here - `just`, `mktemp`, `uv` and
+    `npm` all create their own directories, and doing it here would mean a
+    filesystem side effect in a function whose job is to build a dict.
+    """
+    resolved = dict(environment)
+    for key, value in ({"TMPDIR": _EXECUTABLE_TMPDIR} | _WORKSPACE_CACHE_ENV).items():
+        if not resolved.get(key):
+            resolved[key] = value
+    return resolved
 
 
 class AgenticIsolationAdapter:
@@ -163,7 +223,7 @@ class AgenticIsolationAdapter:
         # management that nobody has designed yet, so it is a deliberate
         # follow-up rather than an omission.
         return apply_session_store_env(
-            config.environment or {},
+            _with_executable_tmpdir(config.environment or {}),
             self._session_store,
             execution_id=config.execution_id,
             workspace_id=config.workspace_id,
@@ -173,20 +233,26 @@ class AgenticIsolationAdapter:
             # workspace across dev, beta and prod is indistinguishable in the
             # corpus: the envelope's own origin.environment is the runtime
             # CLASS, which is the same value for all of them.
-            deployment=self._deployment_identity(),
+            deployment=self._deployment_identity(),  # honours the operator override
         )
 
-    @staticmethod
-    def _deployment_identity() -> str:
-        """``syntropic137__<app_environment>`` for this deployment.
+    def _deployment_identity(self) -> str:
+        """``syntropic137__<app_environment>``, or the operator's override.
 
         Imported locally, matching how session-store settings are resolved above:
         syn_shared settings resolve 1Password at first construction, so importing
         at module scope would make that a side effect of importing the adapter.
+
+        Reads the override off `self._session_store` - the SAME settings object
+        `build_expectations` is handed - so the injected value and the expected
+        value cannot disagree.
         """
         from syn_shared.settings import get_settings
 
-        return deployment_identity(str(get_settings().app_environment))
+        return deployment_identity(
+            str(get_settings().app_environment),
+            self._session_store.display_deployment,
+        )
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
         """Create an isolated workspace container.

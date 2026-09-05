@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { getWorkflow, getWorkflowHistory } from '../api/workflows'
 import { listExecutions } from '../api/executions'
 import { getMetrics } from '../api/observability'
-import { listArtifacts } from '../api/artifacts'
+import { LIST_PAGE_SIZE } from './useListQuery'
+import { listArtifactPage } from '../api/artifacts'
 import type {
   ArtifactSummary,
   ExecutionHistoryResponse,
@@ -16,6 +17,13 @@ export interface UseWorkflowDataResult {
   metrics: MetricsResponse | null
   history: ExecutionHistoryResponse | null
   artifacts: ArtifactSummary[]
+  /**
+   * Artifacts this workflow has produced, across every page.
+   *
+   * Not `artifacts.length`: that is one page of them, and reporting it as the
+   * count is the defect #1204 names, restated on a metric card.
+   */
+  artifactTotal: number
   executions: WorkflowExecutionSummary[]
   loading: boolean
   error: string | null
@@ -27,6 +35,7 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [history, setHistory] = useState<ExecutionHistoryResponse | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([])
+  const [artifactTotal, setArtifactTotal] = useState(0)
   const [executions, setExecutions] = useState<WorkflowExecutionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +54,7 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
       getWorkflow(workflowId),
       getMetrics(workflowId),
       getWorkflowHistory(workflowId),
-      listArtifacts({ workflow_id: workflowId }),
+      listArtifactPage({ page: 1, page_size: LIST_PAGE_SIZE }, { workflow_id: workflowId }),
       listExecutions(workflowId),
     ])
       .then(([wf, met, hist, arts, execs]) => {
@@ -53,7 +62,8 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
         setWorkflow(wf)
         setMetrics(met)
         setHistory(hist)
-        setArtifacts(arts)
+        setArtifacts(arts.artifacts)
+        setArtifactTotal(arts.total)
         setExecutions(execs)
       })
       .catch((err) => {
@@ -66,5 +76,15 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
     return () => { cancelled = true }
   }, [workflowId, refreshKey])
 
-  return { workflow, metrics, history, artifacts, executions, loading, error, refetch }
+  return {
+    workflow,
+    metrics,
+    history,
+    artifacts,
+    artifactTotal,
+    executions,
+    loading,
+    error,
+    refetch,
+  }
 }

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -18,6 +20,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
     _auth_staging_for,
 )
 from syn_shared.agents import AgentProvider
+
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
 
 _YAML = """
 id: deleg-test

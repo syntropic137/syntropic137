@@ -88,3 +88,21 @@ def build_query(
         query += f" OFFSET {offset}"
 
     return query, params
+
+
+def build_count_query(
+    table_name: str,
+    filters: dict[str, Any] | None = None,
+) -> tuple[str, list[Any]]:
+    """A COUNT(*) that filters exactly as `build_query` does.
+
+    Shares `_build_where_clause` with the query it counts, so the two cannot
+    drift into counting different things - which is the failure a hand-written
+    second WHERE clause invites.
+    """
+    query = f"SELECT count(*) FROM {table_name}"
+    params: list[Any] = []
+    if filters:
+        where_sql, params = _build_where_clause(filters, start_idx=1)
+        query += where_sql
+    return query, params

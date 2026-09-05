@@ -7,13 +7,19 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
 )
-from syn_shared.agents import AgentProvider, resolve_phase_model
+from syn_shared.agents import (
+    DEFAULT_PHASE_SANDBOX,
+    AgentProvider,
+    resolve_phase_model,
+)
 
 
 class ExecutionStatus(StrEnum):
@@ -83,6 +89,11 @@ class AgentConfiguration:
     temperature: float = 0.7
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
+    # How much authority this phase's agent process gets. Steers codex only;
+    # claude scopes through allowed_tools. The command builder maps it to the
+    # harness flag. Defaults to DEFAULT_PHASE_SANDBOX, currently the MOST
+    # permissive level as a stopgap - see PhaseSandbox (#1157, #1161, #1167).
+    sandbox: str = DEFAULT_PHASE_SANDBOX
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False
@@ -132,6 +143,103 @@ class PhaseResult:
     total_tokens: int = 0
     error_message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class BranchObservation(BaseModel):
+    """One remote branch of a failing phase's workspace, as git had it (#1200).
+
+    WHERE TO LOOK, WITHOUT SAYING WHO PUT IT THERE. A phase can commit, push,
+    and still fail - most often on the #1167 output-artifact contract - and
+    when it does no PR is opened and no surface names the branch. The work is
+    complete, reviewed by nobody, and findable only by someone who thinks to
+    go through the remote's refs. Twice in one day that someone was a human
+    doing it by hand; both rescues merged.
+
+    EVERY FIELD IS SOMETHING GIT WAS ASKED AND ANSWERED, and nothing here is
+    an attribution. An earlier version of this recorded "work THIS PHASE
+    pushed", derived by snapshotting the refs at phase start and treating
+    whatever was new as the phase's own. That signature is produced just as
+    well by a concurrent push or a human's, because a ref that moved between
+    two readings does not record who moved it: git carries no author of a
+    push. So the comparison is still taken and still reported - as the
+    comparison it is, two SHAs and the reader's own eyes - and no field claims
+    the phase caused it.
+
+    That is enough for the operator the record exists for. "Where do I look"
+    is answered by a branch name and a commit; it never required knowing who
+    pushed.
+
+    A Pydantic model rather than a dataclass because it travels on
+    ``WorkflowFailedEvent`` and must serialise as event data.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repo: str
+    """The repository directory's name, as the workspace had it cloned."""
+
+    branch: str
+    """The branch the workspace was on, without any remote prefix - the name
+    to fetch, and the name a PR would be opened from. ``(detached HEAD)`` when
+    it was not on one."""
+
+    remote: str | None
+    """The remote this observation is about, e.g. ``origin``. ``None`` when
+    the branch has no remote-tracking ref and had none at phase start, so
+    there is no remote branch to describe. One observation per remote that
+    carries the branch, rather than one per repository picking a remote by
+    some rule nobody can see."""
+
+    remote_commit: str | None
+    """What ``<remote>/<branch>`` points at NOW, asked of the remote itself
+    while the workspace was still alive. ``None`` means the remote does not
+    have that branch - never pushed, or deleted while the phase ran.
+
+    Read from the remote and not from `refs/remotes`, which is only what this
+    clone was last told: a phase that never fetched would report a commit that
+    predates whatever it is being compared against. A remote that could not be
+    reached produces no record at all rather than a stale one; see
+    `ObservedBranches.unreadable`."""
+
+    remote_commit_at_phase_start: str | None
+    """What that same ref pointed at when the phase was handed the workspace,
+    from `PhaseStartingPoint`. ``None`` means the ref did not exist then.
+
+    Reported beside `remote_commit` rather than reduced to a verdict: the two
+    together say "it moved" without anyone having to claim who moved it, and
+    an operator diffing them gets more than a boolean would give."""
+
+    unpushed_commits: int
+    """How many commits are reachable from the workspace's HEAD that no remote
+    ref holds. ``0`` is a fact about the repository and not about the phase.
+
+    Non-zero is a DIFFERENT INCIDENT from a remote that moved: those commits
+    are about to die with the container, which is #1184's quarantine to save
+    and not something to fetch. Keeping the count here is what lets a client
+    tell "this phase left nothing anywhere" from "this phase is holding work
+    that is not on any remote" without reading prose."""
+
+    @property
+    def remote_moved(self) -> bool:
+        """Whether ``<remote>/<branch>`` is at a different commit than at start.
+
+        A comparison of two readings, and deliberately not called anything
+        like "pushed": it is true of a push from this workspace, a push from
+        anywhere else, and a ref someone deleted or recreated in between.
+        """
+        return self.remote_commit != self.remote_commit_at_phase_start
+
+    @property
+    def is_worth_recording(self) -> bool:
+        """Whether anything here differs from a workspace nobody touched.
+
+        The one place that decides what a record MEANS by deciding when one
+        exists. A repository whose remote branch is where it was and whose
+        HEAD is fully pushed has nothing an operator would act on, and
+        recording it anyway is how a phase that did nothing came to report the
+        commit it inherited as somewhere to go and look.
+        """
+        return self.remote_moved or self.unpushed_commits > 0
 
 
 @dataclass(frozen=True)
@@ -207,11 +315,24 @@ class ExecutablePhase:
     # Input configuration
     inputs: list[PhaseInput] = field(default_factory=list)
 
-    # Output artifact type
-    output_artifact_type: str = "text"
+    # What this phase's definition declares it produces. Plural and possibly
+    # EMPTY, which is the whole point: empty means "declared nothing" and is a
+    # phase legitimately allowed to produce nothing, while a non-empty
+    # declaration is a contract the collector enforces (#1167). The previous
+    # singular `output_artifact_type: str = "text"` could not express the
+    # difference - an undeclared phase and one declaring "text" both arrived
+    # here as "text", so no enforcement was possible downstream.
+    output_artifact_types: tuple[str, ...] = ()
 
     # Timeout for this phase (can override agent config)
     timeout_seconds: int | None = None
+
+    # Whether this phase's workspace gets the repos checked out (#1187).
+    # Provisioning was phase-blind: the only opt-out was workflow-level
+    # `requires_repos: false`, which applies to every phase at once. Carried
+    # here rather than on `agent_config` because it decides what the WORKSPACE
+    # contains, not how the agent is invoked.
+    clone_repos: bool = True
 
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and

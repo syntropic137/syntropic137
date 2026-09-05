@@ -231,7 +231,7 @@ jobs:
 
     services:
       timescaledb:
-        image: timescale/timescaledb:latest-pg16
+        image: timescale/timescaledb:2.29.2-pg16
         env:
           POSTGRES_USER: syn
           POSTGRES_PASSWORD: syn_dev_password
@@ -308,22 +308,14 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      # ISS-259: --ignore-scripts prevents postinstall hooks from executing
-      # arbitrary code during install — a common npm supply chain vector.
-      - name: Install ui-feedback-react dependencies
-        working-directory: lib/ui-feedback/packages/ui-feedback-react
-        run: pnpm install --ignore-scripts
-
       # Standardized on pnpm across all frontend apps (was npm, creating duplicate
       # lock files and inconsistent audit coverage). --frozen-lockfile ensures CI
-      # installs exactly what's locked. --ignore-scripts blocks postinstall hooks.
+      # installs exactly what's locked. --ignore-scripts blocks postinstall hooks
+      # from executing arbitrary code during install, a common npm supply chain
+      # vector (ISS-259).
       - name: Install dashboard dependencies
         working-directory: apps/syn-dashboard-ui
         run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Link ui-feedback-react
-        working-directory: apps/syn-dashboard-ui
-        run: pnpm link ../../lib/ui-feedback/packages/ui-feedback-react
 
       - name: Lint
         working-directory: apps/syn-dashboard-ui

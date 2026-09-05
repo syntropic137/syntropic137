@@ -84,6 +84,39 @@ describe("conversations commands", () => {
     it("throws on missing session-id", async () => {
       await expect(handler({ positionals: [], values: {} })).rejects.toThrow(CLIError);
     });
+
+    it("emits the underlying lines unmodified as JSON with --json", async () => {
+      const payload = {
+        session_id: "session-abc-123",
+        total_lines: 2,
+        lines: [
+          {
+            line_number: 1,
+            raw: '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git rev-parse HEAD"}}]}}',
+            parsed: null,
+            event_type: "tool_use",
+            tool_name: "Bash",
+            content_preview: "git rev-parse HEAD",
+          },
+          {
+            line_number: 2,
+            raw: '{"type":"user","message":{"content":[{"type":"tool_result","content":"abc123"}]}}',
+            parsed: null,
+            event_type: "user",
+            tool_name: null,
+            content_preview: "abc123",
+          },
+        ],
+      };
+      mockFetch.mockResolvedValue(jsonResponse(payload));
+
+      await handler({ positionals: ["session-abc-123"], values: { json: true } });
+
+      const out = stdout();
+      // The table renderer never runs - the exact API payload is what's on stdout.
+      expect(out).not.toContain("Preview");
+      expect(JSON.parse(out)).toEqual(payload);
+    });
   });
 
   describe("metadata", () => {

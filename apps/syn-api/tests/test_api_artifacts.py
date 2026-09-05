@@ -6,6 +6,11 @@ import pytest
 
 from syn_api.types import Ok
 
+# CI runs `pytest -m unit`; an unmarked module collects zero tests and the
+# gate goes green having run none of them (#1065).
+pytestmark = pytest.mark.unit
+
+
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -29,13 +34,19 @@ def _reset_storage():
     reset_projection_manager()
 
 
-async def test_list_artifacts_returns_empty():
-    """list_artifacts returns Ok([]) when no artifacts exist."""
+async def test_list_artifacts_returns_an_empty_page_not_an_empty_list():
+    """No artifacts is a page of a collection of size zero, not a bare list.
+
+    The distinction is the point of #1204: a caller reads `total` to know
+    whether the rows it holds are all of them, and there was no `total` to
+    read.
+    """
     from syn_api.routes.artifacts import list_artifacts
 
     result = await list_artifacts()
     assert isinstance(result, Ok)
-    assert result.value == []
+    assert result.value.rows == []
+    assert result.value.total == 0
 
 
 async def test_list_artifacts_with_filter():
@@ -44,7 +55,8 @@ async def test_list_artifacts_with_filter():
 
     result = await list_artifacts(workflow_id="nonexistent-wf")
     assert isinstance(result, Ok)
-    assert result.value == []
+    assert result.value.rows == []
+    assert result.value.total == 0
 
 
 async def test_create_artifact():
@@ -82,7 +94,7 @@ async def test_create_and_list_artifacts():
 
     list_result = await list_artifacts(workflow_id="wf-test-456")
     assert isinstance(list_result, Ok)
-    assert isinstance(list_result.value, list)
+    assert list_result.value.total == len(list_result.value.rows)
     # NOTE: In-memory event store doesn't auto-dispatch to projections,
     # so the created artifact may not appear in list results.
     # Full round-trip is verified in integration tests with real infrastructure.

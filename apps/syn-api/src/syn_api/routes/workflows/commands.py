@@ -27,7 +27,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -153,6 +153,10 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 max_tokens=p.get("max_tokens"),
                 timeout_seconds=p.get("timeout_seconds"),
                 allowed_tools=p.get("allowed_tools", []),
+                # Dropping this silently reinstates the clone for a phase
+                # installed through the API that declared it did not need one
+                # (#1187) - the bootstrap cost the declaration exists to avoid.
+                clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as
@@ -165,6 +169,11 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 allow_delegation=_as_bool(
                     _agent_field(p, "allow_delegation", False), "allow_delegation"
                 ),
+                # Dropping this silently downgrades a phase's declared
+                # authority to the default, which for a review phase means it
+                # can write the code it certifies (#1161). Caught by the
+                # roundtrip assertion in test_phase_create_carries_every_field.
+                sandbox=_agent_field(p, "sandbox", DEFAULT_PHASE_SANDBOX),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
             )

@@ -46,8 +46,10 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     PhaseDefinition,
     PhaseExecutionType,
+    UnsupportedExecutionTypeError,
     WorkflowClassification,
     WorkflowType,
+    require_supported_execution_type,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -58,8 +60,12 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    FailExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    ExecutionStatus,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -96,8 +102,14 @@ from syn_domain.contexts.orchestration.slices.archive_workflow_template.ArchiveW
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
+    AGENT_LAUNCH_MARKER,
+    announce_as,
+    mint_wrapper_name,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -105,6 +117,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
+    validate_phase_declarations,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -119,7 +132,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
     WorkflowExecutionProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
-    SYN_WORKSPACE_PROMPT,
+    render_workspace_prompt,
 )
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
@@ -136,9 +149,9 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 )
 
 __all__ = [
-    "RESERVED_INPUT_NAMES",
     # Constants
-    "SYN_WORKSPACE_PROMPT",
+    "AGENT_LAUNCH_MARKER",
+    "RESERVED_INPUT_NAMES",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
@@ -168,6 +181,8 @@ __all__ = [
     "ExecuteWorkflowHandler",
     # Query services
     "ExecutionCostQueryService",
+    "ExecutionStatus",
+    "FailExecutionCommand",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
@@ -193,6 +208,8 @@ __all__ = [
     "SubagentTracker",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
+    "UnsupportedExecutionTypeError",
+    "UnsupportedToolPolicyForProviderError",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
@@ -209,6 +226,11 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "announce_as",
     "build_command_from_definition",
+    "mint_wrapper_name",
+    "render_workspace_prompt",
+    "require_supported_execution_type",
+    "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

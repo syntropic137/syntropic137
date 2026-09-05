@@ -201,7 +201,12 @@ class MinioConversationStorage:
             session_id: Session identifier
 
         Returns:
-            List of JSONL lines, or None if not found
+            List of JSONL lines, or None if the object genuinely does not exist.
+
+        Raises:
+            Exception: if the store could not answer. ``None`` means "no log
+                was ever stored for this session" and callers state that to
+                users; an outage must not be able to produce it (#1065).
         """
         return await _retrieve_session(self, session_id)
 
@@ -215,7 +220,13 @@ class MinioConversationStorage:
             session_id: Session identifier
 
         Returns:
-            Session metadata dict, or None if not found
+            Session metadata dict, or None if the index genuinely holds no
+            row for this session.
+
+        Raises:
+            ConversationStoreUnavailable: if the index could not be queried.
+                ``None`` is reported to users as "no metadata for this
+                session", which an outage does not establish (#1065).
         """
         return await _get_session_metadata(self, session_id)
 
@@ -229,7 +240,12 @@ class MinioConversationStorage:
             execution_id: Execution identifier
 
         Returns:
-            List of session IDs
+            Session IDs for the execution; empty when it genuinely has none.
+
+        Raises:
+            ConversationStoreUnavailable: if the index could not be queried.
+                An empty list says the execution recorded no sessions, and an
+                outage cannot support that either (#1065).
         """
         return await _list_sessions_for_execution(self, execution_id)
 

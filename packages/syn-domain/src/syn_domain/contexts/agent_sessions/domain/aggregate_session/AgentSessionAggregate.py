@@ -9,6 +9,7 @@ from uuid import uuid4
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import (
+    AgentLaunch,
     OperationRecord,
     SessionStatus,
     TokenMetrics,
@@ -18,11 +19,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
         CompleteSessionCommand,
     )
+    from syn_domain.contexts.agent_sessions.domain.commands.MarkAgentLaunchedCommand import (
+        MarkAgentLaunchedCommand,
+    )
     from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
         RecordOperationCommand,
     )
     from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
         StartSessionCommand,
+    )
+    from syn_domain.contexts.agent_sessions.domain.events.AgentLaunchedEvent import (
+        AgentLaunchedEvent,
     )
     from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
         OperationRecordedEvent,
@@ -64,6 +71,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._started_at: datetime | None = None
         self._completed_at: datetime | None = None
         self._metadata: dict[str, str | int | float | bool | None] = {}
+        self._agent_launched: bool = False
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -102,6 +110,17 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def operation_count(self) -> int:
         """Get number of operations recorded."""
         return len(self._operations)
+
+    @property
+    def agent_launch(self) -> AgentLaunch:
+        """What this session knows about whether its agent process started.
+
+        Never UNKNOWN: an aggregate has replayed its own whole stream, so
+        the absence of an ``AgentLaunched`` event in it is a real negative,
+        not a gap. UNKNOWN exists for readers downstream of a stream that
+        predates the fact entirely (#1047, #1065).
+        """
+        return AgentLaunch.LAUNCHED if self._agent_launched else AgentLaunch.NOT_LAUNCHED
 
     @property
     def duration_seconds(self) -> float | None:
@@ -218,6 +237,29 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         self._apply(event)
 
+    @command_handler("MarkAgentLaunchedCommand")
+    def mark_agent_launched(self, command: MarkAgentLaunchedCommand) -> None:  # noqa: ARG002
+        """Handle MarkAgentLaunchedCommand.
+
+        Records that an agent process demonstrably existed for this session.
+        Idempotent: a session that emits this twice (defensive re-dispatch
+        after a crash) still only recorded one true fact, so a second call
+        is a no-op rather than an error - unlike record_operation/
+        complete_session, there is no invariant this could violate.
+        """
+        from syn_domain.contexts.agent_sessions.domain.events.AgentLaunchedEvent import (
+            AgentLaunchedEvent,
+        )
+
+        if self._agent_launched:
+            return
+
+        event = AgentLaunchedEvent(
+            session_id=str(self.id),
+            launched_at=datetime.now(UTC),
+        )
+        self._apply(event)
+
     @command_handler("CompleteSessionCommand")
     def complete_session(self, command: CompleteSessionCommand) -> None:
         """Handle CompleteSessionCommand.
@@ -251,6 +293,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             total_tokens=self._tokens.total_tokens,
             operation_count=len(self._operations),
             error_message=command.error_message,
+            agent_launch=self.agent_launch,
         )
 
         self._apply(event)
@@ -271,6 +314,11 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._status = SessionStatus.RUNNING
         self._started_at = event.started_at
         self._metadata = dict(event.metadata)
+
+    @event_sourcing_handler("AgentLaunched")
+    def on_agent_launched(self, event: AgentLaunchedEvent) -> None:  # noqa: ARG002
+        """Apply AgentLaunchedEvent."""
+        self._agent_launched = True
 
     @event_sourcing_handler("OperationRecorded")
     def on_operation_recorded(self, event: OperationRecordedEvent) -> None:

@@ -39,6 +39,7 @@ Usage:
 """
 
 from syn_domain.contexts.agent_sessions._shared import (
+    AgentLaunch,
     AgentSessionAggregate,
     OperationRecord,
     OperationType,
@@ -57,6 +58,10 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
+from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
+    SessionSummaryData,
+    TokenUsageData,
+)
 from syn_domain.contexts.agent_sessions.import_ledger import (
     BilledUsage,
     ImportLedger,
@@ -72,6 +77,13 @@ from syn_domain.contexts.agent_sessions.slices.complete_session import (
 )
 from syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler import (
     CompleteSessionHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.mark_agent_launched import (
+    AgentLaunchedEvent,
+    MarkAgentLaunchedCommand,
+)
+from syn_domain.contexts.agent_sessions.slices.mark_agent_launched.MarkAgentLaunchedHandler import (
+    MarkAgentLaunchedHandler,
 )
 from syn_domain.contexts.agent_sessions.slices.record_operation import (
     OperationRecordedEvent,
@@ -105,6 +117,8 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "AgentLaunch",
+    "AgentLaunchedEvent",
     "AgentSessionAggregate",
     "BilledUsage",
     "CanonicalTotals",
@@ -114,6 +128,8 @@ __all__ = [
     "CostCalculator",
     "ImportLedger",
     "ImportLedgerPort",
+    "MarkAgentLaunchedCommand",
+    "MarkAgentLaunchedHandler",
     "ObservationType",
     "OperationRecord",
     "OperationRecordedEvent",
@@ -125,11 +141,13 @@ __all__ = [
     "SessionStartedEvent",
     "SessionStatus",
     "SessionStorePort",
+    "SessionSummaryData",
     "StartSessionCommand",
     "StartSessionHandler",
     "StoredSession",
     "StoredTranscript",
     "TokenMetrics",
+    "TokenUsageData",
     "import_phase_delegates",
     "price_canonical_row",
     "record_error",

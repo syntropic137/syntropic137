@@ -30,12 +30,20 @@ from syn_api.types import (
     WorkflowError,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import RESERVED_INPUT_NAMES, SkillError, SkillRef
+from syn_domain.contexts.orchestration import (
+    RESERVED_INPUT_NAMES,
+    SkillError,
+    SkillRef,
+    UnsupportedExecutionTypeError,
+    UnsupportedToolPolicyForProviderError,
+    validate_phase_declarations,
+)
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
     require_executable_provider,
 )
+from syn_shared.tools import UnsupportedToolNameError
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
@@ -480,6 +488,29 @@ def _check_phase_providers(workflow: WorkflowTemplateAggregate) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+    """Raise 422 if any stored phase declares something we cannot honour.
+
+    Same contract and same reason as `_check_phase_providers` above (#1039):
+    without it the caller gets 200 `started` with an execution_id, the
+    BackgroundTask raises BEFORE the execution stream is created, and polling
+    that id returns 404 forever. A ghost execution is worse than a rejected
+    request, because nothing records that it was refused.
+
+    The RULE is `validate_phase_declarations` in the domain - the trigger
+    dispatcher and the execution boundary apply the same one. This function
+    only translates it into HTTP.
+    """
+    try:
+        validate_phase_declarations(workflow)
+    except (
+        UnsupportedExecutionTypeError,
+        UnsupportedToolNameError,
+        UnsupportedToolPolicyForProviderError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 #: A preflight that hangs is worse than one that fails: it converts a fast 200
 #: into a request that never returns. The resolver reads Postgres and the
 #: projection store supplies no timeout of its own.
@@ -589,6 +620,10 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    # #1039: same shape as the provider check - a stored declaration the
+    # platform cannot honour must be a 422, never a ghost execution.
+    _check_phase_declarations(workflow)
 
     # #998: an unresolvable skill ref must be a 422 here, not a 200 followed by
     # an execution that never exists.

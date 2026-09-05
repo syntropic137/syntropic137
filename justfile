@@ -549,7 +549,6 @@ dashboard-frontend:
 
 # Install dashboard frontend dependencies
 dashboard-install:
-    cd lib/ui-feedback/packages/ui-feedback-react && pnpm install
     cd apps/syn-dashboard-ui && pnpm install
 
 # Build dashboard frontend for production
@@ -559,6 +558,17 @@ dashboard-build:
 # Lint dashboard frontend
 dashboard-lint:
     cd apps/syn-dashboard-ui && pnpm run lint
+
+# Mirrors ci.yml dashboard-ui, which installs deps before linting. Use this,
+# not dashboard-qa, when the question is "will CI pass".
+dashboard-ci:
+    # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
+    # modules directory without it. This matches ci.yml's dashboard-ui COMMAND
+    # SEQUENCE, not its environment: CI runs Ubuntu with pinned Node/pnpm and a
+    # clean checkout, and sets CI=true job-wide rather than per command.
+    #
+    cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
+    just dashboard-qa
 
 # Full dashboard QA (lint + build)
 dashboard-qa: dashboard-lint dashboard-build
@@ -929,39 +939,14 @@ format:
 format-check:
     uv run ruff format --check .
 
-# Ratchet: count dict[str, Any] and dict[str, object] per package - never let them grow
-# Config lives in fitness-exceptions.toml [untyped-dicts.*] (default threshold: 0)
+# Ratchet: str-keyed mappings with unconstrained values, per package.
+# Counts the AST, not the text: dict/Dict/Mapping/MutableMapping, quoted,
+# aliased or wrapped across lines all resolve to one shape, and a mention in a
+# docstring or comment is not a use. Budgets live in fitness-exceptions.toml
+# [untyped-dicts.*] (default threshold: 0). See scripts/check_untyped_dicts.py
+# for what counts and why, and #1188 for what it replaced.
 check-untyped-dicts:
-    #!/usr/bin/env python3
-    import re, sys
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib  # type: ignore[no-redef]
-    from pathlib import Path
-    config = tomllib.loads(Path("fitness-exceptions.toml").read_text())
-    entries = config.get("untyped-dicts", {})
-    if not entries:
-        print("  No [untyped-dicts.*] entries in fitness-exceptions.toml")
-        sys.exit(0)
-    failed = False
-    for name, entry in entries.items():
-        pkg_path = entry["path"]
-        threshold = entry.get("value", 0)
-        issue = entry.get("issue", "")
-        count = 0
-        for py_file in Path(pkg_path).rglob("*.py"):
-            count += len(re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text()))
-        if count > threshold:
-            print(f"  FAIL {name}: {count} occurrences (threshold: {threshold}) [{issue}]")
-            failed = True
-        elif threshold > 0:
-            print(f"  WARN {name}: {count}/{threshold} - tech debt, ratchet to 0 [{issue}]")
-        else:
-            print(f"  ok {name}: clean")
-    if failed:
-        print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
-        sys.exit(1)
+    @python3 scripts/check_untyped_dicts.py
 
 # Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 # CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can
@@ -984,7 +969,10 @@ fitness-check: aps-build check-untyped-dicts check-test-markers
     # Always regenerate topology before checking — never validate against stale data
     just topology-analyze
     @echo "Checking architecture fitness thresholds..."
-    {{_aps_bin}} run architecture-fitness validate .
+    {{_aps_bin}} run architecture-fitness validate . --report .topology/fitness-report.json
+    # A waiver whose debt was already paid off still grants its headroom, and the
+    # tool reports those but exits 0 - so they ride along in green runs (#1084).
+    @uv run python scripts/check_stale_exceptions.py .topology/fitness-report.json
     @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
@@ -1010,10 +998,228 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: lint format-check typecheck validate-domain-events vsa-validate fitness codegen-check check-compose check-compose-overlays check-default-workspace-image check-pinned-image-channels check-env-example check-plugin-schemas check-workflows
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
     @echo "✅ preflight: every STATIC CI gate passed locally"
-    @echo "   Not covered here (run separately): unit tests (just test),"
-    @echo "   dashboard build, CLI checks, integration, security scanning."
+    @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
+    @echo "   the docs build. Run 'just qa-ci' for all of those."
+
+# The subset of `preflight` that RUNS inside an agent workspace container.
+#
+# WHY THIS EXISTS (issue #1109). The workspace image ships `just`, `uv` and
+# `node` and nothing else. Agents were told to gate their work on `just qa-ci`,
+# which cannot pass there: seven of preflight's gates need a binary the image
+# does not have, so every implement run failed at its own gate and opened no
+# PR. A gate an agent cannot run is not a gate, it is a wall.
+#
+# The split is MEASURED, not assumed. Every recipe below was run inside
+# omni-fable51:2.1.258 on a fresh clone with the public submodules initialised
+# and `uv sync --frozen` done (2026-09-03):
+#
+#   in this list                       exit 0
+#   check-submodules                   exit 1    private submodules, no token
+#   vsa-validate                       exit 127  no `vsa` (Rust, built in CI)
+#   fitness                            exit 127  no `cargo` (aps-build)
+#   codegen-check                      exit 127  no `pnpm`
+#   check-compose-overlays             exit 127  no docker CLI
+#   check-default-workspace-image      exit 127  no docker CLI
+#   check-pinned-image-channels        exit 1    no registry credentials
+#
+# Re-measure before moving a recipe across the line. "It should work" is how
+# a gate ends up passing because it never ran.
+#
+# THE COMPOSITION: `preflight` is defined as this list PLUS the host-only gates,
+# so a static gate added here is in both by construction. That direction is
+# deliberate - the failure mode worth preventing is a gate that runs in neither.
+# A gate that genuinely needs host tooling goes in `preflight`'s own list above,
+# where the comment table says why.
+#
+# WHAT THIS DOES NOT GUARANTEE. Composition only helps a gate that someone
+# already added to one of these lists. The mechanical guard meant to catch a
+# gate added to NEITHER - `test_every_declared_check_is_wired_into_preflight` -
+# discovers recipes by NAME (`check-*` / `*-check`), so a gate named anything
+# else escapes it entirely; `lint`, `typecheck` and `validate-domain-events`
+# are real gates that match neither pattern and are wired here by hand. That
+# hole is #1125, and it is stated here rather than left implied, because a
+# poka-yoke believed to be airtight is worse than one known to be partial.
+#
+# This is NOT a lighter standard. CI still runs everything; an agent that opens
+# a PR having passed this can still be failed by vsa or fitness on GitHub, and
+# that is the correct division of labour - CI has the toolchain, the workspace
+# does not.
+# Detect endpoint drift between the code and the committed OpenAPI spec.
+#
+# CI ran this as a raw `run:` step inside `python-qa`, marked BLOCKING, with no
+# `just` target at all - so it was reachable from no local command, and
+# `check_ci_parity.py` could not see it because that script compares JOBS, not
+# the steps inside them (#1124). It is portable, so it belongs in the agent
+# gate, not only in preflight.
+check-openapi-drift:
+    @uv run python scripts/check_openapi_drift.py
+
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
+    @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
+    @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
+    @echo "   codegen-check, check-submodules, check-compose-overlays,"
+    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
+
+# Regenerate CLAUDE.md from AGENTS.md.
+#
+# AGENTS.md is canonical; CLAUDE.md is a byte-identical COPY of it, committed so
+# a fresh clone has it. Not a symlink: git for Windows defaults to
+# core.symlinks=false and checks a symlink out as a plain text file containing
+# the target path, so CLAUDE.md would become a 9-byte file reading "AGENTS.md"
+# and Claude Code would load THAT as the project context - no error, just an
+# agent running blind.
+#
+# Not an `@AGENTS.md` import stub either. Claude resolves at most 5 files deep,
+# and the stub spends one hop reaching AGENTS.md. Measured, not assumed:
+#   stub bridge     -> AGENTS.md's imports resolve 3 levels
+#   copy (or link)  -> AGENTS.md's imports resolve 4 levels
+sync-agent-docs:
+    @cp AGENTS.md CLAUDE.md
+    @echo "✅ CLAUDE.md regenerated from AGENTS.md"
+
+# Gate: the copy must be identical. The generator above is a convenience; THIS
+# is the guarantee. A generator that is not enforced drifts the first time
+# someone edits one file by hand.
+check-agent-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! cmp -s AGENTS.md CLAUDE.md; then
+        echo "❌ CLAUDE.md is not identical to AGENTS.md."
+        echo "   AGENTS.md is canonical. Edit THAT, never CLAUDE.md."
+        echo "   Then run: just sync-agent-docs"
+        diff AGENTS.md CLAUDE.md | head -20 || true
+        exit 1
+    fi
+    echo "✅ CLAUDE.md matches AGENTS.md"
+
+# Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
+# quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
+check-ci-parity:
+    uv run python scripts/check_ci_parity.py
+
+# Every CI gate a PR must pass, run locally, using the SAME commands CI uses.
+#
+# Why this exists: 'just preflight' covers only the static gates, so a green
+# preflight has never meant a green CI. Each sub-target below mirrors exactly
+# one ci.yml job so the two cannot drift apart silently; check-ci-parity is the
+# gate that enforces that mapping.
+#
+# NOT covered here, deliberately, with the reason:
+#   osv-scan, pip-audit  - query remote vulnerability databases
+#   dependency-review    - a GitHub API action with no local equivalent
+#   python-integration-tests - skipped on PR branches in CI too (needs services)
+qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
+    @echo ""
+    @echo "✅ qa-ci: every PR-gating CI JOB with a local equivalent passed."
+    @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
+    @echo "   Ubuntu with pinned toolchains and a clean checkout, and a step"
+    @echo "   added inside an existing job is invisible to the parity gate."
+    @echo "   Not included: dependency-review (a GitHub-only action), the"
+    @echo "   release-gate jobs, and three that DO run locally but cost too"
+    @echo "   much for every push: just deps-audit-py, just deps-audit-npm,"
+    @echo "   just workspace-build. check_ci_parity.py lists them by category."
+
+# CI's python-qa runs this WITHOUT --warn-only, so it is a hard gate there.
+# 'just test-debt' passes --warn-only and therefore cannot fail; that is a
+# different check, and it is why this one is separate.
+check-test-debt:
+    uv run python scripts/check_test_debt.py
+
+# Mirrors ci.yml python-unit-tests, including -x (stop on first failure) and
+# the coverage flags, so a locally-green run is the run CI performs.
+test-unit-ci:
+    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit \
+        --cov=apps/syn-api/src \
+        --cov=packages/syn-domain/src \
+        --cov=packages/syn-adapters/src \
+        --cov=packages/syn-shared/src \
+        --cov-report=term-missing \
+        -x -q
+
+# Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
+# are the ones that catch an API change that never reached the CLI types.
+cli-node-ci:
+    cd apps/syn-cli-node && pnpm install --frozen-lockfile --ignore-scripts
+    cd apps/syn-cli-node && pnpm run typecheck
+    cd apps/syn-cli-node && NO_COLOR=1 pnpm run test
+    cd apps/syn-cli-node && pnpm run build
+    cd apps/syn-cli-node && pnpm run check:api-drift
+    cd apps/syn-cli-node && pnpm run check:untyped-api
+
+# Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
+# codegen; CI builds the committed tree as-is.
+docs-site-ci:
+    cd apps/syn-docs && CI=true pnpm install --frozen-lockfile
+    cd apps/syn-docs && pnpm run build
+
+# Mirrors docs-lint.yml lint-content: the published docs must contain no em
+# dashes. Same grep, same paths, same exit code.
+check-docs-content:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `|| true` would swallow grep's status 2 (unreadable or missing directory)
+    # alongside its status 1 (no matches), and report a clean pass for content
+    # that was never read. Only 0 and 1 are answers.
+    set +e
+    found=$(grep -rn $'\xe2\x80\x94' apps/syn-docs/content/)
+    rc=$?
+    set -e
+    if [ "$rc" -gt 1 ]; then
+        echo "❌ could not scan apps/syn-docs/content/ (grep exit $rc)"
+        exit 1
+    fi
+    if [ "$rc" -eq 0 ]; then
+        echo "❌ em dash in syn-docs content. Use colons or commas instead:"
+        printf '%s\n' "$found"
+        exit 1
+    fi
+    echo "✓ Typography check passed."
+
+# Mirrors ci.yml submodule-check.
+check-submodules:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Captured into a variable rather than piped, for two reasons:
+    #
+    #  1. `producer | grep -q` under `set -o pipefail` reports 141, not 0: grep
+    #     exits at the first match and the producer dies of SIGPIPE, so an `if`
+    #     guarding it never fires. This check could not fail until it was found
+    #     by deinitialising a submodule and watching it pass anyway.
+    #  2. It lets git's own exit status be checked, so a broken git cannot read
+    #     as a clean tree.
+    # NOT --recursive, deliberately. ci.yml checks out with `submodules: true`,
+    # which initializes the four direct submodules and leaves
+    # lib/event-sourcing-platform/reference/eventsourcing-book uninitialized. A
+    # recursive check here would assert something CI's own checkout cannot
+    # satisfy, so preflight -- which CI runs -- would fail on every PR. Match
+    # the contract CI actually provides; widening it means changing the
+    # checkouts first.
+    if ! status=$(git submodule status); then
+        echo "❌ could not read submodule status"
+        exit 1
+    fi
+    printf '%s\n' "$status"
+    # A leading -, + or U means uninitialized, at another commit, or conflicted.
+    # `git submodule status` exits 0 for all three.
+    if printf '%s\n' "$status" | grep -E '^[-+U]' > /dev/null; then
+        echo "❌ a submodule is uninitialized or not at its recorded commit:"
+        printf '%s\n' "$status" | grep -E '^[-+U]' || true
+        echo "   run: just submodules-init"
+        exit 1
+    fi
+    # ci.yml's submodule-check asserts these files exist, so a gitlink that is
+    # correct but points at a commit without them still fails CI. Keep both
+    # invariants or the mapping is a false claim of equivalence.
+    for required in lib/agentic-primitives/README.md lib/event-sourcing-platform/README.md; do
+        if [ ! -f "$required" ]; then
+            echo "❌ $required is missing; ci.yml's submodule-check requires it"
+            exit 1
+        fi
+    done
+    echo "✅ All submodules initialized at their recorded commits"
 
 # Validate every workflow YAML against WorkflowDefinition.
 #
@@ -1674,6 +1880,14 @@ check-env-example:
 check-compose-overlays:
     bash scripts/check_compose_overlays.sh
 
+# Every published container port must name its host interface (#1146).
+# A bare `- "5432:5432"` binds 0.0.0.0, and a host firewall does not stop it:
+# Docker's NAT rewrites the destination before the routing decision, so the
+# packet never reaches the INPUT chain. See scripts/no_public_ports.sh.
+check-no-public-ports:
+    bash scripts/no_public_ports.sh
+
+
 # Generate llms.txt from API docs
 generate-llms-txt:
     uv run python scripts/generate_llms_txt.py
@@ -1816,7 +2030,7 @@ proxy-start:
     set -euo pipefail
     PROXY_PORT="${SYN_PROXY_PORT:-18080}"
     docker rm -f syn-egress-proxy 2>/dev/null || true
-    docker run -d --name syn-egress-proxy -p "${PROXY_PORT}:8080" \
+    docker run -d --name syn-egress-proxy -p "127.0.0.1:${PROXY_PORT}:8080" \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
         syn-egress-proxy:latest
     echo "✓ Egress proxy started on port ${PROXY_PORT}"

@@ -15,7 +15,7 @@ services:
   timescaledb:
     container_name: syn-db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
@@ -24,13 +24,13 @@ services:
   event-store:
     container_name: syn-event-store
     ports:
-      - "50051:50051"
+      - "127.0.0.1:50051:50051"
     restart: unless-stopped
 
   collector:
     container_name: syn-collector
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   # Definition in docker-compose.yaml; only container_name + restart here
@@ -92,8 +92,8 @@ services:
   minio:
     container_name: syn-minio
     ports:
-      - "9000:9000" # S3 API
-      - "9001:9001" # Web Console
+      - "127.0.0.1:9000:9000" # S3 API
+      - "127.0.0.1:9001:9001" # Web Console
     volumes:
       - minio_data:/data
     restart: unless-stopped
@@ -101,7 +101,7 @@ services:
   redis:
     container_name: syn-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -109,8 +109,8 @@ services:
   envoy-proxy:
     container_name: syn-envoy-proxy
     ports:
-      - "8081:8081"
-      - "9901:9901" # Envoy admin
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:9901:9901" # Envoy admin
     restart: unless-stopped
 
   token-injector:
@@ -131,9 +131,6 @@ services:
       # Source mount for HMR. node_modules is shielded by the named volume below.
       - ../apps/syn-dashboard-ui:/workspace/apps/syn-dashboard-ui
       - dashboard_node_modules:/workspace/apps/syn-dashboard-ui/node_modules
-      # ui-feedback is a workspace dep; mount source so changes hot-reload too.
-      - ../lib/ui-feedback/packages/ui-feedback-react:/workspace/lib/ui-feedback/packages/ui-feedback-react
-      - ui_feedback_node_modules:/workspace/lib/ui-feedback/packages/ui-feedback-react/node_modules
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────
@@ -149,7 +146,7 @@ services:
     # Port convention: 9137 = dev gateway (this), 8137 = production/selfhost
     # gateway. CLI users point SYN_API_URL at http://localhost:9137 for dev.
     ports:
-      - "9137:80"
+      - "127.0.0.1:9137:80"
     volumes:
       - ../infra/docker/images/gateway/nginx.conf.dev:/etc/nginx/conf.d/default.conf:ro
       # Vite dev mode emits inline scripts (react-refresh init, HMR client);
@@ -157,8 +154,10 @@ services:
       # white-screens. Mount an empty file over the strict policy in dev.
       - /dev/null:/etc/nginx/conf.d/security-headers.conf:ro
     environment:
-      # Dev gateway is unauthenticated; the entrypoint generates an empty
-      # auth.conf when SYN_API_PASSWORD is empty.
+      # Dev gateway is unauthenticated; the entrypoint generates "auth_basic
+      # off" stanzas when SYN_API_PASSWORD is empty. It leaves SYN_GATEWAY_BIND
+      # unset, so port 80 stays in its unauthenticated loopback mode — which is
+      # what nginx.conf.dev, mounted over the baked config below, assumes.
       SYN_API_PASSWORD: ""
       SYN_API_USER: admin
     depends_on:
@@ -173,7 +172,6 @@ volumes:
   minio_data:
   redis_data:
   dashboard_node_modules:
-  ui_feedback_node_modules:
 
 networks:
   default:

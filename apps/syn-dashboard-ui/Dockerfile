@@ -22,9 +22,6 @@ COPY apps/syn-dashboard-ui/package.json ./apps/syn-dashboard-ui/
 # Install dependencies (frozen lockfile for reproducibility)
 RUN pnpm install --frozen-lockfile --filter syn-dashboard-ui
 
-# Copy ui-feedback source (resolved via Vite alias and tsconfig paths)
-COPY lib/ui-feedback/packages/ui-feedback-react/ ./lib/ui-feedback/packages/ui-feedback-react/
-
 # Copy dashboard source
 COPY apps/syn-dashboard-ui/ ./apps/syn-dashboard-ui/
 

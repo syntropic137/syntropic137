@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     CompleteSessionCommand,
+    MarkAgentLaunchedCommand,
     OperationType,
     RecordOperationCommand,
     SessionStatus,
@@ -29,6 +30,23 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _unstated_reason(status: str) -> str:
+    """What a terminal status says when the caller supplied no reason.
+
+    A blank `error_message` is reachable today: the processor derives it with
+    `str(error)`, which is "" for any exception raised with no arguments, and
+    #1196 is a `session_error` observation that reached a user saying nothing
+    at all. The status is the one fact this layer always has, so it is what
+    gets written when the caller has nothing to add.
+
+    The read path has its own fallback for rows stored blank BEFORE this
+    change (`session_tools_verdict.NO_REASON_RECORDED`). This one is more
+    specific because it still knows the status, and it cannot be shared: the
+    domain must not import from the adapters.
+    """
+    return f"session ended with status '{status}' and no reason was recorded"
 
 
 class SessionLifecycleManager:
@@ -97,7 +115,7 @@ class SessionLifecycleManager:
                 observation_type=SESSION_ERROR,
                 data={
                     "status": status,
-                    "error_message": error_message,
+                    "error_message": error_message.strip() or _unstated_reason(status),
                     "model": self._agent_model,
                 },
                 execution_id=self._execution_id,
@@ -128,6 +146,41 @@ class SessionLifecycleManager:
         self._session.start_session(cmd)
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
+
+    async def mark_launched(self) -> None:
+        """Record that an agent process demonstrably existed for this session.
+
+        Called by the stream once the process is known to exist, never by the
+        code that merely decided to start one. This is the real discriminator
+        between "the agent never ran" and "the agent ran and later failed" -
+        both leave zero recorded tokens on the failure path, so
+        `complete_failure` alone can't tell them apart (#1047, #1065).
+
+        Applied to the aggregate first and persisted second, and that order is
+        the entire guarantee. A save that fails leaves the event uncommitted,
+        so the next save re-appends it; and the completion event this same
+        in-memory aggregate emits carries the fact whether or not this write
+        ever landed. Losing it therefore costs promptness - the dashboard
+        learns of the launch later - and never the answer itself, which is
+        what makes swallowing the failure defensible rather than lossy.
+
+        It also has to be swallowed: this runs inside the live agent's output
+        loop, and a bookkeeping write is not worth killing a running agent
+        for.
+        """
+        if self._session is None or self._repo is None:
+            return
+
+        self._session.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id=self._session_id))
+        try:
+            await self._repo.save(self._session)
+        except Exception as launch_err:
+            logger.warning(
+                "Failed to persist agent launch for session %s "
+                "(the fact is held on the aggregate and rides the next save): %s",
+                self._session_id,
+                launch_err,
+            )
 
     async def complete_success(
         self,

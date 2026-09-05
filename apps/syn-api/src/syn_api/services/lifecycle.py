@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from enum import StrEnum
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -27,12 +27,19 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.services.credentials import validate_credentials
-from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
+from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.read_path_health import _judge_read_path
+from syn_api.services.reconciliation import (
+    cleanup_orphaned_containers,
+    reconcile_orphaned_executions,
+    reconcile_orphaned_sessions,
+)
 from syn_api.services.seeding import seed_offline_data
 from syn_api.types import Err, LifecycleError, Ok, Result
 from syn_shared.env_constants import ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
+    ENV_SYN_SESSION_STORE_DEPLOYMENT,
     ENV_SYN_SESSION_STORE_LABEL,
     ENV_SYN_SESSION_STORE_URL,
     SessionStoreSettings,
@@ -65,23 +72,6 @@ def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
         )
 
 
-class DegradedReason(StrEnum):
-    """Reasons the API may enter degraded mode.
-
-    StrEnum so values serialize directly to JSON in health responses.
-    """
-
-    ARTIFACT_STORAGE = "artifact_storage"
-    CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
-    SKILL_STORAGE = "skill_storage"
-    CONVERSATION_STORAGE = "conversation_storage"
-    SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
-    EVENT_POLLER = "event_poller"
-    CHECK_RUN_POLLER = "check_run_poller"
-    ANTHROPIC_API_KEY = "anthropic_api_key"
-    GITHUB_APP = "github_app"
-
-
 @dataclass
 class LifecycleState:
     """Mutable state managed across startup / shutdown / health_check."""
@@ -103,7 +93,7 @@ class LifecycleState:
 # this registry — no manual if/elif dispatch or separate frozensets.
 #
 # To add a new service:
-#   1. Add a value to DegradedReason
+#   1. Add a value to DegradedReason (in degraded_reasons.py)
 #   2. Write an _init_<service>(state) function (raises on failure)
 #   3. Optionally write a _shutdown_<service>(state) function
 #   4. Add a _ServiceEntry to _SERVICE_REGISTRY
@@ -176,15 +166,27 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     service is marked as degraded. A background recovery loop is spawned
     for any recoverable failures.
     """
+    # BEFORE the registry loop, deliberately (#1120). The registry starts the
+    # subscription coordinator and the GitHub pollers, and `coordinator.start()`
+    # returns as soon as it spawns its background task - so from that moment
+    # this process can dispatch NEW executions into `running`. Reconciling after
+    # that point means the reconcile query cannot tell work orphaned by the
+    # previous process from work this one just started. Resolving the old world
+    # before opening the door to a new one removes the race rather than
+    # narrowing it; the started_before cutoff below is defence in depth.
+    process_started_at = datetime.now(UTC)
+    await reconcile_orphaned_sessions()
+    cleanup = await cleanup_orphaned_containers()
+    # AFTER the reap, and only if the reap can say it finished: "this execution
+    # is still running" is provably false only once every container is gone.
+    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+
     for entry in _SERVICE_REGISTRY:
         try:
             await entry.init_fn(state)
         except Exception:
             logger.exception("%s initialization failed (degraded mode)", entry.reason)
             state.degraded_reasons.append(entry.reason)
-
-    await reconcile_orphaned_sessions()
-    await cleanup_orphaned_containers()
 
     # Spawn a background recovery loop for any recoverable degradations.
     recoverable = [r for r in state.degraded_reasons if _is_recoverable(r)]
@@ -313,7 +315,7 @@ async def health_check() -> Result[dict, LifecycleError]:
     if _state.degraded_reasons:
         response["degraded_reasons"] = _state.degraded_reasons
 
-    _enrich_subscription_health(response, mode)
+    await _enrich_subscription_health(response, mode)
     _enrich_codex_auth_health(response)
 
     return Ok(response)
@@ -419,7 +421,7 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
         )
         return
 
-    deployment = deployment_identity(app_environment)
+    deployment = deployment_identity(app_environment, store.display_deployment)
     label = store.display_label
     destination = f"{deployment} (store: {label})" if label else deployment
 
@@ -434,6 +436,21 @@ def _log_session_capture_posture(store: SessionStoreSettings, app_environment: s
             "being ignored and is not repeated here in case it is not what you "
             "meant to set. Capture is unaffected.",
             ENV_SYN_SESSION_STORE_LABEL,
+        )
+
+    if store.has_unusable_deployment:
+        # Value-free for the same reason as the label warning above. Reported
+        # rather than ignored because an operator sets this precisely so their
+        # sessions are attributable, and silently using the derived identity
+        # defeats the reason they set it.
+        logger.warning(
+            "%s is set to something that is not a usable deployment identity "
+            "(ASCII letters, digits, dot, underscore and hyphen, up to 64 "
+            "characters). It is being ignored and is not repeated here in case "
+            "it is not what you meant to set. Sessions are being stamped %r "
+            "instead.",
+            ENV_SYN_SESSION_STORE_DEPLOYMENT,
+            deployment,
         )
 
     if store.is_unauthenticated:
@@ -539,25 +556,53 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-def _enrich_subscription_health(response: dict, mode: str) -> None:
-    """Add subscription coordinator status to the health response."""
+async def _enrich_subscription_health(response: dict, mode: str) -> None:
+    """Add subscription coordinator status and read-model lag to the response.
+
+    WHY LAG BELONGS HERE. `running` alone is set once at start() and never moves,
+    so during a projection rebuild this block reported `status: healthy` while
+    every read model was thousands of events behind and freshly dispatched
+    executions 404ed. An operator seeing those 404s has to be able to tell
+    "rebuild in progress" from "the platform lost my execution", and /health is
+    where they look. See `read_model_lag` for what "catching up" means and why.
+
+    TWO WAYS TO BE BEHIND, reported separately, because they need opposite
+    responses from the operator reading this: a rebuild (`catching_up`) ends by
+    itself and the answer is to wait, while a stalled projection does not and the
+    answer is to intervene. Which signals say what is
+    `read_path_health._judge_read_path`'s decision, not this function's — this
+    one only renders it. A third signal belongs there.
+
+    Being behind is reported through the EXISTING degraded machinery — mode plus
+    a DegradedReason — rather than by changing top-level `status`. `status` is
+    what liveness probes read, and the process is alive and accepting writes in
+    both cases; taking it out of rotation would turn a stale read path into an
+    outage. `subscription.status` DOES gain the extra values, because that
+    field's job is to describe the read path and "healthy" was the lie.
+
+    Never raises. A lag probe that can take /health down is worse than no probe,
+    so any failure degrades to reporting the subscription as unknown.
+    """
     if _state.subscription_service is None:
         return
 
     try:
         sub_status = _state.subscription_service.get_status()
-        sub_healthy = sub_status.get("running", False)
+        lag = await _state.subscription_service.describe_read_model_lag()
+        verdict = _judge_read_path(running=sub_status.get("running", False), lag=lag)
+
         response["subscription"] = {
             **sub_status,
-            "status": "healthy" if sub_healthy else "degraded",
+            "status": verdict.status,
+            **(lag.model_dump(mode="json") if lag is not None else {}),
         }
-        if not sub_healthy:
-            response.setdefault("degraded_reasons", []).append(
-                DegradedReason.SUBSCRIPTION_COORDINATOR
-            )
+
+        if verdict.degraded_reasons:
+            response.setdefault("degraded_reasons", []).extend(verdict.degraded_reasons)
             if mode == "full":
                 response["mode"] = "degraded"
     except Exception:
+        logger.debug("subscription health probe failed", exc_info=True)
         response["subscription"] = {"status": "unknown"}
 
 
@@ -794,7 +839,7 @@ async def _shutdown_check_run_poller(state: LifecycleState) -> None:
 # ── Service Registry (ADR-057) ─────────────────────────────────────
 #
 # Single source of truth for all degradable services. To add a service:
-#   1. Add a DegradedReason enum value
+#   1. Add a DegradedReason enum value (in degraded_reasons.py)
 #   2. Write an _init_<name>(state) function that raises on failure
 #   3. Optionally write a _shutdown_<name>(state) function
 #   4. Add a _ServiceEntry here

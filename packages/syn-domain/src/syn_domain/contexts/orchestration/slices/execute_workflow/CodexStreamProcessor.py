@@ -26,13 +26,22 @@ JSONL events:
 None of these are malformed JSON *events* - they are plain CLI noise that
 happens to land on stdout. Treating every non-JSON line as fatal would fail
 this golden recording, which does terminate normally with a single
-``turn.completed``. So the parser only treats a line as a parse failure (and
-sets ``StreamResult.error_reason``) when the line looks like it was meant to
-be a JSON event (starts with ``{``) but fails to parse. Anything else is
-inert stream noise: recorded into ``conversation_lines`` (provider-native,
+``turn.completed``. So no single line fails a run: unrecognised lines are
+inert stream noise, recorded into ``conversation_lines`` (provider-native,
 NOT claude-shaped - downstream ``ConversationRecorder`` readers must tolerate
 raw codex JSONL, including these interleaved non-JSON lines) and otherwise
 ignored.
+
+That holds for ``{``-leading lines too (issue #1146). stdout carries the
+agent's OWN subprocess output as well as the codex event stream (ADR-043,
+deliberately), so a leading ``{`` is not evidence a line was meant to be an
+event - JSX/TSX interpolation, JSON-with-comments, ``{{ handlebars }}`` and
+shell brace expansion all start that way, and a codex phase asked to read a
+dashboard file will echo them. Treating one as a protocol fault failed a
+``verify`` phase over a line of TSX from the repository under review. Such a
+line is therefore held as a CANDIDATE reason and promoted only if the stream
+never reaches ``turn.completed``; a run that echoes one and then completes
+normally succeeds.
 
 Also verified from the real fixture (contra the plan's documented schema,
 which assumed ``item.item.id``): ``item`` fields live directly under the
@@ -46,7 +55,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypedDict
+from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
@@ -54,6 +63,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPolle
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     ApiErrorType,
     InterruptibleWorkspace,
+    ReportedUsage,
     StreamResult,
     api_error_label,
 )
@@ -80,6 +90,17 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: The reason recorded when a codex stream carries no fault of its own and
+#: simply stops before `turn.completed`. It is a TELEMETRY gap - the run has no
+#: authoritative usage - and it is deliberately distinguishable from every other
+#: value `error_reason` can take, all of which name a real fault (a login
+#: failure, a malformed line). AgentExecutionHandler relies on that distinction:
+#: it will let a phase that reached this state complete IF the phase actually
+#: produced a deliverable, and only this state (issue #1111).
+MISSING_TERMINAL_TURN_REASON: Final[str] = (
+    "codex stream ended without a terminal turn.completed event (no authoritative usage)"
+)
 
 # This processor drives a CODEX primary, so its declared delegate is claude -p.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
@@ -189,6 +210,10 @@ class _CodexItem(TypedDict, total=False):
     exit_code: int
     status: str
     changes: list[_CodexChange]
+    #: Prose, on ``agent_message`` items only. It is where codex states its
+    #: conclusion, and the only copy of that conclusion when the file the
+    #: phase was supposed to write turns out to be empty (#1195).
+    text: str
 
 
 class _CodexUsage(TypedDict, total=False):
@@ -200,12 +225,20 @@ class _CodexUsage(TypedDict, total=False):
     reasoning_output_tokens: int
 
 
+class _CodexError(TypedDict, total=False):
+    """The ``error`` block on a codex ``turn.failed`` event."""
+
+    message: str
+
+
 class _CodexEvent(TypedDict, total=False):
     """A single codex ``--json`` stream event (typed JSON-boundary shape)."""
 
     type: str
     item: _CodexItem
     usage: _CodexUsage
+    error: _CodexError
+    message: str
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -250,6 +283,7 @@ class CodexObservabilityRecorder(Protocol):
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        totals_are_authoritative: bool = True,
     ) -> None: ...
 
 
@@ -330,12 +364,22 @@ class CodexStreamProcessor:
         )
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
+        self._last_agent_message: str | None = None
         self._leader_native_session_id: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
+        #: A fault codex reported on `error` / `turn.failed`, held until
+        #: end-of-stream so a recovered turn is not failed by it (#1117).
+        self._turn_fault_candidate: str | None = None
+        #: A `{`-leading line that would not parse, held until end-of-stream
+        #: for the same reason (#1146). LAST one wins, unlike the two above:
+        #: these lines carry no specificity gradient to preserve, and when the
+        #: candidate is informative at all it is because the stream was cut
+        #: off - which is the last such line, not the first.
+        self._parse_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -372,18 +416,36 @@ class CodexStreamProcessor:
             await self._process_line(line)
 
         if not self._totals.saw_terminal_turn:
+            # THE single place `_error_reason` is decided. Nothing mid-stream
+            # writes it: every fault the parser can see is held as a candidate
+            # and settled here, so a stream that recovers and reaches
+            # `turn.completed` cannot be failed by something it recovered from.
+            #
+            # Order is deliberate, most specific first: a fault codex itself
+            # reported beats an inferred auth fault, which beats an unparseable
+            # `{`-leading line, which beats the generic "it just stopped".
+            #
+            # The parse fault ranks LAST of the three because it is the weakest
+            # evidence - the line may be output the agent echoed, wholly
+            # unrelated to why the stream stopped (#1146). It still outranks
+            # `MISSING_TERMINAL_TURN_REASON` because when a stream IS cut off
+            # mid-event, quoting the truncated line names the cause and the
+            # generic reason does not.
             self._error_reason = (
-                self._error_reason
+                self._turn_fault_candidate
                 or self._auth_fault_candidate
-                or (
-                    "codex stream ended without a terminal turn.completed event "
-                    "(no authoritative usage)"
-                )
+                or self._parse_fault_candidate
+                or MISSING_TERMINAL_TURN_REASON
             )
 
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
+        # A codex stream that never reached `turn.completed` was cut off, so
+        # these totals are what was observed before it stopped, not codex's
+        # own final accounting. Same distinction the claude path draws (#1164);
+        # the numbers are the running accumulator's either way, so the flag is
+        # the only thing that tells a truncated run from a complete one.
         await self._collector.record_session_summary(
             total_cost_usd=total_cost_usd,
             input_tokens=self._totals.input_tokens,
@@ -392,6 +454,7 @@ class CodexStreamProcessor:
             cache_read=self._totals.cache_read,
             num_turns=self._totals.turns or None,
             duration_ms=duration_ms,
+            totals_are_authoritative=self._totals.saw_terminal_turn,
         )
 
         logger.info(
@@ -410,16 +473,28 @@ class CodexStreamProcessor:
             agent_task_result=None,
             conversation_lines=conversation_lines,
             total_cost_usd=total_cost_usd,
-            result_input_tokens=self._totals.input_tokens,
-            result_output_tokens=self._totals.output_tokens,
-            result_cache_creation=0,
-            result_cache_read=self._totals.cache_read,
+            # Present only when codex reached `turn.completed`. A stream that
+            # was cut off has an accumulator, not a report, and saying so here
+            # is what stops the handler treating a truncated run's partial sum
+            # as codex's own final accounting (#1164). The numbers are the same
+            # either way - `_handle_turn_completed` feeds `_totals` and the
+            # shared accumulator the same per-turn values - so this settles
+            # what they MEAN, which is the part downstream cannot re-derive.
+            reported_usage=ReportedUsage(
+                input_tokens=self._totals.input_tokens,
+                output_tokens=self._totals.output_tokens,
+                cache_creation=0,
+                cache_read=self._totals.cache_read,
+            )
+            if self._totals.saw_terminal_turn
+            else None,
             duration_ms=duration_ms,
             num_turns=self._totals.turns,
             error_reason=self._error_reason,
             delegation_attempts=self._delegation_attempts,
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
+            last_agent_message=self._last_agent_message,
         )
 
     def _estimate_cost(self) -> float | None:
@@ -448,12 +523,13 @@ class CodexStreamProcessor:
     def _parse_event(self, line: str) -> _CodexEvent | None:
         """Parse one stdout line into a codex event, or ``None`` to skip it.
 
-        Lines that don't even look like JSON (don't start with ``{``) are inert
-        CLI noise (warnings, banners, interleaved log lines - see module
-        docstring) and are silently skipped: neither recorded nor treated as
-        failures. A ``{``-prefixed line that fails to parse is a real broken
-        event - it sets ``error_reason`` (the handler forces a non-zero phase
-        exit) and is skipped.
+        Every line here is skipped or dispatched; NONE of them fails the run on
+        its own. Lines that don't look like JSON at all are inert CLI noise
+        (warnings, banners, interleaved log lines - see module docstring). A
+        ``{``-leading line that won't parse is held as a CANDIDATE reason,
+        promoted by ``process_stream`` only if no ``turn.completed`` ever
+        arrived - see the ``_parse_fault_candidate`` comment in ``__init__``
+        for why it cannot be a verdict.
         """
         stripped = line.strip()
         if not stripped:
@@ -465,10 +541,8 @@ class CodexStreamProcessor:
         try:
             event: _CodexEvent = json.loads(stripped)
         except json.JSONDecodeError:
-            logger.debug("Malformed codex JSON line: %s", stripped[:100])
-            self._error_reason = self._error_reason or (
-                f"malformed codex JSON line: {stripped[:100]}"
-            )
+            logger.debug("Unparseable `{`-leading codex line: %s", stripped[:100])
+            self._parse_fault_candidate = f"malformed codex JSON line: {stripped[:100]}"
             return None
 
         if not isinstance(event, dict):
@@ -523,6 +597,8 @@ class CodexStreamProcessor:
             await self._handle_item_completed(event)
         elif event_type == CodexStreamType.TURN_COMPLETED:
             await self._handle_turn_completed(event)
+        elif event_type in (CodexStreamType.TURN_FAILED, CodexStreamType.ERROR):
+            self._note_stream_fault(event)
         elif event_type == CodexStreamType.THREAD_STARTED:
             # Codex announces its OWN session id here, and it is the same id
             # the rollout file on disk is keyed by - verified same-run, not
@@ -542,6 +618,55 @@ class CodexStreamProcessor:
                 self._leader_native_session_id = announced
 
         # "turn.started": no observability call needed.
+
+    def _note_stream_fault(self, event: _CodexEvent) -> None:
+        """Record the reason codex itself gave for ending the turn.
+
+        WHY (issue #1116). When a turn fails, codex says why, in the stream:
+
+            {"type":"error","message":"This content was flagged for possible
+             cybersecurity risk..."}
+            {"type":"turn.failed","error":{"message": <the same text>}}
+
+        Neither event was dispatched, so the stream simply ended with no
+        `turn.completed` and the run was reported as
+        "codex stream ended without a terminal turn.completed event". True, and
+        useless: it names the symptom, hides an operator-actionable cause, and
+        makes an ordinary prompt rejection look like the same unexplained
+        failure as a stream that stopped for reasons nobody has established.
+
+        This is #891 again for a different event type, so it takes the same
+        shape: keep the FIRST fault, because a later generic one must not
+        overwrite the specific one that ended the run.
+
+        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
+        directly would be worse than the bug it fixes. `AgentExecutionHandler`
+        forces a non-zero phase exit whenever a codex stream carries ANY
+        `error_reason`, and it does not consult `saw_terminal_turn`. So an
+        `error` event the CLI then recovers from - `error` ... `turn.completed`
+        - would fail a phase that finished cleanly, and would report the
+        mid-turn hiccup as its cause. That does not mask a failure; it invents
+        one. This module's own comment already names that class as the worse
+        defect (an early #891 draft "would have failed SUCCESSFUL codex
+        phases"), and the sibling `_note_non_json_fault` holds its result as a
+        candidate for exactly this reason.
+
+        So the message is held and promoted at end-of-stream only when no
+        `turn.completed` arrived. A turn that genuinely failed emits no terminal
+        turn, so the reason still surfaces; a turn that recovered keeps its
+        success. Found by the cross-model review of #1117.
+        """
+        message = event.get("message")
+        if not message:
+            error = event.get("error")
+            message = error.get("message") if error else None
+        if not message:
+            return
+        reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+        logger.error("Codex turn failed: %s", message)
+        # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
+        # terminal turn arrived. See the class comment above for why.
+        self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.
@@ -574,7 +699,15 @@ class CodexStreamProcessor:
             await self._handle_command_execution_completed(item)
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._handle_file_change_completed(item)
-        # "agent_message" items are conversational text, not a tool op.
+        elif item_type == CodexItemType.AGENT_MESSAGE:
+            # "agent_message" items are conversational text, not a tool op - so
+            # they record no observability. They are kept anyway because they
+            # are the only place codex states its conclusion in prose, and the
+            # artifact path falls back to it when the file the phase wrote
+            # turns out to be empty (#1195).
+            said = str(item.get("text", ""))
+            if said.strip():
+                self._last_agent_message = said
 
     async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
         tool_use_id = str(item.get("id", "unknown"))

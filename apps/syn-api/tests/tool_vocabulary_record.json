@@ -1,0 +1,23 @@
+{
+  "cli_version": "2.1.258",
+  "pinned_image_cli_version": "2.1.250",
+  "provenance": "Each name below was passed as `--tools <name>` to the real command builder and the resulting `init` line's `tools` array was read back. Observed by running the CLI DIRECTLY in an agent workspace container - the pinned workspace image was NOT probed, because Docker is not installed there (#1207, and the reason the unit half of this check has to exist at all). `pinned_image_cli_version` is read from `ARG CLAUDE_CLI_VERSION` in lib/agentic-primitives/providers/workspaces/omni-agent/Dockerfile; it is not verified against the pinned digest until TestTheVocabularyMatchesThePinnedCli runs somewhere Docker exists.",
+  "granted": [
+    "Bash",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Read",
+    "Skill",
+    "Task",
+    "WebFetch",
+    "WebSearch",
+    "Write"
+  ],
+  "ungranted": [
+    "LS",
+    "MultiEdit",
+    "TodoRead",
+    "TodoWrite"
+  ]
+}

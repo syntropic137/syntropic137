@@ -15,6 +15,22 @@ import { parseInputs } from "./models.js";
 import type { components } from "../../generated/api-types.js";
 
 type InputDeclaration = components["schemas"]["InputDeclarationModel"];
+type PhaseDefinition = components["schemas"]["PhaseDefinitionResponse"];
+
+/**
+ * Names referenced via `{{name}}` in any phase's prompt template. An -i key
+ * outside this set is substituted into nothing and silently discarded
+ * (issue #1081).
+ */
+function referencedInputNames(phases: PhaseDefinition[] | undefined): Set<string> {
+  const referenced = new Set<string>();
+  for (const phase of phases ?? []) {
+    for (const match of (phase.prompt_template ?? "").matchAll(/\{\{(\w+)\}\}/g)) {
+      referenced.add(match[1]!);
+    }
+  }
+  return referenced;
+}
 
 /**
  * Resolve each -R value into a form the API accepts (owner/repo or full URL).
@@ -137,6 +153,26 @@ export const runCommand: CommandDef = {
       print("");
       printDim("Provide all required inputs to run this workflow.");
       throw new CLIError("Missing required inputs", 1);
+    }
+
+    // Dispatch-time deliverability warnings (issue #1081): both checks are
+    // purely local — the workflow detail already fetched above has
+    // everything needed — and must fire on the --dry-run path too, since
+    // dry-run's job is to answer "will this do what I typed?".
+    const referenced = referencedInputNames(detail.phases);
+    for (const key of Object.keys(parsedInputs)) {
+      if (!referenced.has(key)) {
+        print(
+          style("Warning:", YELLOW) +
+            ` --input '${key}' is not referenced by any phase prompt in '${wf.name}' — it will be discarded.`,
+        );
+      }
+    }
+    if (repos.length > 0 && !detail.requires_repos) {
+      print(
+        style("Warning:", YELLOW) +
+          ` '${wf.name}' has requires_repos: false — -R repos will not be cloned.`,
+      );
     }
 
     if (!quiet) {

@@ -18,6 +18,7 @@ from typing import ClassVar
 import pytest
 
 from syn_api.types import SessionDetail, SessionSummary
+from syn_domain.pagination import Page
 
 pytestmark = pytest.mark.unit
 
@@ -108,7 +109,9 @@ async def test_the_ROUTE_carries_lineage_from_the_projection() -> None:
         started_at = completed_at = None
 
     manager = MagicMock()
-    manager.session_list.query = AsyncMock(return_value=[_DomainRow()])
+    manager.session_list.page = AsyncMock(
+        return_value=Page(rows=[_DomainRow()], total=1, status_counts={"completed": 1})
+    )
 
     with (
         patch("syn_api.routes.sessions.ensure_connected", new_callable=AsyncMock) as ensure,
@@ -117,7 +120,7 @@ async def test_the_ROUTE_carries_lineage_from_the_projection() -> None:
         result = await list_sessions()
         ensure.assert_awaited_once()
 
-    sessions = result.value
+    sessions = result.value.rows
     assert len(sessions) == 1
     assert sessions[0].parent_session_id == "leader-1", (
         "the route must copy parent_session_id off the domain row; dropping it "

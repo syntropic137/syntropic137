@@ -3,8 +3,10 @@ import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
 import { useExecutionStream } from './useExecutionStream'
 import { useLiveTimer } from './useLiveTimer'
+import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
+import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 
 export interface UseExecutionDataResult {
   execution: ExecutionDetailResponse | null
@@ -14,6 +16,10 @@ export interface UseExecutionDataResult {
   isConnected: boolean
   now: number
   refreshExecution: () => void
+}
+
+function isTerminalExecution(e: ExecutionDetailResponse): boolean {
+  return isTerminalExecutionStatus(e.status)
 }
 
 const REFRESH_EVENT_TYPES = new Set([
@@ -53,7 +59,14 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
   const refreshExecution = useCallback(() => {
     if (!executionId) return
     getExecution(executionId)
-      .then((exec) => setExecution(exec))
+      .then((exec) => {
+        setExecution(exec)
+        // A poll that succeeds clears the last one's failure. Without this the
+        // first transient 502 in a run latched `error` for the life of the
+        // page, and the detail view rendered "Execution not found" on top of
+        // execution data that was still refreshing underneath it (#1048).
+        setError(null)
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [executionId])
@@ -66,6 +79,14 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
     onEvent: (event) => {
       if (isRefreshEvent(event)) refreshExecution()
     },
+  })
+
+  // SSE only fires on lifecycle transitions; tokens/cost/duration update
+  // continuously, so poll while non-terminal (#1048).
+  useRefetchWhileRunning({
+    items: execution ? [execution] : [],
+    isTerminal: isTerminalExecution,
+    refetch: refreshExecution,
   })
 
   useEffect(() => {

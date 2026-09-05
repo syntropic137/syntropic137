@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from syn_domain.contexts.agent_sessions import ObservationType
+from syn_domain.contexts.agent_sessions import ObservationType, SessionSummaryData
 from syn_shared.events import SESSION_SUMMARY
 
 if TYPE_CHECKING:
@@ -251,16 +251,29 @@ class ObservabilityCollector:
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        totals_are_authoritative: bool = True,
     ) -> None:
-        """Record end-of-session summary with authoritative CLI totals (ISS-217).
+        """Record end-of-session summary with the run's final totals (ISS-217).
 
         Emits a session_summary observation so SessionCostProjection.on_session_summary()
-        can overwrite accumulated estimates with the SDK-reported values.
+        can replace accumulated estimates with the SDK-reported values.
+
+        ``totals_are_authoritative`` says whether the harness reported these
+        totals itself. It is False when the process was killed or timed out
+        before it could, leaving the totals observed-so-far rather than final.
+        Consumers need the distinction: authoritative totals REPLACE what was
+        accumulated, estimated ones must never reduce it (#1164). It defaults
+        to True so that summaries recorded before this flag existed keep their
+        original replace semantics on replay.
         """
         if self._writer is None:
             return
 
-        data = {
+        # Declared, so the type checker holds this against the same shape the
+        # cost projections read it back with. Every key here is a key some
+        # projection looks up by string, and a rename on one side used to be
+        # invisible until a dashboard showed a zero.
+        summary: SessionSummaryData = {
             "total_cost_usd": total_cost_usd,
             "total_input_tokens": input_tokens,
             "total_output_tokens": output_tokens,
@@ -269,18 +282,25 @@ class ObservabilityCollector:
             "num_turns": num_turns,
             "duration_ms": duration_ms,
             "model": self._agent_model,
+            "totals_are_authoritative": totals_are_authoritative,
         }
 
         await self._writer.record_observation(
             session_id=self._session_id,
             observation_type=SESSION_SUMMARY,
-            data=data,
+            # Copied because the recorder port still asks for a mutable,
+            # value-untyped dict, which no declared payload shape satisfies.
+            # Widening that port to a read-only mapping is the better fix and
+            # is already flagged as its own change - see the note on
+            # ``syn_adapters...capture_observation.ObservationRecorder``.
+            data=dict(summary),
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
         logger.info(
-            "Session summary recorded: cost=$%s, %d in, %d out, %d turns, %dms",
+            "Session summary recorded (%s): cost=$%s, %d in, %d out, %d turns, %dms",
+            "authoritative" if totals_are_authoritative else "estimated from observations",
             total_cost_usd,
             input_tokens,
             output_tokens,

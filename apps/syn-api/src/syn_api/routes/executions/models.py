@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
+from syn_api.types import BranchObservationInfo  # noqa: TC001
 from syn_shared.display import EM_DASH
 
 
@@ -16,6 +18,26 @@ class PhaseOperationInfo(BaseModel):
     tool_name: str | None = None
     tool_use_id: str | None = None
     success: bool = True
+    """Whether this operation's subject went wrong.
+
+    A row whose type IS a failure (`session_error`, `error`,
+    `tool_execution_failed`) now reports False, decided once in
+    `session_tools_verdict.read_verdict` (#1196). It used to report True here
+    for every one of them, because the projection had nothing to say and this
+    layer read that silence as a yes.
+
+    True still means "nothing reported a failure", not "it finished and
+    succeeded" - a `tool_execution_started` row has no verdict yet. That
+    remaining default is a DISPLAY choice, kept because the dashboard renders
+    this field as a strict boolean; see `_map_phase_to_response`.
+    """
+    error_message: str | None = None
+    """What went wrong, when something did.
+
+    Never the empty string: an operation that reports a failure and no reason
+    is the defect this field exists to close, so the projection substitutes
+    `NO_REASON_RECORDED` rather than leaving it blank.
+    """
 
 
 class PhaseExecutionInfo(BaseModel):
@@ -29,7 +51,11 @@ class PhaseExecutionInfo(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     total_tokens: int
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """``None`` means genuinely unknown. A ``running`` phase computes this live
+    at read time (``now - started_at``); other phases without a completion
+    event to record one have no duration to report.
+    """
     cost_usd: Decimal = Decimal("0")
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
@@ -41,6 +67,39 @@ class PhaseExecutionInfo(BaseModel):
     error_message: str | None = None
     model: str | None = None
     cost_by_model: dict[str, str] = Field(default_factory=dict)
+    agent_session_ids: list[str] | None = None
+    """The agent-native session ids this phase's capture confirmed, in the order
+    the store reported them.
+
+    A phase has MANY. ``session_id`` above is the uuid4 syn137 assigns per phase
+    run; these are the ids the AGENTS chose for themselves, and one phase yields
+    several whenever it delegates - a codex phase handing work to claude, a
+    subagent, a resumed thread. The host never passes its id to the agent, so
+    the two namespaces are disjoint and this field is the only thing relating
+    them: it is what makes an execution's transcripts fetchable (#1185).
+
+    THREE-VALUED, and null is not empty. ``null`` means nothing could tell us -
+    a phase that predates the field, an exporter that did not report it, or
+    telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
+    none. Defaulting the first to the second reports a loss that did not happen
+    (#1176).
+    """
+    observed_branches: list[BranchObservationInfo] | None = None
+    """Where this phase's branches stood when it failed (#1200).
+
+    THREE-VALUED, same contract as `agent_session_ids` above: `null` means
+    nothing could tell us - the phase did not fail, its workspace was already
+    gone, or the execution predates the field - and `[]` means the workspace
+    was read and no branch differs from how the phase found it. A client
+    distinguishing "a branch moved, go and fetch it" from "nothing here
+    changed" reads this, not the prose in `error_message`.
+
+    Only branches that DIFFER from the phase's starting point appear. The
+    branch it was handed is normally already on a remote, so recording every
+    branch would hand every failed phase a location and make the two incidents
+    identical again. What no record claims is who moved a ref: git does not
+    carry that, so this reports the two readings and stops.
+    """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
 
 
@@ -63,7 +122,17 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, including any still
+    running. ``None`` means no phase had a resolvable duration -- unknown, not
+    zero.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str] = Field(default_factory=list)
@@ -113,3 +182,11 @@ class ExecutionListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 50
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    """Matching executions tallied by status, ignoring the status filter itself.
+
+    Counted over every OTHER filter the request carried, so the chips say what
+    selecting a different status would actually return. A tally of the returned
+    rows cannot answer that: it only ever knows about the status already
+    selected, and only about one page of it.
+    """

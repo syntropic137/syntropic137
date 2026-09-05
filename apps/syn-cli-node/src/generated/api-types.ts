@@ -438,6 +438,11 @@ export interface paths {
         /**
          * List Artifacts Endpoint
          * @description List artifacts with optional filtering.
+         *
+         *     The window is named after ``created_at`` because that is the timestamp an
+         *     artifact has; the siblings bound ``started_at`` and spell it
+         *     ``started_after``. The validation is the same one (#1186): a bound with no
+         *     offset is refused rather than guessed at.
          */
         get: operations["list_artifacts_endpoint_artifacts_get"];
         put?: never;
@@ -1826,6 +1831,40 @@ export interface components {
             size_bytes: number | null;
         };
         /**
+         * ArtifactListResponse
+         * @description One page of artifacts, and the numbers describing what it is a page of.
+         *
+         *     The same envelope ``/executions`` and ``/sessions`` answer with, for the
+         *     same reason: this endpoint used to return a bare array, so a response of 50
+         *     rows was indistinguishable from a collection of 50 and a client had no
+         *     number to page against (#1204). ``limit`` was the only parameter it
+         *     honoured and it capped at 200, which made 200 artifacts the whole of
+         *     reachable history.
+         */
+        ArtifactListResponse: {
+            /** Artifacts */
+            artifacts?: components["schemas"]["ArtifactSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
+        };
+        /**
          * ArtifactResponse
          * @description Detailed artifact response.
          */
@@ -1907,6 +1946,45 @@ export interface components {
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
             /** File */
             file: string;
+        };
+        /**
+         * BranchObservationInfo
+         * @description One branch of a failed phase's workspace, as git had it (#1200).
+         *
+         *     THE ANSWER TO "WHERE DO I LOOK", made machine-readable. A phase can push
+         *     complete work and still fail - most often because it wrote no deliverable,
+         *     which #1167 correctly refuses to pass - and the failure then named no
+         *     branch, so nothing pointed at commits that were merged by hand twice in one
+         *     day once a human found them.
+         *
+         *     EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the
+         *     REMOTE ITSELF answered, asked while the workspace was still alive, and
+         *     `remote_commit_at_phase_start` is where this clone's tracking ref pointed
+         *     when the phase was handed that workspace. The two differing means the ref
+         *     moved. It does NOT mean this phase moved it, and no field here says so: a
+         *     push carries no author, so the same evidence is produced by a concurrent
+         *     process or a person. Two earlier versions of this claimed otherwise.
+         *
+         *     A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
+         *     repository - the ref moved, or commits are sitting on no remote. The FIELD
+         *     is three-valued and the two empty answers must not be merged: absent/null
+         *     means nothing could look, `[]` means the workspace was read and every
+         *     branch is exactly where the phase found it. Only a moved ref can be
+         *     recovered by fetching.
+         */
+        BranchObservationInfo: {
+            /** Repo */
+            repo: string;
+            /** Branch */
+            branch: string;
+            /** Remote */
+            remote: string | null;
+            /** Remote Commit */
+            remote_commit: string | null;
+            /** Remote Commit At Phase Start */
+            remote_commit_at_phase_start: string | null;
+            /** Unpushed Commits */
+            unpushed_commits: number;
         };
         /**
          * CancelRequest
@@ -2577,11 +2655,13 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Total Duration Seconds */
+            total_duration_seconds?: number | null;
             /**
-             * Total Duration Seconds
+             * Unknown Duration Phase Count
              * @default 0
              */
-            total_duration_seconds: number;
+            unknown_duration_phase_count: number;
             /** Artifact Ids */
             artifact_ids?: string[];
             /** Error Message */
@@ -2621,6 +2701,10 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -3172,6 +3256,8 @@ export interface components {
              * @default true
              */
             success: boolean;
+            /** Error Message */
+            error_message?: string | null;
             /** Input Tokens */
             input_tokens?: number | null;
             /** Output Tokens */
@@ -3265,8 +3351,11 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
-        /** PhaseDefinition */
-        PhaseDefinition: {
+        /**
+         * PhaseDefinitionResponse
+         * @description Phase definition within a workflow template.
+         */
+        PhaseDefinitionResponse: {
             /** Phase Id */
             phase_id: string;
             /** Name */
@@ -3307,6 +3396,17 @@ export interface components {
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */
             skills?: components["schemas"]["PhaseRefResponse"][];
+            /**
+             * Execution Type
+             * @default sequential
+             */
+            execution_type: string;
+            /** Max Tokens */
+            max_tokens?: number | null;
+            /** Input Artifact Types */
+            input_artifact_types?: string[];
+            /** Output Artifact Types */
+            output_artifact_types?: string[];
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -3330,11 +3430,8 @@ export interface components {
             cache_read_tokens: number;
             /** Total Tokens */
             total_tokens: number;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Cost Usd
              * @default 0
@@ -3357,6 +3454,10 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
+            /** Observed Branches */
+            observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
         };
@@ -3391,11 +3492,8 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Artifact Count
              * @default 0
@@ -3419,6 +3517,8 @@ export interface components {
              * @default true
              */
             success: boolean;
+            /** Error Message */
+            error_message?: string | null;
         };
         /**
          * PhaseRefResponse
@@ -3643,11 +3743,8 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
-            /**
-             * Duration Seconds
-             * @default 0
-             */
-            duration_seconds: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
             /**
              * Trigger Source
              * @default
@@ -4106,6 +4203,20 @@ export interface components {
              * @default 0
              */
             total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /**
          * SessionResponse
@@ -4850,6 +4961,8 @@ export interface components {
             duration_ms?: number | null;
             /** Success */
             success?: boolean | null;
+            /** Error Message */
+            error_message?: string | null;
         };
         /**
          * ToolTimelineResponse
@@ -5264,7 +5377,7 @@ export interface components {
             /** Classification */
             classification: string;
             /** Phases */
-            phases?: components["schemas"]["PhaseDefinition"][];
+            phases?: components["schemas"]["PhaseDefinitionResponse"][];
             /** Input Declarations */
             input_declarations?: components["schemas"]["InputDeclarationModel"][];
             /** Created At */
@@ -5741,8 +5854,16 @@ export interface operations {
     list_executions_endpoint_executions_get: {
         parameters: {
             query?: {
-                /** @description Filter by status */
+                /** @description Filter by single status (legacy) */
                 status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
+                started_before?: string | null;
+                /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
+                q?: string | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -6079,12 +6200,21 @@ export interface operations {
                 status?: string | null;
                 /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
                 statuses?: string | null;
-                /** @description Inclusive ISO 8601 lower bound on started_at */
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
                 started_after?: string | null;
-                /** @description Inclusive ISO 8601 upper bound on started_at */
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
                 started_before?: string | null;
-                /** @description Max items to return */
-                limit?: number;
+                /** @description Case-insensitive substring match against session id and workflow id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -6150,10 +6280,25 @@ export interface operations {
                 workflow_id?: string | null;
                 /** @description Filter by phase ID */
                 phase_id?: string | null;
+                /** @description Filter by session ID */
+                session_id?: string | null;
                 /** @description Filter by artifact type */
                 artifact_type?: string | null;
-                /** @description Max items to return */
-                limit?: number;
+                /** @description Inclusive ISO 8601 lower bound on created_at (timezone required) */
+                created_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on created_at (timezone required) */
+                created_before?: string | null;
+                /** @description Case-insensitive substring match against artifact id, title, workflow id and phase id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
             };
             header?: never;
             path?: never;
@@ -6167,7 +6312,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactSummaryResponse"][];
+                    "application/json": components["schemas"]["ArtifactListResponse"];
                 };
             };
             /** @description Validation Error */

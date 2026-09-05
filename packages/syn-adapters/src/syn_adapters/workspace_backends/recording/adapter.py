@@ -175,6 +175,7 @@ class RecordingEventStreamAdapter:
         timeout_seconds: int | None = None,  # noqa: ARG002
         working_directory: str | None = None,  # noqa: ARG002
         environment: dict[str, str] | None = None,  # noqa: ARG002
+        wrapper_name: str | None = None,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Stream events from recording.
 
@@ -188,6 +189,9 @@ class RecordingEventStreamAdapter:
             timeout_seconds: Timeout (ignored)
             working_directory: Working directory (ignored)
             environment: Environment variables (ignored)
+            wrapper_name: Launch announcement name (ignored - replaying a
+                recording creates no process, so it has no standing to attest
+                a launch and the session is left UNKNOWN)
 
         Yields:
             JSONL event strings, one per line

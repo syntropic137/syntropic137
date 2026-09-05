@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
 
 from syn_api._wiring import get_github_settings
+from syn_api.services.degraded_reasons import DegradedReason
 from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
-
-if TYPE_CHECKING:
-    from syn_api.services.lifecycle import DegradedReason
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +21,6 @@ def validate_credentials(degraded_reasons: list[DegradedReason]) -> None:
     Args:
         degraded_reasons: Mutable list — appended to when credentials are missing.
     """
-    from syn_api.services.lifecycle import DegradedReason
     from syn_shared.settings import get_settings
 
     settings = get_settings()

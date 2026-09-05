@@ -1,6 +1,6 @@
 {
   "name": "syn-docs",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
@@ -24,7 +24,7 @@
     "fumadocs-openapi": "10.3.5",
     "fumadocs-ui": "16.6.2",
     "lucide-react": "0.468.0",
-    "next": "^16.2.2",
+    "next": "16.2.11",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "shiki": "3.2.1",

@@ -22,7 +22,7 @@
 name: syntropic137_selfhost
 services:
   timescaledb:
-    image: timescale/timescaledb:2.25.1-pg16
+    image: timescale/timescaledb:2.29.2-pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-syn}
       POSTGRES_USER: ${POSTGRES_USER:-syn}
@@ -314,10 +314,11 @@ services:
   gateway:
     container_name: syn137-gateway
     ports:
-    - 127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80
+    - ${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80
     environment:
       SYN_API_PASSWORD: ${SYN_API_PASSWORD:-}
       SYN_API_USER: ${SYN_API_USER:-admin}
+      SYN_GATEWAY_BIND: ${SYN_GATEWAY_BIND:-127.0.0.1}
     healthcheck:
       test:
       - CMD

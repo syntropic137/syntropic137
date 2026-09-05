@@ -509,6 +509,25 @@ docker run --rm --network <agent-net> --entrypoint sh <image> \
 > correct GHCR images for the release and starts the stack. This is the same
 > upgrade path users follow, so it's itself a release quality signal.
 
+> **`setup update` can only fetch a PUBLISHED release.** It resolves the last
+> published GHCR digests, so it cannot put unpublished code on a host - and
+> creating a prerelease just to make it fetchable is what produced seven
+> throwaway `v0.28.0-beta.*` entries in 48 hours. To get code that is not
+> released onto a host, build and move the images directly:
+> [Test Deploy runbook](../deployment/test-deploy.md). It also carries the
+> drain check that must precede recreating any container, which this section's
+> `down -v` does not perform. Come back here once the stack is up.
+
+> **v0.28.0: this section will NOT show you the projection rebuild window.**
+> Step 1 removes the data volumes, so Step 2 upgrades against an empty event
+> store - there is nothing to replay, and the read-path window that a real
+> v0.28.0 upgrade opens cannot occur here. A green run of this section is
+> therefore not evidence that the window was handled. It is a rollout
+> constraint, not a validation step, and it lives with the deploy:
+> [v0.28.0 Rollout Constraints](../release-process.md#v0280-rollout-constraints).
+> If you are instead validating an **in-place** upgrade (no `down -v`), follow
+> that procedure before continuing here.
+
 ### Step 1: Tear down and clear data
 
 ```bash
@@ -2373,6 +2392,756 @@ Navigate to `http://localhost:8137` via Playwright.
 
 ---
 
+## 8.1 List Surfaces - Counts, Time Windows and Pagination
+
+The three list surfaces named by the issues - **executions, sessions, artifacts** -
+each shipped the same defect independently: a `total` that described the PAGE rather
+than the collection, and history that no amount of paging could reach. #1159 (executions)
+and #1160 (sessions) are fixed; #1204 (artifacts) is open. The repository owner
+found all of it in a browser, because this runbook had no check that compared a
+displayed count against anything.
+
+Run this section against **every** list surface, not only the ones with a filed
+issue. A check that skips the surface known to be broken stops being a check and
+becomes a carve-out - and it was exactly "we already fixed that one" that let the
+third instance ship.
+
+> **This section covers a fourth surface the issues do not name: `/workflows`.**
+> It carries the same contract as executions and sessions, and it shipped the same
+> bug - its own code comment records `total` having been `len(summaries)`, so a
+> client paginating until it had `total` items stopped after page 1. It was fixed
+> without an issue number and has no regression coverage anywhere, which is the
+> state executions and sessions were in before #1159. Two further surfaces are
+> deliberately left out and recorded in `## Untested Areas`: `/triggers` (returns
+> `total=len(rows)`, truthful only because the endpoint has no paging at all - a
+> latent instance of the same shape) and `/costs/sessions` + `/costs/executions`
+> (bare arrays capped at 200, the artifacts shape, not covered by #1204).
+
+### How a list surface lies to you
+
+Same shape as `## 0.0`: each row is a reading that is **confidently wrong** rather
+than an error, and the right-hand column is the only thing that separates the two
+states.
+
+| What you see | What it can equally mean | What tells them apart |
+|---|---|---|
+| "50 executions" | 50 is the page size, and there are 330 | 8.1.1 - ask twice, at two page sizes |
+| Same rows under "24h" and "7d" | The window is ignored - or is honoured, and page 1 is legitimately identical | 8.1.2 - read `total`, never the rows |
+| History begins in June | Paging stops before the beginning of history | 8.1.3 - walk to the last page, then ask for older |
+| A chip reading "completed 35" | 35 is this page's completed rows, against a true 235 | 8.1.4 - sum the chips against `total` |
+
+The first one is the load-bearing one. **A surface where `total == len(rows)` at
+every page size is self-consistently lying**: every field agrees with every other
+field, the arithmetic closes, and no client can detect it from a single response.
+Only a second request at a different page size can. That is why 8.1.1 comes first
+and why it is two requests, not one.
+
+### Preconditions - this section passes vacuously on a fresh stack
+
+Every check in 8.1.1-8.1.4 is an assertion about a collection LARGER than one page.
+On a stack just reset by `## 0` there are no rows, and all four return green having
+examined nothing. (8.1.5 and 8.1.6 need no data and can run anywhere.) That is `## 0.0`'s "Absence looks exactly like success",
+and a vacuous green here must be recorded as **NOT RUN**, never as PASS.
+
+| Check | Minimum data for a conclusive result | If not met |
+|---|---|---|
+| 8.1.1 | `total` >= 2 | NOT RUN |
+| 8.1.2 | rows in more than one of the 24h / 7d / older bands | NOT RUN (see the discriminator in 8.1.2) |
+| 8.1.3 | `total` > `page_size`, i.e. more than one page | NOT RUN |
+| 8.1.4 | `total` >= 1 | NOT RUN |
+
+**8.1.1 needs two rows, not three hundred.** A `total` that echoes the page length
+reports `total=1` when asked for one row and `total=2` when asked for ten. The
+330-execution stack made the bug obvious; two rows make it provable.
+
+Where to get the data: run this section against the **long-lived selfhost stack on
+8137**, which carries real history. Every request in 8.1.1-8.1.5 is a `GET`; this
+section writes nothing and is safe against accumulated data. A freshly reset
+pre-release stack will only ever satisfy 8.1.1 (from the handful of executions
+Sections 5-7 create) and cannot satisfy 8.1.2 at all.
+
+### Setup - one set of helpers, four surfaces
+
+```bash
+export SYN_API_URL="http://localhost:8137/api/v1"
+export SYN_API_USER="${SYN_API_USER:-admin}"
+# SYN_API_PASSWORD must already be exported. Pass it by NAME, never by value -
+# the literal then appears in no command line, no transcript and no shell history.
+
+api() { curl -sS -u "$SYN_API_USER:$SYN_API_PASSWORD" "$SYN_API_URL/$1"; }
+
+# The two numbers every list surface owes a client, however each one spells them.
+rows_of()  { jq '(if type == "array" then . else (.executions // .sessions // .workflows // []) end) | length'; }
+total_of() { jq -r 'if type == "array" then "ABSENT" else (.total | tostring) end'; }
+
+# Percent-encode a value before it goes into a query string (see 8.1.5).
+urlenc() { jq -rR '@uri'; }
+
+# ISO 8601 UTC, $1 hours ago, offset included. GNU date first, BSD/macOS fallback.
+iso_ago() {
+  date -u -d "$1 hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -v-"$1"H +%Y-%m-%dT%H:%M:%SZ
+}
+```
+
+- [ ] `api "executions?page_size=1" | total_of` prints a number, not `ABSENT`, not an error
+
+The four surfaces, and where they differ:
+
+| Surface | Endpoint | Rows | `total` | Page controls | Row timestamp |
+|---|---|---|---|---|---|
+| executions | `GET /executions` | `.executions` | yes | `page`, `page_size` (max 200) | `started_at` |
+| sessions | `GET /sessions` | `.sessions` | yes | `page`, `page_size` (max 200; `limit` deprecated alias) | `started_at` |
+| workflows | `GET /workflows` | `.workflows` | yes | `page`, `page_size` (**max 100** - 200 returns 422) | `created_at` |
+| artifacts | `GET /artifacts` | bare JSON array | **absent** | `limit` only (max 200) | `created_at` |
+
+Executions and sessions share one contract by construction
+(`apps/syn-api/src/syn_api/list_query.py`), so a difference between those two is
+always a finding. Workflows implements the same `total`/`page`/`page_size` shape
+independently, so it can drift from them without any code changing on either side -
+which is why it is checked here rather than assumed. Artifacts answers a different
+shape, which is #1204.
+
+> **Artifacts is EXPECTED TO FAIL 8.1.1, 8.1.2, 8.1.3 and 8.1.4 today.** Record the
+> failures against #1204 rather than skipping the surface. **If artifacts PASSES,
+> #1204 has been fixed** - say so in the report and delete this note along with the
+> `artifacts` rows in `## Untested Areas`.
+
+Because unrecognised query parameters are ignored by all four endpoints, a single
+URL carrying every spelling works against all of them - so one loop can ask all four
+the same question, and the surface that answers differently is the finding.
+
+### 8.1.1 `total` is invariant under page size
+
+The one check that distinguishes a real count from a page length.
+
+```bash
+for surface in executions sessions workflows artifacts; do
+  for ps in 1 10 50 100; do
+    body="$(api "$surface?page=1&page_size=$ps&limit=$ps")"
+    printf '%-11s page_size=%-4s rows=%-4s total=%s\n' \
+      "$surface" "$ps" "$(rows_of <<<"$body")" "$(total_of <<<"$body")"
+  done
+done
+```
+
+Expected on a healthy stack with 330 executions, 97 sessions and 36 workflows:
+
+```
+executions  page_size=1    rows=1    total=330
+executions  page_size=10   rows=10   total=330
+executions  page_size=50   rows=50   total=330
+executions  page_size=100  rows=100  total=330
+sessions    page_size=1    rows=1    total=97
+sessions    page_size=10   rows=10   total=97
+sessions    page_size=50   rows=50   total=97
+sessions    page_size=100  rows=97   total=97
+workflows   page_size=1    rows=1    total=36
+workflows   page_size=10   rows=10   total=36
+workflows   page_size=50   rows=36   total=36
+workflows   page_size=100  rows=36   total=36
+artifacts   page_size=1    rows=1    total=ABSENT
+artifacts   page_size=10   rows=10   total=ABSENT
+artifacts   page_size=50   rows=50   total=ABSENT
+artifacts   page_size=100  rows=100  total=ABSENT
+```
+
+**PASS** for a surface requires all three:
+
+1. `total` is byte-identical across all four rungs.
+2. `rows` equals `min(page_size, total)` on every rung.
+3. At least two rungs produced different `rows` values - otherwise the collection
+   is smaller than 2 and the check proved nothing (**NOT RUN**).
+
+**FAIL** - `total` moves with `rows`. This is the #1159/#1160 shape:
+
+```
+executions  page_size=1    rows=1    total=1
+executions  page_size=10   rows=10   total=10
+```
+
+**FAIL** - `total=ABSENT`. The surface returns a bare array and states no count at
+all, so a client cannot page and cannot know what it is missing. Expected for
+artifacts today (#1204).
+
+- [ ] precondition, per surface: at least two rungs returned DIFFERENT `rows`
+      values (PASS condition 3). If every rung returned the same `rows`, the
+      collection is smaller than two rows, and that surface's result is
+      **NOT RUN** - no box below may be ticked PASS for it. A one-row stack
+      reports `rows=1 total=1` on all four rungs, which satisfies condition 1
+      while proving nothing
+- [ ] executions: `total` identical across all four page sizes (condition 1)
+- [ ] executions: `rows == min(page_size, total)` on every rung (condition 2) -
+      a rung that returns fewer rows than the page size while `total` is larger
+      is a FAIL, not a rounding detail
+- [ ] sessions: conditions 1 AND 2, both
+- [ ] workflows: conditions 1 AND 2, both
+- [ ] all three of executions, sessions and workflows satisfied conditions 1 and
+      2. A surface whose `total` tracks `rows` is reporting a page length, not a
+      count, however self-consistent its response looks
+- [ ] artifacts: result recorded (expected `ABSENT`; if it now reports a `total`, #1204 is fixed)
+
+### 8.1.2 Time windows actually narrow
+
+```bash
+for surface in executions sessions; do
+  for hours in 24 168; do
+    printf '%-11s last %-5s total=%s\n' "$surface" "${hours}h" \
+      "$(api "$surface?page_size=1&started_after=$(iso_ago "$hours" | urlenc)" | total_of)"
+  done
+  printf '%-11s all time  total=%s\n' "$surface" \
+    "$(api "$surface?page_size=1" | total_of)"
+done
+```
+
+Expected:
+
+```
+executions  last 24h   total=18
+executions  last 168h  total=96
+executions  all time   total=330
+sessions    last 24h   total=6
+sessions    last 168h  total=31
+sessions    all time   total=97
+```
+
+`page_size=1` is deliberate: this check reads `total` and nothing else, and asking
+for one row makes that unmistakable in the transcript.
+
+> **The trap that has already produced a wrong PASS.** With more rows than one page
+> in both windows, **page 1 is legitimately IDENTICAL between 24h and 7d** - the
+> newest 50 rows are the newest 50 rows either way. An earlier validation attempt
+> compared the visible rows, saw them unchanged, and concluded the window filter
+> worked; the same observation is equally consistent with the filter doing nothing.
+> **The acceptance criterion is that `total` changes. It is never that the visible
+> rows change.** Do not add a row-comparison step here; it cannot decide anything.
+
+**PASS** requires all of:
+
+1. `total(24h) <= total(7d) <= total(all-time)` - monotonic, no exceptions. A
+   DECREASE anywhere is an unconditional **FAIL** on its own - a wider window
+   reporting fewer rows than a narrower one is broken regardless of the
+   preconditions below.
+2. When the precondition in the table above holds (rows exist in ALL THREE age
+   bands: within 24h, from 24h through 7d, and older than 7d):
+   `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)` -
+   BOTH strict. Either equality on its own is not sufficient for PASS; it must
+   be resolved by the discriminator below, and an unresolved equality is
+   **FAIL**, never PASS by default.
+3. When the precondition does NOT hold, the result is **NOT RUN** - never
+   PASS. A stack with history in only one age band cannot exercise the
+   narrowing at all, and reporting PASS for it claims a check that did not run.
+
+**If two totals are equal**, the window is either being ignored or a required age
+band is genuinely empty. Establish the precondition by querying or inspecting rows
+in EACH of the three bands; the oldest row alone cannot prove that the middle band
+contains a row. There are THREE equality shapes, not one - cover all of them:
+
+| Observation | Age-band evidence | Verdict |
+|---|---|---|
+| `total(24h) == total(7d) < total(all)` | a row exists in the 24h-through-7d band | **FAIL** - the 24h window is not being applied |
+| `total(24h) == total(7d) < total(all)` | no row exists in the 24h-through-7d band | **NOT RUN** - the middle band cannot be exercised |
+| `total(24h) < total(7d) == total(all)` | a row exists older than 7d | **FAIL** - the 7d window is not being applied |
+| `total(24h) < total(7d) == total(all)` | no row exists older than 7d | **NOT RUN** - the oldest band cannot be exercised |
+| `total(24h) == total(7d) == total(all)` | rows demonstrably exist in all three bands | **FAIL** - neither window is being applied |
+| `total(24h) == total(7d) == total(all)` | any of the three bands has no row | **NOT RUN** - the full narrowing precondition is unmet |
+
+**FAIL** - all three totals equal while history demonstrably spans more than 7
+days. This is the #1159 shape where the window was applied in the browser to 50
+already-fetched rows, so it could never change a server count. (This is the same
+row as the last two lines of the table above, stated separately because it is
+the shape #1159 actually shipped.)
+
+- [ ] executions: precondition recorded (rows present in ALL THREE age
+      bands) - if not met, the result below is **NOT RUN** and no other box in
+      this item may be ticked PASS
+- [ ] executions: `total(24h) <= total(7d) <= total(all-time)` with no
+      decrease anywhere
+- [ ] executions: `total(24h) < total(7d)` **AND** `total(7d) < total(all-time)`
+      both strict - a single strict increase is not sufficient. Any equality is
+      resolved via the discriminator table above; an equality left
+      undiscriminated is **FAIL**, not PASS
+- [ ] sessions: same three assertions
+- [ ] artifacts: `started_after` is not accepted at all - record as FAIL against #1204
+- [ ] workflows: **not applicable** - `/workflows` takes no time bound, so there is no
+      window to narrow. This is a real gap in the surface (a 36-workflow list is
+      browsable, a 3,000-workflow one is not) but it is not the defect under test
+      here; it is recorded in `## Untested Areas`.
+
+### 8.1.3 Paging reaches the end of history
+
+Two failures hide here: arithmetic that does not close, and a `page` parameter that
+is accepted and ignored. The second one still closes the arithmetic, so both checks
+are required.
+
+```bash
+surface=executions; rows_key=.executions; id_key=.workflow_execution_id; ts_key=.started_at
+ps=50; cap=200          # cap = this surface's max page_size; see the surface table
+
+total=$(api "$surface?page_size=1" | total_of)
+pages=$(( (total + ps - 1) / ps ))
+last_rows=$(api "$surface?page=$pages&page_size=$ps"     | rows_of)
+beyond=$(   api "$surface?page=$((pages+1))&page_size=$ps" | rows_of)
+
+echo "total=$total pages=$pages last_page_rows=$last_rows beyond_last=$beyond"
+echo "arithmetic: $(( (pages - 1) * ps + last_rows )) must equal $total"
+```
+
+Expected:
+
+```
+total=330 pages=7 last_page_rows=30 beyond_last=0
+arithmetic: 330 must equal 330
+```
+
+**Pages must be disjoint.** If `page` is silently ignored, every page is page 1,
+the arithmetic above still closes, and 280 rows are unreachable:
+
+```bash
+comm -12 \
+  <(api "$surface?page=1&page_size=$ps" | jq -r "${rows_key}[]${id_key}" | sort) \
+  <(api "$surface?page=2&page_size=$ps" | jq -r "${rows_key}[]${id_key}" | sort) \
+  | wc -l
+```
+
+Expected: `0`. Any shared id means the pages overlap; `50` means `page` does nothing.
+
+**Assertion 2 is a status code as well as a row count.** `rows_of` extracts
+`.executions // .sessions // .workflows // []`, so a 404 or a 500 body has no rows
+key, falls through to `[]`, and prints `0` - identical to a correctly empty page.
+Read the code, not just the count:
+
+```bash
+curl -sS -o /dev/null -w 'beyond-last HTTP %{http_code}\n' \
+  -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+  "$SYN_API_URL/$surface?page=$((pages+1))&page_size=$ps"
+```
+
+Expected: `beyond-last HTTP 200`.
+
+**The last page must be the true beginning of history**, not the oldest row inside
+some fixed recent window. Take the oldest reachable timestamp and ask the server
+whether anything older exists - no date is hardcoded, so this check does not rot.
+
+**Executions and sessions only** - `/workflows` has no `started_before`, and FastAPI
+IGNORES an unrecognised query parameter rather than rejecting it, so running this
+against workflows returns the unfiltered first page and reads as a catastrophic
+failure that is really just a parameter that does not exist. See the workflows note
+below for what to do instead.
+
+```bash
+oldest=$(api "$surface?page=$pages&page_size=$ps" | jq -r "${rows_key}[-1]${ts_key}")
+echo "oldest reachable: $oldest"
+
+api "$surface?page_size=$cap&started_before=$(printf '%s' "$oldest" | urlenc)" \
+  | jq -r "${rows_key}[]${ts_key}" | sort -u
+```
+
+Expected: exactly one distinct value, equal to `$oldest`.
+
+```
+oldest reachable: 2026-04-28T09:12:33.421000Z
+2026-04-28T09:12:33.421000Z
+```
+
+`started_before` is INCLUSIVE, so the boundary row coming back is the check
+working, not an off-by-one.
+
+**PASS** requires all four:
+
+1. `(pages - 1) * page_size + last_page_rows == total`.
+2. Page `pages + 1` returns 0 rows (and a 200, not a 404 or a 500).
+3. Pages 1 and 2 share zero ids.
+4. The `started_before=$oldest` query returns no timestamp EARLIER than `$oldest`.
+
+**FAIL** - assertion 4 returns older timestamps. Those rows are history that exists
+in the store and that no sequence of page requests can reach. Report each distinct
+timestamp; that set is the extent of the unreachable history.
+
+Repeat the whole block for the other two paged surfaces by setting the variables at
+the top. Nothing else changes:
+
+```bash
+surface=sessions;  rows_key=.sessions;  id_key=.id; ts_key=.started_at;  ps=50; cap=200
+surface=workflows; rows_key=.workflows; id_key=.id; ts_key=.created_at;  ps=20; cap=100
+```
+
+> **Workflows gets assertions 1-3 but not 4.** There is no `started_before` on the
+> endpoint, so "is there anything older than the oldest reachable row" cannot be
+> asked of it. What stands in for it: `/workflows` derives `total` from a store
+> COUNT rather than from the rows it returned
+> (`get_projection_mgr().workflow_list.count(...)`), so a `total` that under-reports
+> history would have to be a wrong count rather than a page length - which 8.1.1
+> already tests. Record the last page's oldest `created_at` in the report anyway,
+> and note the missing bound; it is in `## Untested Areas`.
+
+> **Known limitation on `/workflows`, do NOT report it as a new finding.**
+> `order_by` sorts the current PAGE, not the collection, so with more than one page
+> it gives no global ordering (the store orders on a text column, where
+> `runs_count` would sort lexically - `"10" < "9"`). It is the same class as
+> everything else in 8.1: a control that appears to act on the collection and acts
+> on the page. Confirm it is still only that, and that the ROWS are still correctly
+> paged despite it:
+>
+> ```bash
+> api "workflows?page=1&page_size=5&order_by=-runs_count" | jq -r '.workflows[].runs_count'
+> api "workflows?page=2&page_size=5&order_by=-runs_count" | jq -r '.workflows[].runs_count'
+> ```
+>
+> Expected: each page descending WITHIN itself, page 2 not necessarily below page 1.
+> **Escalate** only if the two pages share ids - that would be paging breaking, not
+> the known sort limitation.
+
+- [ ] precondition, per surface: `total > page_size`, i.e. `pages >= 2`. On a
+      single-page collection the arithmetic closes trivially, page 2 is empty for
+      free and pages 1 and 2 are disjoint for free - all four assertions pass
+      having exercised no paging at all. If `pages < 2` that surface's result is
+      **NOT RUN**, never PASS
+- [ ] executions: arithmetic closes; page N+1 returns 0 rows **and HTTP 200** (a
+      404 or a 500 also reads as 0 rows and is a FAIL, not an empty page); pages
+      1 and 2 disjoint
+- [ ] executions: nothing older than the oldest reachable row exists
+- [ ] executions: `$oldest` recorded in the report as the earliest known record
+- [ ] sessions: the precondition and the same four assertions
+- [ ] workflows: the precondition and assertions 1-3 (`page_size` caps at 100, not
+      200); assertion 4 is not available on this surface, so it is recorded as
+      NOT RUN rather than ticked
+- [ ] workflows: `order_by` behaves as the known limitation above, and no worse
+- [ ] artifacts: no `page` parameter exists, so history beyond the 200-row cap is unreachable - record as FAIL against #1204
+
+### 8.1.4 The UI agrees with the API
+
+Everything above tests the API. The defect reached the owner through the browser,
+so the last check is that the browser shows what the API says. Use Playwright as in
+`## 8`, with the browser reaching the dashboard via 8.1.6.
+
+**Set the browser state by URL, not by clicking.** The list pages keep their
+filters in the query string (`timeWindow` is one of `15m`, `1h`, `24h`, `7d`, `all`;
+`status` is a comma-separated list), so navigating directly makes the browser's
+query reproducible and provably the same one you sent to the API:
+
+```
+http://127.0.0.1:8138/executions?timeWindow=all
+```
+
+For each of `/executions` and `/sessions`, with **no status filter selected** and
+`timeWindow=all`:
+
+```bash
+# The API's answer for the same query the UI just made.
+# The dashboard's page size is 50 (LIST_PAGE_SIZE), so page 1 shows 1-50.
+api "executions?page=1&page_size=50" | jq -c '{total, page_size, status_counts}'
+```
+
+Read off the page:
+
+| UI element | Must equal |
+|---|---|
+| `Showing 1-50 of N executions` | `N` == API `total`; the `1-50` == `1-min(50, total)` |
+| `Page 1 of M` | `M` == `ceil(total / 50)`. **Absent by design when `total <= 50`** - the controls only render when there is somewhere to go. Absent with `total > 50` is a FAIL |
+| Status chips (`Pending`, `Running`, `Completed`, `Failed`, `Cancelled`) | see the chip arithmetic below |
+
+**Chip arithmetic.** `status_counts` is tallied over every filter EXCEPT status, so
+with no status selected the chips describe the same collection as `total` and MUST
+sum to it. The dashboard renders a FIXED list of five statuses. There is exactly
+ONE status the executions projection can emit that has no chip: `interrupted`. That
+is the entire, named, enumerated exception - not a residual that absorbs whatever a
+`status_counts` response happens to contain. Any status outside the five rendered
+chips AND outside `interrupted` is not this exception and must not be folded into
+the arithmetic; it is investigated on its own, below.
+
+```bash
+api "executions?page=1&page_size=50" | jq -r '
+  ["pending","running","completed","failed","cancelled"] as $rendered
+  | (.status_counts | to_entries) as $c
+  | {
+      total,
+      chips_sum:   ([$c[] | select(.key | IN($rendered[]))                                   | .value] | add // 0),
+      interrupted: ([$c[] | select(.key == "interrupted")                                     | .value] | add // 0),
+      unexpected:  [$c[] | select(((.key | IN($rendered[])) or (.key == "interrupted")) | not) | .key]
+    }'
+```
+
+Expected shape on executions:
+
+```json
+{"total":330,"chips_sum":310,"interrupted":20,"unexpected":[]}
+```
+
+Sessions has no `interrupted` status at all (`SessionStatus` is
+`running`/`completed`/`failed`/`cancelled` - a subset of the five rendered chips,
+`_shared/value_objects.py`), so on `/sessions` the named exception is EMPTY:
+`interrupted` is always `0` and PASS requires `chips_sum == total` outright.
+
+**The numbers that decide this check are the ones ON SCREEN.** The jq above reads
+`status_counts` from the API, which is a cross-check, not the criterion: #1159 was a
+browser showing "completed 35" while the collection held 235, and an API-only
+assertion cannot see that. Read the five chips off the page and sum them
+(`ResourceFilterBar` renders a fixed five, each as a button labelled
+`<Status> <count>`):
+
+```js
+await page.goto('http://127.0.0.1:8138/executions?timeWindow=all')
+const chips = {}
+for (const label of ['Pending', 'Running', 'Completed', 'Failed', 'Cancelled']) {
+  const text = await page.getByRole('button', { name: new RegExp(`^${label}\\b`) }).innerText()
+  chips[label.toLowerCase()] = Number(text.replace(/\D+/g, ''))
+}
+const visible_sum = Object.values(chips).reduce((a, b) => a + b, 0)
+console.log(JSON.stringify({ chips, visible_sum }))
+```
+
+Expected against the API response above:
+
+```json
+{"chips":{"pending":0,"running":2,"completed":235,"failed":68,"cancelled":5},"visible_sum":310}
+```
+
+**PASS** requires all three:
+
+1. `visible_sum + interrupted == total`, where `visible_sum` is the sum of the five
+   numbers READ OFF THE SCREEN and `interrupted` is the single named exception.
+   This is the acceptance criterion.
+2. `visible_sum == chips_sum` - every chip on screen shows the value
+   `status_counts` reports for it. A chip that disagrees with the API is the #1159
+   symptom exactly, and it is a FAIL even when the API's own arithmetic closes.
+3. `unexpected` is empty.
+
+On `/sessions` the named exception is empty, so condition 1 is
+`visible_sum == total` outright.
+
+**FAIL** - `visible_sum + interrupted != total`. This is the "completed 35 against a
+true 235" shape: the visible chips (plus the one named, enumerated exception) do not
+account for the total. The shortfall is real regardless of what else
+`status_counts` contains - there is no other term available to balance the
+equation.
+
+**FAIL** - `visible_sum != chips_sum` while `chips_sum + interrupted == total`. The
+API is right and the browser is wrong, which is the exact defect that reached the
+owner. Passing on the strength of the API number alone is how it was missed.
+
+**FAIL / escalate immediately** - `unexpected` is non-empty. A status exists outside
+the five rendered chips and outside the single named exception. This is NOT
+`interrupted` in another shape and must not be absorbed by widening the exception
+list after the fact; investigate what emitted it and whether the dashboard needs a
+sixth chip, and record it as its own finding.
+
+**Finding, not a failure of this check** - `interrupted` is non-zero on executions.
+Report it at P2 with the count; it is a smaller version of the same class (history
+the UI cannot show), and it is not covered by #1159, #1160 or #1204. This finding
+is independent of the PASS/FAIL verdict above: the check PASSES while this finding
+is STILL recorded, because `interrupted` is a known, named, deliberate gap - not an
+unexplained one.
+
+**Selecting a status must move `total` to that chip's number.** This is the
+"completed 35 against a true 235" symptom stated as an equation. Take the chip
+counts from the unfiltered query above, then filter by one status - the filtered
+`total` must equal exactly what that chip promised:
+
+```bash
+api "executions?page=1&page_size=50"                   | jq '.status_counts.completed'
+api "executions?page=1&page_size=50&statuses=completed" | jq '.total'
+```
+
+Expected: the two numbers are identical (e.g. `235` and `235`). Navigate to
+`http://127.0.0.1:8138/executions?timeWindow=all&status=completed` and confirm the
+UI's `Showing 1-50 of 235 executions` carries the same number.
+
+**PASS**: filtered `total` == that status's chip count, and the UI agrees.
+**FAIL**: filtered `total` equals the row count of one page (50, or fewer) - the
+chip was promising something the filter cannot deliver.
+
+> Note that `status_counts` deliberately does NOT change when a status is selected -
+> it is tallied over every filter EXCEPT status, so the chips keep saying what
+> selecting each OTHER status would return. Chips that all drop to zero except the
+> selected one is a regression, not the intended behaviour.
+
+**Then page in the browser.** Requires `total > 50`. Click `Next` to page 2 and
+confirm `Showing 51-<min(100, N)> of N` with **the same `N`**. A total that changes
+while paging is the same defect wearing a different hat.
+
+Then `/workflows`, which renders the same count line at a **page size of 20** and
+has no status chips - so it gets the count assertions and not the chip arithmetic:
+
+```bash
+api "workflows?page=1&page_size=20" | jq -c '{total, page, page_size}'
+```
+
+- `Showing 1-20 of N workflows` where `N` == API `total`
+- `Page 1 of M` where `M` == `ceil(total / 20)`
+
+Finally, `/artifacts`:
+
+**PASS**: a count line is present and matches the API. **FAIL (expected today)**:
+there is no `Showing X-Y of N` line on `/artifacts` at all, and the page fetches
+`limit=100` with no statement that it is a page - so 101 artifacts render
+indistinguishably from 500. Record against #1204.
+
+- [ ] precondition, per surface: API `total >= 1`. With `total == 0` every chip
+      reads `0`, the arithmetic closes against nothing, and the result is
+      **NOT RUN**, never PASS
+- [ ] `/executions`: `Showing 1-50 of N` - both halves: `N` == API `total`, AND
+      the displayed range == `1-min(50, total)`
+- [ ] `/executions`: `Page 1 of M` matches `ceil(total / 50)` when `total > 50`.
+      When `total <= 50` the control is absent BY DESIGN and this box is
+      **NOT RUN**; absent while `total > 50` is FAIL
+- [ ] `/executions`: `visible_sum + interrupted == total`, where `visible_sum` is
+      summed from the five chips READ OFF THE SCREEN - an unresolved shortfall is
+      FAIL, never PASS (PASS condition 1)
+- [ ] `/executions`: `visible_sum == chips_sum` - each on-screen chip equals the
+      `status_counts` value for its status. An API total that closes while a chip
+      on screen disagrees is FAIL, not PASS (PASS condition 2)
+- [ ] `/executions`: `unexpected` is empty; any entry is FAIL and is escalated as
+      its own finding, never folded into the exception (PASS condition 3)
+- [ ] `/executions`: any non-zero `interrupted` is reported as its own P2 finding
+      (this does not change the PASS/FAIL verdict of the three items above)
+- [ ] `/executions`: selecting a status moves `total` to exactly that chip's count
+- [ ] `/executions`: `status_counts` unchanged by selecting a status
+- [ ] `/executions`: paging to page 2 leaves `N` unchanged - requires `total > 50`;
+      with `total <= 50` there is no page 2 and this box is **NOT RUN**, never PASS
+- [ ] `/sessions`: every `/executions` assertion above, with the named exception
+      empty - `interrupted` is always `0` on this surface (`SessionStatus` has no
+      such status), so PASS here requires `visible_sum == total` outright, and ANY
+      non-empty `unexpected` is FAIL
+- [ ] `/workflows`: `Showing 1-20 of N` matches API `total` (range == `1-min(20,
+      total)`), and `Page 1 of M` == `ceil(total / 20)` when `total > 20` -
+      `ListPagination` hides the control at one page, so with `total <= 20` that
+      half is **NOT RUN**; absent while `total > 20` is FAIL. No chips on this
+      surface
+- [ ] `/artifacts`: absence of a count line recorded against #1204
+
+### 8.1.5 A bound with no timezone is refused, not guessed
+
+A window bound with no offset is ambiguous - local midnight and UTC midnight are
+written identically - so the server refuses it rather than returning a confidently
+wrong page (`_require_timezone`, #1183).
+
+```bash
+for bound in '2026-04-01T00:00:00' '2026-04-01T00:00:00Z' '2026-04-01'; do
+  printf '%-22s -> %s\n' "$bound" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+        "$SYN_API_URL/executions?started_after=$(printf '%s' "$bound" | urlenc)")"
+done
+```
+
+Expected:
+
+```
+2026-04-01T00:00:00   -> 422
+2026-04-01T00:00:00Z  -> 200
+2026-04-01            -> 422
+```
+
+The 422 body must NAME the problem and the fix, not just reject:
+
+```bash
+api "executions?started_after=2026-04-01T00:00:00" | jq -r '.detail[0].msg'
+```
+
+Expected to contain `requires a timezone` and an example bound.
+
+**PASS**: naive bound 422, aware bound 200, and the 422 message tells the caller
+what to send. **FAIL**: a naive bound returns 200 - it was silently interpreted, and
+every number downstream of it is wrong by the reader's UTC offset with nothing to
+indicate it. A 500 is also a FAIL (that was the pre-#1183 behaviour).
+
+> **`+00:00` must be percent-encoded, or the 422 is your bug and not the server's.**
+> In a query string a literal `+` means a space, so
+> `?started_after=2026-04-01T00:00:00+00:00` reaches the server as
+> `2026-04-01T00:00:00 00:00`, fails to parse, and returns 422 - which reads exactly
+> like the timezone check misfiring on a correctly-formed bound. It cost real
+> debugging time. Send `%2B00%3A00`, or use `Z`, or pipe through `urlenc` as every
+> command in this section does:
+>
+> ```bash
+> curl -sS -o /dev/null -w '%{http_code}\n' -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+>   "$SYN_API_URL/executions?started_after=2026-04-01T00:00:00+00:00"     # 422 - the + became a space
+> curl -sS -o /dev/null -w '%{http_code}\n' -u "$SYN_API_USER:$SYN_API_PASSWORD" \
+>   "$SYN_API_URL/executions?started_after=2026-04-01T00:00:00%2B00%3A00" # 200
+> ```
+
+- [ ] Naive `started_after` returns 422 on `/executions`
+- [ ] Naive `started_after` returns 422 on `/sessions` - the two endpoints share the
+      bound type, so a difference between them is a finding on its own
+- [ ] Aware (`Z`) bound returns 200 on both
+- [ ] The 422 message names the fix
+- [ ] The percent-encoded `%2B00%3A00` form returns 200
+
+### 8.1.6 Reaching the dashboard in a browser without leaking the password
+
+The dashboard and the API sit behind the same Basic Auth at the gateway, and
+`http://admin:PASSWORD@localhost:8137` puts the password into browser history,
+proxy logs, screenshots and this run's transcript. It is not recoverable once
+written. Use a local reverse proxy that injects the header from the environment and
+serves unauthenticated on loopback, then point the browser at the proxy:
+
+```bash
+cat > /tmp/syn-auth-proxy.mjs <<'PROXY'
+// Injects the gateway's Basic Auth from $SYN_API_PASSWORD so the password never
+// appears in a URL. Loopback only; kill it when the run ends.
+import http from 'node:http'
+
+const UPSTREAM = { host: '127.0.0.1', port: 8137 }
+const AUTH =
+  'Basic ' +
+  Buffer.from(`${process.env.SYN_API_USER || 'admin'}:${process.env.SYN_API_PASSWORD}`).toString(
+    'base64'
+  )
+
+http
+  .createServer((req, res) => {
+    const headers = { ...req.headers, host: `${UPSTREAM.host}:${UPSTREAM.port}`, authorization: AUTH }
+    // Do NOT forward Accept-Encoding - see the gotcha below.
+    delete headers['accept-encoding']
+    const up = http.request({ ...UPSTREAM, path: req.url, method: req.method, headers }, (r) => {
+      res.writeHead(r.statusCode, r.headers)
+      r.pipe(res)
+    })
+    up.on('error', (e) => {
+      res.writeHead(502)
+      res.end(String(e))
+    })
+    req.pipe(up)
+  })
+  .listen(8138, '127.0.0.1', () => console.log('http://127.0.0.1:8138'))
+PROXY
+
+SYN_API_PASSWORD="$SYN_API_PASSWORD" node /tmp/syn-auth-proxy.mjs &
+curl -sS -o /dev/null -w 'proxy %{http_code}\n' http://127.0.0.1:8138/api/v1/workflows
+```
+
+Expected: `proxy 200`. Then navigate Playwright to `http://127.0.0.1:8138`.
+
+- [ ] Proxy returns 200 for a real API route (not just `/`, per `## 0.0` "A 200 from an SPA is not a health check")
+- [ ] The password appears in no URL, no screenshot and no log line from this run
+- [ ] Proxy killed at the end of the run
+
+> **The proxy gotcha that looks exactly like a broken dashboard build.** The gateway
+> has `gzip on`. If the proxy forwards the browser's `Accept-Encoding: gzip` but
+> strips or fails to preserve `Content-Encoding: gzip` on the way back, the browser
+> receives gzipped bytes labelled as plain text. The SPA's JS bundle then fails to
+> parse and the console reads:
+>
+> ```
+> Uncaught SyntaxError: Invalid or unexpected token
+> ```
+>
+> which is indistinguishable from a corrupt build, and sends you to rebuild an image
+> that was never broken. Two correct fixes, and the failure is in mixing them:
+> either **do not forward `Accept-Encoding`** (as above - upstream then sends plain
+> text and there is nothing to mislabel), or forward it and pass `Content-Encoding`
+> through untouched. Never strip one and keep the other.
+>
+> Confirm which you got before blaming the dashboard:
+>
+> ```bash
+> curl -sS -D- -o /dev/null http://127.0.0.1:8138/ | grep -i 'content-encoding'
+> ```
+>
+> Expected with the proxy above: no `content-encoding` header at all.
+
+---
+
 ## 9. Claude Code Plugin Validation
 
 Run this section **after Section 8** (so sessions and executions from Section 6 exist for
@@ -2657,6 +3426,12 @@ after fixes are applied. Include which runbook section(s) to re-run.
 
 | Area | Blocked By | Runbook Section |
 |------|------------|-----------------|
+| `/artifacts` count, time window and pagination (8.1.1-8.1.4) | #1204 - endpoint returns a bare array with no `total` and no `page` | 8.1 |
+| `/triggers` count and pagination | Not checked. `total` is `len(rows)`, truthful only because the endpoint is unpaged - a latent instance of the 8.1 shape that becomes a lie the moment a `limit` is added | 8.1 |
+| `/costs/sessions`, `/costs/executions` count and pagination | Not checked. Bare arrays capped at `limit<=200` with no `total` - the artifacts shape, not covered by #1204 | 8.1 |
+| `/workflows` time-window filtering | No `started_after` / `started_before` parameter exists on the endpoint, so 8.1.2 has nothing to assert | 8.1.2 |
+| `/workflows` global `order_by` | Known limitation: sorts the current page, not the collection (text-column ordering in the store). Not a regression - do not file | 8.1.3 |
+| Statuses with no dashboard chip (e.g. `interrupted`) | The UI renders a fixed five-status chip list; a status outside it can be neither displayed nor filtered. Report the count if seen, but the UI behaviour is unvalidated | 8.1.4 |
 |      |            |                 |
 
 ## Feature Matrix

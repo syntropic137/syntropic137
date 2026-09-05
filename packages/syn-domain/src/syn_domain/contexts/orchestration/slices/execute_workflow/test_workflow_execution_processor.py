@@ -110,6 +110,110 @@ class TestAgentRunnerSelection:
 
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
 
+    @pytest.mark.anyio
+    async def test_handle_run_agent_does_not_itself_mark_the_session_launched(self) -> None:
+        """Dispatching an agent is an intention, not evidence one existed.
+
+        This frame has decided to run an agent and nothing more; everything
+        between here and a process - a dead container, a missing binary, a
+        refused exec - can still falsify it. So it hands the observer down to
+        the stream, which can tell, and reports nothing itself.
+
+        The agent handler fails before touching the observer, standing in for
+        every one of those failures. Move the call back up here and this test
+        fails, which is the point: at that ordering the session is already
+        marked launched and no reader downstream can tell the difference
+        (#1047, #1065).
+        """
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+
+        session_mgr = MagicMock()
+        session_mgr.mark_launched = AsyncMock()
+        processor._session_managers["p-1"] = session_mgr
+
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider="claude"),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
+        session_mgr.mark_launched.assert_not_awaited()
+        # Handed down rather than called: the fact is still recordable, just
+        # not from here.
+        assert handler.handle.await_args.kwargs["on_launch"] is session_mgr.mark_launched
+
+    @pytest.mark.anyio
+    async def test_handle_run_agent_tolerates_missing_session_manager(self) -> None:
+        """No session manager registered for the phase (session tracking
+        disabled, repo=None) must not block agent dispatch.
+        """
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+
+        processor = _make_processor()
+        handler = MagicMock()
+        handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
+        processor._agent_handler = handler
+        processor._active_workspaces["p-1"] = MagicMock()
+        processor._active_envs["p-1"] = {}
+        processor._active_cmds["p-1"] = ["agent"]
+        # Deliberately no processor._session_managers["p-1"] entry.
+
+        phase = ExecutablePhase(
+            phase_id="p-1",
+            name="Phase 1",
+            order=1,
+            agent_config=AgentConfiguration(provider="claude"),
+            prompt_template="do it",
+        )
+
+        with pytest.raises(RuntimeError, match="stop after dispatch"):
+            await processor._handle_run_agent(
+                TodoItem(
+                    execution_id="exec-1",
+                    action=TodoAction.RUN_AGENT,
+                    phase_id="p-1",
+                    session_id="sess-1",
+                ),
+                phase,
+                MagicMock(workflow_id="wf-1"),
+            )
+
 
 @pytest.mark.unit
 class TestProcessorTermination:

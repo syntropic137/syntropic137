@@ -196,6 +196,21 @@ class SetupPhaseSecrets:
 
     repo_tokens: dict[str, str] = field(default_factory=dict)
     repositories: list[str] = field(default_factory=list)
+    clone_repos: bool = True
+    """Whether ``repositories`` are checked out, as opposed to merely
+    authenticated (#1187).
+
+    CREDENTIALS AND CHECKOUT ARE DIFFERENT NEEDS, and this field is what
+    separates them. Before it, naming a repo meant both: the only way to skip
+    the clone was to pass no repositories at all, which also dropped
+    ~/.git-credentials and the gh hosts.yml entry - and, one layer up, made
+    ``_resolve_github_app_token`` fall back to the first installation, the
+    exact multi-org misrouting #1129 fixed. A phase that talks to GitHub about
+    a repo it does not need on disk had no way to say so.
+
+    False therefore still resolves the installation, mints the token, writes
+    the per-repo credential entries and configures gh. It skips ``git clone``
+    and nothing else."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -207,6 +222,7 @@ class SetupPhaseSecrets:
         cls,
         *,
         repositories: list[str] | None = None,
+        clone_repos: bool = True,
         require_github: bool = True,
         include_codex_auth: bool = False,
     ) -> SetupPhaseSecrets:
@@ -220,6 +236,9 @@ class SetupPhaseSecrets:
         Args:
             repositories: Full GitHub URLs to clone. One token is fetched per
                 unique GitHub App installation covering these repos.
+            clone_repos: If False, the repos are credentialed but not checked
+                out (#1187). Pass the repos either way - dropping them to skip
+                the clone also drops the token routing they key.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -250,6 +269,7 @@ class SetupPhaseSecrets:
         return cls(
             repo_tokens=repo_tokens,
             repositories=repos,
+            clone_repos=clone_repos,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -268,6 +288,7 @@ class SetupPhaseSecrets:
         git_author_email: str = "test@example.com",
         repositories: list[str] | None = None,
         repo_tokens: dict[str, str] | None = None,
+        clone_repos: bool = True,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -281,6 +302,7 @@ class SetupPhaseSecrets:
             git_author_email: Git author email (default: "test@example.com")
             repositories: Optional list of repo URLs (no tokens fetched)
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
+            clone_repos: False to credential the repos without checking them out (#1187)
         """
         import os
 
@@ -293,6 +315,7 @@ class SetupPhaseSecrets:
         return cls(
             repo_tokens=repo_tokens or {},
             repositories=repositories or [],
+            clone_repos=clone_repos,
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -319,7 +342,8 @@ class SetupPhaseSecrets:
 
         if self.repositories:
             self._append_git_credentials(lines)
-            self._append_repo_clones(lines)
+            if self.clone_repos:
+                self._append_repo_clones(lines)
 
         return "\n".join(lines) + "\n"
 
@@ -395,6 +419,24 @@ class SetupPhaseSecrets:
         lines.append("")
         lines.append("# Clone repositories (ADR-058)")
         lines.append("mkdir -p /workspace/repos")
+        # NO HOOKS during setup (issue #1150). The workspace image composes a set
+        # of developer git hooks at /home/agent/.git-hooks, and every one of them
+        # begins `#!/usr/bin/env python3` while the image has no `python3` on PATH -
+        # only /opt/venv/bin/python3, which `env` never sees. So `post-checkout`
+        # fails and git exits 127 even though the tree landed:
+        #
+        #   $ git clone --depth 1 https://github.com/syntropic137/syntropic137 /tmp/c1
+        #   Cloning into '/tmp/c1'...
+        #   /usr/bin/env: 'python3': No such file or directory
+        #   CLONE_RC=127          # and /tmp/c1 is a complete checkout
+        #
+        # The script runs under `set -e`, so that 127 fails the whole setup phase
+        # and the execution never starts. Hooks are a developer convenience and
+        # have no business running in an ephemeral provisioning clone, so they are
+        # disabled for these commands rather than depended upon.
+        lines.append(
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null"
+        )
         # Submodules are frequently declared with the SSH spelling. The workspace has
         # no SSH key -- auth is an HTTPS installation token -- so those would fail, and
         # the transport pin below rejects them earlier still. Rewriting to HTTPS makes

@@ -6,6 +6,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
+import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,33 +69,22 @@ def _ref_response(ref: PhaseRefDetail) -> PhaseRefResponse:
     )
 
 
-class PhaseDefinition(BaseModel):
-    phase_id: str
-    name: str
-    order: int = 0
-    description: str | None = None
-    agent_type: str = ""
-    prompt_template: str | None = None
-    timeout_seconds: int = 300
-    allowed_tools: list[str] = Field(default_factory=list)
-    argument_hint: str | None = None
-    model: str | None = None
-    provider: str | None = None
-    # Stored since #1012, readable since #1013. `allow_delegation` is
-    # security-relevant -- it stages both agent auths -- so a caller must be
-    # able to see it.
-    allow_delegation: bool = False
-    claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
-    skills: list[PhaseRefResponse] = Field(default_factory=list)
-
-
 class WorkflowResponse(BaseModel):
     id: str
     name: str
     description: str | None = None
     workflow_type: str
     classification: str
-    phases: list[PhaseDefinition] = Field(default_factory=list)
+    phases: list[PhaseDefinitionResponse] = Field(default_factory=list)
+    """The phases as `_map_phases` built them, carried whole.
+
+    This used to be a second, route-local phase model that the endpoint
+    filled field by field from an already-complete `PhaseDefinitionResponse`.
+    Every phase field therefore had two build sites, and a field added to one
+    was silently dropped by the other -- which is exactly what happened to
+    `allow_delegation`/`claude_plugins`/`skills` (#1013) and then again to
+    `input_artifact_types`/`output_artifact_types` (#1176). Reusing the mapped
+    object removes the second site rather than adding a third field to it."""
     input_declarations: list[InputDeclarationModel] = Field(default_factory=list)
     created_at: str | None = None
     runs_count: int = 0
@@ -325,12 +315,51 @@ def _validate_phase_id(phase_id: str) -> str:
     return phase_id
 
 
+def _yaml_flow_list(values: list[str]) -> str:
+    """A flow list the emitter builds, not string concatenation.
+
+    Quoting each item and joining with ", " is not enough: a value that is a
+    perfectly safe standalone scalar can still restructure a FLOW LIST. `a,b`
+    reads back as `a,b` on its own and splits into two entries inside
+    `[a,b]`, so per-item quoting decided correctly and the surrounding
+    context still broke it. The emitter knows both.
+    """
+    return yaml.safe_dump(values, default_flow_style=True, width=10**9).strip().rstrip("\n")
+
+
 def _yaml_quote(value: str) -> str:
-    """Quote a YAML string value if it contains special characters."""
-    if _YAML_SPECIAL_RE.search(value):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+    """Quote a YAML string unless the bare form reads back as itself.
+
+    Special CHARACTERS are not the whole risk. A value made entirely of
+    ordinary characters can still change type: bare `null` parses as None and
+    erases the field, `123` becomes an int a string field then rejects, and
+    `true`/`no`/`on` become booleans. Those look nothing like injection while
+    reading the emitted file, which is why the character test missed them.
+
+    So the check is behavioural rather than syntactic: emit the bare form,
+    parse it, and quote unless it survives as the same string. That covers
+    every YAML scalar resolution rule without this function having to know
+    them.
+    """
+    if _YAML_SPECIAL_RE.search(value) or not _reads_back_as_itself(value):
+        # Delegate to the YAML emitter rather than hand-rolling the escape.
+        # A hand-written double-quoted scalar keeps PHYSICAL newlines, and
+        # YAML folds those to a single space -- so "A\nB" reinstalled as
+        # "A B". A NUL produced a document PyYAML refuses outright. The
+        # emitter knows every escape; this function only decides WHETHER.
+        #
+        # Emitted inside a one-item flow list and unwrapped, so there is no
+        # document-end marker to trim off a bare scalar dump.
+        return _yaml_flow_list([value])[1:-1]
     return value
+
+
+def _reads_back_as_itself(value: str) -> bool:
+    """Whether the bare scalar parses back to the identical string."""
+    try:
+        return yaml.safe_load(value) == value
+    except yaml.YAMLError:
+        return False
 
 
 # -- Export file builders -----------------------------------------------------
@@ -343,6 +372,14 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
     """
     frontmatter_lines: list[str] = []
 
+    # NOTHING REFUSED BY THE LOADER MAY BE EMITTED HERE. The frontmatter this
+    # writes is re-read by md_prompt_loader on install, so a key the loader
+    # rejects turns export -> reinstall into a hard failure.
+    #
+    # `max-tokens` is omitted: it was being emitted here while
+    # `PhaseYamlDefinition._reject_max_tokens` already refused it, so an
+    # exported phase carrying one could not be reinstalled. Fixed in the same
+    # pass as #1039 rather than left as a known open case of the same class.
     if phase.model:
         frontmatter_lines.append(f"model: {_yaml_quote(phase.model)}")
     if phase.argument_hint:
@@ -351,8 +388,6 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
         frontmatter_lines.append(f"allowed-tools: {','.join(phase.allowed_tools)}")
     if phase.timeout_seconds and phase.timeout_seconds != 300:
         frontmatter_lines.append(f"timeout-seconds: {phase.timeout_seconds}")
-    if phase.max_tokens is not None:
-        frontmatter_lines.append(f"max-tokens: {phase.max_tokens}")
 
     body = phase.prompt_template or ""
 
@@ -377,6 +412,71 @@ def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
     return lines
 
 
+def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The `agent:` block, in the spelling the packaged workflow YAML uses.
+
+    Emitted only when the phase actually declares something. A bare
+    `agent: {}` would be noise, and `provider: null` would assert a choice
+    the author never made.
+    """
+    entries: list[str] = []
+    if phase.provider:
+        entries.append(f"      provider: {_yaml_quote(phase.provider)}")
+    if phase.model:
+        entries.append(f"      model: {_yaml_quote(phase.model)}")
+    if phase.allow_delegation:
+        entries.append("      allow_delegation: true")
+    return ["    agent:", *entries] if entries else []
+
+
+def _yaml_ref_entry(key: str, ref: PhaseRefResponse) -> list[str]:
+    """One ref, in the spelling ITS loader accepts.
+
+    Skills and plugins are not symmetric and treating them as one shape
+    silently changed identities: `expand_skill_entry` reads `names:`, while
+    the plugin validator ignores `names` and derives the name from the source
+    basename -- so a plugin exported with `names: [custom]` reinstalled as
+    `bar`.
+
+    A ref known only as shorthand becomes a scalar entry. Writing
+    `- source: owner/repo@v1` with no `version` produced a mapping BOTH
+    reference models reject, so the package would not reinstall.
+
+    Extracted from `_yaml_ref_lines` to stay under the cognitive-complexity
+    threshold; the branching is inherent to the two loaders differing.
+    """
+    if ref.source_url:
+        lines = [f"      - source: {_yaml_quote(ref.source_url)}"]
+        # Only when the author actually overrode it. Emitting a name that was
+        # DERIVED from the source basename makes the loader reconstruct the
+        # ref with `name_overridden=True` -- changing provenance the phase
+        # never declared. When it was not overridden the loader derives the
+        # same name from the source anyway.
+        if ref.name and ref.name_overridden:
+            plural = key == "skills"
+            spelling = "names" if plural else "name"
+            value = _yaml_flow_list([ref.name]) if plural else _yaml_quote(ref.name)
+            lines.append(f"        {spelling}: {value}")
+        if ref.version:
+            lines.append(f"        version: {_yaml_quote(ref.version)}")
+        return lines
+    if ref.raw:
+        return [f"      - {_yaml_quote(ref.raw)}"]
+    # Neither: unnameable. Dropping it is honest; `source: null` would export
+    # a reference that cannot resolve.
+    return []
+
+
+def _yaml_ref_lines(key: str, refs: list[PhaseRefResponse]) -> list[str]:
+    """Plugin/skill refs, never joined into `source/name@version`.
+
+    #1014 established that joining corrupts a ref whose source already ends
+    in the repo name -- it reparses to a different repository.
+    """
+    entries = [line for ref in refs for line in _yaml_ref_entry(key, ref)]
+    return [f"    {key}:", *entries] if entries else []
+
+
 def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """Build the phase entry lines for a single phase in workflow.yaml."""
     pid = _validate_phase_id(phase.phase_id)
@@ -389,9 +489,39 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
     lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.input_artifact_types:
+        lines.append(f"    input_artifacts: {_yaml_flow_list(list(phase.input_artifact_types))}")
     if phase.output_artifact_types:
-        artifacts = ", ".join(phase.output_artifact_types)
-        lines.append(f"    output_artifacts: [{artifacts}]")
+        lines.append(f"    output_artifacts: {_yaml_flow_list(list(phase.output_artifact_types))}")
+    # Everything below was silently dropped (#1015). Export emitted 6 of 18
+    # fields, so export -> reinstall produced a DIFFERENT workflow rather than
+    # an incomplete one: no tool scoping, no provider, no timeouts, no skills.
+    #
+    # Each guarded on presence, never emitted as an empty value: writing
+    # `allowed_tools: []` would turn "inherits the default" into "explicitly
+    # declares nothing", which reinstalls differently again.
+    if phase.timeout_seconds is not None:
+        lines.append(f"    timeout_seconds: {phase.timeout_seconds}")
+    # EXPORT PRESERVES WHAT THE SCHEMA CAN EXPRESS, even when the loader would
+    # refuse it (#1039). Omitting a refused declaration LAUNDERS it: a stored
+    # `execution_type: human_in_loop` phase, dropped on export, reinstalls as
+    # `sequential` and then runs - turning a template this platform refuses
+    # into one it happily executes, with the human gate its author believed in
+    # silently gone. An uninstallable package is the better failure, because it
+    # names the problem instead of hiding it. The same holds for a codex phase
+    # carrying `allowed_tools`.
+    #
+    # `max_tokens` is the ONE exception, and it is a different case: it is not
+    # in the authoring schema at all, so there is no spelling that round-trips.
+    # It can only arrive via the untyped JSON create path (#1015 follow-up).
+    # Nothing that CAN be expressed is dropped here.
+    if phase.argument_hint:
+        lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
+    if phase.allowed_tools:
+        lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
+    lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
+    lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
 
 
@@ -588,28 +718,14 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         description=detail.description,
         workflow_type=detail.workflow_type,
         classification=detail.classification,
-        phases=[
-            PhaseDefinition(
-                phase_id=p.phase_id,
-                name=p.name,
-                order=p.order,
-                description=p.description,
-                agent_type=p.agent_type,
-                prompt_template=p.prompt_template,
-                timeout_seconds=p.timeout_seconds,
-                allowed_tools=list(p.allowed_tools),
-                argument_hint=p.argument_hint,
-                model=p.model,
-                provider=p.provider,
-                allow_delegation=p.allow_delegation,
-                # Already PhaseRefResponse here: `get_workflow()` mapped the
-                # read model at the first build site, so converting again
-                # would be a second translation of the same value.
-                claude_plugins=list(p.claude_plugins),
-                skills=list(p.skills),
-            )
-            for p in detail.phases
-        ],
+        # `get_workflow()` already mapped these through `_map_phases`. Copying
+        # them field by field here is what lost `input_artifact_types` and
+        # `output_artifact_types` (#1176) -- along with `execution_type` and
+        # `max_tokens`, unreported but dropped by the same copy -- and
+        # `allow_delegation`, plugins and skills before that (#1013): the copy
+        # is a second build site nobody remembers to update. Pass the mapped
+        # phases through instead.
+        phases=list(detail.phases),
         input_declarations=[
             InputDeclarationModel(
                 name=d.name,

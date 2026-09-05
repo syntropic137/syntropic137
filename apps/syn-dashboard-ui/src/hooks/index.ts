@@ -16,7 +16,6 @@ export type {
   UseExecutionStreamResult,
 } from './useExecutionStream'
 export { useLiveTimer } from './useLiveTimer'
-export { usePolling } from './usePolling'
 export { useSessionData, type UseSessionDataResult } from './useSessionData'
 export { useSessionList, type UseSessionListResult } from './useSessionList'
 export { useTriggerActions, type UseTriggerActionsResult } from './useTriggerActions'

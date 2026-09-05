@@ -5,6 +5,14 @@ You have both documents:
 - `artifacts/input/research-and-plan.md` - the plan you drafted
 - `artifacts/input/cross-model-review.md` - a different model's review of it
 
+> **Where to find that input.** The durable location is the directory
+> `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
+> `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
+> today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
+> a prompt that reads only the flat path will silently receive nothing once it
+> goes. Look in the directory first and fall back to the flat file. If neither
+> exists, stop and say so rather than proceeding on no input.
+
 ## The original problem
 
 $ARGUMENTS

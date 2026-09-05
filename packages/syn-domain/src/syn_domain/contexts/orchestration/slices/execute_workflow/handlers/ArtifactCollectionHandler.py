@@ -63,7 +63,8 @@ class ArtifactCollectionHandler:
         workflow_id: str,
         session_id: str,
         phase_name: str,
-        output_artifact_type: str,
+        output_artifact_types: tuple[str, ...],
+        last_agent_message: str | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
 
@@ -73,7 +74,14 @@ class ArtifactCollectionHandler:
             workflow_id: Workflow ID
             session_id: Session ID
             phase_name: Phase name for artifact metadata
-            output_artifact_type: Type of output artifact
+            output_artifact_types: What the phase's definition declares it
+                produces. Empty means it declared nothing and may legitimately
+                produce nothing; non-empty and unproduced is a failure the
+                collector raises on (#1167).
+            last_agent_message: The last thing this phase's agent said on its
+                stream. Used only when a file it wrote turns out to be empty,
+                as the fallback that stops a lost write failing the whole
+                execution (#1195).
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
@@ -87,7 +95,8 @@ class ArtifactCollectionHandler:
             execution_id=todo.execution_id,
             session_id=session_id,
             phase_name=phase_name,
-            output_artifact_type=output_artifact_type,
+            output_artifact_types=output_artifact_types,
+            last_agent_message=last_agent_message,
         )
 
         command = ArtifactsCollectedCommand(

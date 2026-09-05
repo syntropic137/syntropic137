@@ -96,6 +96,61 @@ def _one_repo() -> SetupPhaseSecrets:
     )
 
 
+def _isolated_git_env(home: Path) -> dict[str, str]:
+    """A git environment that cannot reach outside the test, or block on input.
+
+    `GIT_TERMINAL_PROMPT=0` and an askpass that always fails are not belt and
+    braces - without them `git credential fill` for a path no helper matches
+    falls through to PROMPTING. On a machine with no terminal that fails fast
+    and the test passes; in an agent workspace it hung a full unit run at 77%
+    until the phase interrupted it and could not certify anything (#1136).
+
+    A unit test must not be able to wait on a human, whatever is attached to
+    its stdin.
+    """
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(home),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
+    }
+
+
+class TestHooksAreDisabledForSetupClones:
+    """The generated script must not let a workspace git hook fail the clone (#1150).
+
+    The image composes developer hooks at /home/agent/.git-hooks, all beginning
+    `#!/usr/bin/env python3`, and has no python3 on PATH. Verified in the real
+    image on the real agent network:
+
+        $ git clone --depth 1 <repo> /tmp/a          -> rc=127   (tree landed)
+        $ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+          GIT_CONFIG_VALUE_0=/dev/null git clone ... -> rc=0     TREE_OK
+
+    The script runs under `set -e`, so that 127 failed the whole setup phase and
+    the execution never started.
+    """
+
+    def test_hooks_are_disabled_before_any_clone(self) -> None:
+        secrets = SetupPhaseSecrets(repositories=["https://github.com/org/repo-a"])
+        script = secrets.build_setup_script()
+
+        assert "GIT_CONFIG_KEY_0=core.hooksPath" in script
+        hooks_at = script.index("core.hooksPath")
+        clone_at = script.index("git clone")
+        assert hooks_at < clone_at, "hooks must be disabled BEFORE the first clone"
+
+    def test_it_is_exported_so_submodule_commands_inherit_it(self) -> None:
+        """`git submodule update` re-enters git and would run the same hooks."""
+        secrets = SetupPhaseSecrets(repositories=["https://github.com/org/repo-a"])
+        script = secrets.build_setup_script()
+
+        line = next(ln for ln in script.splitlines() if "core.hooksPath" in ln)
+        assert line.strip().startswith("export "), line
+
+
 class TestGeneratedScriptBehavior:
     def test_script_succeeds_and_clones_then_inits_submodules(self, harness) -> None:
         run = harness(_one_repo())
@@ -252,7 +307,7 @@ class TestCredentialsAreScopedToTheirRepo:
     def _apply_credential_lines(tmp_path: Path, script: str) -> dict[str, str]:
         home = tmp_path / "home"
         home.mkdir()
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+        env = _isolated_git_env(home)
         lines = [
             ln
             for ln in script.splitlines()
@@ -311,7 +366,7 @@ class TestSshSubmoduleFormsAreRewritten:
     def test_both_ssh_spellings_rewrite_to_https(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir()
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
+        env = _isolated_git_env(home)
         secrets = SetupPhaseSecrets(
             repositories=["https://github.com/org/repo-a"],
             repo_tokens={"https://github.com/org/repo-a": "tok-a"},
@@ -337,3 +392,93 @@ class TestSshSubmoduleFormsAreRewritten:
         ).stdout.split()
         assert "git@github.com:" in got
         assert "ssh://git@github.com/" in got
+
+
+class TestCloneReposFalseSkipsOnlyTheCheckout:
+    """A phase can be credentialed for a repo without being given a copy of it.
+
+    Issue #1187: `open_pr` reads one artifact, checks a remote ref and calls
+    `gh pr create`. It was paying a full clone plus recursive submodule init
+    for that, under the shortest timeout in the workflow, and timing out in
+    roughly a third of runs. Before `clone_repos`, the only way to skip the
+    clone was to pass no repositories at all -- which also dropped
+    ~/.git-credentials and the gh hosts.yml entry, i.e. the credential the
+    phase's entire job depends on.
+
+    So the claim under test is a CONJUNCTION, and both halves matter equally:
+    the checkout does not happen, AND everything else still does. A change
+    that satisfied only the first half would leave the phase unable to open
+    a PR at all, which is worse than the timeout it replaced.
+
+    These run the real script rather than reading the flag back, because "the
+    flag is set" and "git was never asked to clone" are different claims and
+    only the second one is the bug.
+    """
+
+    def test_git_is_never_asked_to_clone_but_is_still_asked_to_store_credentials(
+        self, harness, tmp_path: Path
+    ) -> None:
+        """Both runs share one argv log, so the counts below are cumulative.
+
+        Ordering is load-bearing and deliberate: the no-clone script runs
+        FIRST against an empty log, so its zero cannot be an artifact of the
+        clone guard finding an existing directory. The default script then
+        runs against the same log and takes the count to one. That contrast
+        is the point -- a `clone_repos` that changed nothing would leave the
+        first assertion reading 1, and asserting only the second would pass
+        just as well with the field deleted.
+        """
+        no_clone = harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert no_clone.proc.returncode == 0, no_clone.proc.stderr
+        assert no_clone.count("CALL:clone") == 0
+        assert no_clone.count("CALL:submodule GIT_ALLOW_PROTOCOL=https") == 0
+        # Not merely "git was not asked to clone" -- git WAS asked to do the
+        # credential setup, in the same run. Without this the test would pass
+        # against a script that did nothing at all.
+        assert no_clone.count("CALL:other") > 0
+
+        with_clone = harness(_one_repo())
+        assert with_clone.count("CALL:clone") == 1
+
+    def test_the_gh_credential_the_phase_actually_uses_is_still_written(
+        self, harness, tmp_path: Path
+    ) -> None:
+        """`gh pr create` reads hosts.yml. Skipping the clone must not skip this."""
+        run = harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert run.proc.returncode == 0, run.proc.stderr
+
+        hosts = tmp_path / "home" / ".config" / "gh" / "hosts.yml"
+        assert hosts.exists(), "gh would have no credential for this repo"
+        assert "tok-a" in hosts.read_text()
+
+        credentials = tmp_path / "home" / ".git-credentials"
+        assert credentials.exists()
+        assert "github.com/org/repo-a" in credentials.read_text()
+
+    def test_no_repos_directory_is_created(self, harness, tmp_path: Path) -> None:
+        """The observable consequence, checked on the filesystem.
+
+        `mkdir -p /workspace/repos` lives inside the clone block, so a
+        no-clone workspace should not have the directory at all. Asserted
+        against the rewritten workspace root rather than the script text.
+        """
+        harness(
+            SetupPhaseSecrets(
+                repositories=["https://github.com/org/repo-a"],
+                repo_tokens={"https://github.com/org/repo-a": "tok-a"},
+                clone_repos=False,
+            )
+        )
+        assert not (tmp_path / "ws" / "repos").exists()

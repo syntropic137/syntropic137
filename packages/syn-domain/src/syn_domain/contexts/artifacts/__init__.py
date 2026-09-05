@@ -43,6 +43,7 @@ from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
 )
 from syn_domain.contexts.artifacts.slices.create_artifact import (
+    MIN_ARTIFACT_CONTENT_LENGTH,
     ArtifactCreatedEvent,
     CreateArtifactCommand,
 )
@@ -58,6 +59,7 @@ from syn_domain.contexts.artifacts.slices.upload_artifact import (
 )
 
 __all__ = [
+    "MIN_ARTIFACT_CONTENT_LENGTH",
     "ArtifactAggregate",
     "ArtifactContentStoragePort",
     "ArtifactCreatedEvent",

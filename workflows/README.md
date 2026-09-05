@@ -97,7 +97,7 @@ phases:
   - id: phase-1
     name: Research Phase
     order: 1
-    execution_type: sequential  # sequential|parallel|human_in_loop
+    execution_type: sequential  # the only implemented value; may be omitted
     argument_hint: "[topic]"
     model: sonnet               # Per-phase model override (optional)
     timeout_seconds: 300

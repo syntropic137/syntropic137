@@ -53,7 +53,11 @@ describe("readSkillTree limits", () => {
     }
 
     expect(() => readSkillTree(dir)).toThrow(/10000|10,000|files/i);
-  });
+    // 30s, not the 5s default: writing 10,001 files synchronously is slow and
+    // load-sensitive, and it timed out under `just qa-ci` while the rest of the
+    // suite was running. The assertion is about the cap, not about speed, so a
+    // longer budget removes the flake without weakening what is tested.
+  }, 30_000);
 
   it("refuses a tree larger than the API byte cap without reading the big file", () => {
     fs.writeFileSync(path.join(dir, "SKILL.md"), "# hi");

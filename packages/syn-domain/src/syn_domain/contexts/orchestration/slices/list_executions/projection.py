@@ -12,6 +12,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping
+    from datetime import datetime
+
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
@@ -19,6 +22,7 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
+from syn_domain.pagination import Page, matches_search, paginate, within_window
 
 
 class WorkflowExecutionListProjection(AutoDispatchProjection):
@@ -251,6 +255,50 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
+
+    async def page(
+        self,
+        *,
+        statuses: Collection[str] | None = None,
+        started_after: datetime | None = None,
+        started_before: datetime | None = None,
+        search: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> Page[WorkflowExecutionSummary]:
+        """One page of executions, with the total and status facets it came from.
+
+        `total` used to come from a store-level `COUNT(*)` while the rows were
+        filtered in Python (#1119). The two spelled the same predicate twice and
+        agreed only by luck: adding the time window here would have left `total`
+        counting the whole collection, so a 24-hour view reported the size of
+        all history. Rows, total and facets now come from one filtered
+        sequence and cannot drift.
+
+        `search` matches case-insensitively against the execution id, the
+        workflow id and the workflow name.
+        """
+
+        def base(record: Mapping[str, object]) -> bool:
+            return within_window(
+                record.get("started_at"), started_after, started_before
+            ) and matches_search(
+                search,
+                record.get("workflow_execution_id"),
+                record.get("workflow_id"),
+                record.get("workflow_name"),
+            )
+
+        return paginate(
+            await self._store.get_all(self.PROJECTION_NAME),
+            base_predicate=base,
+            status_of=lambda r: str(r.get("status") or ""),
+            statuses=statuses,
+            sort_key=lambda r: str(r.get("started_at") or ""),
+            to_row=WorkflowExecutionSummary.from_dict,
+            offset=offset,
+            limit=limit,
+        )
 
     async def get_all(
         self,

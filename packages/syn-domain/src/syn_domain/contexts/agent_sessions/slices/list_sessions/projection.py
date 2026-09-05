@@ -10,14 +10,22 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection
 
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
+)
+from syn_domain.pagination import (
+    Page,
+    ProjectionRecord,
+    matches_search,
+    paginate,
+    within_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,36 +51,6 @@ def _calculate_duration(
         return (completed_at - started_at).total_seconds()
     except (ValueError, TypeError):
         return None
-
-
-def _coerce_iso_datetime(value: object) -> datetime | None:
-    """Parse an ISO 8601 string or accept an existing datetime; return None on failure.
-
-    Handles the trailing ``Z`` suffix (RFC 3339) which ``fromisoformat`` rejects
-    on Python <3.11.
-    """
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _within_window(
-    record: Mapping[str, object],
-    after: datetime | None,
-    before: datetime | None,
-) -> bool:
-    """True if ``record['started_at']`` is within [after, before]."""
-    started = _coerce_iso_datetime(record.get("started_at"))
-    if started is None:
-        return False
-    if after is not None and started < after:
-        return False
-    return not (before is not None and started > before)
 
 
 def _build_query_filters(
@@ -105,7 +83,9 @@ def _apply_post_filters(
         allowed = set(statuses)
         data = [d for d in data if d.get("status") in allowed]
     if started_after is not None or started_before is not None:
-        data = [d for d in data if _within_window(d, started_after, started_before)]
+        data = [
+            d for d in data if within_window(d.get("started_at"), started_after, started_before)
+        ]
     return data[offset : offset + limit] if limit else data[offset:]
 
 
@@ -168,6 +148,13 @@ def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None
         existing["num_turns"] = event_data["num_turns"]
     if "duration_api_ms" in event_data:
         existing["duration_api_ms"] = event_data["duration_api_ms"]
+    launch = AgentLaunch.read(event_data.get("agent_launch"))
+    if launch is not AgentLaunch.UNKNOWN:
+        # A completion event written before this field existed says nothing,
+        # so it must leave the row as it found it. Overwriting with UNKNOWN
+        # would be harmless today and wrong the moment a live AgentLaunched
+        # has already landed on the row (#1047, #1065).
+        existing["agent_launch"] = launch.value
 
 
 def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
@@ -206,7 +193,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 3  # Bumped: unified token counting - cache tokens (#695)
+    VERSION = 4  # Bumped: agent_launch fact for never-started detection (#1047, #1065)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -248,8 +235,25 @@ class SessionListProjection(AutoDispatchProjection):
             parent_session_id=event_data.get("parent_session_id"),
             root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
+            agent_launch=AgentLaunch.UNKNOWN,
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
+
+    async def on_agent_launched(self, event_data: dict) -> None:
+        """Handle AgentLaunched - an agent process exists for this session.
+
+        Makes the fact visible while the session is still running. The
+        durable answer arrives again on SessionCompleted, which is what a
+        terminal session is read from (#1047, #1065).
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        if existing:
+            existing["agent_launch"] = AgentLaunch.LAUNCHED.value
+            await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_operation_recorded(self, event_data: dict) -> None:
         """Handle OperationRecorded - update token counts and store operation."""
@@ -330,6 +334,19 @@ class SessionListProjection(AutoDispatchProjection):
         data = await self._store.get_all(self.PROJECTION_NAME)
         return [SessionSummary.from_dict(d) for d in data]
 
+    async def get_by_id(self, session_id: str) -> SessionSummary | None:
+        """One session by its full id, or None.
+
+        The detail endpoint used to read 10000 sessions and scan them for one
+        id, which meant the session detail page stopped working past the
+        ten-thousandth row -- the same "a cap decides what exists" defect as
+        the unpaged list surfaces (#1159, #1204), on the path a client falls
+        back to when the list cannot reach far enough. The store is keyed by
+        id.
+        """
+        data = await self._store.get(self.PROJECTION_NAME, session_id)
+        return SessionSummary.from_dict(data) if data else None
+
     async def get_by_workflow(self, workflow_id: str) -> list[SessionSummary]:
         """Get sessions for a specific workflow."""
         data = await self._store.query(
@@ -380,6 +397,59 @@ class SessionListProjection(AutoDispatchProjection):
             data = _apply_post_filters(data, statuses, started_after, started_before, offset, limit)
 
         return [SessionSummary.from_dict(d) for d in data]
+
+    async def page(
+        self,
+        *,
+        workflow_id: str | None = None,
+        parent_session_id: str | None = None,
+        statuses: Collection[str] | None = None,
+        started_after: datetime | None = None,
+        started_before: datetime | None = None,
+        search: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> Page[SessionSummary]:
+        """One page of sessions, with the total and status facets it came from.
+
+        ``query`` answers "which rows", which was enough while the endpoint had
+        no paging: it capped at 200 and there was nowhere to go from there, so
+        roughly a day of history was reachable and the rest was not addressable
+        at any parameter setting. Paging needs a total counted over the same
+        predicate as the rows, which is what this returns.
+
+        Only the equality filters the store can express are pushed down.
+        ``status`` deliberately is NOT, even though the store could: the facet
+        tally has to see every status the rest of the query matched, and a
+        store-side status filter would leave it able to report only the one
+        already selected.
+
+        ``search`` matches case-insensitively against the session id and the
+        workflow id.
+        """
+        filters = _build_query_filters(workflow_id, None, None, parent_session_id)
+
+        def base(record: ProjectionRecord) -> bool:
+            return within_window(
+                record.get("started_at"), started_after, started_before
+            ) and matches_search(search, record.get("id"), record.get("workflow_id"))
+
+        return paginate(
+            await self._store.query(
+                self.PROJECTION_NAME,
+                filters=filters if filters else None,
+                order_by="-started_at",
+                limit=None,
+                offset=0,
+            ),
+            base_predicate=base,
+            status_of=lambda r: str(r.get("status") or ""),
+            statuses=statuses,
+            sort_key=lambda r: str(r.get("started_at") or ""),
+            to_row=SessionSummary.from_dict,
+            offset=offset,
+            limit=limit,
+        )
 
     async def reconcile_orphaned(
         self,

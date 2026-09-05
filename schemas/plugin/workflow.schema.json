@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.27.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.28.0/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -33,6 +33,23 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "enum": [
+                "read-only",
+                "workspace-write",
+                "full-access"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sandbox"
         },
         "allow_delegation": {
           "default": false,
@@ -256,6 +273,11 @@
           },
           "title": "Allowed Tools",
           "type": "array"
+        },
+        "clone_repos": {
+          "default": true,
+          "title": "Clone Repos",
+          "type": "boolean"
         },
         "argument_hint": {
           "anyOf": [

@@ -7,7 +7,11 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
 from typing import Any
 
-from syn_shared.agents import AgentProvider, resolve_phase_model
+from syn_shared.agents import (
+    DEFAULT_PHASE_SANDBOX,
+    AgentProvider,
+    resolve_phase_model,
+)
 
 
 class ExecutionStatus(StrEnum):
@@ -62,6 +66,11 @@ class AgentConfiguration:
     temperature: float = 0.7
     timeout_seconds: int = 300
     allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
+    # How much authority this phase's agent process gets. Steers codex only;
+    # claude scopes through allowed_tools. The command builder maps it to the
+    # harness flag. Defaults to DEFAULT_PHASE_SANDBOX, currently the MOST
+    # permissive level as a stopgap - see PhaseSandbox (#1157, #1161, #1167).
+    sandbox: str = DEFAULT_PHASE_SANDBOX
     # When true, both agent auths are staged so this phase's primary agent may
     # delegate one-shot to the other CLI. Default false = single-provider isolation.
     allow_delegation: bool = False

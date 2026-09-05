@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
     SessionListProjection,
 )
@@ -246,6 +247,138 @@ class TestSessionListProjection:
         result = await mock_store.get("session_summaries", "session-phase")
         assert result is not None
         assert result["phase_id"] == "phase-123"
+
+    @pytest.mark.asyncio
+    async def test_on_session_started_claims_nothing_about_the_agent(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """A freshly started session knows nothing yet, and must say so.
+
+        UNKNOWN rather than "not launched": at SessionStarted the process has
+        not been attempted, so a negative here would be a claim the row has
+        no basis for, and the read path would turn it into "this session never
+        started an agent" (#1047, #1065).
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-not-launched",
+                "workflow_id": "workflow-x",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-not-launched")
+        assert result is not None
+        assert result["agent_launch"] == AgentLaunch.UNKNOWN.value
+
+    @pytest.mark.asyncio
+    async def test_on_agent_launched_survives_from_dict(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """on_agent_launched must persist through to the SessionSummary the
+        read path actually returns, not just the raw store row - this is the
+        exact "value written correctly, dropped one hop later" trap the fix
+        must not reintroduce (#1047, #1065): the consumer under test here is
+        ``SessionSummary.from_dict`` via ``projection.get_all()``, not the
+        projection dict directly.
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-launched",
+                "workflow_id": "workflow-y",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        await projection.on_agent_launched({"session_id": "session-launched"})
+
+        summaries = await projection.get_all()
+        summary = next(s for s in summaries if s.id == "session-launched")
+        assert summary.agent_launch is AgentLaunch.LAUNCHED
+
+    @pytest.mark.asyncio
+    async def test_completion_carries_the_launch_fact_onto_the_row(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """A rebuilt projection gets the answer from SessionCompleted alone.
+
+        On a replay the AgentLaunched event may be ordered before this one,
+        after it, or - for a session whose launch write never landed - not be
+        in the stream at all. SessionCompleted is on every terminal path, so
+        it is what the row must be able to rely on (#1065).
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-completed-launched",
+                "workflow_id": "workflow-z",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        await projection.on_session_completed(
+            {
+                "session_id": "session-completed-launched",
+                "status": "failed",
+                "completed_at": "2025-12-04T01:05:00.000000Z",
+                "total_tokens": 0,
+                "agent_launch": AgentLaunch.LAUNCHED.value,
+            }
+        )
+
+        summaries = await projection.get_all()
+        summary = next(s for s in summaries if s.id == "session-completed-launched")
+        assert summary.agent_launch is AgentLaunch.LAUNCHED
+
+    @pytest.mark.asyncio
+    async def test_a_completion_from_before_the_field_overwrites_nothing(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """Replaying the archive must leave rows saying "unknown", not "no".
+
+        Every SessionCompleted written before this change has no
+        ``agent_launch`` key. Reading absence as a negative is what relabelled
+        the entire session history as never-started on the next rebuild, and
+        it is silent: the projection rebuilds cleanly and every row lies
+        (#1065).
+        """
+        await projection.on_session_started(
+            {
+                "session_id": "session-archive-row",
+                "workflow_id": "workflow-z",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+        await projection.on_agent_launched({"session_id": "session-archive-row"})
+
+        await projection.on_session_completed(
+            {
+                "session_id": "session-archive-row",
+                "status": "failed",
+                "completed_at": "2025-12-04T01:05:00.000000Z",
+                "total_tokens": 0,
+            }
+        )
+
+        summaries = await projection.get_all()
+        summary = next(s for s in summaries if s.id == "session-archive-row")
+        assert summary.agent_launch is AgentLaunch.LAUNCHED
+
+    @pytest.mark.asyncio
+    async def test_on_agent_launched_is_noop_for_unknown_session(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """on_agent_launched must not create a row for a session it hasn't
+        seen SessionStarted for yet - mirrors the guard already used by
+        on_operation_recorded/on_session_completed.
+        """
+        await projection.on_agent_launched({"session_id": "never-seen"})
+
+        result = await mock_store.get("session_summaries", "never-seen")
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_on_operation_recorded_accumulates_tokens(
@@ -497,6 +630,61 @@ class TestSessionSummaryToDict:
         result = summary.to_dict()
         assert result["started_at"] is None
         assert result["completed_at"] is None
+
+    @pytest.mark.parametrize("launch", [AgentLaunch.LAUNCHED, AgentLaunch.NOT_LAUNCHED])
+    def test_agent_launch_round_trips_through_to_dict_and_from_dict(
+        self, launch: AgentLaunch
+    ) -> None:
+        """Both decisive values must survive to_dict -> from_dict.
+
+        This is the exact hop a field gets silently dropped at (#1047, #1065),
+        and the default (UNKNOWN) would round-trip even if the field were
+        never wired in at all - so only the two values that actually license a
+        statement to a user are asserted here.
+        """
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary,
+        )
+
+        summary = SessionSummary(
+            id="test-launched",
+            workflow_id="wf-launched",
+            agent_type="claude",
+            status="failed",
+            total_tokens=0,
+            started_at=None,
+            completed_at=None,
+            agent_launch=launch,
+        )
+
+        round_tripped = SessionSummary.from_dict(summary.to_dict())
+        assert round_tripped.agent_launch is launch
+
+    def test_a_row_without_the_field_reads_as_unknown(self) -> None:
+        """The archive: rows persisted before this field existed.
+
+        ``from_dict`` sees no key at all and must not invent a negative. It
+        did once - the whole session archive came back as never-started on the
+        next projection rebuild, because the default sat on the wrong side of
+        "we do not know" (#1065).
+        """
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary,
+        )
+
+        stored = SessionSummary(
+            id="test-archive",
+            workflow_id="wf-archive",
+            agent_type="claude",
+            status="failed",
+            total_tokens=0,
+            started_at=None,
+            completed_at=None,
+            agent_launch=AgentLaunch.LAUNCHED,
+        ).to_dict()
+        del stored["agent_launch"]
+
+        assert SessionSummary.from_dict(stored).agent_launch is AgentLaunch.UNKNOWN
 
 
 # ---------------------------------------------------------------------------

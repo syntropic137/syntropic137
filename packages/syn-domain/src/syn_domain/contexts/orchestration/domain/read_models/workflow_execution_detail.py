@@ -7,6 +7,10 @@ at the API boundary from the execution_cost projection.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    BranchObservation,
+)
+
 
 @dataclass(frozen=True)
 class PhaseExecutionDetail:
@@ -45,8 +49,14 @@ class PhaseExecutionDetail:
     total_tokens: int = 0
     """Total tokens used."""
 
-    duration_seconds: float = 0.0
-    """Duration of phase execution."""
+    duration_seconds: float | None = None
+    """Seconds this phase took, or ``None`` when nothing has measured it yet.
+
+    Mirrors ``PhaseDetail.duration_seconds`` in the projection that writes this
+    read model: unknown must stay distinguishable from a measured zero all the
+    way to the API boundary, which is the only place that can decide what to
+    show for a phase still in flight.
+    """
 
     started_at: datetime | str | None = None
     """When the phase started."""
@@ -56,6 +66,18 @@ class PhaseExecutionDetail:
 
     error_message: str | None = None
     """Error message if phase failed."""
+
+    observed_branches: tuple[BranchObservation, ...] | None = None
+    """How this failed phase's branches stood when it died (#1200).
+
+    THREE-VALUED, and the API boundary passes all three through unchanged:
+    records are readings taken from git, `()` means the workspace was read and
+    no branch differs from how the phase found it, and `None` means nothing
+    could read it - including every phase that did not fail and every event
+    written before this field existed. A phase whose branch moved and one whose
+    repositories are exactly as it found them are different incidents;
+    flattening the empties would merge them again.
+    """
 
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
@@ -84,6 +106,11 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
+            "observed_branches": (
+                None
+                if self.observed_branches is None
+                else [w.model_dump() for w in self.observed_branches]
+            ),
         }
 
     @classmethod
@@ -107,10 +134,11 @@ class PhaseExecutionDetail:
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
-            duration_seconds=data.get("duration_seconds", 0.0),
+            duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
+            observed_branches=_observed_branches(data.get("observed_branches")),
         )
 
 
@@ -221,3 +249,17 @@ class WorkflowExecutionDetail:
             "error_message": self.error_message,
             "repos": list(self.repos),
         }
+
+
+def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
+    """Rebuild the branch readings a projection stored, keeping None as None.
+
+    The store round-trips these as plain data, so this is the hop where they
+    become the value object again - and the hop where a defaulted `[]` would
+    turn "nobody looked" into "looked and nothing had changed" (#1200).
+    Anything that is not a list is treated as absent: a malformed row is not a
+    reading of a remote either.
+    """
+    if not isinstance(stored, list):
+        return None
+    return tuple(BranchObservation.model_validate(entry) for entry in stored)

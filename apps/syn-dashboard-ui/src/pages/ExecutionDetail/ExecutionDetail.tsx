@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { CheckCircle2, DollarSign, FileText, Play, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, DollarSign, FileText, Play, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import {
@@ -16,6 +16,7 @@ import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
 import type { ExecutionDetailResponse } from '../../types'
+import { executionTokenTotals } from '../../utils/executionTokens'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
@@ -49,6 +50,15 @@ function ReposPanel({ repos }: { repos: string[] }) {
   )
 }
 
+/**
+ * Per-model costs summed across the phases.
+ *
+ * This is the only per-model source there is: `ExecutionDetailResponse` has no
+ * execution-level `cost_by_model`, and the domain leaves a running phase's map
+ * empty, so mid-run this accounts for less than `total_cost_usd` -- often for
+ * nothing at all. The card is given the execution's own total alongside it and
+ * reconciles the two; do not treat this sum as the execution's cost.
+ */
 function aggregateCostByModel(phases: Phase[]): Record<string, string> {
   const totals = new Map<string, number>()
   for (const phase of phases) {
@@ -61,7 +71,33 @@ function aggregateCostByModel(phases: Phase[]): Record<string, string> {
   return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, v.toString()]))
 }
 
-function ConnectionIndicator({ isConnected }: { isConnected: boolean }) {
+/**
+ * Whether what you are looking at is current, in one place.
+ *
+ * Two things can make the page stale and they used to be reported at opposite
+ * extremes: a dropped SSE connection showed a grey dot, while a single failed
+ * poll replaced the entire page with "Execution not found". The page polls
+ * every 3 seconds for the length of a run now, so one transient 502 in a
+ * multi-hour execution was near-certain, and its effect was permanent (#1048).
+ *
+ * A failed refresh does not invalidate the figures already on screen; it only
+ * means they stopped advancing. Say that, and keep the figures.
+ */
+function FreshnessIndicator({
+  isConnected,
+  refreshError,
+}: {
+  isConnected: boolean
+  refreshError: string | null
+}) {
+  if (refreshError) {
+    return (
+      <div className="flex items-center gap-2 text-sm" title={refreshError}>
+        <AlertTriangle className="h-4 w-4 text-amber-400" />
+        <span className="text-amber-400">Not updating &mdash; showing last known values</span>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-2 text-sm">
       <span className={clsx('h-2 w-2 rounded-full', isConnected ? 'bg-emerald-500' : 'bg-slate-400')} />
@@ -86,10 +122,11 @@ function ExecutionErrorCard({ message }: { message: string }) {
 
 const CONTROLLABLE_STATUSES = new Set(['running', 'paused'])
 
-function ExecutionHeader({ execution, executionId, isConnected, now, refreshExecution }: {
+function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
   execution: ExecutionDetailResponse
   executionId: string | undefined
   isConnected: boolean
+  refreshError: string | null
   now: number
   refreshExecution: () => void
 }) {
@@ -123,7 +160,7 @@ function ExecutionHeader({ execution, executionId, isConnected, now, refreshExec
             onSuccess={refreshExecution}
           />
         )}
-        <ConnectionIndicator isConnected={isConnected} />
+        <FreshnessIndicator isConnected={isConnected} refreshError={refreshError} />
       </div>
     </div>
   )
@@ -137,10 +174,9 @@ function ExecutionMetricsGrid({
   hasCostByModel: boolean
 }) {
   const completedPhases = execution.phases.filter((p) => p.status === 'completed').length
-  const cacheCreation = execution.total_cache_creation_tokens
-  const cacheRead = execution.total_cache_read_tokens
-  const totalTokens =
-    execution.total_input_tokens + execution.total_output_tokens + cacheCreation + cacheRead
+  const tokens = executionTokenTotals(execution)
+  const attributedIn = tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
+  const inOutSubtitle = `In: ${attributedIn.toLocaleString()} / Out: ${tokens.outputTokens.toLocaleString()}`
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -154,9 +190,13 @@ function ExecutionMetricsGrid({
       />
       <MetricCard
         title="Total Tokens"
-        value={totalTokens.toLocaleString()}
+        value={tokens.total.toLocaleString()}
         icon={FileText}
-        subtitle={`In: ${(execution.total_input_tokens + cacheCreation + cacheRead).toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
+        subtitle={
+          tokens.inProgressTokens > 0
+            ? `${inOutSubtitle} / ${tokens.inProgressTokens.toLocaleString()} in progress`
+            : inOutSubtitle
+        }
         scrollToId="token-breakdown"
       />
       <MetricCard
@@ -181,7 +221,10 @@ export function ExecutionDetail() {
 
   if (loading) return <PageLoader />
 
-  if (error || !execution) {
+  // Only the absence of data is a dead end. `error` on its own means the most
+  // recent refresh failed, which the header reports without throwing away an
+  // execution the page already has (#1048).
+  if (!execution) {
     return (
       <Card>
         <EmptyState
@@ -199,11 +242,12 @@ export function ExecutionDetail() {
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
   const aggregatedCostByModel = aggregateCostByModel(execution.phases)
+  const tokens = executionTokenTotals(execution)
 
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
-      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} now={now} refreshExecution={refreshExecution} />
+      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && <ExecutionErrorCard message={execution.error_message} />}
       <ReposPanel repos={execution.repos ?? []} />
       <ExecutionMetricsGrid
@@ -212,19 +256,24 @@ export function ExecutionDetail() {
       />
       <section id="token-breakdown">
         <TokenBreakdown
-          inputTokens={execution.total_input_tokens}
-          outputTokens={execution.total_output_tokens}
-          cacheCreationTokens={execution.total_cache_creation_tokens}
-          cacheReadTokens={execution.total_cache_read_tokens}
+          inputTokens={tokens.inputTokens}
+          outputTokens={tokens.outputTokens}
+          cacheCreationTokens={tokens.cacheCreationTokens}
+          cacheReadTokens={tokens.cacheReadTokens}
+          inProgressTokens={tokens.inProgressTokens}
         />
       </section>
       {Object.keys(aggregatedCostByModel).length > 0 && (
         <section id="cost-by-model">
-          <ModelBreakdown costByModel={aggregatedCostByModel} />
+          <ModelBreakdown
+            costByModel={aggregatedCostByModel}
+            totalCost={execution.total_cost_usd}
+            unpricedObservationCount={execution.unpriced_observation_count}
+          />
         </section>
       )}
       <section id="phase-timeline">
-        <PhaseTimeline phases={execution.phases} now={now} />
+        <PhaseTimeline execution={execution} now={now} />
       </section>
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />

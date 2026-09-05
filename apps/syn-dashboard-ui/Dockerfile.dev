@@ -19,9 +19,6 @@ COPY pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
 COPY apps/syn-dashboard-ui/package.json ./apps/syn-dashboard-ui/
 
-# ui-feedback is a workspace dep; pnpm needs the manifest to resolve
-COPY lib/ui-feedback/packages/ui-feedback-react/package.json ./lib/ui-feedback/packages/ui-feedback-react/
-
 RUN pnpm install --frozen-lockfile --filter syn-dashboard-ui
 
 WORKDIR /workspace/apps/syn-dashboard-ui

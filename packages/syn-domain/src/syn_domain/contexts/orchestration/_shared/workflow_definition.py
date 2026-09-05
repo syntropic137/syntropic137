@@ -38,9 +38,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
+    require_supported_execution_type,
 )
-from syn_shared.agents import REMOVED_INTERACTIVE_PROVIDER, AgentProvider
-from syn_shared.tools import ToolName, canonical_tool_name
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
 
@@ -204,6 +205,24 @@ class AgentYamlDefinition(BaseModel):
     model: str | None = None
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
+    sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
+    """How much authority this phase's agent gets. Provider-neutral.
+
+    Omitted means ``full-access`` (``DEFAULT_PHASE_SANDBOX``) - today's
+    behaviour, kept deliberately as a stopgap. Both lower levels are unusable
+    until a phase can publish its deliverable without a filesystem write
+    (#1167): ``workspace-write`` was tried in v0.28.0-beta.5 and the write
+    under ``artifacts/output/`` was denied, and ``read-only`` cannot publish
+    at all.
+
+    A review or verify phase must therefore declare ``read-only``
+    EXPLICITLY - leaving it out grants write access. That declaration is what
+    makes "the verifier does not modify what it certifies" enforced rather
+    than merely instructed (#1157, #1161).
+
+    Steers codex phases only. Claude phases scope authority through
+    ``allowed_tools`` and ignore this field."""
+
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
     primary agent can shell out one-shot to the other CLI (codex -> ``claude
@@ -285,6 +304,23 @@ class PhaseYamlDefinition(BaseModel):
     timeout_seconds: int | None = None
     allowed_tools: list[str] = Field(default_factory=list)
 
+    clone_repos: bool = True
+    """Whether this phase gets the workflow's repos checked out (#1187).
+
+    Provisioning has been phase-blind: every phase paid the same clone plus
+    recursive submodule init, because the only opt-out was the WORKFLOW-level
+    `requires_repos: false`, which turns cloning off for all of them. A
+    workflow whose implement phase needs a working tree and whose open_pr
+    phase does not could not express that, so the phase doing the least work
+    paid the same 600s bootstrap - under the shortest budget in the workflow.
+
+    False does NOT mean "no GitHub". The repo is still resolved to its
+    installation, still gets a token, still gets a ~/.git-credentials entry
+    and a gh hosts.yml, and still substitutes into `{{repo_url}}`. Only the
+    checkout is skipped. Keeping the repo list intact is what preserves the
+    #1129 token routing: dropping it would fall back to the first
+    installation, which in a multi-org deployment is the wrong one."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -306,32 +342,21 @@ class PhaseYamlDefinition(BaseModel):
     def _validate_tool_names(cls, value: object) -> object:
         """Resolve authored tool names against the closed vocabulary (#964).
 
-        Rejecting here rather than at execution: while the declaration was
+        Rejecting here rather than only at execution: while the declaration was
         inert a typo cost nothing, but it now restricts availability, so
         `bash` instead of `Bash` becomes an agent that cannot run a command -
         discovered at runtime, on an unattended CI trigger.
+
+        The RULE lives in `require_supported_tools`, not here. Execution has to
+        apply the same one to stored templates that never saw this validator,
+        and two copies of a vocabulary check are two things to drift apart.
         """
         if value is None:
             return []
         raw = value.split(",") if isinstance(value, str) else value
         if not isinstance(raw, list):
             return value
-
-        resolved: list[str] = []
-        unknown: list[str] = []
-        for item in raw:
-            if not isinstance(item, str) or not item.strip():
-                continue
-            match = canonical_tool_name(item)
-            if match is None:
-                unknown.append(item.strip())
-            else:
-                resolved.append(str(match))
-        if unknown:
-            known = ", ".join(sorted(t.value for t in ToolName))
-            msg = f"unknown tool name(s): {', '.join(unknown)}. Valid tools are: {known}"
-            raise ValueError(msg)
-        return resolved
+        return [str(t) for t in require_supported_tools(raw)]
 
     @field_validator("max_tokens", mode="before")
     @classmethod
@@ -358,6 +383,35 @@ class PhaseYamlDefinition(BaseModel):
         )
         raise ValueError(msg)
 
+    @field_validator("execution_type", mode="before")
+    @classmethod
+    def _reject_unimplemented_execution_types(cls, value: object) -> object:
+        """Only `sequential` is implemented; the rest are refused (#1039).
+
+        NOTHING in this repository branches on this field. A search for
+        `PhaseExecutionType.PARALLEL` or `.HUMAN_IN_LOOP` outside the enum
+        definition returns no processor, no dispatcher and no handler. Every
+        phase runs sequentially regardless of what is written here.
+
+        Both non-default members are refused in the same change, deliberately.
+        `parallel` is the one the issue names, but `human_in_loop` is the more
+        dangerous half: an author who writes it believes a human approves the
+        phase before it runs, and no human does. Refusing one and leaving the
+        other would certify an open half of the class as closed.
+
+        Refusing rather than implementing: wiring `parallel` to a processor
+        that does not exist converts a silent lie into a crash. Refusal is
+        honest, cheap, and reversible the day a parallel processor lands.
+
+        This is the EARLY half of the check. The rule itself lives in
+        `require_supported_execution_type` because a stored template bypasses
+        this validator entirely, so execution re-checks it.
+        """
+        if value is None:
+            return value
+        require_supported_execution_type(str(getattr(value, "value", value)))
+        return value
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -367,6 +421,36 @@ class PhaseYamlDefinition(BaseModel):
         for entry in value:
             expanded.extend(expand_skill_entry(entry))
         return expanded
+
+    @model_validator(mode="after")
+    def validate_tool_policy_is_supported_by_provider(self) -> PhaseYamlDefinition:
+        """Codex has no tool vocabulary, so refuse the combination here (#1009).
+
+        `UnsupportedToolPolicyError` already existed and was already correct,
+        but it was raised from the command builder behind
+        `if phase.agent_config.allowed_tools:` - the tuple that was always
+        empty, so it was unreachable. Wiring `allowed_tools` makes it
+        reachable, but dispatch is the wrong place for it: by then the
+        workspace is provisioned and the author is paying for it.
+
+        The answer cannot change between authoring and dispatch. Codex
+        enforces WHERE a process may write, at the kernel level, and has no
+        concept of which tools exist (ADR-069 section 3). So the refusal moves
+        to creation, beside the tool-vocabulary check.
+        """
+        provider = self.agent.provider if self.agent else None
+        if provider is None or not self.allowed_tools:
+            return self
+        if str(provider) != AgentProvider.CODEX:
+            return self
+        declared = ", ".join(str(t) for t in self.allowed_tools)
+        msg = (
+            f"Phase '{self.id}': provider 'codex' cannot honour allowed_tools "
+            f"({declared}). Codex enforces a filesystem sandbox, not a tool "
+            "vocabulary, so a tool list would be accepted and never applied. "
+            "Remove allowed_tools, or run this phase on 'claude'."
+        )
+        raise ValueError(msg)
 
     @model_validator(mode="after")
     def validate_prompt_source(self) -> PhaseYamlDefinition:
@@ -403,6 +487,7 @@ class PhaseYamlDefinition(BaseModel):
         provider = self.agent.provider if self.agent else None
         agent_model = self.agent.model if self.agent else None
         allow_delegation = self.agent.allow_delegation if self.agent else False
+        sandbox = (self.agent.sandbox if self.agent else None) or DEFAULT_PHASE_SANDBOX
         model = self.model or agent_model
 
         return PhaseDefinition(
@@ -417,10 +502,12 @@ class PhaseYamlDefinition(BaseModel):
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
+            clone_repos=self.clone_repos,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
+            sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),
         )
@@ -574,6 +661,63 @@ class WorkflowDefinition(BaseModel):
             raise ValueError(msg)
 
         return phases
+
+    @model_validator(mode="after")
+    def validate_input_artifacts_resolve(self) -> WorkflowDefinition:
+        """Every declared input artifact must have a producer (#1039, ADR-069 D5).
+
+        WHY THIS IS A CHECK AND NOT A FILTER. The obvious reading of #1039 is
+        that `input_artifacts` should narrow what a phase receives. It cannot,
+        because the declaration and the injection are keyed on different
+        vocabularies:
+
+          - injection is keyed on PHASE IDs. `_wiring.py` substitutes
+            `{{<phase-id>}}` and builds the context appendix per phase id.
+          - declaration is keyed on ARTIFACT TYPES (`input_artifacts` ->
+            `input_artifact_types`).
+
+        Measured over all 22 authored multi-phase workflows before this was
+        written: 0 declared inputs equal a phase id, and the intersection of
+        the two vocabularies across the whole corpus is the empty set. So
+        filtering phase outputs by this field would match nothing and every
+        phase would receive nothing. That is not a compatibility risk to be
+        sized, it is guaranteed breakage.
+
+        What authors actually wrote is coherent - 31 of 33 declarations name a
+        prior phase's output type - so the field keeps its meaning as a
+        type-level dependency graph and becomes an assertion the platform
+        checks. Runtime injection is deliberately untouched.
+
+        THE SOURCE SET IS PRIOR OUTPUTS UNION WORKFLOW INPUTS. Prior outputs
+        alone would make a first phase's dependency unexpressible, since it has
+        no prior phases and no other spelling available. Authors would then
+        delete the field rather than fix it, losing the graph. Including
+        workflow inputs turns the one real orphan in the shipped corpus
+        (`feature_request` in examples/implementation.yaml, whose workflow
+        input is named `task`) into a rename rather than a deletion.
+
+        THIS IS A HARD REJECT, NOT A WARNING, and that is a decision rather
+        than an oversight. It is retroactive: reinstalling an already-installed
+        workflow carrying an orphan will now fail. That is the point. A
+        permissive default nobody sees is indistinguishable from no rule, which
+        is precisely how these four fields went inert.
+        """
+        available: set[str] = {decl.name for decl in self.inputs}
+        for phase in sorted(self.phases, key=lambda p: p.order):
+            unresolved = [t for t in phase.input_artifacts if t not in available]
+            if unresolved:
+                producers = ", ".join(sorted(available)) or "nothing"
+                msg = (
+                    f"Phase '{phase.id}' declares input_artifacts "
+                    f"{unresolved} that no earlier phase produces and no "
+                    f"workflow input provides. Available at this point: "
+                    f"{producers}. Declare the type in an earlier phase's "
+                    "output_artifacts, add a matching workflow input, or "
+                    "remove it."
+                )
+                raise ValueError(msg)
+            available.update(phase.output_artifacts)
+        return self
 
     @classmethod
     def from_yaml(cls, content: str) -> WorkflowDefinition:

@@ -21,7 +21,7 @@ services:
   # TimescaleDB provides 10x-100x better performance for append-only event stores
   # =============================================================================
   timescaledb:
-    image: timescale/timescaledb:2.25.1-pg16
+    image: timescale/timescaledb:2.29.2-pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-syn}
       POSTGRES_USER: ${POSTGRES_USER:-syn}

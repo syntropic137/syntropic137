@@ -129,7 +129,6 @@ phases:
   - id: discovery
     name: Discovery
     order: 1
-    argument_hint: "[task-description]"
     model: sonnet
     prompt_template: |
       Research this:
@@ -169,9 +168,15 @@ class TestYamlWithInputs:
         assert decls[0].name == "task"
 
     def test_phase_argument_hint(self) -> None:
-        defn = WorkflowDefinition.from_yaml(YAML_WITH_INPUTS)
-        phase = defn.phases[0]
-        assert phase.argument_hint == "[task-description]"
+        """Display metadata, not execution config: the dashboard renders it
+        (PhasePromptEditor.tsx). It legitimately never reaches the agent
+        command, which is why the #1039 sweep must not treat it as inert."""
+        yaml_with_hint = YAML_WITH_INPUTS.replace(
+            "    model: sonnet\n", '    argument_hint: "[task-description]"\n    model: sonnet\n'
+        )
+        defn = WorkflowDefinition.from_yaml(yaml_with_hint)
+
+        assert defn.phases[0].argument_hint == "[task-description]"
 
     def test_phase_model(self) -> None:
         defn = WorkflowDefinition.from_yaml(YAML_WITH_INPUTS)
@@ -181,7 +186,6 @@ class TestYamlWithInputs:
     def test_domain_phase_carries_new_fields(self) -> None:
         defn = WorkflowDefinition.from_yaml(YAML_WITH_INPUTS)
         domain_phases = defn.get_domain_phases()
-        assert domain_phases[0].argument_hint == "[task-description]"
         assert domain_phases[0].model == "sonnet"
 
     def test_backward_compat_no_inputs(self) -> None:
@@ -431,7 +435,6 @@ phases:
         (tmp_path / "phase.md").write_text(
             "---\n"
             "model: opus\n"
-            "argument-hint: '[task]'\n"
             "timeout-seconds: 600\n"
             "allowed-tools: Read, Grep\n"
             "---\n\n"
@@ -451,10 +454,27 @@ phases:
         defn = WorkflowDefinition.from_file(yaml_file)
         phase = defn.phases[0]
         assert phase.model == "opus"
-        assert phase.argument_hint == "[task]"
         assert phase.max_tokens is None  # rejected at authoring time (#964)
         assert phase.timeout_seconds == 600
         assert phase.allowed_tools == ["Read", "Grep"]
+
+    def test_frontmatter_argument_hint_is_carried(self, tmp_path: Path) -> None:
+        """The kebab-case markdown spelling reaches the same display field."""
+        (tmp_path / "phase.md").write_text("---\nargument-hint: '[task]'\n---\n\nDo the work.\n")
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+
+        assert defn.phases[0].argument_hint == "[task]"
 
     def test_yaml_overrides_frontmatter(self, tmp_path: Path) -> None:
         """YAML phase config takes precedence over .md frontmatter."""

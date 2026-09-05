@@ -2,7 +2,11 @@ import { Clock, Coins, Wrench } from 'lucide-react'
 import { MetricCard, ModelBreakdown } from '../../components'
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { SessionResponse } from '../../types'
-import { formatCostWithCoverage, formatDurationSeconds } from '../../utils/formatters'
+import {
+  formatCostWithCoverage,
+  formatDurationSeconds,
+  liveDurationSeconds,
+} from '../../utils/formatters'
 import { TOOL_EVENT_TYPES } from './sessionConstants'
 
 export function SessionMetrics({
@@ -16,10 +20,12 @@ export function SessionMetrics({
     TOOL_EVENT_TYPES.includes(op.operation_type as typeof TOOL_EVENT_TYPES[number])
   ).length
 
-  const durationValue =
-    session.status === 'running' && session.started_at
-      ? formatDurationSeconds((now - new Date(session.started_at).getTime()) / 1000)
-      : formatDurationSeconds(session.duration_seconds)
+  // Same rule as the phase timeline: tick while running, but fall back to the
+  // server's resolved value when the live reading is not measurable, so a
+  // skewed or malformed started_at cannot render as a negative or "NaN".
+  const durationValue = formatDurationSeconds(
+    liveDurationSeconds(session.status === 'running', session.started_at, session.duration_seconds, now)
+  )
 
   const hasCostByModel = session.cost_by_model && Object.keys(session.cost_by_model).length > 0
 
@@ -55,7 +61,11 @@ export function SessionMetrics({
       </section>
       {hasCostByModel && (
         <section id="cost-by-model">
-          <ModelBreakdown costByModel={session.cost_by_model} />
+          <ModelBreakdown
+            costByModel={session.cost_by_model}
+            totalCost={session.total_cost_usd}
+            unpricedObservationCount={session.unpriced_observation_count}
+          />
         </section>
       )}
     </div>

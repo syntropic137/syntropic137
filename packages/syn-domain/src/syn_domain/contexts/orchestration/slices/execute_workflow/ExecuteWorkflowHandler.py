@@ -18,11 +18,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseExecutionType,
+    require_supported_execution_type,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
-from syn_shared.agents import require_executable_provider
+from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
@@ -160,6 +166,60 @@ def _resolve_repos_from_template(
     return []
 
 
+def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+    """Raise if any stored phase declares something the platform cannot honour.
+
+    THE single definition of that check (#1039). Three entry points need it and
+    each one previously would have grown its own copy:
+
+    - the HTTP route, so a caller gets a 422 instead of a 200 carrying an
+      execution id that will never resolve;
+    - the trigger dispatcher, so the dispatch record can be marked `failed`
+      rather than `dispatched` for a run that cannot happen;
+    - `_get_executable_phases` below, which is the boundary that actually
+      protects the CLI and any future caller.
+
+    All three matter because a stored template is rehydrated from its
+    historical ``WorkflowTemplateCreated`` event and never sees the YAML
+    validator, so authoring-time refusal reaches none of them.
+    """
+    for phase in workflow.phases:
+        phase_id = getattr(phase, "phase_id", None)
+        require_supported_execution_type(
+            getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
+            phase_id=phase_id,
+        )
+        tools = require_supported_tools(
+            tuple(getattr(phase, "allowed_tools", ()) or ()),
+            phase_id=phase_id,
+        )
+        provider = getattr(phase, "provider", None) or AgentProvider.CLAUDE
+        if tools and provider == AgentProvider.CODEX:
+            raise UnsupportedToolPolicyForProviderError(
+                provider=str(provider), phase_id=phase_id, declared=list(tools)
+            )
+
+
+def _phase_declares_anything(
+    *,
+    model: str | None,
+    provider: str | None,
+    allow_delegation: bool,
+    allowed_tools: tuple[str, ...],
+    sandbox: str | None,
+) -> bool:
+    """True when the phase set any agent field at all.
+
+    EVERY field a phase can declare must be named here, not only in the
+    constructor (#1039). A phase declaring exactly one of them takes the
+    early-return branch, so a field missing from this predicate is silently
+    dropped for precisely the author who asked for it - that cost
+    `allowed_tools` a release. For `sandbox` the same bug would run a phase
+    with authority it explicitly declined.
+    """
+    return bool(model or provider or allow_delegation or allowed_tools or sandbox is not None)
+
+
 def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     """Build an AgentConfiguration from a workflow-template phase.
 
@@ -180,16 +240,53 @@ def _build_agent_config_from_phase(phase: object) -> AgentConfiguration:
     phase_model: str | None = getattr(phase, "model", None)
     phase_provider: str | None = getattr(phase, "provider", None)
     allow_delegation: bool = bool(getattr(phase, "allow_delegation", False))
+    sandbox: str | None = getattr(phase, "sandbox", None)
     phase_id: str | None = getattr(phase, "phase_id", None)
+    # Canonicalise here, not just in the YAML validator: a stored template
+    # never saw that validator. Unknown names are refused rather than
+    # dropped - dropping would restrict a phase to whatever happened to be
+    # spelled correctly and silently remove the rest.
+    allowed_tools: tuple[str, ...] = require_supported_tools(
+        tuple(getattr(phase, "allowed_tools", ()) or ()), phase_id=phase_id
+    )
     defaults = AgentConfiguration()
     resolved_provider = phase_provider or defaults.provider
-    require_executable_provider(resolved_provider, phase_id=phase_id)
-    if not (phase_model or phase_provider or allow_delegation):
+    provider = require_executable_provider(resolved_provider, phase_id=phase_id)
+    # Codex has no tool vocabulary (ADR-069 section 3), so this combination can
+    # never be honoured. The YAML validator refuses it at authoring time, but a
+    # stored template bypasses that, and the only other guard is in the command
+    # builder - which runs AFTER the workspace is provisioned and paid for.
+    # Two installed workflows carry exactly this shape today.
+    if provider is AgentProvider.CODEX and allowed_tools:
+        raise UnsupportedToolPolicyForProviderError(
+            provider=str(provider), phase_id=phase_id, declared=list(allowed_tools)
+        )
+    # `allowed_tools` MUST be part of this condition, not only of the
+    # constructor below (#1039). A phase that scopes its tools and accepts the
+    # default model and provider is the commonest tool-scoping shape there is,
+    # and it takes this branch - so a constructor-only fix drops the grant for
+    # exactly the author who asked for it, while passing any test that also
+    # sets a model. Pinned by
+    # test_tools_survive_when_they_are_the_only_thing_declared.
+    if not _phase_declares_anything(
+        model=phase_model,
+        provider=phase_provider,
+        allow_delegation=allow_delegation,
+        allowed_tools=allowed_tools,
+        sandbox=sandbox,
+    ):
         return defaults
     return AgentConfiguration(
         provider=resolved_provider,
         model=phase_model,
         allow_delegation=allow_delegation,
+        allowed_tools=allowed_tools,
+        # `is not None`, NOT `or`: a stored phase carrying sandbox="" is
+        # invalid input, and `or` would quietly widen it to the write-capable
+        # default before _resolve_sandbox could reject it. Preserve every
+        # non-None value so the execution boundary sees what was actually
+        # persisted and refuses it.
+        sandbox=sandbox if sandbox is not None else defaults.sandbox,
     )
 
 
@@ -316,6 +413,21 @@ class ExecuteWorkflowHandler:
 
         return _resolve_repos_from_template(merged_inputs, workflow)
 
+    async def validate_stored_declarations(self, workflow_id: str) -> None:
+        """Apply `validate_phase_declarations` to a stored template, by id.
+
+        Exists so a caller that has not loaded the aggregate - the trigger
+        dispatcher - can refuse a bad template BEFORE acknowledging the
+        dispatch, without reaching into this handler's repository.
+
+        A missing workflow is NOT this check's business: `handle()` raises
+        `WorkflowNotFoundError` for that, and duplicating the decision here
+        would give two entry points different answers for the same id.
+        """
+        workflow = await self._workflow_repo.get_by_id(workflow_id)
+        if workflow is not None:
+            validate_phase_declarations(workflow)
+
     async def _get_executable_phases(
         self,
         workflow: WorkflowTemplateAggregate,
@@ -334,6 +446,16 @@ class ExecuteWorkflowHandler:
         workflow_skill_refs = workflow.skills
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
+            # EXECUTION-BOUNDARY re-check, not a duplicate of the YAML rule.
+            # A template stored before that rule existed is rehydrated from its
+            # historical `WorkflowTemplateCreated` event and never sees the
+            # loader, exactly as the provider guard below documents. Checking
+            # only at authoring would let every already-stored `parallel` phase
+            # through - the population most likely to have one.
+            require_supported_execution_type(
+                getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
+                phase_id=getattr(phase, "phase_id", None),
+            )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,
@@ -351,10 +473,13 @@ class ExecuteWorkflowHandler:
                     description=phase.description,
                     agent_config=agent_config,
                     prompt_template=phase.prompt_template or "",
-                    output_artifact_type=(
-                        phase.output_artifact_types[0] if phase.output_artifact_types else "text"
-                    ),
+                    # Passed through whole. Collapsing to `[0] or "text"` here
+                    # is what erased the difference between a phase that
+                    # declared nothing and one that declared "text", four hops
+                    # before anything could act on it (#1167).
+                    output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
+                    clone_repos=phase.clone_repos,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

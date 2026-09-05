@@ -3,6 +3,26 @@ description:
 globs:
 alwaysApply: true
 ---
+<!--
+CANONICAL FILE. Edit this one.
+
+CLAUDE.md is a byte-identical generated COPY of this file, committed so a fresh
+clone has it. After editing here, run `just sync-agent-docs`. `just preflight`
+fails if the two differ.
+
+This notice lives in AGENTS.md rather than CLAUDE.md because the two files must
+be identical, so the copy has nowhere of its own to carry a banner.
+
+Why a copy and not a symlink: git for Windows defaults to core.symlinks=false
+and checks a symlink out as a plain text file containing the target path, so
+CLAUDE.md would become a 9-byte file reading "AGENTS.md" and Claude Code would
+silently load that as the entire project context.
+
+Why a copy and not an `@AGENTS.md` import stub: Claude resolves at most 5 files
+deep and the stub spends one hop reaching AGENTS.md. Measured, not assumed: a
+stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
+-->
+
 # Syntropic137
 
 ## What This Is
@@ -96,6 +116,52 @@ Treat Python like TypeScript. Strict type safety everywhere.
 - **Pydantic** for all API boundaries, configs, and domain events (`frozen=True`, `extra="forbid"`)
 - **All public interfaces fully typed** - no implicit signatures
 - **API routes MUST use Pydantic response models** - never `-> dict[str, Any]`. FastAPI generates the OpenAPI spec from return type annotations. Untyped routes are invisible to the spec, which breaks the CLI type generation pipeline (`openAPI spec → openapi-typescript → CLI types`). Always define a response model and use it: `async def list_foos() -> FooListResponse:`
+
+#### Why the typing ratchets are fitness functions, not lint
+
+Type safety is a declared architectural characteristic of this system, not a
+style preference. Python does not enforce it, so it is built in and measured.
+That is exactly what a fitness function is: an objective, whole-codebase
+measure of a characteristic the architecture requires, ratcheted so it can
+only improve.
+
+`untyped-dicts` and the pyright gate are therefore in the same category as
+`dependency_direction` and `bounded_context_isolation`, even though the
+subject is typing rather than module structure. Do not reclassify them as
+"just lint" or "just tests" and do not weaken them on that basis.
+
+The distinction that DOES matter when adding a new check:
+
+| Shape | Category |
+|---|---|
+| Static property measured across the whole codebase, ratcheted | fitness function - belongs in `ci/fitness/` + `fitness-exceptions.toml` |
+| Behavioural assertion about one code path | a test - belongs beside the code |
+
+"Does this specific field have a production consumer" is the second, however
+architectural it sounds.
+
+#### `untyped-dicts` counts the AST, not the text
+
+`just check-untyped-dicts` parses every file and counts str-keyed mappings
+whose value type constrains nothing. The logic and the full definition of what
+counts live in `scripts/check_untyped_dicts.py`, pinned by
+`scripts/tests/test_check_untyped_dicts.py`.
+
+One shape, all spellings: `dict`, `Dict`, `Mapping` and `MutableMapping`,
+plain or dotted, parameterised with `Any` or `object` — quoted, aliased, or
+wrapped across lines. Docstrings and comments are not code and do not count.
+An alias counts where it is defined, not at each use.
+
+This was a regex until #1188, and it measured spelling. Renaming
+`dict[str, object]` to `Mapping[str, object]` moved the number without typing
+anything, and one agent found that seam under ratchet pressure on PR #1186.
+`Mapping` for a read-only parameter is still the better annotation on its
+merits — it just no longer buys you budget.
+
+Re-measuring re-baselined all five packages (#1188). `syn-api` went 94 -> 139:
+a third of its untyped surface had never been visible to the gate. Those are
+re-baselines of the same debt, not a relaxed ratchet, and the values may only
+decrease from there.
 
 ### API → CLI Type Pipeline
 
@@ -433,15 +499,38 @@ from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
 CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
 
 ```bash
-just preflight       # Every STATIC CI gate, from the same justfile target CI
-                     # and the pre-push hook both call. Add new static gates
-                     # there, never to CI alone (#931).
-                     # NOT covered: unit tests, dashboard build, CLI checks,
-                     # integration, security scanning. Run `just qa` for the
-                     # fuller local sweep before a release PR.
+just qa-ci           # Every PR-gating CI JOB that CAN run locally, using the
+                     # same commands those jobs use. ~3m30s. This is the check
+                     # to run before pushing.
+                     #
+                     # It is job-level coverage, NOT proof of equivalence. CI
+                     # runs on Ubuntu with pinned toolchains and a clean
+                     # checkout; a step added inside an existing job, a widened
+                     # matrix, or a change inside a reusable workflow is
+                     # invisible to the parity gate. Never local at all:
+                     # osv-scan, pip-audit, dependency-review (remote data),
+                     # e2e-container, and the release-only gates.
+
+just preflight       # The static half only (~1m). Faster inner loop; what the
+                     # pre-push hook runs. A green preflight does NOT mean CI
+                     # will pass - it runs no tests and no builds.
+
+just preflight-agent # The subset of preflight that runs INSIDE an agent
+                     # workspace container. Use this one only there: the image
+                     # ships just, uv and node and nothing else, so vsa,
+                     # cargo, pnpm, docker and registry credentials are all
+                     # absent and seven gates cannot run at all (#1109). On a
+                     # dev machine run the full `just preflight` instead.
 ```
 
-Or run `just qa` for the full suite (slower but catches everything including tests).
+`scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that
+triggers on `pull_request` and fails when one of their jobs has no entry: either
+a just target that mirrors it, or a stated reason it cannot run locally. Add a
+PR-gating job and you must map it there. Add a new static gate to `preflight`,
+never to CI alone (#931).
+
+`just qa` remains the broader local sweep (it runs non-unit tests too), but it is
+not CI-shaped: some of its targets are deliberately more lenient than CI's.
 
 **Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
 

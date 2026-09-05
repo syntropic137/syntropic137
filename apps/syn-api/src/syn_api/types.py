@@ -143,6 +143,16 @@ class ObservabilityError(StrEnum):
     NOT_FOUND = "not_found"
     QUERY_FAILED = "query_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    #: A session is KNOWN to have started no agent process, so no conversation
+    #: log ever existed for it. Requires positive evidence of the negative -
+    #: a session we simply know nothing about is NOT_FOUND, which means a log
+    #: should exist but could not be located (issues #1047, #1065).
+    NEVER_STARTED = "never_started"
+    #: The session is still running and has not yet produced a conversation
+    #: log - regardless of what is known about its agent process. Distinct
+    #: from NEVER_STARTED (no agent process, terminal) and NOT_FOUND
+    #: (terminal but unexplained) (issue #1047).
+    PENDING = "pending"
 
 
 class TriggerError(StrEnum):
@@ -479,7 +489,17 @@ class ExecutionDetail(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    total_duration_seconds: float = 0.0
+    total_duration_seconds: float | None = None
+    """Wall-clock seconds across the execution's phases, including any still
+    running. ``None`` means no phase had a resolvable duration -- unknown, not
+    zero.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
+    """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
     repos: list[str]
@@ -723,6 +743,13 @@ class ToolOperation(BaseModel):
     timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
+    error_message: str | None = None
+    """Why this operation's subject went wrong, for the rows that failed.
+
+    Carried from `syn_adapters.projections.session_tools.ToolOperation` by
+    `model_validate(from_attributes=True)`; the two names must stay identical
+    or it is silently dropped here (#1196).
+    """
     # Tool-specific fields
     tool_name: str | None = None
     tool_use_id: str | None = None
@@ -740,6 +767,63 @@ class ToolOperation(BaseModel):
     git_message: str | None = None
     git_branch: str | None = None
     git_repo: str | None = None
+
+
+class BranchObservationInfo(BaseModel):
+    """One branch of a failed phase's workspace, as git had it (#1200).
+
+    THE ANSWER TO "WHERE DO I LOOK", made machine-readable. A phase can push
+    complete work and still fail - most often because it wrote no deliverable,
+    which #1167 correctly refuses to pass - and the failure then named no
+    branch, so nothing pointed at commits that were merged by hand twice in one
+    day once a human found them.
+
+    EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the
+    REMOTE ITSELF answered, asked while the workspace was still alive, and
+    `remote_commit_at_phase_start` is where this clone's tracking ref pointed
+    when the phase was handed that workspace. The two differing means the ref
+    moved. It does NOT mean this phase moved it, and no field here says so: a
+    push carries no author, so the same evidence is produced by a concurrent
+    process or a person. Two earlier versions of this claimed otherwise.
+
+    A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
+    repository - the ref moved, or commits are sitting on no remote. The FIELD
+    is three-valued and the two empty answers must not be merged: absent/null
+    means nothing could look, `[]` means the workspace was read and every
+    branch is exactly where the phase found it. Only a moved ref can be
+    recovered by fetching.
+    """
+
+    repo: str
+    """The repository this reading is from, by directory name."""
+
+    branch: str
+    """The branch the workspace was on: no remote prefix, and the name a PR
+    opens from. ``(detached HEAD)`` when it was not on one."""
+
+    remote: str | None
+    """The remote this reading is about, e.g. ``origin``. Null when the branch
+    has no remote-tracking ref and had none at phase start."""
+
+    remote_commit: str | None
+    """Where the REMOTE said ``<branch>`` was when the phase failed, asked of
+    it directly. Null means the remote does not have that branch: never
+    pushed, or deleted while the phase ran. A remote that could not be reached
+    yields no record at all, never a stale one."""
+
+    remote_commit_at_phase_start: str | None
+    """Where that same ref pointed when the phase was handed the workspace.
+    Null means it did not exist then. Compare it with ``remote_commit`` to see
+    whether the branch moved - that comparison is the whole claim being made,
+    and it says nothing about who moved it."""
+
+    unpushed_commits: int
+    """Commits reachable from the workspace's HEAD that no remote ref holds.
+
+    Non-zero is a DIFFERENT INCIDENT from a moved ref: those commits die with
+    the container unless #1184's quarantine caught them, so there is nothing to
+    fetch. This is what lets a client tell "this phase left nothing anywhere"
+    from "this phase is holding work no remote has"."""
 
 
 class PhaseExecution(BaseModel):
@@ -770,6 +854,30 @@ class PhaseExecution(BaseModel):
     completed_at: datetime | None = None
     model: str | None = None
     cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    agent_session_ids: list[str] | None = None
+    """The agent-native session ids this phase's capture confirmed, in the order
+    the store reported them.
+
+    A phase has MANY. ``session_id`` above is the uuid4 syn137 assigns per phase
+    run; these are the ids the AGENTS chose for themselves, and one phase yields
+    several whenever it delegates - a codex phase handing work to claude, a
+    subagent, a resumed thread. The host never passes its id to the agent, so
+    the two namespaces are disjoint and this field is the only thing relating
+    them: it is what makes an execution's transcripts fetchable (#1185).
+
+    THREE-VALUED, and null is not empty. ``null`` means nothing could tell us -
+    a phase that predates the field, an exporter that did not report it, or
+    telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
+    none. Defaulting the first to the second reports a loss that did not happen
+    (#1176).
+    """
+    observed_branches: list[BranchObservationInfo] | None = None
+    """Where this failed phase's branches stood when it died (#1200).
+
+    Three-valued exactly as `BranchObservationInfo` describes. Defaulting to
+    `[]` here, or anywhere below, would tell an API client that a workspace was
+    verifiably unchanged when in truth nothing looked.
+    """
     operations: list[ToolOperation] = Field(default_factory=list)
 
 
@@ -784,6 +892,21 @@ class ExecutionDetailFull(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0
+    total_duration_seconds: float | None
+    """Wall-clock seconds across the execution's phases, including any still
+    running (#969). ``None`` means no phase had a resolvable duration.
+
+    REQUIRED, deliberately. This model is internal, has exactly one construction
+    site, and always has a source value. A default here would recreate the class
+    of bug this field exists to fix: an omitted argument silently becoming 0.0,
+    which pyright cannot see because omitting a defaulted field is legal.
+    """
+    unknown_duration_phase_count: int = 0
+    """Phases whose duration is unknown and so contributed nothing to the total.
+
+    Non-zero means ``total_duration_seconds`` is a LOWER BOUND, not the total
+    (same contract as ``unpriced_observation_count`` for cost, #890).
+    """
     """Observations that carried no usable rate and so added nothing to the total.
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
@@ -1176,7 +1299,13 @@ class RepoActivityEntryResponse(BaseModel):
     status: str = ""
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    duration_seconds: float = 0.0
+    duration_seconds: float | None = None
+    """Seconds this execution has run, or ``None`` when nothing knows.
+
+    Nullable for the reason every other duration on this API is: 0.0 is a
+    measurement. This field reported it for every running execution on the
+    repo, system-activity and system-history timelines.
+    """
     trigger_source: str = ""
 
 
@@ -1503,6 +1632,7 @@ class ToolTimelineEntry(BaseModel):
     timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
+    error_message: str | None = None
 
 
 class ToolTimelineResponse(BaseModel):

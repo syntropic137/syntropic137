@@ -18,6 +18,12 @@ from syn_api._wiring import (
     get_projection_mgr,
     sync_published_events_to_projections,
 )
+from syn_api.list_query import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    WindowBound,
+    resolve_page_size,
+)
 from syn_api.types import (
     ArtifactActionResponse,
     ArtifactDetail,
@@ -27,6 +33,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
+from syn_domain.pagination import Page
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,37 @@ class ArtifactSummaryResponse(BaseModel):
     title: str | None = None
     size_bytes: int = 0
     created_at: str | None = None
+
+
+class ArtifactListResponse(BaseModel):
+    """One page of artifacts, and the numbers describing what it is a page of.
+
+    The same envelope ``/executions`` and ``/sessions`` answer with, for the
+    same reason: this endpoint used to return a bare array, so a response of 50
+    rows was indistinguishable from a collection of 50 and a client had no
+    number to page against (#1204). ``limit`` was the only parameter it
+    honoured and it capped at 200, which made 200 artifacts the whole of
+    reachable history.
+    """
+
+    artifacts: list[ArtifactSummaryResponse] = Field(default_factory=list)
+    total: int = 0
+    """Artifacts matching every filter, not the length of this page.
+
+    Invariant under ``page_size``: it is the size of the collection the page
+    was cut from. A total that moves when the page does is a page length
+    wearing a count's name, which is what #1159 and #1160 were.
+    """
+    page: int = 1
+    page_size: int = DEFAULT_PAGE_SIZE
+    type_counts: dict[str, int] = Field(default_factory=dict)
+    """Matching artifacts tallied by type, ignoring the type filter itself.
+
+    Named after its own dimension because artifacts have no status; it is the
+    same facet the siblings report as ``status_counts``, counted over every
+    OTHER filter the request carried so an option says what selecting it would
+    return rather than how much of it landed on this page.
+    """
 
 
 class ArtifactResponse(BaseModel):
@@ -78,45 +116,78 @@ class ArtifactResponse(BaseModel):
 async def list_artifacts(
     workflow_id: str | None = None,
     session_id: str | None = None,
-    limit: int = 100,
+    phase_id: str | None = None,
+    artifact_type: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    search: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
-) -> Result[list[ArtifactSummary], ArtifactError]:
-    """List artifacts, optionally filtered by workflow or session.
+) -> Result[Page[ArtifactSummary], ArtifactError]:
+    """List artifacts, optionally filtered, as one page of a known collection.
+
+    Returns a ``Page`` rather than a bare list because the endpoint needs the
+    total and the type facets counted over the same predicate that produced the
+    rows. Deriving them separately is how a count comes to describe rows the
+    query does not return (#1119); returning neither is how this endpoint came
+    to be unpageable at all (#1204).
+
+    Every filter is applied where ``total`` is computed. They used to be split:
+    the store applied ``workflow_id`` under a ``limit``, then ``phase_id`` and
+    ``artifact_type`` were applied in Python to whatever rows survived it, so
+    ``?artifact_type=plan`` answered "none" whenever the newest page happened
+    to hold no plans -- a filter that searched a page, not the collection.
 
     Args:
         workflow_id: Filter by workflow ID.
         session_id: Filter by session ID.
-        limit: Maximum results to return.
-        offset: Pagination offset.
+        phase_id: Filter by phase ID.
+        artifact_type: Filter by artifact type. Also the facet dimension, so
+            the type counts still describe the other types.
+        created_after: Inclusive lower bound on ``created_at``.
+        created_before: Inclusive upper bound on ``created_at``.
+        search: Case-insensitive substring match on artifact id, title,
+            workflow id and phase id.
+        limit: Rows on this page.
+        offset: Rows to skip before this page.
 
     Returns:
-        Ok(list[ArtifactSummary]) on success, Err(ArtifactError) on failure.
+        Ok(Page[ArtifactSummary]) on success, Err(ArtifactError) on failure.
     """
     await ensure_connected()
     try:
         manager = get_projection_mgr()
         projection = manager.artifact_list
-        domain_artifacts = await projection.query(
+        domain_page = await projection.page(
             workflow_id=workflow_id,
             session_id=session_id,
+            phase_id=phase_id,
+            artifact_types=[artifact_type] if artifact_type else None,
+            created_after=created_after,
+            created_before=created_before,
+            search=search,
             limit=limit,
             offset=offset,
         )
         return Ok(
-            [
-                ArtifactSummary(
-                    id=a.id,
-                    workflow_id=a.workflow_id,
-                    phase_id=a.phase_id,
-                    artifact_type=a.artifact_type,
-                    title=a.name,
-                    size_bytes=a.size_bytes,
-                    created_at=datetime.fromisoformat(a.created_at)
-                    if isinstance(a.created_at, str)
-                    else a.created_at,
-                )
-                for a in domain_artifacts
-            ]
+            Page(
+                rows=[
+                    ArtifactSummary(
+                        id=a.id,
+                        workflow_id=a.workflow_id,
+                        phase_id=a.phase_id,
+                        artifact_type=a.artifact_type,
+                        title=a.name,
+                        size_bytes=a.size_bytes,
+                        created_at=datetime.fromisoformat(a.created_at)
+                        if isinstance(a.created_at, str)
+                        else a.created_at,
+                    )
+                    for a in domain_page.rows
+                ],
+                total=domain_page.total,
+                status_counts=domain_page.status_counts,
+            )
         )
     except Exception as e:
         return Err(ArtifactError.STORAGE_ERROR, message=str(e))
@@ -170,9 +241,11 @@ async def get_artifact(
         manager = get_projection_mgr()
         projection = manager.artifact_list
 
-        # Look up from projection
-        all_artifacts = await projection.query(limit=10000)
-        artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+        # Look up from projection. This read every artifact ever written and
+        # scanned for the id, under a limit of 10000 -- so past that row the
+        # only remaining way to reach an old artifact stopped working too
+        # (#1204). The store is keyed by id.
+        artifact = await projection.get_by_id(artifact_id)
 
         if artifact is None:
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
@@ -417,19 +490,6 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # =============================================================================
 
 
-def _filter_artifacts(
-    items: list[ArtifactSummary],
-    phase_id: str | None,
-    artifact_type: str | None,
-) -> list[ArtifactSummary]:
-    """Apply optional phase and type filters to artifact summaries."""
-    if phase_id:
-        items = [a for a in items if a.phase_id == phase_id]
-    if artifact_type:
-        items = [a for a in items if a.artifact_type == artifact_type]
-    return items
-
-
 def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
     """Convert an ArtifactSummary to its API response model."""
     return ArtifactSummaryResponse(
@@ -443,25 +503,67 @@ def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse
     )
 
 
-@router.get("", response_model=list[ArtifactSummaryResponse])
+@router.get("", response_model=ArtifactListResponse)
 async def list_artifacts_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
     phase_id: str | None = Query(None, description="Filter by phase ID"),
+    session_id: str | None = Query(None, description="Filter by session ID"),
     artifact_type: str | None = Query(None, description="Filter by artifact type"),
-    limit: int = Query(50, ge=1, le=200, description="Max items to return"),
-) -> list[ArtifactSummaryResponse]:
-    """List artifacts with optional filtering."""
+    created_after: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on created_at (timezone required)"
+    ),
+    created_before: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on created_at (timezone required)"
+    ),
+    q: str | None = Query(
+        None,
+        description=(
+            "Case-insensitive substring match against artifact id, title, workflow id and phase id"
+        ),
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int | None = Query(None, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        le=MAX_PAGE_SIZE,
+        deprecated=True,
+        description="Deprecated alias for page_size. Ignored when page_size is given.",
+    ),
+) -> ArtifactListResponse:
+    """List artifacts with optional filtering.
+
+    The window is named after ``created_at`` because that is the timestamp an
+    artifact has; the siblings bound ``started_at`` and spell it
+    ``started_after``. The validation is the same one (#1186): a bound with no
+    offset is refused rather than guessed at.
+    """
+    effective_page_size = resolve_page_size(page_size, limit)
     result = await list_artifacts(
         workflow_id=workflow_id,
-        session_id=None,
-        limit=limit,
+        session_id=session_id,
+        phase_id=phase_id,
+        artifact_type=artifact_type,
+        created_after=created_after,
+        created_before=created_before,
+        search=q,
+        limit=effective_page_size,
+        offset=(page - 1) * effective_page_size,
     )
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    items = _filter_artifacts(result.value, phase_id, artifact_type)
-    return [_to_artifact_summary_response(a) for a in items]
+    artifact_page = result.value
+    return ArtifactListResponse(
+        artifacts=[_to_artifact_summary_response(a) for a in artifact_page.rows],
+        # The filtered COLLECTION, not this page. There was no count at all
+        # before, so truncation was undetectable from the response (#1204).
+        total=artifact_page.total,
+        page=page,
+        page_size=effective_page_size,
+        type_counts=artifact_page.status_counts,
+    )
 
 
 @router.get("/{artifact_id}", response_model=ArtifactResponse)

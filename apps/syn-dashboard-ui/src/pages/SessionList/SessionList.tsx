@@ -13,13 +13,14 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { Activity, Search } from 'lucide-react'
+import { Activity } from 'lucide-react'
 import {
   Card,
-  ConnectionIndicator,
   EmptyState,
+  ListPageHeader,
+  ListPagination,
+  ListToolbar,
   ResourceFilterBar,
-  SelectionActionBar,
 } from '../../components'
 import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
@@ -45,29 +46,9 @@ function SessionEmptyState({ searchQuery }: { searchQuery: string }) {
   )
 }
 
-interface SessionSearchBarProps {
-  value: string
-  onChange: (value: string) => void
-}
-
-function SessionSearchBar({ value, onChange }: SessionSearchBarProps) {
-  return (
-    <div className="relative w-full sm:max-w-md">
-      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-      <input
-        type="text"
-        placeholder="Search sessions..."
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] md:py-2"
-      />
-    </div>
-  )
-}
-
 export function SessionList() {
   const {
-    filteredSessions,
+    sessions,
     loading,
     searchQuery,
     setSearchQuery,
@@ -82,9 +63,13 @@ export function SessionList() {
     toggleSort,
     connected,
     lastEventAt,
+    page,
+    pageSize,
+    total,
+    setPage,
   } = useSessionList()
 
-  const selection = useRowSelection(filteredSessions)
+  const selection = useRowSelection(sessions)
   const isMobile = useIsMobile()
 
   useSelectionShortcuts({
@@ -93,40 +78,29 @@ export function SessionList() {
     hasSelection: selection.selectedCount > 0,
   })
 
-  const selectionProps = {
-    selectedIds: selection.selectedIds,
-    onToggleRow: selection.handleClick,
-    onSelectAll: selection.selectAll,
-    onClearSelection: selection.clear,
-  }
   const emptyState = <SessionEmptyState searchQuery={searchQuery} />
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Sessions</h1>
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            Agent sessions across all workflows
-          </p>
-        </div>
-        <ConnectionIndicator connected={connected} lastEventAt={lastEventAt} />
-      </div>
+      <ListPageHeader
+        title="Sessions"
+        description="Agent sessions across all workflows"
+        connected={connected}
+        lastEventAt={lastEventAt}
+      />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <SessionSearchBar value={searchQuery} onChange={setSearchQuery} />
-        {selection.selectedCount > 0 && (
-          <div className="flex-1">
-            <SelectionActionBar
-              count={selection.selectedCount}
-              onCopyIds={() => formatSessionIds(selection.selectedItems.map((s) => s.id))}
-              onCopyForAgent={() => formatSessionsForAgent(selection.selectedItems)}
-              onClear={selection.clear}
-              resourceLabel="session"
-            />
-          </div>
-        )}
-      </div>
+      <ListToolbar
+        searchPlaceholder="Search sessions..."
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        selection={{
+          selectedCount: selection.selectedCount,
+          onCopyIds: () => formatSessionIds(selection.selectedItems.map((s) => s.id)),
+          onCopyForAgent: () => formatSessionsForAgent(selection.selectedItems),
+          onClearSelection: selection.clear,
+          resourceLabel: 'session',
+        }}
+      />
 
       <ResourceFilterBar
         selectedStatuses={selectedStatuses}
@@ -140,20 +114,28 @@ export function SessionList() {
 
       {isMobile ? (
         <SessionCardList
-          rows={filteredSessions}
+          rows={sessions}
           loading={loading}
-          selection={selectionProps}
+          selection={selection.tableProps}
           emptyState={emptyState}
         />
       ) : (
         <SessionTable
-          rows={filteredSessions}
+          rows={sessions}
           loading={loading}
-          selection={selectionProps}
+          selection={selection.tableProps}
           emptyState={emptyState}
           sort={{ state: sort, onToggle: toggleSort }}
         />
       )}
+
+      <ListPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={setPage}
+        itemLabel="session"
+      />
     </div>
   )
 }

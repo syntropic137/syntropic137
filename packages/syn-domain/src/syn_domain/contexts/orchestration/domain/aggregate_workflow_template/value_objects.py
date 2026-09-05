@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 class WorkflowType(StrEnum):
@@ -40,6 +41,51 @@ class PhaseExecutionType(StrEnum):
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
     HUMAN_IN_LOOP = "human_in_loop"
+
+
+#: The members an executor actually implements. `parallel` has no parallel
+#: processor and `human_in_loop` has no approval gate; nothing in the codebase
+#: branches on this field at all, so every phase runs sequentially whatever it
+#: declares. Kept as a named set rather than inlined so the authoring check and
+#: the execution check cannot drift apart.
+IMPLEMENTED_EXECUTION_TYPES: frozenset[PhaseExecutionType] = frozenset(
+    {PhaseExecutionType.SEQUENTIAL}
+)
+
+
+class UnsupportedExecutionTypeError(ValueError):
+    """A phase declared an execution type no executor implements."""
+
+    def __init__(self, execution_type: object, *, phase_id: str | None = None) -> None:
+        where = f"Phase '{phase_id}': " if phase_id else ""
+        supported = ", ".join(sorted(t.value for t in IMPLEMENTED_EXECUTION_TYPES))
+        super().__init__(
+            f"{where}execution_type '{execution_type}' is not implemented: every "
+            f"phase runs sequentially, so this value has never changed how a "
+            f"phase runs. Remove it, or use one of: {supported}."
+        )
+
+
+def require_supported_execution_type(
+    execution_type: object,
+    *,
+    phase_id: str | None = None,
+) -> PhaseExecutionType:
+    """Return the execution type, or raise if no executor implements it.
+
+    TWO CALLERS, DELIBERATELY. The YAML validator rejects it at authoring time,
+    which is cheap and early. This is also called at the EXECUTION boundary,
+    because a template stored before this rule existed is rehydrated straight
+    from its historical ``WorkflowTemplateCreated`` event and never sees the
+    YAML validator - the same reason ``require_executable_provider`` guards
+    execution rather than parsing alone. A loader-only check would sail every
+    already-stored ``parallel`` phase straight through, which is precisely the
+    population most likely to have one.
+    """
+    for known in IMPLEMENTED_EXECUTION_TYPES:
+        if execution_type == known:
+            return known
+    raise UnsupportedExecutionTypeError(execution_type, phase_id=phase_id)
 
 
 class InputDeclaration(BaseModel):
@@ -100,6 +146,14 @@ class PhaseDefinition(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     """Tools allowed during this phase execution."""
 
+    clone_repos: bool = True
+    """Whether the workflow's repos are checked out for this phase (#1187).
+
+    Sourced from the workflow YAML ``clone_repos`` field. False credentials
+    the repos without checking them out, for a phase that talks to GitHub but
+    needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
+    repo list is deliberately still passed when this is False."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""
@@ -115,6 +169,14 @@ class PhaseDefinition(BaseModel):
     harness on the same docker path. Sourced from the workflow YAML
     ``agent.provider`` field.
     """
+
+    sandbox: str = DEFAULT_PHASE_SANDBOX
+    """Authority level for this phase's agent process, from the workflow YAML
+    ``agent.sandbox`` field.
+
+    Defaults to ``DEFAULT_PHASE_SANDBOX``, which is currently the MOST
+    permissive level, not the least - see there for why (#1157, #1161,
+    #1167). A phase wanting less must declare it."""
 
     allow_delegation: bool = False
     """When true, both agent auths are staged so the phase's primary agent can

@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"019f9a01-1111-7000-8000-0000000000bb"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat apps/syn-dashboard-ui/src/components/ExecutionTokenTotals.tsx'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{tokens.settled ? formatTokens(tokens.total) : `${formatTokens(tokens.total)} so far`}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input
