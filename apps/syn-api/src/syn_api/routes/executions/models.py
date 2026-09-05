@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
+from syn_api.types import BranchObservationInfo  # noqa: TC001
 from syn_shared.display import EM_DASH
 
 
@@ -81,6 +83,22 @@ class PhaseExecutionInfo(BaseModel):
     telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
+    """
+    observed_branches: list[BranchObservationInfo] | None = None
+    """Where this phase's branches stood when it failed (#1200).
+
+    THREE-VALUED, same contract as `agent_session_ids` above: `null` means
+    nothing could tell us - the phase did not fail, its workspace was already
+    gone, or the execution predates the field - and `[]` means the workspace
+    was read and no branch differs from how the phase found it. A client
+    distinguishing "a branch moved, go and fetch it" from "nothing here
+    changed" reads this, not the prose in `error_message`.
+
+    Only branches that DIFFER from the phase's starting point appear. The
+    branch it was handed is normally already on a remote, so recording every
+    branch would hand every failed phase a location and make the two incidents
+    identical again. What no record claims is who moved a ref: git does not
+    carry that, so this reports the two readings and stops.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
 

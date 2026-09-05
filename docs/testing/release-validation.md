@@ -509,6 +509,15 @@ docker run --rm --network <agent-net> --entrypoint sh <image> \
 > correct GHCR images for the release and starts the stack. This is the same
 > upgrade path users follow, so it's itself a release quality signal.
 
+> **`setup update` can only fetch a PUBLISHED release.** It resolves the last
+> published GHCR digests, so it cannot put unpublished code on a host - and
+> creating a prerelease just to make it fetchable is what produced seven
+> throwaway `v0.28.0-beta.*` entries in 48 hours. To get code that is not
+> released onto a host, build and move the images directly:
+> [Test Deploy runbook](../deployment/test-deploy.md). It also carries the
+> drain check that must precede recreating any container, which this section's
+> `down -v` does not perform. Come back here once the stack is up.
+
 > **v0.28.0: this section will NOT show you the projection rebuild window.**
 > Step 1 removes the data volumes, so Step 2 upgrades against an empty event
 > store - there is nothing to replay, and the read-path window that a real
