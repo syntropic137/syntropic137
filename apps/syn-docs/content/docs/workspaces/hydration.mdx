@@ -82,18 +82,21 @@ curl -X POST /v1/workflows/{id}/execute \
 
 ## Clone Directory Naming
 
-Repositories are cloned under `/workspace/repos/` using an `owner__reponame` format - the org and repo name joined by a double underscore.
+Repositories are cloned under `/workspace/repos/` as the **bare repository name**: the
+last segment of the URL with any `.git` suffix removed. The owner is not part of the path.
 
 | Repository URL | Clone Path |
 |----------------|------------|
-| `github.com/acme/api-service` | `/workspace/repos/acme__api-service/` |
-| `github.com/acme/web-app` | `/workspace/repos/acme__web-app/` |
-| `github.com/other-org/api-service` | `/workspace/repos/other-org__api-service/` |
+| `github.com/acme/api-service` | `/workspace/repos/api-service/` |
+| `github.com/acme/web-app` | `/workspace/repos/web-app/` |
+| `github.com/other-org/api-service` | `/workspace/repos/api-service/` |
 
-The double underscore prevents namespace collisions when two orgs have repos with the same name (`acme/api-service` and `other-org/api-service` both clone without conflict).
-
-<Callout type="info">
-The double-underscore separator (`__`) was chosen specifically because it cannot appear in a GitHub org or repo name, making it an unambiguous delimiter that requires no escaping.
+<Callout type="warn">
+The first and third rows collide, and the collision is silent. The clone is guarded by
+`[ -d <dest> ] || git clone ...`, so when two repos with the same name from different
+orgs are configured on one workflow, the second clone is skipped without an error and
+the agent works on the first org's checkout believing it is the second's. Do not
+configure two same-named repos on one workflow.
 </Callout>
 
 ## `$GH_REPO`
@@ -110,11 +113,14 @@ tree, so `$GH_REPO` is what makes `gh pr create` work from a phase that declared
 `clone_repos: false`. It is keyed on the same primary repo the prompt is told to work
 on, so the two cannot disagree.
 
-There is no environment variable listing all of a workspace's repo paths. To iterate
-them, use the naming rule above - the paths are `/workspace/repos/<owner>__<repo>/`
-and are derivable from the repos the workflow declares:
+There is no environment variable listing all of a workspace's repo paths. Iterate the
+directory instead of reconstructing the names:
 
 ```bash
+# nullglob matters: /workspace/repos/ always exists and is EMPTY for a phase that
+# set clone_repos: false. Without it the loop runs once, with $repo set to the
+# literal string /workspace/repos/*/.
+shopt -s nullglob
 for repo in /workspace/repos/*/; do
   echo "Processing $repo"
 done
@@ -125,10 +131,10 @@ done
 When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Both files receive identical content: `@`-imports of the AGENTS.md and the CLAUDE.md of every cloned repo:
 
 ```markdown
-@/workspace/repos/acme__api-service/AGENTS.md
-@/workspace/repos/acme__api-service/CLAUDE.md
-@/workspace/repos/acme__web-app/AGENTS.md
-@/workspace/repos/acme__web-app/CLAUDE.md
+@/workspace/repos/api-service/AGENTS.md
+@/workspace/repos/api-service/CLAUDE.md
+@/workspace/repos/web-app/AGENTS.md
+@/workspace/repos/web-app/CLAUDE.md
 ```
 
 The agent loads these files automatically via Claude Code's standard context injection. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
@@ -147,8 +153,8 @@ A hydrated workspace for a phase that clones looks like this:
     input/               # Previous phase outputs (read-only)
     output/              # Current phase deliverables
   repos/
-    acme__api-service/   # Cloned from github.com/acme/api-service
-    acme__web-app/       # Cloned from github.com/acme/web-app
+    api-service/         # Cloned from github.com/acme/api-service
+    web-app/             # Cloned from github.com/acme/web-app
 /opt/agentic/
   plugins/               # Pre-bundled plugins
   config/                # Runtime configuration
@@ -185,7 +191,12 @@ What the phase still gets:
 
 What it does not get:
 
-- `/workspace/repos/` - the directory is not created
+- Any repository checkout beneath `/workspace/repos/`. The directory itself is
+  still there and empty: the workspace image creates it and the entrypoint creates
+  it again, unconditionally. Code that inspects the workspace relies on that, so it
+  can tell "this phase cloned nothing" apart from "the workspace did not answer" -
+  do not write a check that reads a missing `/workspace/repos/` as the signal for
+  `clone_repos: false`, because it never is
 - The synthesized `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`. Both are built
   from what was actually cloned, so for this phase there is nothing to import and
   neither file is written
