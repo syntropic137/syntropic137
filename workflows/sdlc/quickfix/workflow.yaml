@@ -1,0 +1,112 @@
+id: sdlc-quickfix-v1
+name: "SDLC: Mechanical change - correctness visible in the diff, no verify phase (v1)"
+description: >
+  One phase for changes that carry their own proof: version pins, typos, dead
+  links, config values, a renamed constant. Makes the change, runs the gates,
+  pushes, opens a PR that declares it was NOT independently verified. Refuses
+  and redirects to sdlc-implement-v1 the moment the task needs judgement.
+type: implementation
+classification: simple
+requires_repos: true
+
+# WHY THIS EXISTS.
+#
+# `sdlc-implement-v1` was the only path to a PR, so every change bought the
+# same four phases: bootstrap, implement, cross-model verify, open_pr. PR #1213
+# pinned `vitest ^3.0.0` -> `3.2.6` and `next ^16.2.2` -> `16.2.11`. Three
+# lines across three package.json files, and it paid for a gpt-5.6-sol review
+# of a diff whose correctness a reader confirms by reading it.
+#
+# WHY THIS IS NOT "sdlc-implement-v1 BUT FASTER".
+#
+# `workflows/sdlc/implement/workflow.yaml` records, with four measured runs,
+# why implement and verify are separate:
+#
+#     A phase that must finish a change AND prove it will shortchange the
+#     proving, because the change feels like the deliverable.
+#
+# That is correct, and this workflow does not dispute it. It applies to a
+# different class of change - one where there is no proving to shortchange,
+# because the change IS its own evidence. A reader confirms `3.2.6` is the
+# version that was asked for by looking at the line. No amount of independent
+# verification tells them more than the diff already did.
+#
+# So the split is not being relaxed; the workflow is being scoped to the cases
+# that fall outside its premise. The moment a task has something to prove -
+# behaviour, control flow, an event schema, anything a reviewer would have to
+# REASON about rather than SEE - this workflow's prompt requires the agent to
+# stop and say the task needs `sdlc-implement-v1`. That refusal is the feature.
+# A fast path that quietly attempts a judgement call is worse than no fast path
+# at all: it ships an unverified behaviour change wearing a trivial-change
+# label, and the PR body says a gate passed that never ran.
+#
+# This also does not violate "one job per phase" (workflows/sdlc/README.md).
+# The second job is the one that got split out of the old three-phase shape,
+# and for this class of change it does not exist.
+
+phases:
+  # One phase, so no phase id is load-bearing for artifact injection here. The
+  # prompt file is still named for the id, per workflows/sdlc/README.md rule 2.
+  - id: quickfix
+    name: Make the mechanical change and open the PR
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+
+    # BUDGET, DERIVED - and it is a scope signal, not just a limit.
+    #
+    # Measured fixed cost, on this repository at 9b3418e1 in a workspace
+    # container:
+    #
+    #   just preflight-agent          53.8s
+    #   uv run pytest -m unit -q     135.0s
+    #                                ------
+    #   gates                        188.8s
+    #
+    # Plus provisioning. #1187 found the 600s `open_pr` phase timing out in
+    # ~30% of runs while doing ~30s of work: the clone and recursive submodule
+    # init were the whole budget. This phase needs a working tree, so it pays
+    # that ~600s worst case and cannot opt out with `clone_repos: false`.
+    # Push plus `gh pr create` is the ~30s #1187 measured.
+    #
+    #   600 provisioning + 189 gates + 30 PR mechanics = 819s of fixed cost,
+    #   before the agent has read the task.
+    #
+    # Budget one gate re-run after a formatting fix (+189s) and the floor is
+    # ~1008s. 1500s is that floor plus ~50%.
+    #
+    # Deliberately less than HALF the 3600s `sdlc-implement-v1` gives its
+    # implement phase alone. A task that cannot fit in ~11 minutes of agent
+    # time after the fixed costs is not a change whose correctness is visible
+    # in its diff, and the right response to hitting this ceiling is to rerun
+    # the work on `sdlc-implement-v1`, not to raise the number.
+    #
+    # If it does time out after the push but before the PR, the branch is on
+    # origin and nothing is lost: opening the PR by hand is a safe recovery,
+    # provided the provenance paragraph the prompt mandates goes in the body.
+    timeout_seconds: 1500
+
+    # MODEL. The expensive judgement in this phase is not the change, it is the
+    # REFUSAL - deciding that a task advertised as mechanical is not. Haiku is
+    # cheaper, but the scope gate is this workflow's only guardrail, and
+    # underspending on the one decision that keeps unreviewed behaviour changes
+    # out of `main` is the wrong economy. Opus is wrong in the other direction:
+    # nothing here needs it, and paying opus rates to bump a version pin is the
+    # cost this workflow exists to remove.
+    #
+    # Sonnet is what `sdlc-implement-v1` already trusts with `gh pr create` and
+    # with reading gate output, in its bootstrap and open_pr phases.
+    agent:
+      provider: claude
+      model: sonnet
+
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    prompt_file: phases/quickfix.md
