@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        PushedWork,
+        BranchObservation,
     )
 
 
@@ -541,131 +541,193 @@ def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork,
 
 
 @dataclass(frozen=True)
-class StrandedWork:
-    """Where a FAILED phase's work already is, when nothing else will say (#1200).
+class ObservedBranches:
+    """What a FAILED phase's workspace looked like to git, when nothing else says (#1200).
 
     THE MIRROR OF `QuarantinedWork`, and deliberately shaped like it. #1184
     covers the phase that ended holding work nobody had pushed: it saves that
-    work to a ref and fails naming it. This covers the phase that DID push and
-    then failed anyway - most often on the #1167 output-artifact contract,
-    which is unmet the moment the phase writes no deliverable, however good the
-    code it pushed. The commits are already durable and already on a branch;
-    the only thing missing is anyone being told. It happened three times in one
-    day, and twice a human found the branch by hand and opened the PR - both
-    merged, so the work was never the problem.
+    work to a ref and fails naming it. This covers the phase that failed with
+    a branch already on a remote - most often on the #1167 output-artifact
+    contract, which is unmet the moment the phase writes no deliverable,
+    however good the code on that branch. The commits are already durable; the
+    only thing missing is anyone being told where. It happened three times in
+    one day, and twice a human found the branch by hand and opened the PR -
+    both merged, so the work was never the problem.
 
     NOTHING HERE PUSHES, QUARANTINES OR PUBLISHES. Opening the PR on the
     author's behalf is a different decision (#1197), and pushing on its behalf
-    would risk overwriting a remote nobody inspected. Saying where the work is
+    would risk overwriting a remote nobody inspected. Saying what git shows
     costs nothing and cannot be wrong in that direction.
 
-    THE CLAIM IS COUNTED, NEVER ASSUMED. `pushed` holds one record per
-    repository where a commit THIS PHASE PRODUCED was confirmed to be on a
-    remote, so "is any of this recoverable" is the size of that tuple - never
-    the truthiness of a branch name that may never have left the workspace.
-    That substitution is the exact defect #1184 needed four review passes to
-    remove from its own reporting.
-
-    "THIS PHASE PRODUCED" IS ALSO COUNTED, and it is the second half of the
-    same discipline. A phase inherits a branch that is already pushed, so "the
-    workspace's HEAD is on a remote" is true of a phase that did nothing at
-    all, and reporting it made "pushed work, wrote no deliverable" and
-    "produced nothing" the same record - a recoverable incident wearing the
-    unrecoverable one's clothes again, one field further along. Only commits
-    absent from the workspace when the phase started are eligible; see
-    `PhaseStartingPoint`.
+    OBSERVATIONS, NOT ATTRIBUTIONS, and that is the whole shape of this type.
+    Two earlier versions reported "what THIS PHASE pushed", which git cannot
+    answer: a ref that advanced between two readings is the same evidence
+    whether this phase, a concurrent process, or a person moved it. So each
+    record states where a remote branch is, where it was when the phase
+    started, and how many local commits no remote holds - and stops there.
 
     `unreadable` says why the inspection stopped early, and exists so that an
-    answer nobody obtained can never be printed as an answer of "nothing". The
-    two are kept apart the whole way to the API; see `confirmed_locations`.
+    answer nobody obtained can never be printed as an answer of "nothing
+    changed". The two are kept apart the whole way to the API; see `recorded`.
     """
 
-    pushed: tuple[PushedWork, ...]
+    branches: tuple[BranchObservation, ...]
     unreadable: str | None = None
 
     @property
-    def confirmed_locations(self) -> tuple[PushedWork, ...] | None:
+    def recorded(self) -> tuple[BranchObservation, ...] | None:
         """What an API client is told, in the one place that decides it.
 
         THREE-VALUED, in the shape this codebase already uses for
-        `agent_session_ids` (#1176): records are what was found, `()` means the
-        inspection FINISHED and nothing in this workspace was on any remote,
-        and `None` means nothing could tell us. Collapsing the last two would
-        report a phase whose workspace had already died as one that verifiably
-        pushed nothing - the recoverable incident wearing the unrecoverable
-        one's clothes, which is the whole failure this module exists to stop.
+        `agent_session_ids` (#1176): records are what git showed, `()` means
+        the inspection FINISHED and no branch in this workspace differs from
+        how the phase found it, and `None` means nothing could tell us.
+        Collapsing the last two would report a phase whose workspace had
+        already died as one verifiably holding nothing - the recoverable
+        incident wearing the unrecoverable one's clothes, which is the whole
+        failure this module exists to stop.
 
-        Records survive an incomplete inspection because each one is a fact
-        about a ref that exists; not finishing does not unmake them.
+        Records survive an incomplete inspection because each one is a reading
+        that was taken; not finishing does not unmake it.
         """
-        if self.pushed:
-            return self.pushed
+        if self.branches:
+            return self.branches
         return None if self.unreadable else ()
 
 
-#: What is true of a failed phase's work, keyed by ``(something is on a remote,
-#: the inspection stopped early)``. A table for the same reason
-#: ``_INSPECTION_HEADLINE`` is one: these four ARE the state space, and a reader
-#: checking them against each other should not have to reconstruct them from a
-#: chain of ``if``s. Formatted with the count of repositories a ref was found
-#: for, so the number read is the number of places to look.
-_STRANDED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
-    # 1. The ordinary failure: nothing was pushed and nothing is claimed.
+#: What is true of a failed phase's workspace, keyed by ``(some branch differs
+#: from how the phase found it, the inspection stopped early)``. A table for
+#: the same reason ``_INSPECTION_HEADLINE`` is one: these four ARE the state
+#: space, and a reader checking them against each other should not have to
+#: reconstruct them from a chain of ``if``s. Formatted with the count of
+#: DISTINCT REPOSITORIES rather than of records - a repository with two
+#: remotes carrying one branch produces two records and is still one place
+#: to look - so the number read is the number of places to look.
+_OBSERVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
+    # 1. The ordinary failure: git was asked, and it looks untouched.
     (False, False): (
-        "  NOTHING OF THIS PHASE'S WORK IS ON A REMOTE: it advanced no branch "
-        "onto one, so there is no branch to open a PR from and nothing of its "
-        "own to fetch back. If it committed anything, the workspace took it. "
-        "This says nothing about commits that were already there when the "
-        "phase started - those are not its work and not what is being offered."
+        "  NO BRANCH IN THIS WORKSPACE DIFFERS FROM HOW THE PHASE FOUND IT: "
+        "every remote branch it was on points at the commit it pointed at "
+        "when the phase started, and no repository holds a commit that no "
+        "remote has. There is nothing here to fetch and nothing about to be "
+        "lost with the container."
     ),
-    # 2. The inspection could not finish and found nothing before it stopped.
+    # 2. The inspection could not finish and read nothing before it stopped.
     #    NOT the same as (1) and never merged with it: this says nobody looked.
     (False, True): (
-        "  WHERE THIS PHASE'S WORK WENT IS UNKNOWN: the workspace stopped "
-        "answering before anything was found ({unreadable}), so this is not a "
-        "report that nothing was pushed - it is the absence of a report. Check "
-        "the remote for a branch from this execution before assuming either."
+        "  THE STATE OF THIS WORKSPACE'S BRANCHES IS UNKNOWN: it stopped "
+        "answering before any repository was read ({unreadable}), so this is "
+        "not a report that nothing changed - it is the absence of a report. "
+        "Check the remote for a branch from this execution before assuming "
+        "either."
     ),
-    # 3. Found something, then stopped. The records below are still true.
+    # 3. Read something, then stopped. The records below are still readings.
     (True, True): (
-        "  PART OF THIS PHASE'S WORK IS ON A REMOTE - a branch exists for "
-        "{found} - and the inspection then stopped ({unreadable}), so there "
-        "may be more it never reached. What it did confirm:"
+        "  PART OF THIS WORKSPACE'S BRANCH STATE WAS READ - {found} - and the "
+        "inspection then stopped ({unreadable}), so there may be more it "
+        "never reached. What it did read:"
     ),
-    # 4. The incident this exists for: the work is fine, and nothing said so.
+    # 4. The incident this exists for: something is there, and nothing said so.
     (True, False): (
-        "  THIS PHASE'S WORK IS ON A REMOTE. It pushed {found} and then failed "
-        "before anything opened a PR for it, so the commits below are complete "
-        "and unreferenced. Nothing was pushed or published on its behalf:"
+        "  THIS IS WHERE THIS WORKSPACE'S BRANCHES STOOD when the phase "
+        "failed, for {found}. Read from git at failure time and reported as "
+        "observations: nothing below says who moved a ref, because a ref does "
+        "not record that. Nothing was pushed or published on the phase's "
+        "behalf:"
+    ),
+}
+
+#: How the remote half of one observation reads, keyed by ``(the ref exists
+#: now, it existed at phase start, it is at a different commit than it was)``.
+#: Five reachable combinations and no sixth: "neither exists" cannot have
+#: moved, and "exactly one exists" always has. A table rather than a chain of
+#: ``if``s because every branch of it is one sentence, and the sentences are
+#: the thing worth reading side by side.
+_REMOTE_STATE: Final[dict[tuple[bool, bool, bool], str]] = {
+    (False, False, False): (
+        "no remote-tracking ref exists for this branch, and none did when the phase started"
+    ),
+    (False, True, True): (
+        "the remote branch {remote}/{branch} no longer exists; when the phase "
+        "started it was at {before}"
+    ),
+    (True, False, True): (
+        "the remote branch {remote}/{branch} is at {now}; it had no remote "
+        "ref when the phase started"
+    ),
+    (True, True, True): (
+        "the remote branch {remote}/{branch} is at {now}, which differs from "
+        "{before} when the phase started"
+    ),
+    (True, True, False): (
+        "the remote branch {remote}/{branch} is at {now}, the same commit it "
+        "was at when the phase started"
     ),
 }
 
 
-def _render_pushed_work(work: PushedWork) -> list[str]:
-    """How one repository's pushed work is described.
+def _render_observed_branch(work: BranchObservation) -> list[str]:
+    """How one branch observation is described.
 
     Deliberately the same shape as `_render_quarantined_work`: an operator
     reading a failed execution should not have to learn two layouts to answer
     the one question both errors are about.
-    """
-    return [
-        f"  {work.repo} (branch {work.branch}):",
-        f"    pushed at {work.commit}",
-        f"    look at it with: git fetch origin {work.branch} && git checkout {work.commit}",
-    ]
 
-
-def describe_stranded_work(work: StrandedWork) -> str:
-    """Say where a failed phase's work went, in the words an operator reads.
-
-    Appended to the failure's own message rather than replacing it: WHY the
-    phase failed and WHERE its work is are different questions, and #1167's
-    answer to the first must stay exactly as loud as it is.
+    THE FETCH LINE IS PRINTED ONLY WHEN THE REF MOVED, because that is the
+    only case in which fetching shows the reader something the phase did not
+    start with. Printing it beside an unchanged ref would dress "nothing
+    arrived here" up as somewhere to go, which is the substitution this
+    feature exists to stop.
     """
     lines = [
-        _STRANDED_HEADLINE[bool(work.pushed), bool(work.unreadable)].format(
-            found=_repositories(len(work.pushed)), unreadable=work.unreadable
+        f"  {work.repo} (branch {work.branch}):",
+        f"    {_remote_state(work)}",
+    ]
+    if work.remote_moved and work.remote_commit is not None:
+        lines.append(
+            f"    look at it with: git fetch {work.remote} {work.branch} "
+            f"&& git checkout {work.remote_commit}"
+        )
+    if work.unpushed_commits:
+        lines.append(
+            f"    {_commits(work.unpushed_commits)} here on no remote at all - "
+            f"lost with the workspace unless #1184 quarantined the branch"
+        )
+    return lines
+
+
+def _remote_state(work: BranchObservation) -> str:
+    """The one sentence saying where this branch's remote ref is, and was."""
+    key = (
+        work.remote_commit is not None,
+        work.remote_commit_at_phase_start is not None,
+        work.remote_moved,
+    )
+    return _REMOTE_STATE[key].format(
+        remote=work.remote,
+        branch=work.branch,
+        now=work.remote_commit,
+        before=work.remote_commit_at_phase_start,
+    )
+
+
+def _commits(count: int) -> str:
+    """The count, said in English: '1 commit', '3 commits'."""
+    return f"{count} commit" if count == 1 else f"{count} commits"
+
+
+def describe_observed_branches(work: ObservedBranches) -> str:
+    """Say where a failed phase's branches stand, in the words an operator reads.
+
+    Appended to the failure's own message rather than replacing it: WHY the
+    phase failed and WHERE its repositories stand are different questions, and
+    #1167's answer to the first must stay exactly as loud as it is.
+    """
+    lines = [
+        _OBSERVED_HEADLINE[bool(work.branches), bool(work.unreadable)].format(
+            found=_repositories(len({record.repo for record in work.branches})),
+            unreadable=work.unreadable,
         )
     ]
-    lines.extend(line for record in work.pushed for line in _render_pushed_work(record))
+    lines.extend(line for record in work.branches for line in _render_observed_branch(record))
     return "\n".join(lines)

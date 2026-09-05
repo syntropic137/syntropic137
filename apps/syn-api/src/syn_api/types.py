@@ -769,37 +769,59 @@ class ToolOperation(BaseModel):
     git_repo: str | None = None
 
 
-class PushedWorkInfo(BaseModel):
-    """A branch a failed phase's work is sitting on (#1200).
+class BranchObservationInfo(BaseModel):
+    """One branch of a failed phase's workspace, as git had it (#1200).
 
-    THE ANSWER TO "WHERE DID IT GO", made machine-readable. A phase can push
+    THE ANSWER TO "WHERE DO I LOOK", made machine-readable. A phase can push
     complete work and still fail - most often because it wrote no deliverable,
     which #1167 correctly refuses to pass - and the failure then named no
     branch, so nothing pointed at commits that were merged by hand twice in one
     day once a human found them.
 
-    Every instance is a claim the workspace verified against a remote-tracking
-    ref before the workspace was destroyed, about a commit that was not in the
-    workspace when the phase started. The FIELD is three-valued and the two
-    empty answers must not be merged: absent/null means nothing could look,
-    `[]` means the workspace was asked and nothing this phase produced had
-    reached a remote. Only the first can be recovered by fetching.
+    EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is where the
+    branch's remote-tracking ref pointed while the workspace was still alive,
+    and `remote_commit_at_phase_start` is where it pointed when the phase was
+    handed that workspace. The two differing means the ref moved. It does NOT
+    mean this phase moved it, and no field here says so: a push carries no
+    author, so the same evidence is produced by a concurrent process or a
+    person. Two earlier versions of this claimed otherwise.
 
-    `[]` is a statement about the PHASE and not about the repository. The
-    branch a phase works on is usually on a remote before it starts, so a
-    version of this that reported "the workspace's HEAD is on a remote" gave
-    every phase a location, including phases that produced nothing at all.
+    A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
+    repository - the ref moved, or commits are sitting on no remote. The FIELD
+    is three-valued and the two empty answers must not be merged: absent/null
+    means nothing could look, `[]` means the workspace was read and every
+    branch is exactly where the phase found it. Only a moved ref can be
+    recovered by fetching.
     """
 
     repo: str
-    """The repository the work is in, by directory name."""
+    """The repository this reading is from, by directory name."""
 
     branch: str
-    """The branch to fetch: no remote prefix, and the name a PR opens from."""
+    """The branch the workspace was on: no remote prefix, and the name a PR
+    opens from. ``(detached HEAD)`` when it was not on one."""
 
-    commit: str
-    """The commit to look at: the newest one this phase produced that its
-    branch's remote is confirmed to hold."""
+    remote: str | None
+    """The remote this reading is about, e.g. ``origin``. Null when the branch
+    has no remote-tracking ref and had none at phase start."""
+
+    remote_commit: str | None
+    """Where ``<remote>/<branch>`` pointed when the phase failed. Null means
+    that ref does not exist: never pushed, or deleted while the phase ran."""
+
+    remote_commit_at_phase_start: str | None
+    """Where that same ref pointed when the phase was handed the workspace.
+    Null means it did not exist then. Compare it with ``remote_commit`` to see
+    whether the branch moved - that comparison is the whole claim being made,
+    and it says nothing about who moved it."""
+
+    unpushed_commits: int
+    """Commits reachable from the workspace's HEAD that no remote ref holds.
+
+    Non-zero is a DIFFERENT INCIDENT from a moved ref: those commits die with
+    the container unless #1184's quarantine caught them, so there is nothing to
+    fetch. This is what lets a client tell "this phase left nothing anywhere"
+    from "this phase is holding work no remote has"."""
 
 
 class PhaseExecution(BaseModel):
@@ -847,12 +869,12 @@ class PhaseExecution(BaseModel):
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
     """
-    pushed_work: list[PushedWorkInfo] | None = None
-    """Where this phase's OWN work is, when it failed after pushing some (#1200).
+    observed_branches: list[BranchObservationInfo] | None = None
+    """Where this failed phase's branches stood when it died (#1200).
 
-    Three-valued exactly as `PushedWorkInfo` describes. Defaulting to `[]`
-    here, or anywhere below, would tell an API client that a phase verifiably
-    pushed nothing when in truth nothing asked.
+    Three-valued exactly as `BranchObservationInfo` describes. Defaulting to
+    `[]` here, or anywhere below, would tell an API client that a workspace was
+    verifiably unchanged when in truth nothing looked.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
 

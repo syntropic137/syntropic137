@@ -349,14 +349,14 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                     phase["status"] = "failed"
                     phase["error_message"] = event_data.get("error_message")
 
-                    # Where this phase's work already is, when it pushed any
-                    # (#1200). Copied verbatim INCLUDING None and []: the two
-                    # are different incidents - nobody could ask, versus asked
-                    # and nothing THIS PHASE produced had reached a remote -
-                    # and a `or []` here would report the first as the second. Absent on every
-                    # event that predates the field, which is null: correct,
-                    # because nothing looked.
-                    phase["pushed_work"] = event_data.get("pushed_work")
+                    # How this phase's branches stood when it died (#1200).
+                    # Copied verbatim INCLUDING None and []: the two are
+                    # different incidents - nobody could read the workspace,
+                    # versus read it and found no branch differing from how the
+                    # phase found it - and a `or []` here would report the first
+                    # as the second. Absent on every event that predates the
+                    # field, which is null: correct, because nothing looked.
+                    phase["observed_branches"] = event_data.get("observed_branches")
 
                     # The failed phase never gets a PhaseCompleted event, so
                     # without this its duration_seconds is stuck at the 0.0

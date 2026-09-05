@@ -1948,6 +1948,45 @@ export interface components {
             file: string;
         };
         /**
+         * BranchObservationInfo
+         * @description One branch of a failed phase's workspace, as git had it (#1200).
+         *
+         *     THE ANSWER TO "WHERE DO I LOOK", made machine-readable. A phase can push
+         *     complete work and still fail - most often because it wrote no deliverable,
+         *     which #1167 correctly refuses to pass - and the failure then named no
+         *     branch, so nothing pointed at commits that were merged by hand twice in one
+         *     day once a human found them.
+         *
+         *     EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is where the
+         *     branch's remote-tracking ref pointed while the workspace was still alive,
+         *     and `remote_commit_at_phase_start` is where it pointed when the phase was
+         *     handed that workspace. The two differing means the ref moved. It does NOT
+         *     mean this phase moved it, and no field here says so: a push carries no
+         *     author, so the same evidence is produced by a concurrent process or a
+         *     person. Two earlier versions of this claimed otherwise.
+         *
+         *     A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
+         *     repository - the ref moved, or commits are sitting on no remote. The FIELD
+         *     is three-valued and the two empty answers must not be merged: absent/null
+         *     means nothing could look, `[]` means the workspace was read and every
+         *     branch is exactly where the phase found it. Only a moved ref can be
+         *     recovered by fetching.
+         */
+        BranchObservationInfo: {
+            /** Repo */
+            repo: string;
+            /** Branch */
+            branch: string;
+            /** Remote */
+            remote: string | null;
+            /** Remote Commit */
+            remote_commit: string | null;
+            /** Remote Commit At Phase Start */
+            remote_commit_at_phase_start: string | null;
+            /** Unpushed Commits */
+            unpushed_commits: number;
+        };
+        /**
          * CancelRequest
          * @description Request to cancel an execution.
          */
@@ -3417,8 +3456,8 @@ export interface components {
             };
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
-            /** Pushed Work */
-            pushed_work?: components["schemas"]["PushedWorkInfo"][] | null;
+            /** Observed Branches */
+            observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
         };
@@ -3502,36 +3541,6 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
-        };
-        /**
-         * PushedWorkInfo
-         * @description A branch a failed phase's work is sitting on (#1200).
-         *
-         *     THE ANSWER TO "WHERE DID IT GO", made machine-readable. A phase can push
-         *     complete work and still fail - most often because it wrote no deliverable,
-         *     which #1167 correctly refuses to pass - and the failure then named no
-         *     branch, so nothing pointed at commits that were merged by hand twice in one
-         *     day once a human found them.
-         *
-         *     Every instance is a claim the workspace verified against a remote-tracking
-         *     ref before the workspace was destroyed, about a commit that was not in the
-         *     workspace when the phase started. The FIELD is three-valued and the two
-         *     empty answers must not be merged: absent/null means nothing could look,
-         *     `[]` means the workspace was asked and nothing this phase produced had
-         *     reached a remote. Only the first can be recovered by fetching.
-         *
-         *     `[]` is a statement about the PHASE and not about the repository. The
-         *     branch a phase works on is usually on a remote before it starts, so a
-         *     version of this that reported "the workspace's HEAD is on a remote" gave
-         *     every phase a location, including phases that produced nothing at all.
-         */
-        PushedWorkInfo: {
-            /** Repo */
-            repo: string;
-            /** Branch */
-            branch: string;
-            /** Commit */
-            commit: string;
         };
         /**
          * RegisterClaudePluginRequest

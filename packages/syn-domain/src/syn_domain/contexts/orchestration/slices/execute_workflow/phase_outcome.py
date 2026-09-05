@@ -29,7 +29,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
-    describe_stranded_work,
+    describe_observed_branches,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -45,10 +45,10 @@ if TYPE_CHECKING:
         CompletePhaseCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        BranchObservation,
         PhaseResult,
-        PushedWork,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import StrandedWork
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
 
 
 def failed_phase_elapsed_seconds(
@@ -88,20 +88,20 @@ class PhaseFailure:
     when the execution died before any phase started - there is no phase to
     report on, but there is still a failure to describe.
 
-    `pushed_work` describes where the phase's work IS, which is a different
-    question from why it failed and is answered here so that the four sinks
-    above cannot answer it four ways (#1200).
+    `observed_branches` describes where the phase's repositories STAND, which
+    is a different question from why it failed and is answered here so that the
+    four sinks above cannot answer it four ways (#1200).
     """
 
     reason: str
     error_type: str
     duration_seconds: float | None
     result: PhaseResult | None
-    pushed_work: tuple[PushedWork, ...] | None = None
-    """Locations this phase put on a remote, `()` for "checked, this phase put
-    nothing there", and None for "nothing could tell us". Straight from
-    `StrandedWork.confirmed_locations`, because deciding it twice is how the
-    two would come to disagree."""
+    observed_branches: tuple[BranchObservation, ...] | None = None
+    """Branches read from git at failure time, `()` for "read, and none of them
+    differs from how the phase found it", and None for "nothing could tell us".
+    Straight from `ObservedBranches.recorded`, because deciding it twice is how
+    the two would come to disagree."""
 
 
 def failed_phase_outcome(
@@ -110,7 +110,7 @@ def failed_phase_outcome(
     started_at_by_phase: Mapping[str, DateTime],
     session_id_by_phase: Mapping[str, str],
     now: DateTime | None = None,
-    stranded: StrandedWork | None = None,
+    observed: ObservedBranches | None = None,
 ) -> PhaseFailure:
     """What a failed run reports, derived from the exception that ended it.
 
@@ -123,23 +123,23 @@ def failed_phase_outcome(
     happens once. The processor used to do it and hand the string in, which put
     the decision back at the call site the moment a second call site appeared.
 
-    `stranded` is what the workspace said about where the phase's work already
-    is, and it is APPENDED to the reason rather than replacing any of it: #1167
-    saying the output contract was unmet stays exactly as loud, and the
-    location follows it as a separate paragraph (#1200). None - no workspace to
-    ask - reads the same as it did before this existed.
+    `observed` is what git showed about where this workspace's branches stood,
+    and it is APPENDED to the reason rather than replacing any of it: #1167
+    saying the output contract was unmet stays exactly as loud, and where the
+    branches stand follows it as a separate paragraph (#1200). None - nothing
+    could be read - reads the same as it did before this existed.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
     reason = describe_exception(error)
-    if stranded is not None:
-        reason = f"{reason}\n\n{describe_stranded_work(stranded)}"
+    if observed is not None:
+        reason = f"{reason}\n\n{describe_observed_branches(observed)}"
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
-        pushed_work=stranded.confirmed_locations if stranded is not None else None,
+        observed_branches=observed.recorded if observed is not None else None,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
         result=failed_phase_result(
             phase_id,

@@ -145,28 +145,29 @@ class PhaseResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class PushedWork(BaseModel):
-    """One repository's work that a failing phase had already put on a remote (#1200).
+class BranchObservation(BaseModel):
+    """One remote branch of a failing phase's workspace, as git had it (#1200).
 
-    THE FACT AN OPERATOR NEEDS AT 2AM, and the one a failed execution used to
-    throw away. A phase can commit, push, and still fail - most often on the
-    #1167 output-artifact contract - and when it does, no PR is opened and no
-    surface names the branch. The work is complete, reviewed by nobody, and
-    findable only by someone who thinks to go looking through the remote's
-    refs. Twice in one day that someone was a human doing it by hand; both
-    rescues merged.
+    WHERE TO LOOK, WITHOUT SAYING WHO PUT IT THERE. A phase can commit, push,
+    and still fail - most often on the #1167 output-artifact contract - and
+    when it does no PR is opened and no surface names the branch. The work is
+    complete, reviewed by nobody, and findable only by someone who thinks to
+    go through the remote's refs. Twice in one day that someone was a human
+    doing it by hand; both rescues merged.
 
-    EVERY INSTANCE IS A TRUE CLAIM ABOUT THE REMOTE, AND ABOUT THIS PHASE.
-    One is only ever built after a remote-tracking ref was found to contain
-    ``commit`` - never from "the phase had a branch name", which is the mistake
-    #1184 took four review passes to get out of its own recoverability
-    reporting - and only for a commit that was NOT in the workspace when the
-    phase began. Without that second half a phase that did nothing reported the
-    branch it was handed as its own output, which is a true sentence about git
-    and a false answer to "where did this phase's work go". A phase that pushed
-    nothing therefore produces NO instances rather than an instance saying so:
-    absence is the honest shape for "there is nothing to fetch", because a
-    record shaped like a location invites being read as one.
+    EVERY FIELD IS SOMETHING GIT WAS ASKED AND ANSWERED, and nothing here is
+    an attribution. An earlier version of this recorded "work THIS PHASE
+    pushed", derived by snapshotting the refs at phase start and treating
+    whatever was new as the phase's own. That signature is produced just as
+    well by a concurrent push or a human's, because a ref that moved between
+    two readings does not record who moved it: git carries no author of a
+    push. So the comparison is still taken and still reported - as the
+    comparison it is, two SHAs and the reader's own eyes - and no field claims
+    the phase caused it.
+
+    That is enough for the operator the record exists for. "Where do I look"
+    is answered by a branch name and a commit; it never required knowing who
+    pushed.
 
     A Pydantic model rather than a dataclass because it travels on
     ``WorkflowFailedEvent`` and must serialise as event data.
@@ -178,15 +179,61 @@ class PushedWork(BaseModel):
     """The repository directory's name, as the workspace had it cloned."""
 
     branch: str
-    """The branch the phase was on, without its remote prefix - i.e. the name
-    to fetch, and the name a PR would be opened from. Its remote-tracking ref
-    is what was found to contain ``commit``."""
+    """The branch the workspace was on, without any remote prefix - the name
+    to fetch, and the name a PR would be opened from. ``(detached HEAD)`` when
+    it was not on one."""
 
-    commit: str
-    """The commit an operator should look at: the newest one this phase
-    produced that its branch's remote is confirmed to hold. Usually HEAD, and
-    not HEAD when the phase pushed and then committed again - the later commits
-    are not on the remote, so they are not offered here."""
+    remote: str | None
+    """The remote this observation is about, e.g. ``origin``. ``None`` when
+    the branch has no remote-tracking ref and had none at phase start, so
+    there is no remote branch to describe. One observation per remote that
+    carries the branch, rather than one per repository picking a remote by
+    some rule nobody can see."""
+
+    remote_commit: str | None
+    """What ``<remote>/<branch>`` points at NOW, read while the workspace was
+    still alive. ``None`` means that ref does not exist - the branch was never
+    pushed, or the ref was deleted while the phase ran."""
+
+    remote_commit_at_phase_start: str | None
+    """What that same ref pointed at when the phase was handed the workspace,
+    from `PhaseStartingPoint`. ``None`` means the ref did not exist then.
+
+    Reported beside `remote_commit` rather than reduced to a verdict: the two
+    together say "it moved" without anyone having to claim who moved it, and
+    an operator diffing them gets more than a boolean would give."""
+
+    unpushed_commits: int
+    """How many commits are reachable from the workspace's HEAD that no remote
+    ref holds. ``0`` is a fact about the repository and not about the phase.
+
+    Non-zero is a DIFFERENT INCIDENT from a remote that moved: those commits
+    are about to die with the container, which is #1184's quarantine to save
+    and not something to fetch. Keeping the count here is what lets a client
+    tell "this phase left nothing anywhere" from "this phase is holding work
+    that is not on any remote" without reading prose."""
+
+    @property
+    def remote_moved(self) -> bool:
+        """Whether ``<remote>/<branch>`` is at a different commit than at start.
+
+        A comparison of two readings, and deliberately not called anything
+        like "pushed": it is true of a push from this workspace, a push from
+        anywhere else, and a ref someone deleted or recreated in between.
+        """
+        return self.remote_commit != self.remote_commit_at_phase_start
+
+    @property
+    def is_worth_recording(self) -> bool:
+        """Whether anything here differs from a workspace nobody touched.
+
+        The one place that decides what a record MEANS by deciding when one
+        exists. A repository whose remote branch is where it was and whose
+        HEAD is fully pushed has nothing an operator would act on, and
+        recording it anyway is how a phase that did nothing came to report the
+        commit it inherited as somewhere to go and look.
+        """
+        return self.remote_moved or self.unpushed_commits > 0
 
 
 @dataclass(frozen=True)

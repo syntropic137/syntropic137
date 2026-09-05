@@ -7,7 +7,9 @@ at the API boundary from the execution_cost projection.
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PushedWork
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    BranchObservation,
+)
 
 
 @dataclass(frozen=True)
@@ -65,17 +67,16 @@ class PhaseExecutionDetail:
     error_message: str | None = None
     """Error message if phase failed."""
 
-    pushed_work: tuple[PushedWork, ...] | None = None
-    """Branches a remote was confirmed to hold for this failed phase (#1200).
+    observed_branches: tuple[BranchObservation, ...] | None = None
+    """How this failed phase's branches stood when it died (#1200).
 
     THREE-VALUED, and the API boundary passes all three through unchanged:
-    records are where the work is, `()` means the workspace was asked and
-    nothing this phase produced had reached a remote, and `None` means nothing
-    could ask -
-    including every phase that did not fail and every event written before this
-    field existed. A phase whose work is sitting on a branch and one whose work
-    died with its container are different incidents; flattening the empties
-    would merge them again.
+    records are readings taken from git, `()` means the workspace was read and
+    no branch differs from how the phase found it, and `None` means nothing
+    could read it - including every phase that did not fail and every event
+    written before this field existed. A phase whose branch moved and one whose
+    repositories are exactly as it found them are different incidents;
+    flattening the empties would merge them again.
     """
 
     @staticmethod
@@ -105,8 +106,10 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
-            "pushed_work": (
-                None if self.pushed_work is None else [w.model_dump() for w in self.pushed_work]
+            "observed_branches": (
+                None
+                if self.observed_branches is None
+                else [w.model_dump() for w in self.observed_branches]
             ),
         }
 
@@ -135,7 +138,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
-            pushed_work=_pushed_work(data.get("pushed_work")),
+            observed_branches=_observed_branches(data.get("observed_branches")),
         )
 
 
@@ -248,15 +251,15 @@ class WorkflowExecutionDetail:
         }
 
 
-def _pushed_work(stored: object) -> tuple[PushedWork, ...] | None:
-    """Rebuild the pushed-work records a projection stored, keeping None as None.
+def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:
+    """Rebuild the branch readings a projection stored, keeping None as None.
 
     The store round-trips these as plain data, so this is the hop where they
     become the value object again - and the hop where a defaulted `[]` would
-    turn "nobody looked" into "looked and found nothing" (#1200). Anything that
-    is not a list is treated as absent: a malformed row is not evidence about a
-    remote either.
+    turn "nobody looked" into "looked and nothing had changed" (#1200).
+    Anything that is not a list is treated as absent: a malformed row is not a
+    reading of a remote either.
     """
     if not isinstance(stored, list):
         return None
-    return tuple(PushedWork.model_validate(entry) for entry in stored)
+    return tuple(BranchObservation.model_validate(entry) for entry in stored)

@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        BranchObservation,
         PhaseDefinition,
-        PushedWork,
     )
 
 
@@ -80,7 +80,7 @@ class FailExecutionCommand:
         completed_phases: int,
         total_phases: int,
         failed_phase_duration_seconds: float | None = None,
-        pushed_work: tuple[PushedWork, ...] | None = None,
+        observed_branches: tuple[BranchObservation, ...] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -89,15 +89,16 @@ class FailExecutionCommand:
         self.completed_phases = completed_phases
         self.total_phases = total_phases
         self.failed_phase_duration_seconds = failed_phase_duration_seconds
-        #: Where the failed phase's work already is, when it pushed any (#1200).
-        #: THREE-VALUED: records name branches confirmed on a remote, `()` says
-        #: the workspace was asked and this phase had put nothing on one, and
-        #: None says nobody could ask. A failure that pushed work and one that
-        #: lost it are different incidents, and this is what keeps them apart
-        #: downstream. THIS PHASE, not the repository: the branch it started on
-        #: is normally already pushed, so counting that gives every failure a
-        #: location and merges the two incidents again.
-        self.pushed_work = pushed_work
+        #: Where the failed phase's branches stood when it died (#1200).
+        #: THREE-VALUED: records are readings taken from git, `()` says the
+        #: workspace was read and no branch differs from how the phase found
+        #: it, and None says nobody could read it. A failure whose branch moved
+        #: and one that left nothing anywhere are different incidents, and this
+        #: is what keeps them apart downstream. DIFFERENCE FROM THE STARTING
+        #: POINT, not authorship: the branch a phase starts on is normally
+        #: already pushed, so recording every branch would give every failure a
+        #: location, and no ref records whose push moved it.
+        self.observed_branches = observed_branches
 
 
 class StartPhaseCommand:

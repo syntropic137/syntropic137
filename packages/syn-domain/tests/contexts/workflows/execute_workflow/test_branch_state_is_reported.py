@@ -1,4 +1,4 @@
-"""#1200: a failed phase must say WHERE its work went, as data an API can read.
+"""#1200: a failed phase must say WHERE its branches stand, as data an API can read.
 
 THE INCIDENT. `exec-9cfc47026881` ran for 27 minutes, pushed a complete branch,
 then failed the #1167 output-artifact contract because it wrote no deliverable.
@@ -7,23 +7,35 @@ the work was finished, and nothing anywhere named it - so the run looked
 identical to one that had produced nothing at all, and the work was found again
 by a human reading a container log.
 
+OBSERVATIONS, NOT ATTRIBUTIONS, and that is what these tests pin hardest. Two
+earlier versions of this feature reported "the work THIS PHASE pushed", derived
+by snapshotting the refs at provisioning and calling anything new the phase's
+own. GIT DOES NOT RECORD WHO PUSHED A COMMIT: a concurrent process, or a
+person, pushing to the same branch between the two readings produces the
+identical evidence. So what is recorded is what was read - the branch, where
+its remote ref is now, where it was when the phase started, and how many local
+commits no remote has - and the assertions below check that nothing claims
+more. An operator needs to know where to look; that never required knowing
+whose push it was.
+
 WHAT THESE TESTS DRIVE. The real `_fail_execution`, against REAL git
 repositories (the harness #1184 already built for the completion path), and
 then the real detail projection and its read model. A workspace double
-returning canned stdout would only pin the double: it would stay green if the
-claim were derived from a branch-name variable instead of from a ref that
-exists on the remote, which is the single mistake this feature can make. Every
-branch and SHA asserted below is read back out of the ORIGIN repository, never
-copied from the value the code returned.
+returning canned stdout would only pin the double: it would stay green if a
+reading were derived from a branch-name variable instead of from a ref that
+exists, which is the single mistake this feature can make. Every branch and SHA
+asserted below is read back out of the ORIGIN repository, never copied from the
+value the code returned.
 
-THREE STATES, NOT TWO, and they stay distinguishable all the way out:
-  records - these locations are on a remote right now
-  `[]`    - we asked git, and none of this phase's work is on a remote
-  None    - nobody could ask (no workspace, or a workspace that stopped
-            answering); the absence of a verdict is not a verdict of "nothing"
-`[]` and None both render as "no recoverable branch", so prose alone cannot
-tell them apart - which is why the API carries the structure and not a
-sentence.
+FOUR STATES, NOT THREE, and they stay distinguishable all the way out:
+  a moved ref  - `origin/<branch>` is not where the phase found it: fetch it
+  unpushed     - commits here are on no remote: #1184's quarantine, nothing to
+                 fetch, and NOT the same incident as nothing having happened
+  `[]`         - we read git, and every branch is where the phase found it
+  None         - nobody could read it; the absence of a verdict is not a
+                 verdict of "nothing changed"
+The last three all render as "no branch to fetch", so prose alone cannot tell
+them apart - which is why the API carries the structure and not a sentence.
 """
 
 from __future__ import annotations
@@ -37,9 +49,9 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    BranchObservation,
     ExecutablePhase,
     PhaseDefinition,
-    PushedWork,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     StartExecutionCommand,
@@ -141,10 +153,10 @@ async def _provisioned(workspace: object) -> PhaseStartingPoint:
     """What the processor records the moment a workspace is handed to a phase.
 
     CALLED BEFORE THE PHASE DOES ANYTHING, in every test, because that ordering
-    is the feature: a starting point read after the agent ran would contain the
-    agent's own commits and attribute none of them to it. Tests therefore call
-    this on their first line and commit afterwards, so the sequence a reader
-    sees is the sequence production performs.
+    is the feature: a starting point read after the agent ran would already
+    hold whatever the agent pushed, and every ref would then look unmoved.
+    Tests therefore call this on their first line and commit afterwards, so the
+    sequence a reader sees is the sequence production performs.
     """
     return await record_phase_starting_point(cast("GitWorkspace", workspace))
 
@@ -233,7 +245,7 @@ class _Unreachable:
     """A container that has stopped answering.
 
     Not a raise: the Docker backend RETURNS a non-zero result with empty
-    stdout, which is byte-for-byte what a workspace with nothing pushed
+    stdout, which is byte-for-byte what a workspace with nothing to report
     returns. That collision is the reason `None` and `[]` are different values.
     """
 
@@ -244,39 +256,82 @@ class _Unreachable:
 
 
 # ---------------------------------------------------------------------------
-# (a) The work is on a remote: name the branch and the SHA.
+# (a) The remote ref moved: name the branch, where it is, and where it was.
 # ---------------------------------------------------------------------------
 
 
-async def test_a_pushed_branch_and_sha_are_named_on_the_failure(clone: _Clone) -> None:
+async def test_a_moved_remote_ref_is_named_with_both_of_its_commits(clone: _Clone) -> None:
     """The incident shape: pushed everything, wrote no deliverable, failed.
 
-    The expected SHA is read from the ORIGIN's ref, not from the clone and not
-    from the returned value, so this asserts the recorded commit is one a
-    reader can actually fetch.
+    Both SHAs are read from the ORIGIN's ref, never from the clone and never
+    from the returned value, so this asserts the recorded commits are ones a
+    reader can actually fetch and compare.
     """
+    started_at = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
     start = await _provisioned(clone.workspace)
 
     clone.commit("implementation.py", "the work the phase actually did\n")
     clone.git("push", "origin", _BRANCH)
     on_remote = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
+    assert on_remote != started_at, "this test is only meaningful while the ref moved"
 
     failed = await _fail_after(start)
 
-    assert failed.pushed_work == [PushedWork(repo=_REPO, branch=_BRANCH, commit=on_remote)], (
-        "the failure must name the branch and the commit the phase pushed; "
-        f"got {failed.pushed_work!r}"
+    assert failed.observed_branches == [
+        BranchObservation(
+            repo=_REPO,
+            branch=_BRANCH,
+            remote="origin",
+            remote_commit=on_remote,
+            remote_commit_at_phase_start=started_at,
+            unpushed_commits=0,
+        )
+    ], (
+        "the failure must record the branch, where its remote ref is now, and "
+        f"where it was at phase start; got {failed.observed_branches!r}"
     )
 
     phase = await _read_back(failed)
-    assert phase.pushed_work is not None
-    assert [(w.branch, w.commit) for w in phase.pushed_work] == [(_BRANCH, on_remote)], (
-        "the branch and SHA did not survive the projection and read model - "
-        "the failure record is where an operator looks, not the log"
+    assert phase.observed_branches is not None
+    assert [
+        (w.branch, w.remote_commit, w.remote_commit_at_phase_start) for w in phase.observed_branches
+    ] == [(_BRANCH, on_remote, started_at)], (
+        "the branch and both SHAs did not survive the projection and read "
+        "model - the failure record is where an operator looks, not the log"
     )
-    # And the prose says it too, for the reader who is not an API client.
-    assert _BRANCH in phase.error_message and on_remote in phase.error_message  # type: ignore[operator]
-    assert "declares output_artifacts" in (phase.error_message or ""), (
+
+
+async def test_the_operator_is_told_what_was_observed_and_not_who_did_it(
+    clone: _Clone,
+) -> None:
+    """The prose makes the same claim the data does, and no larger one.
+
+    THE POINT OF THE THIRD PASS. "This phase pushed <sha>" is not a sentence
+    git can support: a ref that advanced between two readings advanced, and
+    nothing records whose push advanced it. So the message states the two
+    readings and lets the reader conclude - and both SHAs must be in it,
+    because a message naming only the current one is the attribution again
+    with the evidence removed.
+    """
+    started_at = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
+    start = await _provisioned(clone.workspace)
+    clone.commit("implementation.py", "the work the phase actually did\n")
+    clone.git("push", "origin", _BRANCH)
+    on_remote = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
+
+    message = (await _read_back(await _fail_after(start))).error_message or ""
+
+    assert f"the remote branch origin/{_BRANCH} is at {on_remote}" in message, (
+        f"the failure must say where the branch IS, as an observation: {message}"
+    )
+    assert f"differs from {started_at} when the phase started" in message, (
+        f"the failure must say what it is being compared against: {message}"
+    )
+    for claim in ("this phase pushed", "its own work", "produced by this phase"):
+        assert claim not in message.lower(), (
+            f"the failure claims authorship git cannot support ({claim!r}): {message}"
+        )
+    assert "declares output_artifacts" in message, (
         "#1167's reason must survive alongside the location, not be replaced by it"
     )
 
@@ -298,25 +353,25 @@ async def test_the_reason_the_phase_failed_is_not_replaced_by_where_it_went(
 
 
 # ---------------------------------------------------------------------------
-# (b) The phase produced nothing: claim nothing, however pushed the branch is.
+# (b) Nothing changed anywhere: record nothing, and offer no inherited SHA.
 # ---------------------------------------------------------------------------
 
 
-async def test_a_phase_that_produced_nothing_claims_no_branch(clone: _Clone) -> None:
+async def test_a_workspace_nothing_touched_records_no_branch(clone: _Clone) -> None:
     """The trap the first version of this feature walked into.
 
     The phase does NOTHING. It makes no commit, pushes nothing, and leaves the
     workspace exactly as it found it - on a feature branch whose commits an
     earlier phase already pushed. Every ingredient of a recoverable failure is
     present in git: HEAD exists, the branch has a name, and that name is on the
-    remote containing HEAD. None of it is this phase's work.
+    remote containing HEAD.
 
     Answering "is HEAD on a remote" is therefore true here and worthless: it
-    hands an operator a location for a phase that produced nothing, which makes
-    "pushed complete work, wrote no deliverable" - recoverable, go and fetch it
-    - and "produced nothing at all" - unrecoverable, run it again - the same
-    record. That is the distinction the whole feature exists to draw, so the
-    answer must be the empty tuple.
+    hands an operator a location for a workspace nothing happened in, which
+    makes "a branch moved, go and fetch it" and "nothing here changed" the same
+    record. So the answer must be the empty tuple, and the SHA the phase
+    INHERITED must appear nowhere - it is not a difference, and reporting it
+    would be reporting a fact about the clone as if it were about the run.
     """
     inherited = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
     assert clone.git("rev-parse", "HEAD") == inherited, (
@@ -328,73 +383,74 @@ async def test_a_phase_that_produced_nothing_claims_no_branch(clone: _Clone) -> 
 
     failed = await _fail_after(start)
 
-    assert failed.pushed_work == [], (
-        "a phase that produced nothing must record 'checked, nothing there' - "
-        f"got {failed.pushed_work!r}"
+    assert failed.observed_branches == [], (
+        "a workspace nothing touched must record 'read, and nothing differs' - "
+        f"got {failed.observed_branches!r}"
     )
 
     phase = await _read_back(failed)
-    assert phase.pushed_work == ()
+    assert phase.observed_branches == ()
     assert inherited not in (phase.error_message or ""), (
-        "the failure offers the commit the phase INHERITED as its own output"
+        "the failure offers the commit the phase INHERITED as somewhere to look"
     )
     assert _BRANCH not in (phase.error_message or ""), (
-        "the failure names a branch this phase put nothing on"
+        "the failure names a branch that is exactly where the phase found it"
     )
 
 
-async def test_a_phase_that_only_fetched_claims_no_branch(clone: _Clone) -> None:
-    """Someone else's merged commit is not this phase's work either.
+async def test_a_phase_that_only_fetched_records_no_branch(clone: _Clone) -> None:
+    """Someone else's merged commit is not this workspace's incident either.
 
-    A phase that fetches and resets onto a freshly advanced `origin/main` has a
-    HEAD that IS on a remote ref - `origin/main` - and is new since it started,
-    because the fetch happened after. Both halves of "new work that reached a
-    remote" are satisfied by a phase that wrote nothing.
+    A phase that fetches and resets onto a freshly advanced `origin/main` HAS
+    moved a remote-tracking ref - `origin/main` is at a commit it was not at
+    when the phase started - and its HEAD is now a commit that is on a remote.
+    Every ingredient of "a ref moved" is present, produced by a phase that
+    wrote nothing.
 
-    What saves it is asking about the remote counterpart of THIS branch rather
-    than about any remote ref: `origin/<branch>` does not contain that commit,
-    so there is nothing to offer. A version that accepted any remote ref would
-    name this phase's branch beside a SHA that branch does not contain - a
-    location that is not merely useless but wrong, and one an operator would
-    only discover by fetching it.
+    What saves it is observing the remote counterpart of THIS branch and no
+    other ref: `origin/<branch>` did not move, and nothing local is off a
+    remote. A version that reported every ref it saw move would put another
+    PR's merge in this phase's failure record, which is worse than useless -
+    an operator would fetch it and find someone else's work.
     """
     start = await _provisioned(clone.workspace)
     clone.advance_origin_main("someone_elses_pr.py", "merged while this ran\n")
     clone.git("reset", "--hard", "origin/main")
-    on_a_remote = clone.git("rev-parse", "HEAD")
-    assert on_a_remote == clone.origin_refs()["refs/heads/main"], (
-        "this test is only meaningful while HEAD is a commit on some remote ref"
+    someone_else = clone.git("rev-parse", "HEAD")
+    assert someone_else == clone.origin_refs()["refs/heads/main"], (
+        "this test is only meaningful while a remote ref really did move"
     )
 
     failed = await _fail_after(start)
 
-    assert failed.pushed_work == [], (
-        "a commit this phase merely fetched was reported as work it pushed - "
-        f"got {failed.pushed_work!r}"
+    assert failed.observed_branches == [], (
+        "a ref this phase merely fetched was reported as this workspace's "
+        f"business - got {failed.observed_branches!r}"
     )
-    assert on_a_remote not in ((await _read_back(failed)).error_message or "")
+    assert someone_else not in ((await _read_back(failed)).error_message or "")
 
 
 # ---------------------------------------------------------------------------
-# (c) It committed but never pushed: #1184's territory, and not recoverable here.
+# (c) Commits on no remote: a DIFFERENT record from (b), and not fetchable.
 # ---------------------------------------------------------------------------
 
 
-async def test_a_phase_whose_work_never_reached_a_remote_claims_no_branch(
-    clone: _Clone,
-) -> None:
-    """The trap this test exists to spring.
+async def test_commits_that_no_remote_holds_are_recorded_as_such(clone: _Clone) -> None:
+    """The blocking finding this pass exists to fix.
 
-    The clone IS on a branch, that branch's NAME exists, and the branch exists
-    on the remote - it was pushed when the phase started. What is not on any
-    remote is the commit the phase made. A claim derived from "is the branch
-    variable non-empty" is true here and useless: it would send a reader to a
-    branch that does not contain the work.
+    The clone IS on a branch, that branch's name exists, and the branch exists
+    on the remote - it was pushed before the phase started. What is not on any
+    remote is the commit made here. Until now this answered `[]`, exactly like
+    the workspace nothing touched, and the two are NOT the same incident: this
+    one is holding work that dying will destroy (#1184's quarantine territory),
+    and the other has nothing.
 
-    So the recorded answer must be the empty tuple - asked, and none of this
-    phase's work is reachable - and the SHA must not be offered as somewhere
-    to fetch from.
+    So it records a branch, and the record says what is true of it: the remote
+    ref is where the phase found it, AND commits here are on no remote. Both
+    halves matter - the second is the incident, and the first is what stops a
+    reader fetching a branch that does not contain them.
     """
+    unchanged = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
     start = await _provisioned(clone.workspace)
     lost = clone.commit("implementation.py", "committed, never pushed\n")
     assert lost != clone.origin_refs()[f"refs/heads/{_BRANCH}"], (
@@ -403,34 +459,49 @@ async def test_a_phase_whose_work_never_reached_a_remote_claims_no_branch(
 
     failed = await _fail_after(start)
 
-    assert failed.pushed_work == [], (
-        "a phase that pushed nothing must record 'checked, nothing there' - "
-        f"got {failed.pushed_work!r}"
+    assert failed.observed_branches == [
+        BranchObservation(
+            repo=_REPO,
+            branch=_BRANCH,
+            remote="origin",
+            remote_commit=unchanged,
+            remote_commit_at_phase_start=unchanged,
+            unpushed_commits=1,
+        )
+    ], (
+        "unpushed commits must be recorded as their own observation, not "
+        f"flattened into 'nothing changed'; got {failed.observed_branches!r}"
     )
 
     phase = await _read_back(failed)
-    assert phase.pushed_work == ()
-    assert lost not in (phase.error_message or ""), (
-        "the failure offers an unpushed SHA as a place to fetch from"
+    assert phase.observed_branches is not None
+    (record,) = phase.observed_branches
+    assert record.unpushed_commits == 1
+    assert not record.remote_moved, "the remote ref did not move and must not be said to have"
+
+    message = phase.error_message or ""
+    assert "1 commit here on no remote at all" in message, (
+        f"the failure does not say the commits are unreachable: {message}"
     )
-    assert _BRANCH not in (phase.error_message or ""), (
-        "the failure names a branch that does not contain this phase's work"
+    assert lost not in message, "the failure offers an unpushed SHA as a place to fetch from"
+    assert "git fetch" not in message, (
+        "the failure offers a fetch for a branch that does not contain the work"
     )
 
 
 async def test_the_offered_commit_is_the_one_the_remote_actually_holds(
     clone: _Clone,
 ) -> None:
-    """Pushed, then committed again: offer the push, never the local tip.
+    """Pushed, then committed again: report the ref, never the local tip.
 
     A phase that pushes and then keeps working ends with a HEAD that is NOT on
-    any remote, and the two halves of its work have different fates: what it
-    pushed is recoverable, what came after is #1184's problem. Reporting HEAD
-    would send a reader to fetch a SHA that does not exist on the remote;
-    reporting nothing would strand a branch that does.
+    any remote, and the two halves of its work have different fates: what
+    reached the remote is fetchable, what came after is #1184's problem.
+    Reporting HEAD would send a reader to fetch a SHA the remote does not have;
+    reporting only the ref would hide that something is about to be lost.
 
-    So the record names the newest commit the branch's remote is confirmed to
-    hold, which is why `commit` is not documented as "HEAD".
+    So one record says both, which is why `remote_commit` is not documented as
+    "HEAD".
     """
     start = await _provisioned(clone.workspace)
     clone.commit("implementation.py", "the work that got out\n")
@@ -440,54 +511,64 @@ async def test_the_offered_commit_is_the_one_the_remote_actually_holds(
 
     failed = await _fail_after(start)
 
-    assert failed.pushed_work == [
-        PushedWork(repo=_REPO, branch=_BRANCH, commit=reached_the_remote)
-    ], f"expected the pushed commit, not the local tip; got {failed.pushed_work!r}"
+    assert failed.observed_branches is not None
+    (record,) = failed.observed_branches
+    assert record.remote_commit == reached_the_remote, (
+        f"expected the commit the ref holds, not the local tip; got {record!r}"
+    )
+    assert record.unpushed_commits == 1, (
+        f"the commit made after the push is on no remote and must be counted; got {record!r}"
+    )
     assert kept_local not in ((await _read_back(failed)).error_message or ""), (
         "the failure offers a commit the remote does not have as a place to fetch from"
     )
 
 
+# ---------------------------------------------------------------------------
+# Nobody could look: None, never an empty answer.
+# ---------------------------------------------------------------------------
+
+
 async def test_a_workspace_that_cannot_answer_records_no_verdict(clone: _Clone) -> None:
     """None, not `[]`: an inspection that could not run has found nothing out.
 
-    Same operator-facing sentence as the case above ("no recoverable branch"),
+    Same operator-facing sentence as the case above ("no branch to fetch"),
     deliberately different data - which is the whole reason the API carries a
     nullable list rather than prose.
     """
     failed = await _fail_after(await _provisioned(_Unreachable()))
 
-    assert failed.pushed_work is None, (
+    assert failed.observed_branches is None, (
         "a workspace that stopped answering must not be recorded as 'nothing "
-        f"was pushed'; got {failed.pushed_work!r}"
+        f"changed'; got {failed.observed_branches!r}"
     )
     phase = await _read_back(failed)
-    assert phase.pushed_work is None
+    assert phase.observed_branches is None
 
 
 async def test_a_workspace_that_died_after_starting_records_no_verdict(
     clone: _Clone,
 ) -> None:
-    """The other order, and it must not become a verdict of "nothing".
+    """The other order, and it must not become a verdict of "nothing changed".
 
     The starting point was read fine; it is the failure-time half that cannot
     run, because the container went away between the two. There is now a real
-    snapshot in hand and it is tempting to answer from it - but the snapshot
-    only says what was NOT this phase's work. Whether the phase pushed anything
-    is exactly what nobody can find out any more.
+    snapshot in hand and it is tempting to answer from it - but a snapshot is
+    half a comparison. Where those refs point NOW is exactly what nobody can
+    find out any more.
     """
     start = await _provisioned(clone.workspace)
     died = PhaseStartingPoint(
-        workspace=cast("GitWorkspace", _Unreachable()), reachable=start.reachable
+        workspace=cast("GitWorkspace", _Unreachable()), remote_refs=start.remote_refs
     )
 
     failed = await _fail_after(died)
 
-    assert failed.pushed_work is None, (
-        "a workspace that died mid-phase was recorded as one that pushed "
-        f"nothing; got {failed.pushed_work!r}"
+    assert failed.observed_branches is None, (
+        "a workspace that died mid-phase was recorded as one where nothing "
+        f"changed; got {failed.observed_branches!r}"
     )
-    assert (await _read_back(failed)).pushed_work is None
+    assert (await _read_back(failed)).observed_branches is None
     assert "produced none" in failed.error_message
 
 
@@ -495,8 +576,8 @@ async def test_a_failure_with_no_workspace_at_all_records_no_verdict() -> None:
     """A run that dies before provisioning has nobody to ask. Also None."""
     failed = await _fail_after(None)
 
-    assert failed.pushed_work is None
-    assert (await _read_back(failed)).pushed_work is None
+    assert failed.observed_branches is None
+    assert (await _read_back(failed)).observed_branches is None
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +600,7 @@ async def test_the_unreachable_workspace_still_fails_for_its_own_reason() -> Non
 
 
 # ---------------------------------------------------------------------------
-# (d) The three outcomes are three values, not three sentences.
+# (d) The four outcomes are four values, not four sentences.
 # ---------------------------------------------------------------------------
 
 
@@ -530,27 +611,29 @@ def _fresh(tmp_path: Path, name: str) -> Path:
     return root
 
 
-async def test_the_three_outcomes_are_distinguishable_without_reading_prose(
+async def test_the_four_outcomes_are_distinguishable_without_reading_prose(
     tmp_path: Path,
 ) -> None:
-    """One client, three failures, three different answers to `pushed_work`.
+    """One client, four failures, four different answers to `observed_branches`.
 
     Each case above pins its own value; this pins that they DIFFER, which is
     the property an operator's tooling depends on and the one no single-case
-    test can protect. It is easy to satisfy every assertion above with a field
-    that quietly answers `[]` to two questions - "it produced nothing" and "it
-    committed without pushing" being the pair most likely to collapse, since
-    both phases end with nothing of theirs on a remote.
+    test can protect.
 
-    They must not collapse INTO the pushed case: `[]` alongside a record would
-    mean an operator who fetched nothing had been told there was nothing to
-    fetch. Read through the projection and read model, because that is the
-    shape the API serves.
+    THE PAIR THAT COLLAPSED. "Nothing changed anywhere" and "commits are here
+    that no remote has" both end with nothing of this phase's on a remote, and
+    both answered `[]` until this pass - so a client could not tell a workspace
+    holding doomed work from one holding none. They are asserted UNEQUAL below,
+    not merely each equal to their own value: two constants can drift into
+    agreement while both single-case tests still pass.
+
+    Read through the projection and read model, because that is the shape the
+    API serves.
     """
-    pushed = _clone_repository(_fresh(tmp_path, "pushed"))
-    pushed_start = await _provisioned(pushed.workspace)
-    pushed.commit("implementation.py", "work that got out\n")
-    pushed.git("push", "origin", _BRANCH)
+    moved = _clone_repository(_fresh(tmp_path, "moved"))
+    moved_start = await _provisioned(moved.workspace)
+    moved.commit("implementation.py", "work that got out\n")
+    moved.git("push", "origin", _BRANCH)
 
     idle = _clone_repository(_fresh(tmp_path, "idle"))
     idle_start = await _provisioned(idle.workspace)
@@ -560,21 +643,36 @@ async def test_the_three_outcomes_are_distinguishable_without_reading_prose(
     local.commit("implementation.py", "committed, never pushed\n")
 
     answers = {
-        "pushed": (await _read_back(await _fail_after(pushed_start))).pushed_work,
-        "produced nothing": (await _read_back(await _fail_after(idle_start))).pushed_work,
-        "committed, unpushed": (await _read_back(await _fail_after(local_start))).pushed_work,
-        "nobody could look": (await _read_back(await _fail_after(None))).pushed_work,
+        "ref moved": (await _read_back(await _fail_after(moved_start))).observed_branches,
+        "nothing changed": (await _read_back(await _fail_after(idle_start))).observed_branches,
+        "committed, unpushed": (await _read_back(await _fail_after(local_start))).observed_branches,
+        "nobody could look": (await _read_back(await _fail_after(None))).observed_branches,
     }
 
-    assert answers["pushed"], "the recoverable failure must name somewhere to look"
-    assert answers["produced nothing"] == (), "asked, and this phase put nothing on a remote"
-    assert answers["committed, unpushed"] == (), "its commits are local; #1184 quarantines them"
-    assert answers["nobody could look"] is None, "the absence of a verdict is not a verdict"
+    assert len({repr(value) for value in answers.values()}) == 4, (
+        f"four incidents must be four structured values, not fewer: {answers}"
+    )
+    assert answers["nothing changed"] != answers["committed, unpushed"], (
+        "a client cannot tell a workspace holding doomed commits from one "
+        f"holding nothing: {answers}"
+    )
 
-    # And the one an API client actually acts on: recoverable vs not.
-    assert (answers["pushed"] is not None and len(answers["pushed"]) > 0) and not any(
-        answers[case] for case in ("produced nothing", "committed, unpushed", "nobody could look")
-    ), f"a client cannot tell 'go and fetch it' from 'it is gone': {answers}"
+    # And what a client actually acts on, read off the structure alone.
+    def _verdict(value: tuple[BranchObservation, ...] | None) -> str:
+        if value is None:
+            return "go and check by hand"
+        if any(record.remote_moved for record in value):
+            return "fetch it"
+        if any(record.unpushed_commits for record in value):
+            return "it is being quarantined, nothing to fetch"
+        return "nothing happened here"
+
+    assert {case: _verdict(value) for case, value in answers.items()} == {
+        "ref moved": "fetch it",
+        "nothing changed": "nothing happened here",
+        "committed, unpushed": "it is being quarantined, nothing to fetch",
+        "nobody could look": "go and check by hand",
+    }, f"a client cannot act differently on the four incidents: {answers}"
 
 
 # ---------------------------------------------------------------------------
@@ -594,12 +692,12 @@ async def test_a_phase_that_writes_its_deliverable_is_never_even_asked(
     """
 
     def _never_ask(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("the success path asked where a phase's work went")
+        raise AssertionError("the success path asked where a phase's branches stood")
 
     # Reached through `sys.modules` because the module and the class it holds
     # share a name, and importing that name gives the class.
     monkeypatch.setattr(
-        sys.modules[WorkflowExecutionProcessor.__module__], "where_the_work_went", _never_ask
+        sys.modules[WorkflowExecutionProcessor.__module__], "observe_branches", _never_ask
     )
 
     fake = FakeAgentExecutionHandler.success(
@@ -630,16 +728,16 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
 ) -> None:
     """The hop the failure path cannot check for itself.
 
-    `where_the_work_went` answers None when no starting point was recorded, and
+    `observe_branches` answers None when no starting point was recorded, and
     None is a legitimate answer - so a processor that never recorded one would
     make every failure say "nobody looked", and every test above that expects
     None would still pass. The wiring has to be pinned where it happens.
 
     ORDER IS THE POINT, not merely the call. A snapshot taken after the agent
-    ran would contain the agent's own commits, and the phase would then be
-    credited with nothing it did - the same silent, plausible emptiness by a
-    different route. So the spy records how many agent runs had happened when
-    it was asked, and the answer for phase N must be N.
+    ran would already hold whatever the agent pushed, and every ref would then
+    read as unmoved - the same silent, plausible emptiness by a different
+    route. So the spy records how many agent runs had happened when it was
+    asked, and the answer for phase N must be N.
     """
     module = sys.modules[WorkflowExecutionProcessor.__module__]
     real = module.record_phase_starting_point
