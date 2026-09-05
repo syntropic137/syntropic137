@@ -273,3 +273,72 @@ Templates are higher-order prompts -- generic, reusable recipes that define the 
 - **API:** `repos: [...]` in the execute request body
 
 `requires_repos` gates the preflight validation pipeline, not the repo resolution itself. When `true`, the system validates GitHub App access before spinning up a container, ensuring fast failure. When `false`, the pipeline is skipped entirely.
+
+---
+
+## Addendum: `clone_repos` Per-Phase Checkout Gate (#1187)
+
+**Date:** 2026-09-05
+
+### Problem
+
+Hydration was phase-blind. `WorkflowExecutionProcessor` builds one repo list
+from the workflow and hands the same list to every phase;
+`SetupPhaseSecrets.build_setup_script()` clones whatever it is handed. So every
+phase of a workflow paid the same clone plus recursive submodule init,
+regardless of what that phase does.
+
+`sdlc-implement-v1`'s `open_pr` phase reads one artifact, checks a remote ref
+and calls `gh pr create`. Its own prompt already tells it the branch is on
+origin and that it must not push -- so the checkout it paid for was never used.
+It nonetheless paid the full bootstrap under the shortest budget in the
+workflow (600s against 1800-3600s elsewhere) and timed out in roughly 30% of
+runs.
+
+The only opt-out that existed was the `requires_repos` gate above, and it is
+workflow-scoped: turning it off for `open_pr` would also have turned it off for
+`implement` and `verify`, which genuinely need the checkout.
+
+### Decision
+
+Add `clone_repos: bool = True` at PHASE scope, alongside the existing
+workflow-scoped `requires_repos`.
+
+The two gates answer different questions, and the distinction is the point:
+
+| | Scope | Question |
+|---|---|---|
+| `requires_repos` | workflow | Does this workflow have repos at all? |
+| `clone_repos` | phase | Does THIS phase need them on disk? |
+
+**Credentials and checkout are separated.** `clone_repos: false` still resolves
+the GitHub App installation, mints the token, writes the per-repo
+`~/.git-credentials` entries and configures `gh`'s `hosts.yml`. Only
+`git clone` is skipped.
+
+That separation is load-bearing, not incidental. The cheap way to skip a clone
+was to pass no repositories -- but `repositories` is also what keys token
+routing, so an empty list makes `_resolve_github_app_token` fall back to
+`installations[0]`, which is the multi-org misrouting #1129 already fixed once.
+A phase that talks to GitHub about a repo it does not need on disk previously
+had no way to say so; this field is that way.
+
+**The synthetic context follows the checkout.** Section 4's generated
+`/workspace/AGENTS.md` and `/workspace/CLAUDE.md` are `@`-imports of paths under
+`/workspace/repos/<name>/`. They are now derived from what was actually cloned,
+so a no-clone phase does not receive imports pointing at files that do not
+exist. This also removes the repo's own (large) `CLAUDE.md` from that phase's
+auto-loaded context.
+
+**Default is `true`**, for the same reason `requires_repos` defaults that way:
+every phase already in the event store was written assuming a checkout.
+
+### Known Gap
+
+`SYN_WORKSPACE_PROMPT`
+(`packages/syn-domain/.../execute_workflow/workspace_prompt.py`) is injected
+into every phase and still describes `repos/` as "pre-cloned repositories
+(ready to use)". For a `clone_repos: false` phase that is now inaccurate. It was
+left unchanged deliberately: it is one shared preamble for all phases, so making
+it conditional is a prompt change affecting every workflow, and #1187 was scoped
+to configuration. Tracked as a follow-up.
