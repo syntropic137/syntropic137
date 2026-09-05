@@ -73,7 +73,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
     SessionLifecycleManager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    quarantine_unpushed_work,
+    refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
 
@@ -374,13 +374,7 @@ class WorkflowExecutionProcessor:
                 phase_outputs,
             )
         elif todo.action == TodoAction.COMPLETE_PHASE:
-            await self._handle_complete_phase(
-                todo,
-                phase,
-                aggregate,
-                phase_results,
-                completed_phase_ids,
-            )
+            await self._handle_complete_phase(todo, aggregate, phase_results, completed_phase_ids)
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
@@ -773,25 +767,16 @@ class WorkflowExecutionProcessor:
     async def _handle_complete_phase(
         self,
         todo: TodoItem,
-        phase: ExecutablePhase,  # noqa: ARG002
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
     ) -> None:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
-        # BEFORE anything is popped or committed. This is the last moment at
-        # which the workspace still exists, and the aggregate has not yet been
-        # told the phase succeeded - so a phase holding work that the imminent
-        # teardown would erase fails here, from a state indistinguishable to
-        # every downstream path from any other phase failure (#1184).
-        workspace = self._active_workspaces.get(todo.phase_id)
-        if workspace is not None:
-            await quarantine_unpushed_work(
-                workspace,
-                execution_id=todo.execution_id,
-                phase_id=todo.phase_id,
-            )
+        # FIRST, and on the real path rather than inside a try: nothing has
+        # been popped, the workspace is still alive and the aggregate has not
+        # been told this phase succeeded, so the raise IS the outcome (#1184).
+        await refuse_to_complete_unsaved_phase(self._active_workspaces, todo)
 
         self._phase_tokens.pop(todo.phase_id, None)
         auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)

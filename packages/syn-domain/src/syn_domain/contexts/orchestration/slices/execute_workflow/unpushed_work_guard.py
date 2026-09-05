@@ -43,6 +43,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )
@@ -77,6 +80,38 @@ class GitWorkspace(Protocol):
     """The single workspace capability this gate needs: run a command in it."""
 
     async def execute(self, command: list[str]) -> ExecutionResult: ...
+
+
+async def refuse_to_complete_unsaved_phase(
+    workspaces: Mapping[str, GitWorkspace],
+    todo: TodoItem,
+) -> None:
+    """Refuse to complete a phase that is holding work its teardown would erase.
+
+    MUST be called before the aggregate is told the phase completed and before
+    the phase's workspace context manager is exited. That window is the whole
+    point: it is the last moment at which the work still exists to be saved,
+    and the last at which refusing leaves the phase indistinguishable, to every
+    path downstream, from any other phase failure (#1184). Called after either,
+    the guard can still detect the loss but can no longer prevent it.
+
+    The caller hands over the live workspace map and the to-do item and needs
+    to know nothing else - which workspace belongs to the phase, and what an
+    absent one means, are decided here. ABSENCE IS NOT A FAILURE, and that is a
+    verdict rather than an oversight: a phase with no workspace is holding
+    nothing that dying could erase, so there is nothing to save and nothing to
+    refuse. Contrast a workspace that is present but will not answer, which
+    `quarantine_unpushed_work` treats as the failure it is.
+
+    Raises:
+        UnpushedWorkQuarantinedError: as `quarantine_unpushed_work`.
+        WorkspaceInspectionFailedError: as `quarantine_unpushed_work`.
+    """
+    phase_id = todo.phase_id
+    workspace = workspaces.get(phase_id) if phase_id is not None else None
+    if phase_id is None or workspace is None:
+        return
+    await quarantine_unpushed_work(workspace, execution_id=todo.execution_id, phase_id=phase_id)
 
 
 async def quarantine_unpushed_work(

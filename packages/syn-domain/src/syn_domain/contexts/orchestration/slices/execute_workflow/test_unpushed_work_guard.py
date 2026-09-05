@@ -31,10 +31,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    AgentConfiguration,
-    ExecutablePhase,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -47,6 +43,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     _SCRATCH_INDEX,
     GitWorkspace,
     quarantine_unpushed_work,
+    refuse_to_complete_unsaved_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -397,13 +394,6 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
                 phase_id=_PHASE_ID,
                 session_id="sess-1",
             ),
-            ExecutablePhase(
-                phase_id=_PHASE_ID,
-                name="Implement",
-                order=1,
-                agent_config=AgentConfiguration(provider="claude"),
-                prompt_template="do it",
-            ),
             aggregate,
             [],
             completed_phase_ids,
@@ -414,6 +404,99 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
 
     aggregate.complete_phase.assert_not_called()
     assert completed_phase_ids == []
+
+
+# --------------------------------------------------------------------------
+# The wiring hop.
+#
+# `_handle_complete_phase` no longer looks a workspace up, and no longer
+# decides what a missing one means: `refuse_to_complete_unsaved_phase` owns
+# both. Every other test in this file calls `quarantine_unpushed_work`
+# directly with the module constants, so all of them would still pass if that
+# hop forwarded the wrong workspace, or ids it had invented rather than read.
+# These four are about the hop itself.
+# --------------------------------------------------------------------------
+
+
+class _NeverRun:
+    """A workspace that fails the test if the gate reaches it at all."""
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        raise AssertionError(f"ran {command} for a phase it was not asked about")
+
+
+def _completing(phase_id: str | None, execution_id: str = _EXECUTION_ID) -> TodoItem:
+    return TodoItem(
+        execution_id=execution_id,
+        action=TodoAction.COMPLETE_PHASE,
+        phase_id=phase_id,
+        session_id="sess-1",
+    )
+
+
+async def test_the_ref_is_named_from_the_todo_the_hop_was_handed(tmp_path: Path) -> None:
+    """The ids survive the hop as far as the ref an operator has to fetch.
+
+    BOTH ids differ from the module constants deliberately. The value that
+    matters is not one the gate could have defaulted to: a hop that read the
+    ids from anywhere other than this `TodoItem` would still push a
+    plausible-looking ref, and every other test here would still be green.
+    """
+    clone = _clone_repository(tmp_path)
+    clone.commit("never-pushed.py", "work the workspace was about to eat\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await refuse_to_complete_unsaved_phase(
+            {"verify": clone.workspace},
+            _completing("verify", execution_id="exec-a-different-run"),
+        )
+
+    refs = clone.origin_refs()
+    assert "refs/syn/lost/exec-a-different-run/verify" in refs
+    assert _QUARANTINE_REF not in refs, "the ref was named from something other than the todo"
+
+
+async def test_the_hop_inspects_the_phase_its_todo_names_and_no_other(tmp_path: Path) -> None:
+    """The map holds every live phase; only the one completing is at stake.
+
+    The phase that is NOT completing holds unpushed work here. Failing this
+    phase for it would strand a phase that is still running, and each phase
+    gets its own COMPLETE_PHASE to be judged at.
+    """
+    roots = {name: tmp_path / name for name in ("completing", "running")}
+    for root in roots.values():
+        root.mkdir()
+    completing = _clone_repository(roots["completing"])
+    running = _clone_repository(roots["running"])
+    running.commit("never-pushed.py", "another phase's work, still in progress\n")
+
+    await refuse_to_complete_unsaved_phase(
+        {"implement": running.workspace, "verify": completing.workspace},
+        _completing("verify"),
+    )
+
+    saved = [ref for ref in running.origin_refs() if ref.startswith("refs/syn/lost/")]
+    assert saved == [], "the hop quarantined a phase that was not completing"
+
+
+async def test_a_phase_whose_workspace_is_already_gone_is_holding_nothing() -> None:
+    """Absence is a verdict, not a check that was skipped.
+
+    Nothing that no longer exists can lose work by being destroyed again, so
+    the phase completes - and the gate must not go looking in some other
+    phase's workspace for something to say about this one.
+    """
+    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing("verify"))
+
+
+async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() -> None:
+    """`phase_id` is optional on `TodoItem`, and there is no phase to key on.
+
+    Unreachable from the processor, which asserts it first. Stated here so the
+    hop has one answer for "no workspace to inspect" however it arises, rather
+    than a `None` key that quietly matches nothing.
+    """
+    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing(None))
 
 
 # --------------------------------------------------------------------------
@@ -546,13 +629,6 @@ class _PhaseRun:
                 action=TodoAction.COMPLETE_PHASE,
                 phase_id=_PHASE_ID,
                 session_id="sess-1",
-            ),
-            ExecutablePhase(
-                phase_id=_PHASE_ID,
-                name="Implement",
-                order=1,
-                agent_config=AgentConfiguration(provider="claude"),
-                prompt_template="do it",
             ),
             self.aggregate,
             self.phase_results,
