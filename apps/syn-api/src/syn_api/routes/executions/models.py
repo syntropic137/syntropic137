@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from syn_api.types import PushedWorkInfo
 from syn_shared.display import EM_DASH
 
 
@@ -81,6 +82,16 @@ class PhaseExecutionInfo(BaseModel):
     telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
+    """
+    pushed_work: list[PushedWorkInfo] | None = None
+    """Branches a remote is confirmed to hold for this phase's work (#1200).
+
+    THREE-VALUED, same contract as `agent_session_ids` above: `null` means
+    nothing could tell us - the phase did not fail, its workspace was already
+    gone, or the execution predates the field - and `[]` means the workspace
+    was asked and none of its commits had reached a remote. A client
+    distinguishing "the work is recoverable, go and fetch it" from "the work is
+    gone" reads this, not the prose in `error_message`.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
 

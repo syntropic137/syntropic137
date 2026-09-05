@@ -26,6 +26,7 @@ from syn_api.types import (
     ExecutionSummary,
     Ok,
     PhaseExecution,
+    PushedWorkInfo,
     Result,
     ToolOperation,
 )
@@ -358,6 +359,17 @@ async def _map_phase_detail(
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
         agent_session_ids=agent_sessions.get(phase.session_id) if phase.session_id else None,
+        # None stays None for the same reason it does above: it means nothing
+        # looked for this phase's work, which is not the same statement as an
+        # empty list's "looked, and none of it reached a remote" (#1200).
+        pushed_work=(
+            None
+            if phase.pushed_work is None
+            else [
+                PushedWorkInfo(repo=w.repo, branch=w.branch, commit=w.commit)
+                for w in phase.pushed_work
+            ]
+        ),
         operations=ops,
     )
 
@@ -405,6 +417,11 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
+        # Same model, passed through rather than rebuilt: this constructor is
+        # the hop that has dropped a field twice (#891, #1176), and a phase
+        # whose work is on a branch nobody knows about is exactly the thing
+        # this field exists to stop being invisible (#1200).
+        pushed_work=phase.pushed_work,
         # Passed through verbatim, None included: this constructor re-lists
         # every field by hand and is exactly the hop that drops one (#891,
         # #1176). `or []` here would erase the not-reported/confirmed-none

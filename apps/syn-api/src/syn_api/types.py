@@ -769,6 +769,32 @@ class ToolOperation(BaseModel):
     git_repo: str | None = None
 
 
+class PushedWorkInfo(BaseModel):
+    """A branch a failed phase's work is sitting on (#1200).
+
+    THE ANSWER TO "WHERE DID IT GO", made machine-readable. A phase can push
+    complete work and still fail - most often because it wrote no deliverable,
+    which #1167 correctly refuses to pass - and the failure then named no
+    branch, so nothing pointed at commits that were merged by hand twice in one
+    day once a human found them.
+
+    Every instance is a claim the workspace verified against a remote-tracking
+    ref before the workspace was destroyed. The FIELD is three-valued and the
+    two empty answers must not be merged: absent/null means nothing could look,
+    `[]` means the workspace was asked and none of its commits had reached a
+    remote. Only the first can be recovered by fetching.
+    """
+
+    repo: str
+    """The repository the work is in, by directory name."""
+
+    branch: str
+    """The branch to fetch: no remote prefix, and the name a PR opens from."""
+
+    commit: str
+    """The commit to look at - the phase's HEAD, confirmed present on a remote."""
+
+
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
 
@@ -813,6 +839,13 @@ class PhaseExecution(BaseModel):
     telemetry that was unreachable. ``[]`` means the sweep ran and confirmed
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
+    """
+    pushed_work: list[PushedWorkInfo] | None = None
+    """Where this phase's work is, when it failed after pushing some (#1200).
+
+    Three-valued exactly as `PushedWorkInfo` describes. Defaulting to `[]`
+    here, or anywhere below, would tell an API client that a phase verifiably
+    pushed nothing when in truth nothing asked.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
 

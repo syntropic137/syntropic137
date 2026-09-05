@@ -7,6 +7,8 @@ at the API boundary from the execution_cost projection.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PushedWork
+
 
 @dataclass(frozen=True)
 class PhaseExecutionDetail:
@@ -63,6 +65,18 @@ class PhaseExecutionDetail:
     error_message: str | None = None
     """Error message if phase failed."""
 
+    pushed_work: tuple[PushedWork, ...] | None = None
+    """Branches a remote was confirmed to hold for this failed phase (#1200).
+
+    THREE-VALUED, and the API boundary passes all three through unchanged:
+    records are where the work is, `()` means the workspace was asked and
+    nothing in it had reached a remote, and `None` means nothing could ask -
+    including every phase that did not fail and every event written before this
+    field existed. A phase whose work is sitting on a branch and one whose work
+    died with its container are different incidents; flattening the empties
+    would merge them again.
+    """
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -90,6 +104,9 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
+            "pushed_work": (
+                None if self.pushed_work is None else [w.model_dump() for w in self.pushed_work]
+            ),
         }
 
     @classmethod
@@ -117,6 +134,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
+            pushed_work=_pushed_work(data.get("pushed_work")),
         )
 
 
@@ -227,3 +245,17 @@ class WorkflowExecutionDetail:
             "error_message": self.error_message,
             "repos": list(self.repos),
         }
+
+
+def _pushed_work(stored: object) -> tuple[PushedWork, ...] | None:
+    """Rebuild the pushed-work records a projection stored, keeping None as None.
+
+    The store round-trips these as plain data, so this is the hop where they
+    become the value object again - and the hop where a defaulted `[]` would
+    turn "nobody looked" into "looked and found nothing" (#1200). Anything that
+    is not a list is treated as absent: a malformed row is not evidence about a
+    remote either.
+    """
+    if not isinstance(stored, list):
+        return None
+    return tuple(PushedWork.model_validate(entry) for entry in stored)
