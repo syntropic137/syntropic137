@@ -743,6 +743,13 @@ class ToolOperation(BaseModel):
     timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
+    error_message: str | None = None
+    """Why this operation's subject went wrong, for the rows that failed.
+
+    Carried from `syn_adapters.projections.session_tools.ToolOperation` by
+    `model_validate(from_attributes=True)`; the two names must stay identical
+    or it is silently dropped here (#1196).
+    """
     # Tool-specific fields
     tool_name: str | None = None
     tool_use_id: str | None = None
@@ -1561,6 +1568,7 @@ class ToolTimelineEntry(BaseModel):
     timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
+    error_message: str | None = None
 
 
 class ToolTimelineResponse(BaseModel):
