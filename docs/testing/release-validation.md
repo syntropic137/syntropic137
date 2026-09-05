@@ -509,6 +509,16 @@ docker run --rm --network <agent-net> --entrypoint sh <image> \
 > correct GHCR images for the release and starts the stack. This is the same
 > upgrade path users follow, so it's itself a release quality signal.
 
+> **v0.28.0: this section will NOT show you the projection rebuild window.**
+> Step 1 removes the data volumes, so Step 2 upgrades against an empty event
+> store - there is nothing to replay, and the read-path window that a real
+> v0.28.0 upgrade opens cannot occur here. A green run of this section is
+> therefore not evidence that the window was handled. It is a rollout
+> constraint, not a validation step, and it lives with the deploy:
+> [v0.28.0 Rollout Constraints](../release-process.md#v0280-rollout-constraints).
+> If you are instead validating an **in-place** upgrade (no `down -v`), follow
+> that procedure before continuing here.
+
 ### Step 1: Tear down and clear data
 
 ```bash
