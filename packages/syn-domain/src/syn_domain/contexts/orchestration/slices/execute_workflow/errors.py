@@ -153,6 +153,55 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         self.declared = declared
 
 
+class EmptyPhaseArtifactError(Exception):
+    """A phase wrote its deliverable and the file had no content (#1195).
+
+    THE FAILURE THIS EXISTS TO REPLACE. The empty content was refused by
+    `CreateArtifactCommand`, correctly, and the refusal escaped as a raw
+    Pydantic `ValidationError` - "String should have at least 1 character
+    [type=string_too_short]" - which then failed the whole execution. That
+    message describes a schema. An operator reading it at 2am has to work out
+    that a nine-minute verify phase produced nothing storable, which phase it
+    was, and whether anything survived. This says all three.
+
+    Raised only after `recover_empty_artifact` has already declined, so
+    reaching this means BOTH routes to the phase's conclusion were empty: the
+    file it wrote and the last thing it said. That is a real "the agent
+    produced nothing", and failing is right.
+
+    THE THREE OUTCOMES ARE DELIBERATELY DISTINCT, because before #1195 two of
+    them were the same opaque `failed`:
+
+    - the phase wrote nothing collectable at all -> `PhaseProducedNoDeclaredOutputError`
+    - it wrote an empty file and had said nothing -> this
+    - it wrote an empty file but HAD said something -> no error; the phase
+      completes on the recovered content, and the artifact says so in its title
+
+    An operator distinguishes the first two by `phases[].error_message` and the
+    third by following `phases[].artifact_id` to an artifact whose title
+    carries `RECOVERED_TITLE_MARKER`.
+    """
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        phase_name: str,
+        source_path: str,
+    ) -> None:
+        super().__init__(
+            f"Phase '{phase_id}' ({phase_name}): THE ARTIFACT WAS EMPTY. It "
+            f"wrote '{source_path}' and the file had no content, and nothing "
+            f"could be recovered from the session transcript either - the "
+            f"agent's last message was empty too. The phase's conclusion, if "
+            f"it reached one, was not captured anywhere, so there is nothing "
+            f"to store and the execution fails here."
+        )
+        self.phase_id = phase_id
+        self.phase_name = phase_name
+        self.source_path = source_path
+
+
 @dataclass(frozen=True)
 class FailedWorkspaceCommand:
     """The command that did not run, in enough detail to tell why."""
