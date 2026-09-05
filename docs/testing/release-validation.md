@@ -3380,7 +3380,7 @@ Copy and fill in after completing the runbook.
 **Validated by:** <name or agent>
 **Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
-**Runbook:** [docs/testing/release-validation.md](../release-validation.md)
+**Runbook:** [docs/testing/release-validation.md](./release-validation.md)
 
 ## What Passed
 

@@ -118,7 +118,7 @@ Syn137 follows these architectural patterns:
 
 | Pattern | Description | Key ADRs |
 |---------|-------------|----------|
-| **Vertical Slice Architecture** | Feature-first organization | [ADR-019](../adrs/ADR-019-vsa-standard-structure.md) |
+| **Vertical Slice Architecture** | Feature-first organization | [ADR-019](../../lib/event-sourcing-platform/docs/adrs/ADR-019-vsa-standard-structure.md) |
 | **CQRS** | Command/Query separation with projections | [ADR-008](../adrs/ADR-008-vsa-projection-architecture.md) |
 | **Event Sourcing** | Domain events as source of truth | [ADR-007](../adrs/ADR-007-event-store-integration.md) |
 | **Hexagonal Architecture** | Ports & Adapters for clean boundaries | [ADR-019](../adrs/ADR-019-websocket-control-plane.md) |
@@ -174,7 +174,7 @@ VSA Scanner → Manifest JSON → Diagram Generator → Markdown + Mermaid
 
 | ...what? | See this |
 |----------|----------|
-| Overall system structure | [ARCHITECTURE.svg](../ARCHITECTURE.svg) |
+| Overall system structure | [vsa-overview.svg](./vsa-overview.svg) |
 | Why we have two event types | [Event Architecture](./event-architecture.md) |
 | How Dashboard gets real-time updates | [Real-time Communication](./realtime-communication.md) |
 | How agent execution is secured | [Docker Workspace Lifecycle](./docker-workspace-lifecycle.md) |

@@ -348,5 +348,5 @@ kubectl exec kata-test -- uname -r
 
 - [Kata Containers Official Docs](https://katacontainers.io/docs/)
 - [ADR-021: Isolated Workspace Architecture](../adrs/ADR-021-isolated-workspace-architecture.md)
-- [Production Deployment Guide](./PRODUCTION-DEPLOYMENT.md)
+- [Production Deployment Guide](./production-deployment.md)
 - [Firecracker Setup](../../docker/firecracker/README.md)

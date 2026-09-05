@@ -151,7 +151,7 @@ APP_ENVIRONMENT=development pytest  # ❌ MockTestEnvironmentError
 
 ### Reference
 
-See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
+See [ADR-004: Environment Configuration](../adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
 
 ---
 
@@ -1386,7 +1386,7 @@ assert agent is not None
 
 ## Feature 13: WebSocket Control Plane ⭐ NEW
 
-> **ADR:** [ADR-019: WebSocket Control Plane Architecture](/docs/adrs/ADR-019-websocket-control-plane.md)
+> **ADR:** [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
 
 ### Overview
 
