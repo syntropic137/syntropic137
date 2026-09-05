@@ -3417,6 +3417,8 @@ export interface components {
             };
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Pushed Work */
+            pushed_work?: components["schemas"]["PushedWorkInfo"][] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
         };
@@ -3500,6 +3502,30 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PushedWorkInfo
+         * @description A branch a failed phase's work is sitting on (#1200).
+         *
+         *     THE ANSWER TO "WHERE DID IT GO", made machine-readable. A phase can push
+         *     complete work and still fail - most often because it wrote no deliverable,
+         *     which #1167 correctly refuses to pass - and the failure then named no
+         *     branch, so nothing pointed at commits that were merged by hand twice in one
+         *     day once a human found them.
+         *
+         *     Every instance is a claim the workspace verified against a remote-tracking
+         *     ref before the workspace was destroyed. The FIELD is three-valued and the
+         *     two empty answers must not be merged: absent/null means nothing could look,
+         *     `[]` means the workspace was asked and none of its commits had reached a
+         *     remote. Only the first can be recovered by fetching.
+         */
+        PushedWorkInfo: {
+            /** Repo */
+            repo: string;
+            /** Branch */
+            branch: string;
+            /** Commit */
+            commit: string;
         };
         /**
          * RegisterClaudePluginRequest
