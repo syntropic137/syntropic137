@@ -21,6 +21,8 @@ for each rather than by field:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic import ValidationError
 
@@ -59,6 +61,37 @@ def _workflow(phases, inputs=None):
     return WorkflowDefinition.model_validate(payload)
 
 
+@dataclass
+class _StoredPhaseDeclaring:
+    """A rehydrated phase that declared exactly the fields passed here.
+
+    Duck-typed on purpose, and ``sandbox`` defaults to None rather than to
+    ``DEFAULT_PHASE_SANDBOX``. Both are needed for the early-return branch in
+    ``_build_agent_config_from_phase`` to be reachable AT ALL:
+
+    - It reads its input with ``getattr(phase, ..., default)``, so it accepts
+      any object, which is how a rehydrated template reaches it.
+    - ``PhaseDefinition.sandbox`` is a non-optional ``str`` with a non-null
+      default, and ``PhaseYamlDefinition.to_domain()`` substitutes
+      ``DEFAULT_PHASE_SANDBOX`` when the YAML omits it. So for EVERY real
+      phase object the predicate's ``sandbox is not None`` term is true, the
+      predicate is true, and no test built from one can observe which other
+      terms it contains.
+
+    That is not a hypothetical (#1207): the canary below asserted nothing for
+    a full release because of it. Declaring one field here and nothing else is
+    the only shape that makes the predicate answer False, so it is the only
+    shape that can pin what the predicate reads.
+    """
+
+    model: str | None = None
+    provider: str | None = None
+    allow_delegation: bool = False
+    allowed_tools: tuple[str, ...] = ()
+    sandbox: str | None = None
+    phase_id: str = "research"
+
+
 class TestAllowedToolsReachesExecution:
     """APPLY. The emit path already existed; only the hand-off was missing.
 
@@ -89,16 +122,58 @@ class TestAllowedToolsReachesExecution:
         likely to declare it: a phase that scopes its tools and accepts the
         default model and provider. This is the regression that a
         constructor-only fix passes and production does not.
+
+        WHY THE FIXTURE IS ``_StoredPhaseDeclaring`` AND NOT ``.to_domain()``
+        (#1207). This test spent a release asserting nothing. It built its
+        phase through ``PhaseYamlDefinition.to_domain()``, which substitutes
+        ``DEFAULT_PHASE_SANDBOX`` for an undeclared sandbox, so the predicate's
+        ``sandbox is not None`` term was unconditionally true and the test
+        passed with ``allowed_tools`` deleted from the predicate entirely - the
+        one mutation it exists to catch. A canary that cannot go quiet is not a
+        canary. See ``_StoredPhaseDeclaring`` for why no ``PhaseDefinition``
+        can reach the branch either.
         """
         from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
             _build_agent_config_from_phase,
         )
 
-        phase = _phase(allowed_tools=["Bash"]).to_domain()
+        config = _build_agent_config_from_phase(_StoredPhaseDeclaring(allowed_tools=("Bash",)))
 
-        config = _build_agent_config_from_phase(phase)
+        assert config.allowed_tools == (ToolName.BASH,), "dropped by the early-return branch"
 
-        assert config.allowed_tools == (ToolName.BASH,)
+    @pytest.mark.parametrize(
+        ("field", "declared", "expected"),
+        [
+            ("model", "haiku", "haiku"),
+            ("provider", AgentProvider.CODEX, AgentProvider.CODEX),
+            ("allow_delegation", True, True),
+            ("allowed_tools", ("Bash",), (ToolName.BASH,)),
+            ("sandbox", "read-only", "read-only"),
+        ],
+    )
+    def test_every_field_the_predicate_gates_survives_being_declared_alone(
+        self, field: str, declared: object, expected: object
+    ) -> None:
+        """The whole class of bug, not just the instance that cost a release.
+
+        ``_phase_declares_anything`` duplicates knowledge that the constructor
+        below it already has: the set of fields a phase can declare. Whenever
+        those two lists disagree, the field missing from the PREDICATE is
+        dropped for the one author who declared only it - silently, because the
+        early return hands back a fully-formed default config rather than
+        failing. That is #1039 (``allowed_tools``) and #1207 (the canary that
+        could not see it) as a single shape.
+
+        So each field is declared ALONE here. Delete any one term from the
+        predicate and exactly one of these cases goes red, naming the field.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            _build_agent_config_from_phase,
+        )
+
+        config = _build_agent_config_from_phase(_StoredPhaseDeclaring(**{field: declared}))
+
+        assert getattr(config, field) == expected, f"{field} dropped by the early-return branch"
 
     def test_a_phase_declaring_no_tools_still_gets_the_full_toolset(self) -> None:
         """Absence means absence (ADR-069 D4), not an empty grant."""
@@ -405,6 +480,79 @@ class TestStoredTemplatesAreCheckedAtTheExecutionBoundary:
             _build_agent_config_from_phase(stored)
 
         assert "codex" in str(exc.value).lower()
+
+
+class TestTheVocabularyOnlyAcceptsNamesTheCliActuallyGrants:
+    """#1207. A name the CLI does not grant is worse than an unknown name.
+
+    ``LS``, ``TodoRead``, ``TodoWrite`` and ``MultiEdit`` were in the
+    vocabulary, sourced from a stale image manifest. The CLI grants none of
+    them: ``claude -p --tools LS`` reports ``tools: []``. So a phase declaring
+    one was ACCEPTED here and then ran with no tools at all.
+
+    That is an upgrade break, not a wart. While ``allowed_tools`` was dropped
+    (v0.27) such a phase got the full toolset and worked; now that it is
+    applied (v0.28) the same stored phase gets nothing. Applied-to-nothing is
+    worse than either honouring or refusing it, because it is silent.
+
+    Refusing at the execution boundary is what converts that into an error
+    naming the phase, BEFORE a workspace is provisioned and paid for.
+    """
+
+    @pytest.mark.parametrize("ungranted", ["LS", "TodoRead", "TodoWrite", "MultiEdit"])
+    def test_a_name_the_cli_does_not_grant_is_refused(self, ungranted: str) -> None:
+        from syn_shared.tools import UnsupportedToolNameError, require_supported_tools
+
+        with pytest.raises(UnsupportedToolNameError) as exc:
+            require_supported_tools([ungranted], phase_id="build-and-delegate")
+
+        message = str(exc.value)
+        assert ungranted in message, "the refusal must name what was rejected"
+        assert "build-and-delegate" in message, "and which phase to go and fix"
+        # The valid set is spelled out, so the author can repair the
+        # declaration from the error alone rather than reading our source.
+        for valid in ("Bash", "Edit", "Glob", "Grep", "Read", "Skill", "Task", "Write"):
+            assert valid in message, f"the error must name {valid} as a valid choice"
+
+    @pytest.mark.parametrize("ungranted", ["LS", "TodoRead", "TodoWrite", "MultiEdit"])
+    def test_an_ungranted_name_is_refused_at_authoring_time_too(self, ungranted: str) -> None:
+        """Both hops, because they protect different populations.
+
+        The YAML validator catches the next author; the execution boundary
+        above catches the templates already stored, which never see it.
+        """
+        with pytest.raises(ValidationError):
+            _phase(allowed_tools=[ungranted])
+
+    def test_skill_is_accepted_because_the_cli_does_grant_it(self) -> None:
+        """The other half of #1207: a capability the vocabulary wrongly refused.
+
+        ``claude -p --tools Skill`` reports ``tools: ['Skill']`` on CLI
+        2.1.250, the version the pinned omni-agent image was probed to carry
+        when its digest was pinned (commit da0a4951). Verified by
+        test_tool_vocabulary_matches_the_cli.py against the image itself.
+        """
+        from syn_shared.tools import require_supported_tools
+
+        assert require_supported_tools(["Skill"]) == (ToolName.SKILL,)
+
+    def test_a_valid_declaration_still_reaches_the_agent_configuration(self) -> None:
+        """(b) The negative control: refusing more must not break what worked.
+
+        Asserted on the CONSUMER (``AgentConfiguration``), not on the enum, and
+        including ``Skill`` - a tuple this assertion could not have produced
+        before this change, because the vocabulary refused that name.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+            _build_agent_config_from_phase,
+        )
+
+        phase = _phase(allowed_tools=["Read", "Skill", "bash"], model="haiku").to_domain()
+
+        config = _build_agent_config_from_phase(phase)
+
+        # Order preserved, case forgiven, nothing dropped.
+        assert config.allowed_tools == (ToolName.READ, ToolName.SKILL, ToolName.BASH)
 
 
 class TestDelegatingTheVocabularyCheckChangedNoBehaviour:

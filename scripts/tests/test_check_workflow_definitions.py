@@ -13,10 +13,13 @@ covered at all.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 import yaml
-from scripts.check_workflow_definitions import validate_file
+from pydantic import ValidationError
+from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
+from scripts.check_workflow_definitions import _workflow_files, validate_file
 
 pytestmark = pytest.mark.unit
 
@@ -248,4 +251,139 @@ class TestAnInputArtifactMustBeSuppliedBySomething:
             f"a phase consuming a DECLARED WORKFLOW INPUT was rejected: "
             f"{validate_file(path)!r}. A workflow input is a legitimate "
             "supplier; this phase is not starved."
+        )
+
+
+class TestNoShippedWorkflowDeclaresToolsItCannotGet:
+    """#1207, and the two blind spots that let one sit in the tree unseen.
+
+    The vocabulary lost four names the CLI never granted. That is only safe to
+    ship if nothing tracked here declares one, and a one-off grep is not a
+    gate. Worse, a grep of the YAML is the wrong instrument twice over:
+
+    1. ``allowed_tools`` need not appear in the workflow YAML at all. A phase
+       with ``prompt_file:`` inherits ``allowed-tools`` from that .md file's
+       frontmatter for any key the YAML leaves unset. The one real instance in
+       this repo - the codex phase in the delegation workflow - is invisible to
+       ``grep allowed_tools workflows/``, which is why it was reported as "not
+       in the repo".
+    2. ``check_workflow_definitions.main()`` skips workflow PACKAGES, because
+       their package-relative skill refs only resolve against a plugin root.
+       The delegation workflow lives in one, so the repo's own gate was green
+       on a file that does not validate.
+
+    So this reads the EFFECTIVE declaration through the real loader, which
+    performs the frontmatter merge itself, and it covers packages.
+    """
+
+    #: Workflows the loader cannot resolve standing alone: their ``shared://``
+    #: prompts and package-relative skill refs need a plugin root that only
+    #: exists when the package is validated as a whole. Listed rather than
+    #: skipped by a predicate, so ADDING one is a test failure that has to be
+    #: argued for. A silent skip is how the delegation workflow stayed hidden.
+    UNRESOLVABLE_ALONE: ClassVar[set[str]] = {
+        "workflows/examples/starter-plugin/workflows/pr-review/workflow.yaml",
+        "workflows/examples/starter-plugin/workflows/research/workflow.yaml",
+        "workflows/validation/workflows/skills-injection/workflow.yaml",
+    }
+
+    def _definitions(self) -> tuple[list[tuple[Path, object]], set[str]]:
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        loaded: list[tuple[Path, object]] = []
+        unresolvable: set[str] = set()
+        for path in _workflow_files():
+            raw = yaml.safe_load(path.read_text())
+            if not isinstance(raw, dict) or "phases" not in raw:
+                continue  # marketplace manifests and fragments are not workflows
+            try:
+                loaded.append((path, WorkflowDefinition.from_file(path)))
+            except (ValidationError, ValueError, OSError):
+                unresolvable.add(path.relative_to(_REPO_ROOT).as_posix())
+        return loaded, unresolvable
+
+    def test_the_set_of_workflows_this_cannot_check_has_not_grown(self) -> None:
+        """The skip list is an assertion, not an escape hatch."""
+        _, unresolvable = self._definitions()
+
+        assert unresolvable == self.UNRESOLVABLE_ALONE, (
+            "a workflow became unresolvable standing alone, so the checks below "
+            "silently stopped covering it - which is exactly how #1207 hid"
+        )
+
+    def test_every_declared_tool_is_a_name_the_cli_actually_grants(self) -> None:
+        from syn_shared.tools import canonical_tool_name
+
+        offenders = [
+            (path, phase.id, name)
+            for path, definition in self._definitions()[0]
+            for phase in definition.phases
+            for name in phase.allowed_tools
+            if canonical_tool_name(name) is None
+        ]
+
+        assert not offenders, (
+            "these declarations name a tool the CLI does not grant, so the "
+            "phase would run with an empty tool set: "
+            + "; ".join(f"{p}::{phase} -> {name}" for p, phase, name in offenders)
+        )
+
+    def test_no_codex_phase_declares_tools_it_cannot_honour(self) -> None:
+        """The one real instance (#1207), pinned so it cannot come back.
+
+        Codex has no tool vocabulary at all - it scopes with a filesystem
+        sandbox (#1202) - so ``allowed_tools`` on a codex phase is refused at
+        creation. Before the fix this held for every tracked workflow EXCEPT
+        the delegation one, whose declaration arrived from prompt frontmatter.
+        """
+        offenders = [
+            (path, phase.id, list(phase.allowed_tools))
+            for path, definition in self._definitions()[0]
+            for phase in definition.phases
+            if phase.allowed_tools and (phase.agent.provider if phase.agent else None) == "codex"
+        ]
+
+        assert not offenders, (
+            "a codex phase cannot honour allowed_tools and is refused at "
+            "creation: " + "; ".join(f"{p}::{ph} -> {t}" for p, ph, t in offenders)
+        )
+
+    def test_the_delegation_workflow_validates(self) -> None:
+        """(d) The workflow #1207 named, checked through the gate's own validator.
+
+        It is a workflow PACKAGE member, so ``main()`` skips it and this is the
+        only thing checking it. Before the fix ``validate_file`` returned the
+        codex-cannot-honour-allowed_tools error.
+        """
+        path = _REPO_ROOT / "workflows/validation/workflows/delegation/workflow.yaml"
+
+        assert validate_file(path) is None
+
+    def test_the_delegation_phase_keeps_the_harness_it_exists_to_exercise(self) -> None:
+        """The fix must not be "make the error go away".
+
+        Switching the phase to ``provider: claude`` also validates, and would
+        gut the workflow: it exists to prove a CODEX-primary phase can delegate
+        to ``claude -p`` and that both legs are costed (#895). So the tools go
+        and the provider stays.
+        """
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        definition = WorkflowDefinition.from_file(
+            _REPO_ROOT / "workflows/validation/workflows/delegation/workflow.yaml"
+        )
+        phase = definition.phases[0]
+
+        assert phase.id == "build-and-delegate"
+        assert phase.agent is not None
+        assert phase.agent.provider == "codex", "the cross-harness leg is the point"
+        assert phase.agent.allow_delegation is True
+        assert phase.allowed_tools == [], (
+            "the YAML must override the frontmatter's allowed-tools; an absent "
+            "key inherits Read,Write,Bash from phases/delegate.md and the "
+            "workflow stops validating"
         )
