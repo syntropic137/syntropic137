@@ -119,7 +119,13 @@ class _UnsavedWork:
 
 
 async def _repositories(workspace: GitWorkspace) -> list[str]:
-    """Absolute paths of the repositories cloned into this workspace."""
+    """Absolute paths of the repositories cloned into this workspace.
+
+    An empty result means the execution was configured with no repositories,
+    not that the workspace could not be reached: artifact collection copied
+    files out of this same container moments earlier, so by the time the gate
+    runs, unreachable has already failed the phase by another route.
+    """
     found = await workspace.execute(
         ["find", str(WORKSPACE_REPOS_DIR), "-mindepth", "2", "-maxdepth", "2", "-name", ".git"]
     )
