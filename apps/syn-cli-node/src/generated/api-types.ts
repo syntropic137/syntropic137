@@ -3514,10 +3514,16 @@ export interface components {
          *     day once a human found them.
          *
          *     Every instance is a claim the workspace verified against a remote-tracking
-         *     ref before the workspace was destroyed. The FIELD is three-valued and the
-         *     two empty answers must not be merged: absent/null means nothing could look,
-         *     `[]` means the workspace was asked and none of its commits had reached a
-         *     remote. Only the first can be recovered by fetching.
+         *     ref before the workspace was destroyed, about a commit that was not in the
+         *     workspace when the phase started. The FIELD is three-valued and the two
+         *     empty answers must not be merged: absent/null means nothing could look,
+         *     `[]` means the workspace was asked and nothing this phase produced had
+         *     reached a remote. Only the first can be recovered by fetching.
+         *
+         *     `[]` is a statement about the PHASE and not about the repository. The
+         *     branch a phase works on is usually on a remote before it starts, so a
+         *     version of this that reported "the workspace's HEAD is on a remote" gave
+         *     every phase a location, including phases that produced nothing at all.
          */
         PushedWorkInfo: {
             /** Repo */
