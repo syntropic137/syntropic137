@@ -9078,6 +9078,20 @@
             ],
             "title": "Agent Session Ids"
           },
+          "pushed_work": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PushedWorkInfo"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed Work"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -9282,6 +9296,30 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "PushedWorkInfo": {
+        "properties": {
+          "repo": {
+            "type": "string",
+            "title": "Repo"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "commit": {
+            "type": "string",
+            "title": "Commit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo",
+          "branch",
+          "commit"
+        ],
+        "title": "PushedWorkInfo",
+        "description": "A branch a failed phase's work is sitting on (#1200).\n\nTHE ANSWER TO \"WHERE DID IT GO\", made machine-readable. A phase can push\ncomplete work and still fail - most often because it wrote no deliverable,\nwhich #1167 correctly refuses to pass - and the failure then named no\nbranch, so nothing pointed at commits that were merged by hand twice in one\nday once a human found them.\n\nEvery instance is a claim the workspace verified against a remote-tracking\nref before the workspace was destroyed. The FIELD is three-valued and the\ntwo empty answers must not be merged: absent/null means nothing could look,\n`[]` means the workspace was asked and none of its commits had reached a\nremote. Only the first can be recovered by fetching."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
