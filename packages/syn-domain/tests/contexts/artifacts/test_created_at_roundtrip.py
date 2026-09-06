@@ -40,7 +40,7 @@ RECOVERED = datetime(2024, 3, 1, 9, 30, tzinfo=UTC)
 #: What ``ArtifactSummary.to_dict`` emits, and what an ``ArtifactCreated``
 #: payload carries for the fields these tests touch. Spelled concretely rather
 #: than as an object-valued mapping so the assertions type-check against values.
-type Row = dict[str, str | int | bool | None]
+type Row = dict[str, str | int | bool | datetime | None]
 
 
 class _Store:
@@ -142,6 +142,12 @@ async def test_a_recovered_time_reaches_the_read_model():
     Through the projection, because that is what the list surfaces read. An
     event the store never applies leaves the 274 rows exactly as invisible as
     they were.
+
+    The payload carries a ``datetime``, because that is what a dispatcher
+    hands a projection -- ``model_dump()``, not JSON. Passing the ISO string
+    here instead tested a shape this handler never receives, and hid the fact
+    that the recovered row was being stored in a different representation from
+    every other row (#1215).
     """
     store = await _project(
         ("on_artifact_created", _created()),
@@ -149,18 +155,31 @@ async def test_a_recovered_time_reaches_the_read_model():
             "on_artifact_creation_time_recovered",
             {
                 "artifact_id": "a1",
-                "created_at": RECOVERED.isoformat(),
+                "created_at": RECOVERED,
                 "recovered_from": "events.timestamp_unix_ms",
             },
         ),
     )
 
-    assert store.rows["a1"]["created_at"] == RECOVERED.isoformat()
+    assert store.rows["a1"]["created_at"] == RECOVERED.isoformat(), (
+        "stored the way ArtifactSummary stores every other row -- a row that "
+        "holds a datetime while its neighbours hold strings cannot be ordered "
+        "against them, and the list endpoint raises rather than answers"
+    )
 
 
-async def test_a_row_with_no_derivable_source_stays_null():
-    """No source, no event, no date. A fabricated timestamp is worse than a
-    null, because null is honest and the window count now says how many."""
+async def test_the_projection_leaves_an_undated_row_undated():
+    """No recovery event, no date: the projection invents nothing on its own.
+
+    This is only the projection's half. Whether the BACKFILL invents a date for
+    a row whose append record has none is a question about the script, and this
+    test cannot answer it -- it never calls the script. Under its previous name
+    it looked as though it did, and it passed unchanged while ``_recover`` was
+    mutated to return ``datetime.now(UTC)``, which is the one behaviour #1215
+    forbids outright. That rule is pinned where the decision is made, in
+    ``scripts/tests/test_backfill_artifact_created_at.py``, against the
+    resulting value on the list surface.
+    """
     store = await _project(("on_artifact_created", _created()))
 
     assert store.rows["a1"]["created_at"] is None

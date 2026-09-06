@@ -121,7 +121,19 @@ async def _read_candidates(dsn: str) -> list[_Candidate]:
 
 
 async def _apply(candidates: list[_Candidate]) -> tuple[int, int]:
-    """Issue the recovery command for each candidate. Returns (written, skipped)."""
+    """Record each recovered time and leave the read models showing it.
+
+    Returns ``(written, skipped)``, where a skip is an artifact that already
+    stated its creation time -- the normal end state of a re-run, not a failure.
+
+    Ends with the same projection sync every write path in this system performs
+    after ``repository.save``. Appending alone is not the job: an
+    ``ArtifactCreationTimeRecovered`` that reaches the store and no projection
+    leaves all 274 rows exactly as null as they were, while this function still
+    returns a count and the script still prints success. A migration whose
+    effect no reader can see has not run.
+    """
+    from syn_adapters.projections.sync import sync_published_events_to_projections
     from syn_adapters.storage.event_store_client import connect_event_store
     from syn_adapters.storage.repositories import get_artifact_repository
     from syn_domain.contexts.artifacts import (
@@ -151,6 +163,8 @@ async def _apply(candidates: list[_Candidate]) -> tuple[int, int]:
             continue
         written += did_write
         skipped += not did_write
+
+    await sync_published_events_to_projections()
     return written, skipped
 
 

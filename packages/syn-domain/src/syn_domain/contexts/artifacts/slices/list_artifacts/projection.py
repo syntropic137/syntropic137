@@ -5,6 +5,7 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime  # noqa: TC003 - runtime annotation on page()
 from typing import TYPE_CHECKING, Any
 
@@ -166,6 +167,17 @@ class ArtifactListProjection(AutoDispatchProjection):
         against whatever is in the store, including events written before that
         rule existed, and an out-of-order replay must not let a recovered value
         overwrite the real one from ArtifactCreated.
+
+        Written back through ``ArtifactSummary`` rather than by assigning into
+        the stored row. The payload a dispatcher hands a projection is
+        ``model_dump()``, so ``created_at`` arrives as a ``datetime`` while
+        every row written by ``on_artifact_created`` holds the ISO string
+        ``to_dict`` produces. Assigning it straight in put one row in each
+        representation, and the first list query that had to order them raised
+        ``'<' not supported between instances of 'datetime.datetime' and
+        'str'`` -- so the backfill would have taken GET /artifacts down for
+        every caller, having reported success. One place decides how a row
+        stores a date; this is not it.
         """
         artifact_id = event_data.get("artifact_id", "")
         created_at = event_data.get("created_at")
@@ -174,8 +186,8 @@ class ArtifactListProjection(AutoDispatchProjection):
         data = await self._store.get(self.PROJECTION_NAME, artifact_id)
         if data is None or data.get("created_at"):
             return
-        data["created_at"] = created_at
-        await self._store.save(self.PROJECTION_NAME, artifact_id, data)
+        recovered = replace(ArtifactSummary.from_dict(data), created_at=created_at)
+        await self._store.save(self.PROJECTION_NAME, artifact_id, recovered.to_dict())
 
     async def on_artifact_updated(self, event_data: dict) -> None:
         """Handle ArtifactUpdated event."""
