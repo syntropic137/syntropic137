@@ -75,7 +75,7 @@ Use {{discovery}} to reference output from a previous phase.
 |-----------------|-------------|
 | `model` | Model id for the phase's harness (`sonnet`, `opus`, `haiku` on claude, a concrete id such as `gpt-5.6-sol` on codex) |
 | `argument-hint` | Shown to users when prompted for input |
-| `allowed-tools` | Comma-separated list of permitted tools. Inert on claude phases today, and rejected outright on codex phases. See [Choosing an Agent Harness](/docs/guide/workflows#allowed_tools-and-the-two-harnesses) |
+| `allowed-tools` | Comma-separated list of permitted tools. Validated at authoring time, then inert: it restricts nothing on either harness today. See [Choosing an Agent Harness](/docs/guide/workflows#allowed_tools-and-the-two-harnesses) |
 | `max-tokens` | Maximum output tokens for the phase |
 | `timeout-seconds` | Phase execution timeout |
 

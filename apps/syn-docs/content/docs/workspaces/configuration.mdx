@@ -46,7 +46,7 @@ These are injected automatically by syn137 when creating workspaces:
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Claude API key, for claude phases (injected via sidecar) |
-| `CODEX_AUTH_JSON` | Codex auth blob, for codex phases (injected file-only during setup) |
+| `CODEX_AUTH_JSON` | Deployment variable, not injected into the workspace. Provisioning stages its contents to `~/.codex/auth.json` at mode 0600 and deletes the staged copy. A codex phase runs with an empty agent environment |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
