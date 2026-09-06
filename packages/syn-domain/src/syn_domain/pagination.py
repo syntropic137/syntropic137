@@ -150,7 +150,7 @@ def paginate[R, T](
         if verdict is _WindowVerdict.OUTSIDE:
             continue
         status = status_of(record)
-        selected = allowed is None or status in allowed
+        selected = _status_is_selected(status, allowed)
         if verdict is _WindowVerdict.UNDATED:
             # Not tallied into the facets: a facet says what selecting that
             # option WOULD return, and selecting it would not return this row.
@@ -171,6 +171,11 @@ def paginate[R, T](
         status_counts=counts,
         excluded_undated=undated,
     )
+
+
+def _status_is_selected(status: str, allowed: set[str] | None) -> bool:
+    """Whether the optional status facet admits one row."""
+    return allowed is None or status in allowed
 
 
 def coerce_datetime(value: object) -> datetime | None:

@@ -281,10 +281,17 @@ function answer<TRow>(
       page: query.page,
       page_size: query.page_size,
       [dialect.facetCountsKey]: facetCounts,
-      excluded_undated: allowed?.length
-        ? undated.filter((row) => allowed.includes(dialect.facetOf(row))).length
-        : undated.length,
+      excluded_undated: countSelectedUndated(undated, allowed, dialect.facetOf),
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   )
+}
+
+function countSelectedUndated<TRow>(
+  undated: readonly TRow[],
+  allowed: readonly string[] | undefined,
+  facetOf: (row: TRow) => string,
+): number {
+  if (!allowed?.length) return undated.length
+  return undated.filter((row) => allowed.includes(facetOf(row))).length
 }

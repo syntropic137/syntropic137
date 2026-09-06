@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores import reset_projection_store
+from syn_adapters.projections.manager import reset_projection_manager
 from syn_adapters.projections.sync import sync_published_events_to_projections
 from syn_adapters.storage import get_artifact_repository
 from syn_api.routes.artifacts import list_artifacts
@@ -64,6 +66,16 @@ pytestmark = pytest.mark.unit
 #: not be confused with a fabricated "now".
 APPENDED_AT = datetime(2024, 3, 1, 9, 30, tzinfo=UTC)
 APPENDED_MS = int(APPENDED_AT.timestamp() * 1000)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_read_model():
+    """Give each migration test the empty read model its assertions require."""
+    reset_projection_manager()
+    reset_projection_store()
+    yield
+    reset_projection_manager()
+    reset_projection_store()
 
 
 async def _seed_undated_artifact(artifact_id: str) -> None:
