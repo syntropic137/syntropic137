@@ -866,6 +866,7 @@ async def list_executions_endpoint(
         total=execution_page.total,
         page=page,
         page_size=page_size,
+        excluded_undated=execution_page.excluded_undated,
         status_counts=execution_page.status_counts,
     )
 

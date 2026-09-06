@@ -79,6 +79,13 @@ if TYPE_CHECKING:
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+
+# Re-exported, not defined here: joining the event publisher to the projection
+# manager needs neither half of this app, and the artifact backfill migration
+# calls it too (#1215). Routes keep importing it from the composition root.
+from syn_adapters.projections.sync import (
+    sync_published_events_to_projections as sync_published_events_to_projections,
+)
 from syn_adapters.session_store import HttpSessionStore
 from syn_adapters.storage import (
     connect_event_store,
@@ -759,30 +766,6 @@ def get_pending_sha_store() -> PendingSHAStore:
         "Configure SYN_OBSERVABILITY_DB_URL for production use."
     )
     raise RuntimeError(msg)
-
-
-async def sync_published_events_to_projections() -> None:
-    """Dispatch published events from InMemoryEventPublisher to projections.
-
-    In test mode (APP_ENVIRONMENT=test), events are stored by the
-    InMemoryEventPublisher but NOT automatically dispatched to projections
-    (there's no subscription service running). This helper bridges the gap
-    so that API-level integration tests can verify create→list round-trips.
-
-    No-op in production (NoOpEventPublisher has no stored events).
-    """
-    from syn_adapters.storage.in_memory import InMemoryEventPublisher
-
-    publisher = get_event_publisher()
-    if not isinstance(publisher, InMemoryEventPublisher):
-        return
-
-    manager = get_projection_manager()
-    for envelope in publisher.get_published_events():
-        await manager.process_event_envelope(envelope)
-
-    # Clear processed events to avoid re-processing
-    publisher._published_events.clear()
 
 
 # ---------------------------------------------------------------------------

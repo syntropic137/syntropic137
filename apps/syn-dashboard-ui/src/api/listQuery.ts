@@ -52,6 +52,19 @@ export interface ListPage<TRow> {
    * be on the page in front of you.
    */
   statusCounts: Record<string, number>
+  /**
+   * Matching rows the server DROPPED because it could not read their
+   * timestamp, not because they fell outside the window.
+   *
+   * `total` cannot tell "older than the window" from "carries no date at all",
+   * and a quarter of the artifact corpus is the second (#1215). Without this
+   * number a reader narrowing the window sees an unexplained gap; with it they
+   * see "755 of 1037, 274 undated".
+   *
+   * Always 0 when no window is set - nothing can be unjudgeable against a
+   * bound that was not given.
+   */
+  excludedUndated: number
 }
 
 /**

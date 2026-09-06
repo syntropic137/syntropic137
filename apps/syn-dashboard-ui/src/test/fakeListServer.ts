@@ -239,12 +239,19 @@ function answer<TRow>(
   dialect: ListDialect<TRow>,
   matchesSearch: ((row: TRow, term: string) => boolean) | undefined,
 ): Response {
-  const beforeFacet = collection.filter((row) => {
+  const bounded = Boolean(query.started_after || query.started_before)
+  const searched = collection.filter(
+    (row) => !query.q || (matchesSearch?.(row, query.q) ?? true),
+  )
+  // A row with no timestamp fails a bounded window without being outside it,
+  // and the real API reports how many it dropped that way (#1215).
+  const undated = bounded ? searched.filter((row) => !dialect.timestampOf(row)) : []
+  const beforeFacet = searched.filter((row) => {
     const at = dialect.timestampOf(row)
+    if (!at) return !bounded
     return (
       (!query.started_after || at >= query.started_after) &&
-      (!query.started_before || at <= query.started_before) &&
-      (!query.q || (matchesSearch?.(row, query.q) ?? true))
+      (!query.started_before || at <= query.started_before)
     )
   })
 
@@ -274,7 +281,17 @@ function answer<TRow>(
       page: query.page,
       page_size: query.page_size,
       [dialect.facetCountsKey]: facetCounts,
+      excluded_undated: countSelectedUndated(undated, allowed, dialect.facetOf),
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },
   )
+}
+
+function countSelectedUndated<TRow>(
+  undated: readonly TRow[],
+  allowed: readonly string[] | undefined,
+  facetOf: (row: TRow) => string,
+): number {
+  if (!allowed?.length) return undated.length
+  return undated.filter((row) => allowed.includes(facetOf(row))).length
 }
