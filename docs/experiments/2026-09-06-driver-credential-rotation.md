@@ -298,3 +298,51 @@ either).
 - **Not measured: cost.** Every new connection now performs whatever work the
   provider does (here, a file read). Under connection churn that is a per-connect
   syscall, unmeasured here.
+
+## Independent verification
+
+Reproduced independently on 2026-09-06 at commit
+`555eb6cf3cf26be463530de86b1d67d084dd57ac` using fresh throwaway PostgreSQL
+16.2 and Redis 6.2.14 servers installed from the documented wheels. The normal
+fixture path was unavailable: Docker was absent, no database or Redis endpoint
+environment variables were set, and ports 5432, 15432, 6379, and 16379 all
+refused connections.
+
+The independent runs reproduced the decisive server-observed results:
+
+```text
+asyncpg: 5 distinct pg_backend_pid() values / 5 password callable calls
+asyncpg after rotation: old password rejected; 5 new PIDs / 5 calls reading pw-v2
+redis: 5 distinct CLIENT ID values / 5 credential-provider calls
+redis after rotation: old password rejected; 3 new client IDs / 3 calls reading rpw-v2
+declared floors: asyncpg 0.30.0 = 4 PIDs / 4 calls; redis 5.0.0 = 4 IDs / 4 calls
+```
+
+The real call-site argument shapes were also reproduced: an explicit asyncpg
+password callable overrides a stale password embedded in its DSN, whereas
+redis-py rejects a URL password combined with `credential_provider` on first
+use. Redis-py also rejects a bare callable because the object must implement
+the `CredentialProvider` contract.
+
+Two mutations checked that the frequency assertions are not vacuous. Changing
+each experiment counter to record only its first invocation left the server
+showing five physical connections but made the corresponding assertion fail
+with a count of one. Both mutations were then restored. The implementation
+added no pytest tests, so there were no added suite tests to mutate.
+
+Repository gates on the exact implementation commit passed:
+
+```text
+just preflight-agent: every static gate that RUNS in a workspace passed
+uv run pytest -m unit -q: 100% passed (3 skipped, 2 expected xfails)
+```
+
+The limitations listed above remain: this did not use the repository's Docker
+stack or TimescaleDB image, and did not cover TLS, Redis cluster/Sentinel,
+in-flight rotation races, or live-socket streaming reauthentication. These do
+not undermine the scoped conclusion about credentials obtained for newly
+opened connections.
+
+**Independent verdict: correct and complete for Q1-Q4.** The documentation and
+standalone experiments add no production abstraction or special case, so no
+design-maintenance concern was found.
