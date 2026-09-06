@@ -19,6 +19,7 @@ from syn_adapters.control.adapters.memory import (
     InMemoryControlStateAdapter,
     InMemorySignalQueueAdapter,
 )
+from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
 
 
 @pytest.mark.unit
@@ -341,6 +342,43 @@ class TestExecutionController:
 
         # Signal should be consumed
         signal = await controller.check_signal(execution_id)
+        assert signal is None
+
+
+class _FakeTimingOutRedis:
+    """Minimal async Redis double whose getdel always raises a timeout.
+
+    Mirrors what a transient `Timeout reading from redis:6379` looks like to
+    the adapter, without needing a real Redis server.
+    """
+
+    async def getdel(self, key: str) -> str | None:
+        import redis.exceptions
+
+        raise redis.exceptions.TimeoutError("Timeout reading from redis:6379")
+
+
+@pytest.mark.unit
+class TestRedisSignalQueueFailOpen:
+    """#1078: a transient Redis timeout on the signal queue must not fail a phase.
+
+    Exercises the fix through ExecutionController.check_signal() - the actual
+    port boundary CancelSignalPoller depends on - rather than calling
+    RedisSignalQueueAdapter.dequeue() directly, so the test also catches a
+    regression where the fail-open handling is dropped somewhere between the
+    adapter and the controller that wraps it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_check_signal_returns_none_on_redis_timeout(self) -> None:
+        state_adapter = InMemoryControlStateAdapter()
+        signal_adapter = RedisSignalQueueAdapter(_FakeTimingOutRedis())  # type: ignore[arg-type]
+        controller = ExecutionController(state_adapter, signal_adapter)
+        execution_id = "test-exec-timeout"
+        await controller.initialize_execution(execution_id, ExecutionState.RUNNING)
+
+        signal = await controller.check_signal(execution_id)
+
         assert signal is None
 
 

@@ -617,11 +617,10 @@ def _create_dedup_adapter() -> DedupPort:
             )
 
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
+        from syn_adapters.redis_client import resilient_redis_client
 
-        redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        redis_client = resilient_redis_client(settings.redis_url)
         logger.info("EventPipeline using Redis dedup")
         return RedisDedupAdapter(
             redis_client,
@@ -803,11 +802,10 @@ def get_controller() -> ExecutionController:
 
     redis_url = get_settings().redis_url
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
+        from syn_adapters.redis_client import resilient_redis_client
 
-        redis_client = aioredis.from_url(redis_url, decode_responses=True)
+        redis_client = resilient_redis_client(redis_url)
         signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
         logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
     except Exception:
