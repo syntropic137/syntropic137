@@ -206,10 +206,13 @@ at the kernel level.
 The two harnesses restrict along different axes and neither guarantee can be
 expressed in the other's vocabulary:
 
-| Harness | What it can restrict | What it cannot restrict |
-|---------|----------------------|-------------------------|
-| `claude` | Which tools exist | Where the process may write |
-| `codex` | Where the process may write, enforced by the kernel | Which tools exist. Codex has no tool vocabulary at all. |
+| Harness | What it could restrict in principle | What it cannot restrict | Enforced today |
+|---------|-------------------------------------|-------------------------|----------------|
+| `claude` | Which tools exist | Where the process may write | No. See the `allowed_tools` section below. |
+| `codex` | Where the process may write, enforced by the kernel | Which tools exist. Codex has no tool vocabulary at all. | Yes, via `sandbox`. |
+
+Read that last column carefully. Codex is the only harness enforcing anything at
+the process level today.
 
 Sandbox levels, least to most authority:
 
@@ -217,27 +220,39 @@ Sandbox levels, least to most authority:
 |-------|--------|---------|
 | `read-only` | Read and search | Review, verify, and audit phases. A phase that cannot write cannot invent the work it was asked to check. It also cannot write its own deliverable, so pair it with another way to publish. |
 | `workspace-write` | Read, write, and run commands inside the workspace | Work that stays inside the container. This level is **not** network-free: egress is available at every level. It also cannot write under `artifacts/output/`, so a phase that publishes an artifact needs `full-access`. |
-| `full-access` | Unrestricted filesystem access and network egress | Phases that push a branch or call an external API. Never appropriate for a phase whose job is checking other work. |
+| `full-access` | Unrestricted filesystem access | Phases that publish an artifact, because `workspace-write` cannot write under `artifacts/output/`. Never appropriate for a phase whose job is checking other work. Note this is not the level you need for network access, which every level already has. |
 
 ### `allowed_tools` and the two harnesses
 
-Setting `allowed_tools` on a **codex** phase is rejected: codex exposes no tool
-flag of any kind, and translating a tool allowlist into a sandbox mode would be a
-category error, so the platform raises `UnsupportedToolPolicyError` rather than
-silently doing something else.
+**`allowed_tools` restricts nothing today, on either harness.** Treat it as
+documentation of intent, not as a control.
 
-On a **claude** phase, `allowed_tools` is currently inert. It is validated at
-authoring time but never reaches the harness, so every claude phase inherits the
-full toolset. See
-[ADR-069](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-069-harness-neutral-phase-definition.md)
-for the analysis and the planned fix. Do not rely on it as a restriction today.
+Per [ADR-069](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-069-harness-neutral-phase-definition.md),
+`_build_agent_config_from_phase` builds `AgentConfiguration` from `provider`,
+`model` and `allow_delegation` only. `allowed_tools` keeps its default of `()`,
+so the guard that would emit `--tools` never fires and every phase inherits the
+full toolset. A closed-vocabulary validator still rejects `bash` for `Bash` at
+authoring time, which enforces a restriction that is never applied.
+
+The codex path additionally carries an `UnsupportedToolPolicyError` guard,
+because codex exposes no tool flag and translating an allowlist into a sandbox
+mode would be a category error. That guard is currently unreachable for the same
+reason: `allowed_tools` never arrives populated.
+
+If you need to bound what a phase can do, use `sandbox` on a codex phase. That
+is the only enforced control available today.
 
 ### Codex authentication
 
-Codex phases need `CODEX_AUTH_JSON` in your `.env`, holding the full contents of a
-Codex `~/.codex/auth.json`. It is injected file-only during workspace setup and
-never passed through argv or logs. Without it, a phase with `agent.provider: codex`
-fails to provision. Claude phases are unaffected.
+Codex phases need `CODEX_AUTH_JSON` set on the deployment, holding the full
+contents of a Codex `~/.codex/auth.json`. Without it, a phase with
+`agent.provider: codex` fails to provision. Claude phases are unaffected.
+
+The agent process itself never receives that environment variable. Provisioning
+stages the value to a file, relocates it to `~/.codex/auth.json` inside the
+workspace at mode 0600, and deletes the staged copy. A codex phase runs with an
+empty agent environment, which is also what keeps `ANTHROPIC_API_KEY` and
+`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run.
 
 For a durable deployment credential that a developer running `codex login` on a
 laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See

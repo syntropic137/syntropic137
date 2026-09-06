@@ -4,7 +4,9 @@ description: RTK token compression, OpenTelemetry observability, LSP code intell
 ---
 
 <Callout type="info">
-RTK, the OTel export, the LSP servers, and the plugin hooks on this page all ship in the `agentic-workspace-claude-cli` image and are consumed by the **claude** harness. The default `omni-agent` image does not carry them, and a phase running on `agent.provider: codex` does not use them on either image. See [Workspace Images](/docs/workspaces).
+Everything on this page is consumed by the **claude** harness. A phase running on `agent.provider: codex` does not use it, on either image.
+
+Both images carry the Claude Code plugins and native OTel export. The manifest scopes `otel_native` to claude deliberately, because codex OTel is unverified here. What the default `omni-agent` image does **not** carry is the LSP servers and the Rust toolchain, which its manifest omits on purpose rather than declaring something the image lacks. See [Workspace Images](/docs/workspaces).
 </Callout>
 
 ## RTK Token Compression
