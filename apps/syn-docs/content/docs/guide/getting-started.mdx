@@ -3,7 +3,9 @@ title: Getting Started
 description: Install Syntropic137 and run your first AI agent workflow in under 5 minutes.
 ---
 
-Syntropic137 orchestrates **Claude Code sessions inside isolated Docker workspaces**, giving you scalable, observable, trigger-driven AI agent execution. Each workflow phase runs in its own container with injected credentials, captured output, and full token/cost tracking. Claude Code is currently the only supported agent provider; [OpenCode](https://github.com/opencode-ai/opencode) support is planned next.
+Syntropic137 orchestrates **coding agent sessions inside isolated Docker workspaces**, giving you scalable, observable, trigger-driven AI agent execution. Each workflow phase runs in its own container with injected credentials, captured output, and full token/cost tracking.
+
+Two agent harnesses are supported: **Claude Code** and **OpenAI Codex**. Each phase picks one in the workflow YAML, so a single workflow can implement with one vendor and review with the other. See [Choosing an Agent Harness](/docs/guide/workflows#choosing-an-agent-harness).
 
 <Callout type="info">
 Get up and running in a single command: no config files, no YAML, no manual setup.
@@ -51,7 +53,7 @@ The `init` wizard walks you through the full setup step-by-step:
 1. **Docker check**: verifies Docker and Compose are available
 2. **Directory setup**: creates `~/.syntropic137/` with config, secrets, and workspace directories
 3. **Secret generation**: creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
-4. **API key**: prompts for your `ANTHROPIC_API_KEY`
+4. **API key**: prompts for your `ANTHROPIC_API_KEY`. To run codex phases, add `CODEX_AUTH_JSON` to your `.env` afterwards
 5. **GitHub App**: opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
 6. **Claude Code plugin** *(optional)*: installs the Syntropic137 plugin for Claude Code if the `claude` CLI is detected
 7. **Pull & start**: downloads container images and starts the full stack

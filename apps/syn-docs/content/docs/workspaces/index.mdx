@@ -3,22 +3,32 @@ title: Workspace Images
 description: Production-ready, multi-arch Docker images for isolated agent execution with built-in observability, token compression, and security hardening.
 ---
 
-Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLI, language tooling, token compression, and observability hooks.
+Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLIs, language tooling, and observability hooks. The same container serves both harnesses, so whether a phase declares `agent.provider: claude` or `agent.provider: codex`, the isolation model is identical.
 
 ## What's in a Workspace Image
 
-Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. The primary image is `ghcr.io/agentparadise/agentic-workspace-claude-cli`.
+Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. Two images matter:
 
-| Component | Purpose |
-|-----------|---------|
-| Claude CLI | Agent runtime (pinned version) |
-| RTK | Token compression: 53% context reduction on Bash output |
-| Python 3.12 + uv | Hooks, scripts, agentic packages |
-| Node.js 22 LTS | Required for Claude CLI |
-| Rust toolchain | rust-analyzer LSP, cargo builds |
-| LSP servers | pyright, typescript-language-server, rust-analyzer |
-| Plugins | Pre-bundled hooks for git ops, compaction, subagent tracking |
-| GitHub CLI | Repository operations |
+| Image | Harnesses | Notes |
+|-------|-----------|-------|
+| `ghcr.io/agentparadise/omni-agent-workspace` | claude and codex | The default. `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
+| `ghcr.io/agentparadise/agentic-workspace-claude-cli` | claude and codex | The heavier image. Adds RTK, LSP servers, and the Rust toolchain, which back Claude Code plugin features and are harness-specific weight. |
+
+Both images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
+
+| Component | omni-agent | claude-cli |
+|-----------|------------|------------|
+| Claude CLI | Yes | Yes |
+| Codex CLI | Yes | Yes |
+| Python 3.12 + uv | Yes | Yes |
+| Node.js 22 LTS | Yes | Yes |
+| GitHub CLI | Yes | Yes |
+| RTK token compression | No | Yes |
+| Rust toolchain | No | Yes |
+| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | Yes |
+| Claude Code plugins (git ops, compaction, subagent tracking) | No | Yes |
+
+The plugins and LSP servers exist to back Claude Code features. A codex phase does not use them on either image.
 
 ## Version Manifest
 

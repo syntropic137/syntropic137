@@ -5,9 +5,15 @@ description: "How Syntropic137 collects agent events: two-channel pipeline, even
 
 Syntropic137 captures every agent action in real time. Events flow from workspace containers through the collector service into TimescaleDB, where projections build the read models that power the dashboard.
 
+<Callout type="warn">
+**This page describes the claude harness.** The two-channel pipeline below is built on Claude Code's plugin hooks and its native OTel export. A phase running on `agent.provider: codex` emits neither, so it produces no hook events, no subagent records, no todo data, and no OTel metrics.
+
+What a codex phase still gives you: a session, a conversation, a tool-call timeline parsed from the codex event stream (`command_execution` becomes `Bash`, `file_change` becomes `Edit`), and token counts. What it does not give you is vendor cost, which is always null for codex. See [Choosing an Agent Harness](/docs/guide/workflows#what-each-harness-gives-you).
+</Callout>
+
 ## Two-Channel Pipeline
 
-Workspace containers emit observability data through two complementary channels:
+Workspace containers running the claude harness emit observability data through two complementary channels:
 
 | Channel | Transport | What It Captures |
 |---------|-----------|-----------------|

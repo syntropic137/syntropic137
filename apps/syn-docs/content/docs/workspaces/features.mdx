@@ -3,6 +3,10 @@ title: Features
 description: RTK token compression, OpenTelemetry observability, LSP code intelligence, and plugin hooks in workspace images.
 ---
 
+<Callout type="info">
+RTK, the OTel export, the LSP servers, and the plugin hooks on this page all ship in the `agentic-workspace-claude-cli` image and are consumed by the **claude** harness. The default `omni-agent` image does not carry them, and a phase running on `agent.provider: codex` does not use them on either image. See [Workspace Images](/docs/workspaces).
+</Callout>
+
 ## RTK Token Compression
 
 [RTK](https://github.com/rtk-ai/rtk) intercepts Bash tool calls and compresses output from commands like `ls`, `find`, `git log`, and `tree`. This reduces the tokens Claude consumes reading command output.
