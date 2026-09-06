@@ -12,10 +12,19 @@ WHY THIS RENDERS RATHER THAN EXPORTING A CONSTANT (#1187). A phase can declare
 a phase this prompt used to state two things that are false: that `repos/` holds
 pre-cloned repositories, and that the way to start work is to navigate into
 `/workspace/repos/<name>`. Both were unconditional, so the merged `clone_repos`
-gate could not actually be switched on - turning it on told the agent to enter a
-directory that does not exist, and the synthetic `CLAUDE.md`/`AGENTS.md` the tree
-also advertised are not injected for such a phase either
-(`WorkspaceProvisionHandler._hydrate_workspace`).
+gate could not actually be switched on - turning it on sent the agent looking
+for a checkout that was never made.
+
+WHAT WAS NEVER THE PROBLEM: a missing directory. `/workspace/repos` always
+exists. Both workspace images pre-create it and the entrypoint creates it again
+unconditionally, and `unpushed_work_guard._repositories` depends on exactly that
+to read an empty result as "this phase cloned nothing" rather than "the
+workspace did not answer". So the no-checkout tree below shows the directory,
+empty - describing it as absent would put the prompt in contradiction with an
+invariant production relies on. The synthetic `CLAUDE.md`/`AGENTS.md` the tree
+also advertised ARE absent for such a phase
+(`WorkspaceProvisionHandler._hydrate_workspace`). Empty and missing are
+different claims and the tree has to keep them apart.
 
 The claims are now made per phase, by the one caller that knows the answer. A
 phase that DOES clone gets exactly the bytes it got before - see
@@ -44,13 +53,15 @@ _TREE_WITH_CHECKOUT: Final[str] = """\
 └── repos/       ← Pre-cloned repositories (ready to use)
     └── {repo-name}/"""
 
-#: No `repos/`, and no synthetic CLAUDE.md/AGENTS.md either - both are derived
-#: from what was actually cloned, so neither exists for this phase.
+#: `repos/` is present and EMPTY - the directory is always created, only the
+#: checkout beneath it is conditional. No synthetic CLAUDE.md/AGENTS.md though:
+#: both are derived from what was actually cloned, so neither exists here.
 _TREE_WITHOUT_CHECKOUT: Final[str] = """\
 /workspace/
-└── artifacts/
-    ├── input/   ← Previous phase outputs (read-only)
-    └── output/  ← Write YOUR deliverables here"""
+├── artifacts/
+│   ├── input/   ← Previous phase outputs (read-only)
+│   └── output/  ← Write YOUR deliverables here
+└── repos/       ← Exists but EMPTY - nothing is checked out for this phase"""
 
 _STARTING_POINT_WITH_CHECKOUT: Final[str] = (
     "1. Navigate to `/workspace/repos/{repo-name}` (repositories are "

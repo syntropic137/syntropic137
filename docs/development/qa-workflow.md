@@ -231,4 +231,4 @@ just test-stack-down
 
 - [pytest markers documentation](https://docs.pytest.org/en/stable/example/markers.html)
 - [Ruff configuration](https://docs.astral.sh/ruff/)
-- [ADR-034: Test Infrastructure](../adrs/ADR-034-test-infrastructure.md)
+- [ADR-034: Test Infrastructure](../adrs/ADR-034-test-infrastructure-architecture.md)

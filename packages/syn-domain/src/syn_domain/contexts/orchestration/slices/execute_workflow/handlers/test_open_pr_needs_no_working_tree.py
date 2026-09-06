@@ -730,6 +730,22 @@ Examples of failure reasons:
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
 
+def _the_workspace_tree(prompt: str) -> str:
+    """The fenced directory tree out of a rendered prompt, fence excluded.
+
+    The tree is the only part of the prompt that makes a positional claim about
+    what is on disk, so assertions about the workspace layout belong on it
+    alone: matched against the whole prompt they would also be satisfied by the
+    phase's own task text, which no agent reads as a description of the
+    filesystem.
+    """
+    _, heading, rest = prompt.partition("### Workspace Structure\n\n```\n")
+    assert heading, "the prompt no longer has a fenced `### Workspace Structure` tree"
+    tree, fence, _ = rest.partition("\n```")
+    assert fence, "the workspace tree fence is unterminated"
+    return tree
+
+
 class TestThePromptTellsTheTruthAboutCloning:
     """The shared preamble describes the workspace, so it must describe THIS one.
 
@@ -777,6 +793,35 @@ class TestThePromptTellsTheTruthAboutCloning:
         assert "pre-cloned" not in provisioned.prompt.lower()
         assert "fresh clone" not in provisioned.prompt.lower()
         assert "/workspace/repos" not in provisioned.prompt
+
+    async def test_a_no_checkout_phase_is_shown_repos_as_an_empty_directory(self) -> None:
+        """`/workspace/repos` always exists; only the checkout inside it is conditional.
+
+        Both workspace images pre-create the directory and the entrypoint
+        creates it again unconditionally, and `unpushed_work_guard`
+        `._repositories` leans on precisely that: an empty `find` there means
+        "this phase cloned nothing", while a failing one means "the workspace
+        did not answer". The prompt used to omit the directory entirely, which
+        taught the agent the opposite of the invariant the teardown guard
+        depends on - and left the hydration docs describing the prompt as
+        correct while it contradicted them.
+
+        Asserted on the TREE BLOCK rather than the whole prompt. `repos/`
+        occurs in prose elsewhere in the phase's own instructions, so a
+        substring search over the whole string would pass on a prompt whose
+        tree never showed the agent the directory at all - which is the exact
+        defect this pins.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["open_pr"], completed={})
+
+        tree = _the_workspace_tree(provisioned.prompt)
+        assert "repos/" in tree, f"the no-checkout tree does not show `repos/`:\n{tree}"
+        # Present AND empty. Naming the directory while hanging a repository
+        # under it would be the original false claim in a new spelling, so the
+        # cloning tree's `{repo-name}` child must NOT have come along.
+        assert "{repo-name}" not in tree, f"the no-checkout tree claims a checkout:\n{tree}"
+        assert "EMPTY" in tree, f"the no-checkout tree does not say `repos/` is empty:\n{tree}"
 
     async def test_a_no_checkout_phase_is_told_how_to_work_without_one(self) -> None:
         """Deleting the paragraph would satisfy the test above and help nobody.

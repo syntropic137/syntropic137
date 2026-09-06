@@ -188,7 +188,7 @@ APP_ENVIRONMENT=development pytest  # ❌ MockTestEnvironmentError
 
 ### Reference
 
-See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
+See [ADR-004: Environment Configuration](../adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
 
 ---
 
@@ -458,7 +458,7 @@ curl -s http://localhost:8137/api/workflows/invalid-id
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 4.3.1 | GET /api/sessions returns 200 | ⬜ |
-| 4.3.2 | Response is an array (empty if no sessions) | ⬜ |
+| 4.3.2 | Response is `{sessions, total, page, page_size, status_counts}`; `sessions` empty if none | ⬜ |
 | 4.3.3 | Filter by workflow_id works | ⬜ |
 | 4.3.4 | GET /api/sessions/{invalid-id} returns 404 | ⬜ |
 
@@ -477,7 +477,7 @@ curl -s "http://localhost:8137/api/sessions?workflow_id=<id>" | jq
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 4.4.1 | GET /api/artifacts returns 200 | ⬜ |
-| 4.4.2 | Response is an array (empty if no artifacts) | ⬜ |
+| 4.4.2 | Response is `{artifacts, total, page, page_size, type_counts}`; `artifacts` empty if none | ⬜ |
 | 4.4.3 | Filter by workflow_id works | ⬜ |
 | 4.4.4 | GET /api/artifacts/{invalid-id} returns 404 | ⬜ |
 
@@ -1509,7 +1509,7 @@ assert agent is not None
 
 ## Feature 13: WebSocket Control Plane ⭐ NEW
 
-> **ADR:** [ADR-019: WebSocket Control Plane Architecture](/docs/adrs/ADR-019-websocket-control-plane.md)
+> **ADR:** [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
 
 ### Overview
 
@@ -1731,7 +1731,7 @@ test('execution control flow', async ({ page }) => {
 
 ## Feature 14: Isolated Workspace Architecture ⭐ NEW
 
-> **ADR:** [ADR-021: Isolated Workspace Architecture](/docs/adrs/ADR-021-isolated-workspace-architecture.md)
+> **ADR:** [ADR-021: Isolated Workspace Architecture](../adrs/ADR-021-isolated-workspace-architecture.md)
 
 ### Overview
 
@@ -1985,8 +1985,8 @@ just perf-all
 
 ## Feature 15: GitHub App & Secure Token Architecture ⭐ NEW
 
-> **ADR:** [ADR-022: Secure Token Architecture](/docs/adrs/ADR-022-secure-token-architecture.md)
-> **Docs:** [GitHub App Security](/docs/deployment/github-app-security.md), [Claude API Security](/docs/deployment/claude-api-security.md)
+> **ADR:** [ADR-022: Secure Token Architecture](../adrs/ADR-022-secure-token-architecture.md)
+> **Docs:** [GitHub App Security](../deployment/github-app-security.md), [Claude API Security](../deployment/claude-api-security.md)
 
 ### Overview
 
@@ -2188,8 +2188,8 @@ docker exec syn-db psql -U syn -d syn -c \
 
 ## Feature 16: Workspace-First Execution Architecture ⭐ NEW
 
-> **ADR:** [ADR-023: Workspace-First Execution Model](/docs/adrs/ADR-023-workspace-first-execution-model.md)
-> **Plan:** [Full Workspace Isolation Plan](/docs/PLAN-FULL-WORKSPACE-ISOLATION.md)
+> **ADR:** [ADR-023: Workspace-First Execution Model](../adrs/ADR-023-workspace-first-execution-model.md)
+> **Plan:** [Full Workspace Isolation Plan](../PLAN-FULL-WORKSPACE-ISOLATION.md)
 
 ### Overview
 

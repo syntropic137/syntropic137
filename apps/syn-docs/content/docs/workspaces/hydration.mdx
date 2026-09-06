@@ -48,7 +48,8 @@ phases:
     model: sonnet
 ```
 
-Every execution of this workflow will pre-clone both repos unless overridden at run time.
+Every execution of this workflow will pre-clone both repos into every phase, unless
+overridden at run time or opted out per phase with [`clone_repos`](#phases-that-need-credentials-but-not-a-checkout).
 
 ### Execute Override
 
@@ -81,67 +82,68 @@ curl -X POST /v1/workflows/{id}/execute \
 
 ## Clone Directory Naming
 
-Repositories are cloned under `/workspace/repos/` using an `owner__reponame` format - the org and repo name joined by a double underscore.
+Repositories are cloned under `/workspace/repos/` as the **bare repository name**: the
+last segment of the URL with any `.git` suffix removed. The owner is not part of the path.
 
 | Repository URL | Clone Path |
 |----------------|------------|
-| `github.com/acme/api-service` | `/workspace/repos/acme__api-service/` |
-| `github.com/acme/web-app` | `/workspace/repos/acme__web-app/` |
-| `github.com/other-org/api-service` | `/workspace/repos/other-org__api-service/` |
+| `github.com/acme/api-service` | `/workspace/repos/api-service/` |
+| `github.com/acme/web-app` | `/workspace/repos/web-app/` |
+| `github.com/other-org/api-service` | `/workspace/repos/api-service/` |
 
-The double underscore prevents namespace collisions when two orgs have repos with the same name (`acme/api-service` and `other-org/api-service` both clone without conflict).
-
-<Callout type="info">
-The double-underscore separator (`__`) was chosen specifically because it cannot appear in a GitHub org or repo name, making it an unambiguous delimiter that requires no escaping.
+<Callout type="warn">
+The first and third rows collide, and the collision is silent. The clone is guarded by
+`[ -d <dest> ] || git clone ...`, so when two repos with the same name from different
+orgs are configured on one workflow, the second clone is skipped without an error and
+the agent works on the first org's checkout believing it is the second's. Do not
+configure two same-named repos on one workflow.
 </Callout>
 
-## `$SYN_ALL_REPOS`
+## `$GH_REPO`
 
-Every phase prompt has access to `$SYN_ALL_REPOS` - a colon-separated list of all pre-cloned repo paths. This lets prompts reference repos without hardcoding paths:
+Every phase has `$GH_REPO` set to the primary repo's `owner/repo`:
 
 ```
-$SYN_ALL_REPOS=/workspace/repos/acme__api-service:/workspace/repos/acme__web-app
+$GH_REPO=acme/api-service
 ```
 
-Use it in a phase prompt:
+It names the repository `gh` acts on. `gh` normally infers that from the git remotes
+of the surrounding working tree and fails before making any API call when there is no
+tree, so `$GH_REPO` is what makes `gh pr create` work from a phase that declared
+`clone_repos: false`. It is keyed on the same primary repo the prompt is told to work
+on, so the two cannot disagree.
 
-```markdown
-You have access to the following repositories:
-
-$SYN_ALL_REPOS
-
-Review each repository and identify cross-cutting concerns.
-```
-
-Or split it in a script:
+There is no environment variable listing all of a workspace's repo paths. Iterate the
+directory instead of reconstructing the names:
 
 ```bash
-IFS=':' read -ra REPOS <<< "$SYN_ALL_REPOS"
-for repo in "${REPOS[@]}"; do
+# nullglob matters: /workspace/repos/ always exists and is EMPTY for a phase that
+# set clone_repos: false. Without it the loop runs once, with $repo set to the
+# literal string /workspace/repos/*/.
+shopt -s nullglob
+for repo in /workspace/repos/*/; do
   echo "Processing $repo"
 done
 ```
 
-`$SYN_ALL_REPOS` is empty (not unset) when no repos are configured. Scripts that iterate over it will correctly handle the zero-repo case.
-
 ## AGENTS.md and CLAUDE.md Injection
 
-When one or more repos are configured, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Each file contains `$import` directives that pull in the AGENTS.md and CLAUDE.md from every cloned repo that has one:
+When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Both files receive identical content: `@`-imports of the AGENTS.md and the CLAUDE.md of every cloned repo:
 
 ```markdown
-# /workspace/AGENTS.md (synthesized by Syntropic137)
-
-@/workspace/repos/acme__api-service/AGENTS.md
-@/workspace/repos/acme__web-app/AGENTS.md
+@/workspace/repos/api-service/AGENTS.md
+@/workspace/repos/api-service/CLAUDE.md
+@/workspace/repos/web-app/AGENTS.md
+@/workspace/repos/web-app/CLAUDE.md
 ```
 
 The agent loads these files automatically via Claude Code's standard context injection. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
 
-If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are configured, no synthesis happens and `/workspace/AGENTS.md` is not created.
+If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are cloned - because none are configured, or because the phase set `clone_repos: false` - no synthesis happens and neither file is created.
 
 ## Workspace Directory Structure
 
-A hydrated workspace looks like this:
+A hydrated workspace for a phase that clones looks like this:
 
 ```
 /workspace/
@@ -151,14 +153,58 @@ A hydrated workspace looks like this:
     input/               # Previous phase outputs (read-only)
     output/              # Current phase deliverables
   repos/
-    acme__api-service/   # Cloned from github.com/acme/api-service
-    acme__web-app/       # Cloned from github.com/acme/web-app
+    api-service/         # Cloned from github.com/acme/api-service
+    web-app/             # Cloned from github.com/acme/web-app
 /opt/agentic/
   plugins/               # Pre-bundled plugins
   config/                # Runtime configuration
   version.json           # Image version manifest
   entrypoint.sh
 ```
+
+## Phases That Need Credentials But Not a Checkout
+
+Credentials and a checkout are different needs. A phase that only opens a PR, comments
+on an issue or reads the API needs to be authenticated against the repos - it does not
+need them on disk, and cloning them costs time and disk for nothing.
+
+Set `clone_repos: false` on that phase:
+
+```yaml
+phases:
+  - id: open-pr
+    name: Open PR
+    order: 2
+    prompt_file: phases/open-pr.md
+    clone_repos: false
+```
+
+It is a phase-level field and defaults to `true`. The repos stay configured on the
+workflow either way - do not drop them to skip the clone, because the repo list is
+what routes the GitHub App token to the right installation.
+
+What the phase still gets:
+
+- A GitHub App installation token per repo, and the matching `~/.git-credentials` entries
+- `gh` CLI configured, so `gh pr create` works
+- `$GH_REPO`
+
+What it does not get:
+
+- Any repository checkout beneath `/workspace/repos/`. The directory itself is
+  still there and empty: the workspace image creates it and the entrypoint creates
+  it again, unconditionally. Code that inspects the workspace relies on that, so it
+  can tell "this phase cloned nothing" apart from "the workspace did not answer" -
+  do not write a check that reads a missing `/workspace/repos/` as the signal for
+  `clone_repos: false`, because it never is
+- The synthesized `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`. Both are built
+  from what was actually cloned, so for this phase there is nothing to import and
+  neither file is written
+
+The workspace prompt the agent receives is rendered to match: its tree shows `repos/`
+present and empty, and it does not tell the agent to `cd` into a checkout that is not
+there. The directory is shown rather than omitted for the reason above - an agent told
+`repos/` does not exist has been told the opposite of what the workspace guarantees.
 
 ## GitHub App Token Lifecycle
 
@@ -175,6 +221,57 @@ The agent can push commits and open PRs using the cached credentials. The GitHub
 Repos must be accessible to the GitHub App installation registered with Syntropic137. See [GitHub Integration](/docs/guide/github-integration) for setup. Repos outside the app's installation scope will fail to clone and the execution will error before the agent starts.
 </Callout>
 
+## Unpushed Work at Phase End
+
+A workspace is destroyed when its phase ends, and everything in it that is not on a
+remote goes with it. Before teardown, and while the git credentials are still live,
+Syntropic137 checks every repo cloned into the workspace for two things: commits that
+no remote has, and changes that were never committed at all.
+
+If there are none - the normal case, and also the case for a phase that legitimately
+produces no commits at all - the phase completes as usual.
+
+If there are, the work is saved and **the phase fails**. It is never reported as
+completed. For each affected repo, a commit is written whose tree is the working tree
+as the agent left it and whose parents are the local tips carrying the unpushed
+commits, and that commit is pushed to:
+
+```
+refs/syn/lost/<execution-id>/<phase-id>
+```
+
+The namespace is deliberately outside `refs/heads` and `refs/tags`. Nothing fetches it
+by default, no pull request shows it, and no reviewer is ever shown it. It exists to be
+recovered on purpose, by someone who was given the name.
+
+### Recovering Quarantined Work
+
+The failure names the ref for every repo it saved, and prints the command beside it.
+From a clone of the affected repo:
+
+```bash
+git fetch origin refs/syn/lost/<execution-id>/<phase-id>
+git log FETCH_HEAD
+git switch -c recovered-work FETCH_HEAD
+```
+
+The unpushed commits are ancestors of `FETCH_HEAD`, so they read as the phase left
+them. Anything that was still uncommitted is folded into the quarantine commit itself,
+as its tree.
+
+<Callout type="warn">
+The quarantine push can itself fail - no network, a rejecting remote. When it does, the
+report says `NOT RECOVERABLE` for that repo and gives the push error instead of a ref,
+because that work really is gone. Read the summary line at the end of the report: it
+states whether all, some or none of the work can be fetched back, and it is counted
+from the refs that actually exist.
+</Callout>
+
+Work committed inside a **submodule** of a cloned repo is detected - the superproject
+reports a modified gitlink, so the phase still fails rather than quietly succeeding -
+but the submodule's own objects are not quarantined, because they belong to a different
+remote. Submodule commits survive only if the phase pushed them itself.
+
 ## Dashboard and Execution Detail
 
 Configured repos are surfaced throughout the platform:
@@ -185,7 +282,7 @@ Configured repos are surfaced throughout the platform:
 
 ## Related
 
-- [Workspace Configuration](/docs/workspaces/configuration) - environment variables including `$SYN_ALL_REPOS`
+- [Workspace Configuration](/docs/workspaces/configuration) - environment variables including `$GH_REPO`
 - [Workspace Security](/docs/workspaces/security) - secret injection lifecycle (ADR-024)
 - [GitHub Integration](/docs/guide/github-integration) - GitHub App setup and permissions
 - [CLI: syn workflow](/docs/cli/workflow) - `--repo` and `--repos` flag reference
