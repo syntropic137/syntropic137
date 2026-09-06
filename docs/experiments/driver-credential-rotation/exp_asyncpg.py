@@ -55,8 +55,7 @@ async def main(host: str, port: int, admin_dsn: str) -> None:
     conns = [await pool.acquire() for _ in range(5)]
     pids = sorted({await c.fetchval("SELECT pg_backend_pid()") for c in conns})
     server_backends = await admin.fetchval(
-        "SELECT count(*) FROM pg_stat_activity "
-        "WHERE usename = 'rotuser' AND application_name = $1",
+        "SELECT count(*) FROM pg_stat_activity WHERE usename = 'rotuser' AND application_name = $1",
         APP,
     )
     for c in conns:
@@ -74,8 +73,7 @@ async def main(host: str, port: int, admin_dsn: str) -> None:
     await admin.execute("ALTER ROLE rotuser PASSWORD 'pw-v2'")
     PW_FILE.write_text("pw-v2")
     verifier = await admin.fetchval(
-        "SELECT substring(rolpassword from 1 for 30) FROM pg_authid "
-        "WHERE rolname = 'rotuser'"
+        "SELECT substring(rolpassword from 1 for 30) FROM pg_authid WHERE rolname = 'rotuser'"
     )
     out("server verifier after rotation", verifier[:30])
 

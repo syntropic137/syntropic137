@@ -41,8 +41,13 @@ async def main(host: str, port: int, redis_url: str) -> None:
         return "pw-v1"
 
     pool = await asyncpg.create_pool(
-        host=host, port=port, user="rotuser", database="rotdb",
-        password=cb, min_size=1, max_size=4,
+        host=host,
+        port=port,
+        user="rotuser",
+        database="rotdb",
+        password=cb,
+        min_size=1,
+        max_size=4,
         server_settings={"application_name": "exp-floor"},
     )
     held = [await pool.acquire() for _ in range(4)]
@@ -54,8 +59,9 @@ async def main(host: str, port: int, redis_url: str) -> None:
     await pool.close()
 
     cp = Counting("rpw-v1")
-    client = Redis.from_url(redis_url, credential_provider=cp, decode_responses=True,
-                            client_name="exp-floor")
+    client = Redis.from_url(
+        redis_url, credential_provider=cp, decode_responses=True, client_name="exp-floor"
+    )
     assert await client.ping()
     rpool = client.connection_pool
     conns = [await rpool.get_connection("PING") for _ in range(4)]

@@ -69,11 +69,7 @@ async def main(url: str, admin_pw: str) -> None:
     for conn in held:
         await conn.send_command("CLIENT", "ID")
         ids.append(await conn.read_response())
-    server_side = [
-        line
-        for line in (await admin.client_list())
-        if line.get("name") == "exp-redis"
-    ]
+    server_side = [line for line in (await admin.client_list()) if line.get("name") == "exp-redis"]
     for conn in held:
         await pool.release(conn)
 

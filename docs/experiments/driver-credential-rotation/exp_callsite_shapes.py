@@ -37,9 +37,7 @@ class Provider(CredentialProvider):
 
 async def main(pg_dsn_stale: str, redis_url: str) -> None:
     # --- asyncpg: DSN carries a WRONG password, callable carries the right one
-    pool = await asyncpg.create_pool(
-        pg_dsn_stale, password=lambda: "pw-v1", min_size=1, max_size=1
-    )
+    pool = await asyncpg.create_pool(pg_dsn_stale, password=lambda: "pw-v1", min_size=1, max_size=1)
     async with pool.acquire() as con:
         out("asyncpg: callable overrides DSN password", await con.fetchval("SELECT current_user"))
     await pool.close()
