@@ -505,8 +505,30 @@ Merge the PR as a merge commit (not squash, not rebase). This triggers `release-
 - [ ] GitHub Release exists with all assets
 - [ ] Docker images tagged on GHCR (`v0.20.0`, `v0.20`, `latest`)
 - [ ] `npm info @syntropic137/cli` shows new version
-- [ ] Template sync PR opened on `syntropic137-npx`
 - [ ] Docs site updated at production URL
+
+### 7. Publish the npx setup package
+
+The release pipeline only *opens* a template-sync PR on `syntropic137-npx`. It
+cannot finish the job: that repo requires code-owner review, and its
+`publish.yml` is `workflow_dispatch`-only on purpose for supply-chain reasons.
+Both remaining steps are human, and until they happen
+`npx @syntropic137/setup` keeps handing new users the PREVIOUS release's
+templates.
+
+This step used to read "Template sync PR opened on syntropic137-npx", which is
+satisfied by the one part that already automates itself. Opening a PR is not
+publishing, so the box could be ticked on every release while npm stayed
+behind - which is how v0.28.0 shipped with `@syntropic137/setup` still on
+0.27.0 (#1227).
+
+- [ ] Merge the sync PR on `syntropic137-npx`
+      (`gh pr list --repo syntropic137/syntropic137-npx`)
+- [ ] Confirm the merged `package.json` version equals this release
+- [ ] Dispatch the publish workflow:
+      `gh workflow run publish.yml --repo syntropic137/syntropic137-npx`
+- [ ] **Verify against npm, not the workflow's exit code:**
+      `npm view @syntropic137/setup version` returns this release
 
 ## Beta Release
 
