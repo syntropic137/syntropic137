@@ -3,34 +3,54 @@ title: Workspace Images
 description: Production-ready, multi-arch Docker images for isolated agent execution with built-in observability, token compression, and security hardening.
 ---
 
-Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLI, language tooling, token compression, and observability hooks.
+Syntropic137 runs AI agents inside **isolated workspace containers**. Each workspace is a disposable Docker container pre-loaded with everything an agent needs: the agent CLIs, language tooling, and observability hooks. The same container serves both harnesses, so whether a phase declares `agent.provider: claude` or `agent.provider: codex`, the container boundary is the same. Process-level authority is not: only codex phases enforce the declared `sandbox` level on top of the container.
 
 ## What's in a Workspace Image
 
-Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. The primary image is `ghcr.io/agentparadise/agentic-workspace-claude-cli`.
+Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. Two images matter:
 
-| Component | Purpose |
-|-----------|---------|
-| Claude CLI | Agent runtime (pinned version) |
-| RTK | Token compression: 53% context reduction on Bash output |
-| Python 3.12 + uv | Hooks, scripts, agentic packages |
-| Node.js 22 LTS | Required for Claude CLI |
-| Rust toolchain | rust-analyzer LSP, cargo builds |
-| LSP servers | pyright, typescript-language-server, rust-analyzer |
-| Plugins | Pre-bundled hooks for git ops, compaction, subagent tracking |
-| GitHub CLI | Repository operations |
+| Image | Harnesses | Notes |
+|-------|-----------|-------|
+| `ghcr.io/agentparadise/omni-agent-workspace` | claude and codex | The default. `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
+| `ghcr.io/agentparadise/agentic-workspace-claude-cli` | claude and codex | The heavier image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
+
+Both images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
+
+| Component | omni-agent | claude-cli |
+|-----------|------------|------------|
+| Claude CLI | Yes | Yes |
+| Codex CLI | Yes | Yes |
+| Python 3.12 + uv | Yes | Yes |
+| Node.js 22 LTS | Yes | Yes |
+| GitHub CLI | Yes | Yes |
+| RTK token compression | Yes | No |
+| Rust toolchain | No | Yes |
+| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | Yes |
+| Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes |
+
+The plugins and LSP servers exist to back Claude Code features. A codex phase does not use them on either image.
 
 ## Version Manifest
 
-Every image includes `/opt/agentic/version.json`, a machine-readable manifest that orchestrators read after container creation:
+<Callout type="warn">
+**Not currently produced.** ADR-056 specifies a machine-readable
+`/opt/agentic/version.json` in every image, but no provider Dockerfile or the
+build staging script creates or copies it. The consumer treats the field as
+optional and records `None` when it is absent, so nothing breaks, but no
+workspace event carries component versions today. The shape below is the
+specified format, not an observed one.
+</Callout>
+
+The intended manifest, which orchestrators would read after container creation:
 
 ```json
 {
-  "provider": "claude-cli",
-  "provider_version": "1.1.0",
+  "provider": "omni-agent",
+  "provider_version": "1.6.0",
   "components": {
-    "claude_cli": "2.1.76",
-    "rtk": "0.34.3",
+    "claude_cli": "2.1.250",
+    "codex_cli": "0.150.1",
+    "rtk": "0.48.0",
     "node": "22",
     "python": "3.12"
   },
@@ -39,14 +59,15 @@ Every image includes `/opt/agentic/version.json`, a machine-readable manifest th
 }
 ```
 
-Syntropic137 records this manifest in the `IsolationStartedEvent`, enabling version-aware dashboards and audit trails.
+Were it generated, Syntropic137 would record it in the `IsolationStartedEvent`,
+enabling version-aware dashboards and audit trails.
 
 ## Multi-Architecture Support
 
 Images are built for both `linux/amd64` and `linux/arm64`:
 
 - **amd64**: Pre-built static binaries (fast builds)
-- **arm64**: RTK built from source via cargo (supports Mac Mini fleets)
+- **arm64**: prebuilt release binaries per architecture. RTK takes upstream's glibc build on arm64 and its static musl build on amd64
 
 ## Next Steps
 
