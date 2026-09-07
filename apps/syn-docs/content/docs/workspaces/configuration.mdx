@@ -55,6 +55,16 @@ These are injected automatically by syn137 when creating workspaces:
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
 
+<Callout type="info">
+**Container environment is not the agent environment.** The table above is what
+the workspace *container* receives. The environment handed to the *agent
+process* is built separately and is narrower. A claude phase gets its Anthropic
+credential there. A codex phase gets an empty agent environment, which is
+precisely what keeps `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` out of
+reach of a codex run, and its own credential arrives as the staged
+`~/.codex/auth.json` file rather than as a variable.
+</Callout>
+
 ## OTel Configuration
 
 ### How OTel connects to syn-collector

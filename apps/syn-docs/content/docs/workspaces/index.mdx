@@ -32,15 +32,25 @@ The plugins and LSP servers exist to back Claude Code features. A codex phase do
 
 ## Version Manifest
 
-Every image includes `/opt/agentic/version.json`, a machine-readable manifest that orchestrators read after container creation:
+<Callout type="warn">
+**Not currently produced.** ADR-056 specifies a machine-readable
+`/opt/agentic/version.json` in every image, but no provider Dockerfile or the
+build staging script creates or copies it. The consumer treats the field as
+optional and records `None` when it is absent, so nothing breaks, but no
+workspace event carries component versions today. The shape below is the
+specified format, not an observed one.
+</Callout>
+
+The intended manifest, which orchestrators would read after container creation:
 
 ```json
 {
-  "provider": "claude-cli",
-  "provider_version": "1.1.0",
+  "provider": "omni-agent",
+  "provider_version": "1.6.0",
   "components": {
-    "claude_cli": "2.1.76",
-    "rtk": "0.34.3",
+    "claude_cli": "2.1.250",
+    "codex_cli": "0.150.1",
+    "rtk": "0.48.0",
     "node": "22",
     "python": "3.12"
   },
@@ -49,7 +59,8 @@ Every image includes `/opt/agentic/version.json`, a machine-readable manifest th
 }
 ```
 
-Syntropic137 records this manifest in the `IsolationStartedEvent`, enabling version-aware dashboards and audit trails.
+Were it generated, Syntropic137 would record it in the `IsolationStartedEvent`,
+enabling version-aware dashboards and audit trails.
 
 ## Multi-Architecture Support
 
