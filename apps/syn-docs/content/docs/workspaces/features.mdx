@@ -15,7 +15,13 @@ Both images carry the Claude Code plugins and native OTel export. The manifest s
 
 ### How It Works
 
-RTK is initialized via `rtk init` in the container entrypoint. It creates shell aliases that wrap common commands with token-optimized formatting. Claude Code's Bash tool calls go through these aliases transparently.
+RTK is installed in the `omni-agent` image at a pinned, checksum-verified
+version and initialized via `rtk init -g` in the container entrypoint, after
+the entrypoint writes `~/.claude/settings.json`. It installs a hook that
+intercepts Bash tool calls and rewrites them to compressed equivalents.
+
+`rtk init` targets Claude Code and has no codex target, so this is Claude-only.
+A codex phase never consults the hook.
 
 ### Measured Impact
 

@@ -23,7 +23,7 @@ Both images ship both CLIs, pinned to explicit versions. What varies is the tool
 | Python 3.12 + uv | Yes | Yes |
 | Node.js 22 LTS | Yes | Yes |
 | GitHub CLI | Yes | Yes |
-| RTK token compression | No | Yes |
+| RTK token compression | Yes | No |
 | Rust toolchain | No | Yes |
 | LSP servers (pyright, typescript-language-server, rust-analyzer) | No | Yes |
 | Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes |
@@ -56,7 +56,7 @@ Syntropic137 records this manifest in the `IsolationStartedEvent`, enabling vers
 Images are built for both `linux/amd64` and `linux/arm64`:
 
 - **amd64**: Pre-built static binaries (fast builds)
-- **arm64**: Rust components built from source via cargo (supports Mac Mini fleets). Applies to the heavier `claude-cli` image, which carries the Rust toolchain. The default `omni-agent` image does not
+- **arm64**: prebuilt release binaries per architecture. RTK takes upstream's glibc build on arm64 and its static musl build on amd64
 
 ## Next Steps
 
