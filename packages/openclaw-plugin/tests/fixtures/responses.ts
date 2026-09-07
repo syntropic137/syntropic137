@@ -71,6 +71,20 @@ export const executionList: ExecutionListResponse = {
   page_size: 50,
 };
 
+/**
+ * A collection that does NOT fit on one page.
+ *
+ * `executionList` above has total 1 and page_size 50, so `page 1/1` is what
+ * every arithmetic error also produces. This fixture is the one where
+ * `Math.ceil(total / page_size)` has a value worth reading.
+ */
+export const executionListPaged: ExecutionListResponse = {
+  executions: executionList.executions,
+  total: 137,
+  page: 2,
+  page_size: 50,
+};
+
 export const executionDetail: ExecutionDetail = {
   workflow_execution_id: "exec-abc-123",
   workflow_id: "wf-issue-001",

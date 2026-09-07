@@ -151,7 +151,7 @@ APP_ENVIRONMENT=development pytest  # ❌ MockTestEnvironmentError
 
 ### Reference
 
-See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
+See [ADR-004: Environment Configuration](../adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
 
 ---
 
@@ -352,7 +352,7 @@ curl -s http://localhost:8137/api/workflows/invalid-id
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 4.3.1 | GET /api/sessions returns 200 | ⬜ |
-| 4.3.2 | Response is an array (empty if no sessions) | ⬜ |
+| 4.3.2 | Response is `{sessions, total, page, page_size, status_counts}`; `sessions` empty if none | ⬜ |
 | 4.3.3 | Filter by workflow_id works | ⬜ |
 | 4.3.4 | GET /api/sessions/{invalid-id} returns 404 | ⬜ |
 
@@ -371,7 +371,7 @@ curl -s "http://localhost:8137/api/sessions?workflow_id=<id>" | jq
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 4.4.1 | GET /api/artifacts returns 200 | ⬜ |
-| 4.4.2 | Response is an array (empty if no artifacts) | ⬜ |
+| 4.4.2 | Response is `{artifacts, total, page, page_size, type_counts}`; `artifacts` empty if none | ⬜ |
 | 4.4.3 | Filter by workflow_id works | ⬜ |
 | 4.4.4 | GET /api/artifacts/{invalid-id} returns 404 | ⬜ |
 
@@ -1386,7 +1386,7 @@ assert agent is not None
 
 ## Feature 13: WebSocket Control Plane ⭐ NEW
 
-> **ADR:** [ADR-019: WebSocket Control Plane Architecture](/docs/adrs/ADR-019-websocket-control-plane.md)
+> **ADR:** [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
 
 ### Overview
 

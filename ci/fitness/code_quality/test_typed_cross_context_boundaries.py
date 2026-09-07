@@ -29,14 +29,15 @@ Pattern:  ADR-063 (docs/adrs/ADR-063-cross-context-anti-corruption-layer.md)
 from __future__ import annotations
 
 import ast
-import re
-from typing import TYPE_CHECKING
+import sys
+from pathlib import Path
 
 import pytest
 from ci.fitness.conftest import load_exceptions, rel_path, repo_root
 
-if TYPE_CHECKING:
-    from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+
+from check_untyped_dicts import contains_untyped_mapping
 
 _CHECK_DIRS = [
     "packages/syn-domain/src",
@@ -44,8 +45,10 @@ _CHECK_DIRS = [
     "apps/syn-api/src",
 ]
 
-# Patterns that indicate untyped dict crossing a boundary
-_UNTYPED_DICT_RE = re.compile(r"dict\s*\[\s*str\s*,\s*(str|Any|object)\s*\]")
+#: Value types that carry no domain meaning at a boundary. Wider than the
+#: ratchet's default by ``str``: ``dict[str, str]`` is exactly the identity
+#: smuggling ADR-063 exists to stop.
+_OPAQUE_VALUES = frozenset({"str", "Any", "object"})
 
 # Parameter/return slot names that are known-safe generic dicts (not domain
 # identity). These carry opaque key/value pairs (config maps, HTTP headers,
@@ -72,8 +75,7 @@ _SAFE_PARAM_NAMES = frozenset(
 class _BoundaryDictVisitor(ast.NodeVisitor):
     """Find Protocol/ABC methods with untyped dict parameters or returns."""
 
-    def __init__(self, source: str) -> None:
-        self.source = source
+    def __init__(self) -> None:
         self.violations: list[tuple[str, str, str, int]] = []
         # (class_name, method_name, slot, line)  where slot is "param:<name>" or "return"
 
@@ -99,15 +101,14 @@ class _BoundaryDictVisitor(ast.NodeVisitor):
             ann = arg.annotation
             if ann is None:
                 continue
-            ann_text = ast.get_source_segment(self.source, ann)
-            if ann_text and _UNTYPED_DICT_RE.search(ann_text):
+            if contains_untyped_mapping(ann, values=_OPAQUE_VALUES):
                 self.violations.append((class_name, func.name, f"param:{arg.arg}", arg.lineno))
 
         # Return type
-        if func.returns is not None:
-            ret_text = ast.get_source_segment(self.source, func.returns)
-            if ret_text and _UNTYPED_DICT_RE.search(ret_text):
-                self.violations.append((class_name, func.name, "return", func.lineno))
+        if func.returns is not None and contains_untyped_mapping(
+            func.returns, values=_OPAQUE_VALUES
+        ):
+            self.violations.append((class_name, func.name, "return", func.lineno))
 
 
 def _is_boundary_class(node: ast.ClassDef) -> bool:
@@ -139,14 +140,16 @@ def _is_boundary_class(node: ast.ClassDef) -> bool:
 
 
 def _scan_file(py_file: Path) -> list[tuple[str, str, str, int]]:
-    """Scan a file for Protocol/ABC methods with untyped dict signatures."""
-    try:
-        source = py_file.read_text()
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
+    """Scan a file for Protocol/ABC methods with untyped dict signatures.
 
-    visitor = _BoundaryDictVisitor(source)
+    A ``SyntaxError`` is deliberately not caught. This used to return ``[]``,
+    which meant a file that stopped parsing reported no violations rather than
+    an unknown number of them - a gate that goes quiet exactly when the code is
+    at its most broken.
+    """
+    tree = ast.parse(py_file.read_text())
+
+    visitor = _BoundaryDictVisitor()
     visitor.visit(tree)
     return visitor.violations
 

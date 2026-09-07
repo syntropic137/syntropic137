@@ -24,6 +24,13 @@ from syn_api._wiring import (
     get_session_repo,
     sync_published_events_to_projections,
 )
+from syn_api.list_query import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    WindowBound,
+    parse_statuses,
+    resolve_page_size,
+)
 from syn_api.types import (
     Err,
     GitEventData,
@@ -37,6 +44,7 @@ from syn_api.types import (
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
+from syn_domain.pagination import Page
 from syn_shared.display import (
     EM_DASH,
     compute_duration_seconds,
@@ -52,6 +60,9 @@ if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
         SessionCost,
+    )
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+        SessionSummary as DomainSessionSummary,
     )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +134,28 @@ class SessionListResponse(BaseModel):
 
     sessions: list[SessionSummaryResponse] = Field(default_factory=list)
     total: int = 0
+    """Sessions matching every filter, not the length of this page.
+
+    This used to be ``len(sessions)``, which made it unusable for paging - it
+    always said "you have them all". Nothing rendered it, so nothing broke;
+    now that the endpoint pages, it is the number a client pages against.
+    """
+    page: int = 1
+    page_size: int = DEFAULT_PAGE_SIZE
+    excluded_undated: int = 0
+    """Sessions dropped from this window because they carry no date at all.
+
+    ``total`` cannot say why a row is missing: "older than the bound" and
+    "undated" leave it looking identical, so narrowing a window showed an
+    unexplained gap (#1215). With this the reader gets "755 of 1037, 274
+    undated" instead.
+
+    Zero when the request gave no window - an unbounded query evaluates every
+    row and returns the undated ones. Non-zero means rows exist that this
+    filter could not judge, NOT that they failed it.
+    """
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    """Matching sessions tallied by status, ignoring the status filter itself."""
 
 
 class OperationInfo(BaseModel):
@@ -133,6 +166,9 @@ class OperationInfo(BaseModel):
     timestamp: datetime | str | None = None
     duration_seconds: float | None = None
     success: bool = True
+    """See `PhaseOperationInfo.success` - same field, same rule, other endpoint."""
+    error_message: str | None = None
+    """Why this operation's subject went wrong, when something did (#1196)."""
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
@@ -308,6 +344,33 @@ async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
     return dict(entry for entry in results if entry is not None)
 
 
+def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
+    """Convert a domain read-model row into the API-layer summary."""
+    return SessionSummary(
+        id=s.id,
+        workflow_id=s.workflow_id,
+        execution_id=s.execution_id,
+        phase_id=s.phase_id,
+        # #895: the domain read model carries these; this conversion used to
+        # drop them, so delegation lineage died at the API boundary even once
+        # something wrote it.
+        parent_session_id=s.parent_session_id,
+        root_session_id=s.root_session_id,
+        status=s.status,
+        agent_type=s.agent_type,
+        repos=list(s.repos),
+        input_tokens=s.input_tokens,
+        output_tokens=s.output_tokens,
+        cache_creation_tokens=s.cache_creation_tokens,
+        cache_read_tokens=s.cache_read_tokens,
+        total_tokens=s.total_tokens,
+        # Lane 2: cost is enriched from session_cost projection at the endpoint (#695)
+        total_cost_usd=Decimal("0"),
+        started_at=s.started_at,
+        completed_at=s.completed_at,
+    )
+
+
 async def list_sessions(
     workflow_id: str | None = None,
     status: str | None = None,
@@ -316,8 +379,14 @@ async def list_sessions(
     started_before: datetime | None = None,
     limit: int = 100,
     offset: int = 0,
-) -> Result[list[SessionSummary], SessionError]:
+    search: str | None = None,
+) -> Result[Page[SessionSummary], SessionError]:
     """List agent sessions, optionally filtered.
+
+    Returns a ``Page`` rather than a bare list because the endpoint needs the
+    total and the status facets counted over the same predicate that produced
+    the rows. Deriving them separately is how a count comes to describe rows
+    the query does not return (#1119).
 
     Args:
         workflow_id: Filter by workflow ID.
@@ -328,49 +397,30 @@ async def list_sessions(
         started_before: Inclusive upper bound on ``started_at``.
         limit: Maximum results to return.
         offset: Pagination offset.
+        search: Case-insensitive substring match on session id or workflow id.
 
     Returns:
-        Ok(list[SessionSummary]) on success, Err(SessionError) on failure.
+        Ok(Page[SessionSummary]) on success, Err(SessionError) on failure.
     """
     await ensure_connected()
     manager = get_projection_mgr()
     projection = manager.session_list
-    domain_sessions = await projection.query(
+    domain_page = await projection.page(
         workflow_id=workflow_id,
-        status_filter=status,
-        statuses=statuses,
+        statuses=statuses if statuses else ([status] if status else None),
         started_after=started_after,
         started_before=started_before,
+        search=search,
         limit=limit,
         offset=offset,
     )
     return Ok(
-        [
-            SessionSummary(
-                id=s.id,
-                workflow_id=s.workflow_id,
-                execution_id=s.execution_id,
-                phase_id=s.phase_id,
-                # #895: the domain read model carries these; this conversion
-                # used to drop them, so delegation lineage died at the API
-                # boundary even once something wrote it.
-                parent_session_id=s.parent_session_id,
-                root_session_id=s.root_session_id,
-                status=s.status,
-                agent_type=s.agent_type,
-                repos=list(s.repos),
-                input_tokens=s.input_tokens,
-                output_tokens=s.output_tokens,
-                cache_creation_tokens=s.cache_creation_tokens,
-                cache_read_tokens=s.cache_read_tokens,
-                total_tokens=s.total_tokens,
-                # Lane 2: cost is enriched from session_cost projection at the endpoint (#695)
-                total_cost_usd=Decimal("0"),
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-            )
-            for s in domain_sessions
-        ]
+        Page(
+            rows=[_to_session_summary(s) for s in domain_page.rows],
+            total=domain_page.total,
+            status_counts=domain_page.status_counts,
+            excluded_undated=domain_page.excluded_undated,
+        )
     )
 
 
@@ -513,9 +563,10 @@ async def get_session(
     await ensure_connected()
     manager = get_projection_mgr()
 
-    # Look up session in the session_list projection
-    sessions = await manager.session_list.query(limit=10000)
-    session = next((s for s in sessions if s.id == session_id), None)
+    # Look up session in the session_list projection. This read 10000 sessions
+    # and scanned them for one id, so the detail page went 404 past that row
+    # (#1204, same shape as the artifact one).
+    session = await manager.session_list.get_by_id(session_id)
 
     if session is None:
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
@@ -644,29 +695,44 @@ async def list_sessions_endpoint(
         None,
         description="Comma-separated list of statuses (OR'd; takes precedence over `status`)",
     ),
-    started_after: datetime | None = Query(
-        None, description="Inclusive ISO 8601 lower bound on started_at"
+    started_after: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 lower bound on started_at (timezone required)"
     ),
-    started_before: datetime | None = Query(
-        None, description="Inclusive ISO 8601 upper bound on started_at"
+    started_before: WindowBound | None = Query(
+        None, description="Inclusive ISO 8601 upper bound on started_at (timezone required)"
     ),
-    limit: int = Query(50, ge=1, le=200, description="Max items to return"),
+    q: str | None = Query(
+        None,
+        description="Case-insensitive substring match against session id and workflow id",
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int | None = Query(None, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        le=MAX_PAGE_SIZE,
+        deprecated=True,
+        description="Deprecated alias for page_size. Ignored when page_size is given.",
+    ),
 ) -> SessionListResponse:
     """List agent sessions with optional filtering."""
-    status_list = [s.strip() for s in statuses.split(",") if s.strip()] if statuses else None
+    effective_page_size = resolve_page_size(page_size, limit)
     result = await list_sessions(
         workflow_id=workflow_id,
         status=status,
-        statuses=status_list,
+        statuses=parse_statuses(statuses, status),
         started_after=started_after,
         started_before=started_before,
-        limit=limit,
+        search=q,
+        limit=effective_page_size,
+        offset=(page - 1) * effective_page_size,
     )
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    summaries = result.value
+    session_page = result.value
+    summaries = session_page.rows
     wf_ids = {s.workflow_id for s in summaries if s.workflow_id}
     wf_names = await _build_workflow_name_map(wf_ids)
     # Lane 2: enrich each session's cost/model/duration from the session_cost projection (#695)
@@ -679,7 +745,16 @@ async def list_sessions_endpoint(
         )
         for s in summaries
     ]
-    return SessionListResponse(sessions=responses, total=len(responses))
+    return SessionListResponse(
+        sessions=responses,
+        # The filtered COLLECTION, not this page. It was ``len(responses)``,
+        # which said "you have them all" however much history was unreachable.
+        total=session_page.total,
+        page=page,
+        page_size=effective_page_size,
+        excluded_undated=session_page.excluded_undated,
+        status_counts=session_page.status_counts,
+    )
 
 
 def _parse_tool_input(input_preview: str | None) -> dict[str, Any] | None:
@@ -702,7 +777,9 @@ def _to_operation_info(op: ToolOperation) -> OperationInfo:
         operation_type=op.operation_type,
         timestamp=str(op.timestamp) if op.timestamp else None,
         duration_seconds=(op.duration_ms / 1000.0) if op.duration_ms else None,
+        # See `_map_phase_to_response` for why None still renders as True.
         success=op.success if op.success is not None else True,
+        error_message=op.error_message,
         tool_name=op.tool_name,
         tool_use_id=op.tool_use_id,
         tool_input=_parse_tool_input(op.input_preview),

@@ -48,28 +48,49 @@ value = 1200
 issue = "#185"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Untyped Dicts - dict[str, Any] and dict[str, object] in Python packages
+# Untyped Dicts - str-keyed mappings with unconstrained values, per package.
 # Default is 0 (clean). Every non-zero entry is grandfathered tech debt.
 #
 # RATCHET INVARIANT: values MAY ONLY DECREASE. Never bump a value up to
 # accommodate new untyped dicts. Type them with TypedDict or Pydantic
 # before merging. The threshold is a ceiling on existing tech debt, not
 # a budget for new debt.
+#
+# RE-BASELINED 2026-09-05 (#1188). These five values were re-measured, NOT
+# raised. The gate used to grep for the literal string "dict[str, Any]"; it now
+# parses each file, so Mapping[str, object], MutableMapping[str, Any],
+# Dict[str, Any], quoted and line-wrapped spellings are counted for the first
+# time, and mentions in docstrings and comments stopped being counted at all.
+# Same debt, correct measure. Before -> after, and why each moved:
+#
+#   syn-domain     387 -> 413   +34 newly visible, -8 prose
+#   syn-adapters   195 -> 205   +10 newly visible
+#   syn-api         94 -> 139   +45 newly visible
+#   syn-collector   22 ->  22   unchanged
+#   syn-shared      10 ->  11   +1 newly visible
+#
+# syn-api is the finding: a third of its untyped surface was never being
+# measured. The debt did not appear on 2026-09-05, it was always there. The
+# invariant above applies unchanged from this baseline forward.
+#
+# Every value is now the exact measured count, so no entry carries headroom.
+# syn-domain previously allowed 391 against a real 387; a ratchet with slack in
+# it permits exactly the growth it exists to stop.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 391
+value = 413
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
 path = "packages/syn-adapters"
-value = 195
+value = 205
 issue = "#673"
 
 [untyped-dicts.syn-api]
 path = "apps/syn-api"
-value = 94
+value = 139
 issue = "#673"
 
 [untyped-dicts.syn-collector]
@@ -79,7 +100,7 @@ issue = "#673"
 
 [untyped-dicts.syn-shared]
 path = "packages/syn-shared"
-value = 10
+value = 11
 issue = "#673"
 
 # Test-marker census (justfile: check-test-markers).

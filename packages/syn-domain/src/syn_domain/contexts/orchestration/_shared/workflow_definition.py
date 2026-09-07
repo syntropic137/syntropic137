@@ -304,6 +304,23 @@ class PhaseYamlDefinition(BaseModel):
     timeout_seconds: int | None = None
     allowed_tools: list[str] = Field(default_factory=list)
 
+    clone_repos: bool = True
+    """Whether this phase gets the workflow's repos checked out (#1187).
+
+    Provisioning has been phase-blind: every phase paid the same clone plus
+    recursive submodule init, because the only opt-out was the WORKFLOW-level
+    `requires_repos: false`, which turns cloning off for all of them. A
+    workflow whose implement phase needs a working tree and whose open_pr
+    phase does not could not express that, so the phase doing the least work
+    paid the same 600s bootstrap - under the shortest budget in the workflow.
+
+    False does NOT mean "no GitHub". The repo is still resolved to its
+    installation, still gets a token, still gets a ~/.git-credentials entry
+    and a gh hosts.yml, and still substitutes into `{{repo_url}}`. Only the
+    checkout is skipped. Keeping the repo list intact is what preserves the
+    #1129 token routing: dropping it would fall back to the first
+    installation, which in a multi-org deployment is the wrong one."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -485,6 +502,7 @@ class PhaseYamlDefinition(BaseModel):
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
+            clone_repos=self.clone_repos,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

@@ -18,9 +18,9 @@ honest failure does.
 
 ## If verification passed
 
-The implement phase already pushed the branch; this workspace is a fresh clone
-that does not contain it. Open a PR from the **existing remote branch** named in
-the artifacts - you do not need to push anything.
+The implement phase already pushed the branch; this workspace has no checkout at
+all, so nothing is on disk here. Open a PR from the **existing remote branch**
+named in the artifacts - you do not need to push anything.
 
 Confirm first that the branch exists on origin and that its head SHA matches the
 one verification reported. If they differ, something pushed over it; stop and say

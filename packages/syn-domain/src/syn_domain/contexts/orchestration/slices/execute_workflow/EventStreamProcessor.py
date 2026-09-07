@@ -292,6 +292,18 @@ class StreamResult:
     #: which is what forced the old classify-by-agent-name inference, and what
     #: made a claude phase delegating to claude unattributable (#895).
     leader_native_session_id: str | None = None
+    #: The last thing this phase's agent SAID, as opposed to what it wrote.
+    #:
+    #: Kept because the file the phase writes is not the only copy of its
+    #: conclusion, and it turned out to be the less reliable one: in
+    #: exec-0bac0e1ed2b2 a verify phase ran for nine minutes and then wrote an
+    #: empty file, and because nothing held on to what it had said, the whole
+    #: execution failed with the verdict irrecoverable (#1195).
+    #:
+    #: None means the agent said nothing at all on this stream, which is a
+    #: different fact from "it said something empty" and the artifact path
+    #: needs to be able to tell them apart.
+    last_agent_message: str | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -356,6 +368,7 @@ class EventStreamProcessor:
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
+        self._last_agent_message: str | None = None
 
         # #894: A claude phase delegates to `codex exec`. Track the tool_use_ids
         # of those invocations so the tool_result can tell "tried and failed"
@@ -457,6 +470,7 @@ class EventStreamProcessor:
             delegation_attempts=self._delegation_attempts,
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
+            last_agent_message=self._last_agent_message,
         )
 
     async def _process_line(
@@ -639,6 +653,13 @@ class EventStreamProcessor:
             )
         if cli_event.get("is_error") and result_text:
             self._error_reason = _extract_error_reason(result_text)
+        elif result_text.strip():
+            # The terminal, most-complete statement the agent made, so it wins
+            # over anything remembered mid-stream. Skipped when `is_error`,
+            # where `result` holds the harness's own failure text rather than
+            # the agent's - recovering THAT into an artifact would file a stack
+            # trace as a verdict (#1195).
+            self._last_agent_message = result_text
         self._capture_result_tokens(cli_event)
         return task_result
 
@@ -658,8 +679,19 @@ class EventStreamProcessor:
         await self._record_turn_usage_once(message)
 
         for item in message.get("content", []):
-            if isinstance(item, dict) and item.get("type") == "tool_use":
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "tool_use":
                 await self._handle_tool_use(item)
+            elif item.get("type") == "text":
+                # Remembered as the stream goes rather than only at the end: a
+                # phase whose harness never emits a terminal `result` line -
+                # killed, timed out, cut off - is exactly the phase whose
+                # output is most likely to be missing, and its last words are
+                # the only copy left (#1195).
+                said = str(item.get("text", ""))
+                if said.strip():
+                    self._last_agent_message = said
 
     async def _record_turn_usage_once(self, message: Mapping[str, Any]) -> None:
         """Record per-turn token usage, deduped by message.id (#695)."""

@@ -1,7 +1,7 @@
 """A failed phase's outcome must be captured before teardown destroys it.
 
 `_fail_execution` completes sessions and closes workspaces, and
-`close_phase_workspaces` clears the session-id map. Reading the phase's start
+`PhaseRuntime.abandon_all` clears the session-id map. Reading the phase's start
 time and session id AFTER that timed the phase from its start to the end of
 cleanup - counting container capture and teardown as "how long the phase ran" -
 and handed the failed result an empty session id even when the session was known.
@@ -34,18 +34,19 @@ _TEARDOWN_SECONDS = 30.0
 async def test_duration_excludes_teardown_and_the_session_id_survives() -> None:
     processor = _make_processor(FakeAgentExecutionHandler())
 
+    runtime = processor._runtime
     started = datetime.now(UTC) - timedelta(seconds=5)
-    processor._phase_started_at[PHASE] = started
-    processor._phase_session_ids[PHASE] = "sess-real"
+    runtime._started_at[PHASE] = started
+    runtime._session_ids[PHASE] = "sess-real"
 
     async def _slow_teardown(*_args: object, **_kwargs: object) -> None:
         """Stands in for cleanup that takes real time and clears the maps."""
-        processor._phase_started_at.pop(PHASE, None)
-        processor._phase_session_ids.pop(PHASE, None)
-        processor._phase_started_at["_teardown_ran"] = datetime.now(UTC)
+        runtime._started_at.pop(PHASE, None)
+        runtime._session_ids.pop(PHASE, None)
+        runtime._started_at["_teardown_ran"] = datetime.now(UTC)
         await asyncio.sleep(0)
 
-    processor._close_phase_workspace_cms = _slow_teardown  # type: ignore[method-assign]
+    runtime.abandon_all = _slow_teardown  # type: ignore[method-assign]
 
     results: list[object] = []
     await processor._fail_execution(

@@ -233,4 +233,3 @@ jailer --id my-vm --exec-file /usr/local/bin/firecracker --uid 1000 --gid 1000
 
 - [Firecracker Documentation](https://github.com/firecracker-microvm/firecracker/tree/main/docs)
 - [ADR-021: Isolated Workspace Architecture](../../docs/adrs/ADR-021-isolated-workspace-architecture.md)
-- [Workspace README](../../packages/syn-adapters/src/syn_adapters/workspaces/README.md)

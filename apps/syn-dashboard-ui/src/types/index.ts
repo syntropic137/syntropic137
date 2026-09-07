@@ -163,6 +163,17 @@ export interface ArtifactSummary {
   created_at: string | null
 }
 
+/**
+ * One page of artifacts, and the numbers describing what it is a page of.
+ *
+ * Aliased to the generated schema for the same reason `ExecutionListResponse`
+ * is: a hand-written copy cannot notice a field the server added, and
+ * `response.total` on a shape that does not declare it is `undefined` rather
+ * than a build failure - which is how this endpoint returned a bare array
+ * that read as the whole collection for as long as it did (#1204).
+ */
+export type ArtifactListResponse = components['schemas']['ArtifactListResponse']
+
 export interface ArtifactResponse {
   id: string
   workflow_id: string | null
@@ -275,12 +286,21 @@ export interface ExecutionListItem {
   repos_display: string | null
 }
 
-export interface ExecutionListResponse {
-  executions: ExecutionListItem[]
-  total: number
-  page: number
-  page_size: number
-}
+/**
+ * The `/executions` envelope, aliased to the generated type rather than
+ * restated.
+ *
+ * Hand-written, it silently lost every field the API gained: the compiler had
+ * nothing to compare it against, and `response.status_counts` on a shape that
+ * does not declare it is `undefined`, not an error. That is #1176 one layer
+ * out. As an alias, a server field added without regenerating is a build
+ * failure at the point of use.
+ *
+ * `ExecutionListItem` above is left in place for the callers that name it; the
+ * generated `ExecutionSummaryResponse` is assignable to it, which is what made
+ * this alias a drop-in.
+ */
+export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
 
 export interface PhaseExecutionDetail {
   /** Explicit naming for OTel correlation (ADR-028) */

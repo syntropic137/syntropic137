@@ -27,6 +27,8 @@ from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import deployment_identity
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.workspace_backends.agentic.capture_result import (
         AuthoritativeCapture,
     )
@@ -39,6 +41,7 @@ __all__ = [
     "CaptureObservationData",
     "ObservationWriter",
     "build_expectations",
+    "read_agent_session_ids",
     "record_capture_outcome",
 ]
 
@@ -145,6 +148,57 @@ class CaptureObservationData(BaseModel):
     container-local today, so a post-teardown backfill cannot reach it: this
     field records the identity a durable archive will need, and does not by
     itself make backfill possible."""
+
+
+#: The observation schema that introduced `agent_session_ids`. Below this the
+#: field did not exist, so its presence in such a payload is not something this
+#: build has any reason to interpret.
+_AGENT_SESSIONS_SINCE: Final = 2
+
+
+def read_agent_session_ids(payload: Mapping[str, object]) -> list[str] | None:
+    """The recorded agent-native session ids, or None when none were recorded.
+
+    The read side of `CaptureObservationData.agent_session_ids`, and it lives
+    beside the writer deliberately: the version gate below only stays correct
+    while it moves with the payload it guards, and a copy of it in each reading
+    route is a copy that drifts the next time the schema does.
+
+    Absent and empty stay apart: None is "the verdict that produced this could
+    not tell us", [] is "it looked and confirmed none". Reading the first as the
+    second turns a version skew into a reported loss.
+
+    VERSION-AWARE rather than a bare field read. A schema 1 payload predates
+    this field, so a schema 1 row that carries the key anyway did not get it
+    from a writer of ours, and interpreting it under schema 2 semantics would
+    mean trusting a shape nobody declared. Reading the field only where the
+    version says it means something is the same discipline the version gate
+    itself exists for.
+
+    Non-strings are dropped rather than coerced. This payload was written by
+    another process, possibly an older one, so its shape is not guaranteed.
+    """
+    # BOTH predicates. `_AGENT_SESSIONS_SINCE` says when the field was
+    # introduced; the supported set says which shapes this build understands at
+    # all. Without the second, an unsupported future schema (3, 999) would have
+    # its `agent_session_ids` trusted while a reader of the same payload's
+    # `state` refuses to interpret it - the reader disagreeing with itself about
+    # whether it understands the document.
+    #
+    # `type(...) is int`, not a membership test alone: bool subclasses int and
+    # Python makes True == 1, so a payload declaring `"schema_version": true`
+    # would otherwise be read as schema 1.
+    version = payload.get("schema_version")
+    if (
+        type(version) is not int
+        or version not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+        or version < _AGENT_SESSIONS_SINCE
+    ):
+        return None
+    raw = payload.get("agent_session_ids")
+    if not isinstance(raw, list):
+        return None
+    return [item for item in raw if isinstance(item, str) and item]
 
 
 class ObservationWriter(Protocol):

@@ -60,6 +60,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "prompt_file": ("ExecutablePhase", "prompt_template"),
     "output_artifacts": ("ExecutablePhase", "output_artifact_types"),
     "timeout_seconds": ("ExecutablePhase", "timeout_seconds"),
+    # Carried the full six hops to `SetupPhaseSecrets`, where it decides
+    # whether the setup script contains `git clone` at all (#1187). Applied,
+    # not validated: any boolean is legal, and both values do something.
+    "clone_repos": ("ExecutablePhase", "clone_repos"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),

@@ -1,7 +1,7 @@
 import { ChevronRight, GitBranch, Play, Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, EmptyState, PageLoader } from '../components'
+import { Card, CardContent, EmptyState, ListPagination, PageLoader } from '../components'
 import { useWorkflowList } from '../hooks/useWorkflowList'
 import type { WorkflowSummary } from '../types'
 
@@ -43,41 +43,8 @@ function WorkflowRow({ workflow, idx }: { workflow: WorkflowSummary; idx: number
   )
 }
 
-function WorkflowPagination({ page, setPage, total, totalPages, pageSize }: {
-  page: number
-  setPage: React.Dispatch<React.SetStateAction<number>>
-  total: number
-  totalPages: number
-  pageSize: number
-}) {
-  if (totalPages <= 1) return null
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-[var(--color-text-secondary)]">
-        Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)} of {total}
-      </span>
-      <div className="flex gap-2">
-        <button
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          disabled={page === 1}
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Previous
-        </button>
-        <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disabled={page === totalPages}
-          className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export function WorkflowList() {
-  const { filteredWorkflows, loading, searchQuery, setSearchQuery, typeFilter, setTypeFilter, page, setPage, total, totalPages, pageSize } = useWorkflowList()
+  const { filteredWorkflows, loading, searchQuery, setSearchQuery, typeFilter, setTypeFilter, page, setPage, total, pageSize } = useWorkflowList()
 
   return (
     <div className="space-y-6">
@@ -127,7 +94,13 @@ export function WorkflowList() {
               <WorkflowRow key={workflow.id} workflow={workflow} idx={idx} />
             ))}
           </div>
-          <WorkflowPagination page={page} setPage={setPage} total={total} totalPages={totalPages} pageSize={pageSize} />
+          <ListPagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="workflow"
+          />
         </>
       )}
     </div>

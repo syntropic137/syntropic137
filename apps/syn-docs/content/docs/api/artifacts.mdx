@@ -42,7 +42,19 @@ _openapi:
       - content: Upload Artifact Endpoint
         id: upload-artifact-endpoint
     contents:
-      - content: List artifacts with optional filtering.
+      - content: >-
+          List artifacts with optional filtering.
+
+
+          The window is named after ``created_at`` because that is the timestamp
+          an
+
+          artifact has; the siblings bound ``started_at`` and spell it
+
+          ``started_after``. The validation is the same one (#1186): a bound
+          with no
+
+          offset is refused rather than guessed at.
         heading: list-artifacts-endpoint
       - content: Create a new artifact.
         heading: create-artifact-endpoint

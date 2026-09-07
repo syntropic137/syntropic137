@@ -61,8 +61,26 @@ class RedisSignalQueueAdapter:
         logger.debug("Enqueued signal type=%s for execution %s", signal.signal_type, execution_id)
 
     async def dequeue(self, execution_id: str) -> ControlSignal | None:
-        """Atomically read and remove the pending signal, or None if absent."""
-        raw = await self._redis.getdel(self._key(execution_id))
+        """Atomically read and remove the pending signal, or None if absent.
+
+        Fail-open on Redis errors (#1078): the signal queue is a
+        control-plane read (pause/cancel/resume), not on the critical path
+        of the work a phase is doing. A transient timeout here must be
+        treated the same as "no signal pending", not propagate and fail an
+        otherwise-healthy phase - matching the fail-open stance the dedup
+        adapter already takes when Redis is unavailable.
+        """
+        import redis.exceptions
+
+        try:
+            raw = await self._redis.getdel(self._key(execution_id))
+        except redis.exceptions.RedisError:
+            logger.warning(
+                "Redis error reading signal for execution %s; treating as no signal pending",
+                execution_id,
+                exc_info=True,
+            )
+            return None
         if raw is None:
             return None
         return self._deserialize(raw)

@@ -15,7 +15,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { TimeWindow } from '../types'
 
 const VALID_TIME_WINDOWS: TimeWindow[] = ['15m', '1h', '24h', '7d', 'all']
-const DEFAULT_TIME_WINDOW: TimeWindow = '24h'
+export const DEFAULT_TIME_WINDOW: TimeWindow = '24h'
 
 function parseStatuses(raw: string | null): Set<string> {
   if (!raw) return new Set()

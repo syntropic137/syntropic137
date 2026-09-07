@@ -18,6 +18,20 @@ export interface SelectionClickModifiers {
   meta?: boolean
 }
 
+/**
+ * What a ResourceTable / ResourceCardList needs in order to render selection.
+ *
+ * Owned here rather than by the table, because the four names are this hook's
+ * output under different labels. Both list pages used to map them by hand and
+ * had to keep agreeing on the mapping; `tableProps` is that agreement, once.
+ */
+export interface SelectionProps {
+  selectedIds: Set<string>
+  onToggleRow: (id: string, modifiers: SelectionClickModifiers) => void
+  onSelectAll: () => void
+  onClearSelection: () => void
+}
+
 export interface UseRowSelectionResult<T> {
   selectedIds: Set<string>
   selectedItems: T[]
@@ -27,6 +41,8 @@ export interface UseRowSelectionResult<T> {
   toggle: (id: string) => void
   selectAll: () => void
   clear: () => void
+  /** Ready to spread onto a ResourceTable or ResourceCardList. */
+  tableProps: SelectionProps
 }
 
 function rangeBetween(items: { id: string }[], a: string, b: string): string[] {
@@ -116,6 +132,18 @@ export function useRowSelection<T extends { id: string }>(
     [items, selectedIds],
   )
 
+  // Memoised because the table treats it as a prop: a fresh object per render
+  // would defeat any memoisation downstream of it.
+  const tableProps = useMemo<SelectionProps>(
+    () => ({
+      selectedIds,
+      onToggleRow: handleClick,
+      onSelectAll: selectAll,
+      onClearSelection: clear,
+    }),
+    [selectedIds, handleClick, selectAll, clear],
+  )
+
   return {
     selectedIds,
     selectedItems,
@@ -125,5 +153,6 @@ export function useRowSelection<T extends { id: string }>(
     toggle,
     selectAll,
     clear,
+    tableProps,
   }
 }

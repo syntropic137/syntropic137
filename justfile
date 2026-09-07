@@ -939,39 +939,14 @@ format:
 format-check:
     uv run ruff format --check .
 
-# Ratchet: count dict[str, Any] and dict[str, object] per package - never let them grow
-# Config lives in fitness-exceptions.toml [untyped-dicts.*] (default threshold: 0)
+# Ratchet: str-keyed mappings with unconstrained values, per package.
+# Counts the AST, not the text: dict/Dict/Mapping/MutableMapping, quoted,
+# aliased or wrapped across lines all resolve to one shape, and a mention in a
+# docstring or comment is not a use. Budgets live in fitness-exceptions.toml
+# [untyped-dicts.*] (default threshold: 0). See scripts/check_untyped_dicts.py
+# for what counts and why, and #1188 for what it replaced.
 check-untyped-dicts:
-    #!/usr/bin/env python3
-    import re, sys
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib  # type: ignore[no-redef]
-    from pathlib import Path
-    config = tomllib.loads(Path("fitness-exceptions.toml").read_text())
-    entries = config.get("untyped-dicts", {})
-    if not entries:
-        print("  No [untyped-dicts.*] entries in fitness-exceptions.toml")
-        sys.exit(0)
-    failed = False
-    for name, entry in entries.items():
-        pkg_path = entry["path"]
-        threshold = entry.get("value", 0)
-        issue = entry.get("issue", "")
-        count = 0
-        for py_file in Path(pkg_path).rglob("*.py"):
-            count += len(re.findall(r"dict\[str, (?:Any|object)\]", py_file.read_text()))
-        if count > threshold:
-            print(f"  FAIL {name}: {count} occurrences (threshold: {threshold}) [{issue}]")
-            failed = True
-        elif threshold > 0:
-            print(f"  WARN {name}: {count}/{threshold} - tech debt, ratchet to 0 [{issue}]")
-        else:
-            print(f"  ok {name}: clean")
-    if failed:
-        print("\nRatchet exceeded! Reduce untyped dicts or lower value in fitness-exceptions.toml.")
-        sys.exit(1)
+    @python3 scripts/check_untyped_dicts.py
 
 # Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 # CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can
@@ -2309,11 +2284,21 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across all 11 package files
+# Bump version across every version-carrying file (manifests, schemas, uv.lock)
 bump-version version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The script writes the manifests and the schema $id values. uv.lock is
+    # owned by uv and is regenerated rather than hand-edited - a hand-edited
+    # lockfile drifts back the next time anyone runs `uv lock`.
     python3 scripts/workflows/bump_version.py {{version}}
+    echo ""
+    echo "Regenerating uv.lock..."
+    uv lock
+    echo ""
+    python3 scripts/workflows/bump_version.py --check
 
-# Validate all 11 package files have the same version
+# Validate every version-carrying file has the same version
 check-version:
     python3 scripts/workflows/bump_version.py --check
 
@@ -2337,20 +2322,32 @@ release-local version:
     # Images to build (order: fast first)
     FAILED=()
     for image in token-injector sidecar-proxy syn-collector syn-dashboard-ui syn-api syn-gateway; do
+        # build_args holds extra `--build-arg` flags and is expanded UNQUOTED on
+        # purpose: the values are literal tokens with no whitespace, and this
+        # stays correct on the bash 3.2 that ships with macOS, where an empty
+        # array under `set -u` does not.
+        build_args=""
         case "$image" in
             token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
             sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
             syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
             syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
-            syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="." ;;
+            syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="."
+                              # Also the Dockerfile default since #1216. Stated
+                              # here too so this recipe declares what it needs
+                              # rather than inheriting it silently - inheriting
+                              # it silently is the exact shape of the bug this
+                              # line closes.
+                              build_args="--build-arg INCLUDE_DOCKER_CLI=1" ;;
             syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
         esac
         echo "📦 Building $image..."
-        if docker buildx build --platform linux/amd64,linux/arm64 \
+        if docker buildx build $build_args --platform linux/amd64,linux/arm64 \
             -f "$dockerfile" \
             -t "{{registry}}/$image:{{version}}" \
-            --push "$context"; then
-            echo "✅ $image pushed"
+            --push "$context" \
+           && just verify-image-capabilities "$image" "{{registry}}/$image:{{version}}"; then
+            echo "✅ $image pushed and verified"
         else
             echo "❌ $image failed"
             FAILED+=("$image")
@@ -2368,6 +2365,77 @@ release-local version:
         echo "❌ Failed: ${FAILED[*]}"
         exit 1
     fi
+
+# Assert a built image actually HAS the binaries it cannot run without.
+#
+# Test the capability, not the flag. `just release-local` could pass every
+# build arg correctly and still ship an unusable image - a Dockerfile stage
+# that stops copying a binary forward, an upstream tarball that moves, a base
+# image that drops a package. Asserting "does the pushed artifact have docker"
+# survives all of those; asserting "did we pass --build-arg" only restates the
+# recipe above and goes stale with it.
+#
+# This exists because #1216 was invisible until an execution was attempted:
+# the API answered /health, served every list endpoint, and failed every
+# workflow at bootstrap having spent $0.00. smoke-test.yml already carried a
+# comment about "issues like INCLUDE_DOCKER_CLI not being passed" - the
+# knowledge lived next to a detector instead of next to the recipe that
+# causes the problem, so the local release path walked into it anyway.
+#
+#   image  short name from the release matrix (chooses the capability list)
+#   ref    full pullable reference to inspect
+#
+# Callable on its own, including from CI:
+#   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+verify-image-capabilities image ref:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{image}}" in
+        # syn-api resolves every workspace image through `docker` and verifies
+        # its signature with `cosign` (syn_adapters/workspace_backends/
+        # image_verification.py). Both look the binary up with shutil.which and
+        # both fail closed, so either one missing means zero executions start.
+        syn-api)
+            required="docker cosign" ;;
+        syn-gateway|syn-collector|syn-dashboard-ui|sidecar-proxy|token-injector)
+            required="" ;;
+        # An unlisted image is not "needs nothing", it is "nobody decided yet".
+        # Failing here costs one line in this case statement; guessing costs
+        # another silent release.
+        *)
+            echo "❌ verify-image-capabilities: no capability list for '{{image}}'" >&2
+            echo "   Add one to this recipe before releasing that image." >&2
+            exit 1 ;;
+    esac
+
+    if [ -z "$required" ]; then
+        echo "🔍 {{image}}: no required binaries"
+        exit 0
+    fi
+
+    # Without this the loop below reports every binary as missing, and the
+    # message blames the image for the state of the host running the check.
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "❌ verify-image-capabilities needs docker to inspect {{ref}}," >&2
+        echo "   and docker is not on PATH here. Cannot verify {{image}}." >&2
+        exit 1
+    fi
+
+    echo "🔍 Verifying {{ref}} provides: $required"
+    missing=""
+    for bin in $required; do
+        if ! docker run --rm --entrypoint sh "{{ref}}" -c "command -v $bin" >/dev/null 2>&1; then
+            missing="$missing $bin"
+        fi
+    done
+
+    if [ -n "$missing" ]; then
+        echo "❌ {{ref}} is missing:$missing" >&2
+        echo "   This image cannot provision a workspace. Do not deploy it." >&2
+        echo "   Fix the build and re-push the same tag." >&2
+        exit 1
+    fi
+    echo "✅ {{image}}: $required present"
 
 # Re-tag an existing image version without rebuilding (e.g., event-store)
 release-retag image from to:

@@ -4,6 +4,7 @@ import type {
   WorkflowExecutionSummary,
 } from '../types'
 import { API_BASE, fetchJSON } from './base'
+import { listQueryParams, type ListQuery } from './listQuery'
 
 export async function listExecutions(
   workflowId: string,
@@ -24,18 +25,8 @@ export async function getExecution(executionId: string): Promise<ExecutionDetail
   return fetchJSON<ExecutionDetailResponse>(`${API_BASE}/executions/${executionId}`)
 }
 
-export async function listAllExecutions(params?: {
-  status?: string
-  page?: number
-  page_size?: number
-}): Promise<ExecutionListResponse> {
-  const searchParams = new URLSearchParams()
-  if (params?.status) searchParams.set('status', params.status)
-  if (params?.page) searchParams.set('page', String(params.page))
-  if (params?.page_size) searchParams.set('page_size', String(params.page_size))
-
-  const query = searchParams.toString()
-  return fetchJSON(`${API_BASE}/executions${query ? `?${query}` : ''}`)
+export async function listAllExecutions(query: ListQuery): Promise<ExecutionListResponse> {
+  return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`)
 }
 
 export async function pauseExecution(

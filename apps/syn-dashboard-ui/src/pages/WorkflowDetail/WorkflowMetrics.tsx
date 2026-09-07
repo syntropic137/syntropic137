@@ -2,17 +2,18 @@ import { FileText, GitBranch, Play, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { MetricCard } from '../../components'
-import type { ArtifactSummary, MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../../types'
+import type { MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../../types'
 
 interface WorkflowMetricsProps {
   workflow: WorkflowResponse
   metrics: MetricsResponse | null
-  artifacts: ArtifactSummary[]
+  /** Artifacts across every page, not the length of the page on screen. */
+  artifactCount: number
   executions: WorkflowExecutionSummary[]
   workflowId: string
 }
 
-export function WorkflowMetrics({ workflow, metrics, artifacts, executions, workflowId }: WorkflowMetricsProps) {
+export function WorkflowMetrics({ workflow, metrics, artifactCount, executions, workflowId }: WorkflowMetricsProps) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
       <MetricCard
@@ -40,7 +41,7 @@ export function WorkflowMetrics({ workflow, metrics, artifacts, executions, work
       />
       <MetricCard
         title="Artifacts"
-        value={artifacts.length}
+        value={artifactCount}
         icon={FileText}
         subtitle={`${((metrics?.total_artifact_bytes ?? 0) / 1024).toFixed(1)} KB`}
       />

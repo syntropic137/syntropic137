@@ -32,6 +32,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _unstated_reason(status: str) -> str:
+    """What a terminal status says when the caller supplied no reason.
+
+    A blank `error_message` is reachable today: the processor derives it with
+    `str(error)`, which is "" for any exception raised with no arguments, and
+    #1196 is a `session_error` observation that reached a user saying nothing
+    at all. The status is the one fact this layer always has, so it is what
+    gets written when the caller has nothing to add.
+
+    The read path has its own fallback for rows stored blank BEFORE this
+    change (`session_tools_verdict.NO_REASON_RECORDED`). This one is more
+    specific because it still knows the status, and it cannot be shared: the
+    domain must not import from the adapters.
+    """
+    return f"session ended with status '{status}' and no reason was recorded"
+
+
 class SessionLifecycleManager:
     """Manages AgentSession aggregate lifecycle for a single phase execution.
 
@@ -98,7 +115,7 @@ class SessionLifecycleManager:
                 observation_type=SESSION_ERROR,
                 data={
                     "status": status,
-                    "error_message": error_message,
+                    "error_message": error_message.strip() or _unstated_reason(status),
                     "model": self._agent_model,
                 },
                 execution_id=self._execution_id,

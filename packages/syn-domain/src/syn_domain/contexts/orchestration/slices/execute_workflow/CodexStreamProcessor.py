@@ -210,6 +210,10 @@ class _CodexItem(TypedDict, total=False):
     exit_code: int
     status: str
     changes: list[_CodexChange]
+    #: Prose, on ``agent_message`` items only. It is where codex states its
+    #: conclusion, and the only copy of that conclusion when the file the
+    #: phase was supposed to write turns out to be empty (#1195).
+    text: str
 
 
 class _CodexUsage(TypedDict, total=False):
@@ -360,6 +364,7 @@ class CodexStreamProcessor:
         )
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
+        self._last_agent_message: str | None = None
         self._leader_native_session_id: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
@@ -489,6 +494,7 @@ class CodexStreamProcessor:
             delegation_attempts=self._delegation_attempts,
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
+            last_agent_message=self._last_agent_message,
         )
 
     def _estimate_cost(self) -> float | None:
@@ -693,7 +699,15 @@ class CodexStreamProcessor:
             await self._handle_command_execution_completed(item)
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._handle_file_change_completed(item)
-        # "agent_message" items are conversational text, not a tool op.
+        elif item_type == CodexItemType.AGENT_MESSAGE:
+            # "agent_message" items are conversational text, not a tool op - so
+            # they record no observability. They are kept anyway because they
+            # are the only place codex states its conclusion in prose, and the
+            # artifact path falls back to it when the file the phase wrote
+            # turns out to be empty (#1195).
+            said = str(item.get("text", ""))
+            if said.strip():
+                self._last_agent_message = said
 
     async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
         tool_use_id = str(item.get("id", "unknown"))

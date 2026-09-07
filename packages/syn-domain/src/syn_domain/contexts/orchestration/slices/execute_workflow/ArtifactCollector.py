@@ -15,7 +15,12 @@ from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+    is_storable,
+    recover_empty_artifact,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    EmptyPhaseArtifactError,
     PhaseProducedNoDeclaredOutputError,
 )
 from syn_shared.workspace_paths import (
@@ -422,6 +427,7 @@ class ArtifactCollector:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        last_agent_message: str | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
 
@@ -435,9 +441,19 @@ class ArtifactCollector:
         of a run while every surface still reported completed. The signal was
         already present and simply nothing consumed it.
 
+        A phase that wrote a file and left it EMPTY is a different incident and
+        gets a different answer (#1195). `last_agent_message` is the last thing
+        the phase's agent said on its own stream; when the file is empty this
+        falls back to it rather than letting the store's refusal fail the run,
+        because the conclusion the phase reached is worth more than the route
+        it took to get here. Omitted or empty means no fallback is available
+        and the phase fails - saying so, in those words.
+
         Raises:
             PhaseProducedNoDeclaredOutputError: the phase declared output
                 artifact types and produced none of them.
+            EmptyPhaseArtifactError: the phase wrote a file with no content and
+                nothing could be recovered from its transcript either.
 
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
@@ -465,6 +481,15 @@ class ArtifactCollector:
         for index, (artifact_path, artifact_content) in enumerate(artifacts):
             artifact_id = str(uuid4())
             content_str = artifact_content.decode("utf-8", errors="replace")
+            title = f"{phase_name}: {artifact_path}"
+            if not is_storable(content_str):
+                content_str, title = self._recover_or_fail(
+                    last_agent_message=last_agent_message,
+                    phase_id=phase_id,
+                    phase_name=phase_name,
+                    artifact_path=artifact_path,
+                    title=title,
+                )
             await self.create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=workflow_id,
@@ -473,7 +498,7 @@ class ArtifactCollector:
                 session_id=session_id,
                 artifact_type=artifact_type,
                 content=content_str,
-                title=f"{phase_name}: {artifact_path}",
+                title=title,
                 source_path=artifact_path,
                 # The flat `<phase-id>.md` alias reads this after a restart,
                 # so it must name the file the live path injects (#997).
@@ -489,6 +514,42 @@ class ArtifactCollector:
             first_content=first_content,
             files=files,
         )
+
+    @staticmethod
+    def _recover_or_fail(
+        *,
+        last_agent_message: str | None,
+        phase_id: str,
+        phase_name: str,
+        artifact_path: str,
+        title: str,
+    ) -> tuple[str, str]:
+        """The content and title to store for a file that came back empty (#1195).
+
+        Deliberately raises rather than skipping the file. Skipping would put
+        the execution back where #1167 found it - advancing past a phase whose
+        declared output never materialised - and the whole value of failing
+        here is that it is now a NAMED incident rather than a schema complaint.
+        """
+        recovered = recover_empty_artifact(
+            last_agent_message=last_agent_message,
+            source_path=artifact_path,
+            title=title,
+        )
+        if recovered is None:
+            raise EmptyPhaseArtifactError(
+                phase_id=phase_id,
+                phase_name=phase_name,
+                source_path=artifact_path,
+            )
+        logger.warning(
+            "Phase %s (%s) wrote an empty %s; recovered its content from the "
+            "session transcript instead of failing the execution (#1195)",
+            phase_id,
+            phase_name,
+            artifact_path,
+        )
+        return recovered.content, recovered.title
 
     async def collect_partial(
         self,
@@ -522,6 +583,21 @@ class ArtifactCollector:
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
                 content_str = artifact_content.decode("utf-8", errors="replace")
+                if not is_storable(content_str):
+                    # SKIPPED, not recovered and not raised. This is the same
+                    # empty-file shape as #1195, but on the interrupt path the
+                    # outcome is already decided by the interrupt: there is no
+                    # verdict to rescue, and substituting the transcript would
+                    # invent a deliverable for a run nobody is going to read as
+                    # one. What it does fix is that the store's refusal used to
+                    # escape into the `except` below and abandon every
+                    # REMAINING file, so one empty file cost the whole salvage.
+                    logger.info(
+                        "Skipping empty partial artifact %s for %s",
+                        artifact_path,
+                        session_id,
+                    )
+                    continue
                 await self.create_artifact(
                     artifact_id=artifact_id,
                     workflow_id=workflow_id,

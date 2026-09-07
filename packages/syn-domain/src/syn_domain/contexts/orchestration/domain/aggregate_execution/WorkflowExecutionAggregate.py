@@ -255,6 +255,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
             failed_phase_duration_seconds=command.failed_phase_duration_seconds,
+            # list() rather than a default, and None rather than []: the event
+            # has to preserve the difference between "read, and no branch had
+            # moved" and "nobody could read it" (#1200).
+            observed_branches=(
+                None if command.observed_branches is None else list(command.observed_branches)
+            ),
         )
         self._apply(event)
 

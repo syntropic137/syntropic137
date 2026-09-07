@@ -48,6 +48,7 @@ validation:
 # import from a projection still fails, which is what we want.
 projection_allowed_prefixes:
   - "syn_domain.contexts"          # read models, _shared value objects, sibling events
+  - "syn_domain.pagination"        # pure shared list filtering, ordering and paging
   - "syn_shared"                   # pricing, typed constants, agent enums
   - "syn_adapters.projection_stores"
   - "event_sourcing"

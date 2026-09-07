@@ -62,6 +62,7 @@ async def get_tool_timeline(
                     "timestamp": str(op.timestamp),
                     "duration_ms": op.duration_ms,
                     "success": op.success,
+                    "error_message": op.error_message,
                 }
             )
         return Ok(result)
@@ -179,6 +180,7 @@ async def get_tool_timeline_endpoint(
                 timestamp=t.get("timestamp"),
                 duration_ms=t.get("duration_ms"),
                 success=t.get("success"),
+                error_message=t.get("error_message"),
             )
             for t in timeline
         ],

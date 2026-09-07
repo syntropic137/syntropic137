@@ -16,13 +16,13 @@ vi.mock('../../api/observability', () => ({
 }))
 
 vi.mock('../../api/artifacts', () => ({
-  listArtifacts: vi.fn(),
+  listArtifactPage: vi.fn(),
 }))
 
 import { getWorkflow, getWorkflowHistory } from '../../api/workflows'
 import { listExecutions } from '../../api/executions'
 import { getMetrics } from '../../api/observability'
-import { listArtifacts } from '../../api/artifacts'
+import { listArtifactPage } from '../../api/artifacts'
 
 describe('useWorkflowData', () => {
   beforeEach(() => {
@@ -33,7 +33,13 @@ describe('useWorkflowData', () => {
     vi.mocked(getWorkflow).mockResolvedValue({ workflow_id: 'wf-1' } as never)
     vi.mocked(getMetrics).mockResolvedValue({ total_tokens: 0 } as never)
     vi.mocked(getWorkflowHistory).mockResolvedValue({ entries: [] } as never)
-    vi.mocked(listArtifacts).mockResolvedValue([])
+    vi.mocked(listArtifactPage).mockResolvedValue({
+      artifacts: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      type_counts: {},
+    })
     vi.mocked(listExecutions).mockResolvedValue([])
 
     const { result } = renderHook(() => useWorkflowData('wf-1'))
@@ -54,7 +60,13 @@ describe('useWorkflowData', () => {
     vi.mocked(getWorkflow).mockRejectedValue(new Error('Not found'))
     vi.mocked(getMetrics).mockResolvedValue({} as never)
     vi.mocked(getWorkflowHistory).mockResolvedValue({} as never)
-    vi.mocked(listArtifacts).mockResolvedValue([])
+    vi.mocked(listArtifactPage).mockResolvedValue({
+      artifacts: [],
+      total: 0,
+      page: 1,
+      page_size: 50,
+      type_counts: {},
+    })
     vi.mocked(listExecutions).mockResolvedValue([])
 
     const { result } = renderHook(() => useWorkflowData('wf-1'))

@@ -11,7 +11,7 @@ Drive a version bump through the `main -> release` PR, the release gate, and the
    ```
    docker build -f infra/docker/<image>/Dockerfile .
    ```
-3. Bump the version (updates all 11 files) and verify consistency.
+3. Bump the version (writes every version-carrying file) and verify consistency.
    ```
    just bump-version <X.Y.Z>
    just check-version

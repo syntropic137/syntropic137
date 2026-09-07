@@ -21,6 +21,24 @@ phases:
     execution_type: sequential
     timeout_seconds: 600
     prompt_file: phases/delegate.md
+    # Empty, and DELIBERATELY not absent (#1207). `phases/delegate.md` carries
+    # `allowed-tools: Read,Write,Bash` in its frontmatter, and frontmatter is
+    # merged into the phase for every key the YAML does not set - so omitting
+    # this key does not mean "declared no tools", it means "whatever the prompt
+    # said". That made this a codex phase carrying allowed_tools, which v0.28
+    # refuses at creation: codex enforces a filesystem sandbox, not a tool
+    # vocabulary, so it can never honour a tool list (#1202). Under v0.27 the
+    # declaration was dropped and the phase ran; under v0.28 it is applied, and
+    # this workflow stops executing.
+    #
+    # Emptied rather than switched to `provider: claude`, because the provider
+    # IS the point: this workflow exists to prove a CODEX-primary phase can
+    # delegate to `claude -p` and that both legs appear in the cost breakdown
+    # (#895). Running it on claude would delete the thing it validates.
+    #
+    # The frontmatter is the other place this could be fixed; it is frozen as
+    # the baseline of a pending experiment, so the override lives here.
+    allowed_tools: []
     agent:
       provider: codex
       allow_delegation: true

@@ -78,10 +78,18 @@ class ToolOperation:
     tool_use_id: str | None
     operation_type: str  # e.g. "tool_started", "git_commit", "subagent_started"
     timestamp: datetime
-    success: bool | None  # Only for tool_execution_completed
+    success: bool | None  # None means this row carries no verdict, NOT success
     input_preview: str | None  # Truncated input for display
     output_preview: str | None  # Truncated output for display
     duration_ms: int | None  # Only for tool_execution_completed
+    error_message: str | None = None
+    """Why this row's subject went wrong, for the rows that record a failure.
+
+    Set by `session_tools_verdict.read_verdict` alongside `success`, because
+    they are one decision: an observation that reports a failure has to be able
+    to say what failed. `session_error` recorded the reason in its payload all
+    along and every reader dropped it (#1196) - the same one-hop loss as #891.
+    """
     # Git-specific fields (populated for git_* event types)
     git_sha: str | None = None
     git_message: str | None = None

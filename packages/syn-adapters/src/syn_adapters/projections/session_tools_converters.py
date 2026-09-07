@@ -11,6 +11,7 @@ import logging
 import re as _re
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.projections.session_tools_verdict import observation_id, read_verdict
 from syn_shared.events import (
     GIT_REWRITE,
     SUBAGENT_STARTED,
@@ -53,14 +54,20 @@ def row_to_subagent_operation(
     is_started = event_type == TOOL_EXECUTION_STARTED
     subagent_op = SUBAGENT_STARTED if is_started else SUBAGENT_STOPPED
     agent_label = extract_agent_label(data)
-    obs_id = f"subagent-{subagent_op}-{tool_use_id}-{row['time'].isoformat()}"
+    # The verdict is read against `subagent_op`, not `event_type`: this row has
+    # already been relabelled from a tool event to a subagent one, and the
+    # relabelled type is what every reader downstream sees.
+    verdict = read_verdict(subagent_op, data)
     return ToolOperation(
-        observation_id=obs_id,
+        observation_id=observation_id(
+            "subagent", subagent_op, tool_use_id, row["time"].isoformat()
+        ),
         tool_name=agent_label,
         tool_use_id=tool_use_id or None,
         operation_type=subagent_op,
         timestamp=row["time"],
-        success=data.get("success") if not is_started else None,
+        success=verdict.success,
+        error_message=verdict.error_message,
         input_preview=data.get("input_preview") or json.dumps(data),
         output_preview=data.get("output_preview") if not is_started else None,
         duration_ms=data.get("duration_ms") if not is_started else None,
@@ -156,13 +163,20 @@ def row_to_git_operation(
     if event_type == GIT_REWRITE and not git_subcmd:
         git_subcmd = "rebase"
 
+    # `unrecorded=True`: a git row exists because the commit, push or merge
+    # happened, so the observation type settles the question that no payload
+    # key answers. Every other converter leaves it None - "the row did not say,
+    # so nobody knows" - rather than defaulting a silence to success.
+    verdict = read_verdict(event_type, data, unrecorded=True)
+
     return ToolOperation(
-        observation_id=f"git-{event_type}-{row['time'].isoformat()}",
+        observation_id=observation_id("git", event_type, row["time"].isoformat()),
         tool_name=git_subcmd,
         tool_use_id=None,
         operation_type=event_type,
         timestamp=row["time"],
-        success=True,
+        success=verdict.success,
+        error_message=verdict.error_message,
         input_preview=None,
         output_preview=None,
         duration_ms=None,

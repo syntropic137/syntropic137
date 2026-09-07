@@ -6,10 +6,21 @@ was inert nothing noticed; the moment it restricts anything, a case typo
 becomes an agent that cannot run a command, discovered at runtime on an
 unattended CI trigger. A closed vocabulary moves that to authoring time.
 
-PROVENANCE: these names are the `defaults.allowed_tools` block of the
-omni-agent workspace image manifest
-(`providers/workspaces/omni-agent/manifest.yaml`), which is the image these
-phases actually execute in - not a list assembled from memory.
+PROVENANCE: every name here was OBSERVED to be granted by the CLI, by running
+`claude -p --tools <name> --output-format stream-json --verbose` and reading
+the `tools` array of the `init` line it emits. That probe needs no credentials
+and spends nothing: `init` is printed before authentication, so an invalid key
+still yields the grant. `test_tool_vocabulary_matches_the_cli.py` is that
+probe, automated against the pinned image.
+
+This USED to cite `defaults.allowed_tools` in the omni-agent image manifest
+(`providers/workspaces/omni-agent/manifest.yaml`). That source was wrong in
+both directions and is no longer trusted (#1207): it listed `LS`, `MultiEdit`,
+`TodoRead` and `TodoWrite`, none of which the CLI grants - `--tools LS` yields
+`tools: []`, so a phase declaring one ran with NO tools rather than with the
+one it asked for - and it omitted `Skill`, which the CLI does grant. A
+hand-maintained list of another program's interface drifts the moment that
+program ships; only the probe settles it.
 
 BOUNDARY: by the AGENTS.md test ("if it changes when Anthropic ships a new
 CLI version, it belongs in agentic-primitives") this vocabulary is harness
@@ -37,12 +48,9 @@ class ToolName(StrEnum):
     EDIT = "Edit"
     GLOB = "Glob"
     GREP = "Grep"
-    LS = "LS"
-    MULTI_EDIT = "MultiEdit"
     READ = "Read"
+    SKILL = "Skill"
     TASK = "Task"
-    TODO_READ = "TodoRead"
-    TODO_WRITE = "TodoWrite"
     WEB_FETCH = "WebFetch"
     WEB_SEARCH = "WebSearch"
     WRITE = "Write"

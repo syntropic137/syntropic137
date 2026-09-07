@@ -24,8 +24,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CompleteExecutionCommand,
+    FailExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    describe_exception,
+    describe_observed_branches,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -41,8 +49,10 @@ if TYPE_CHECKING:
         CompletePhaseCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        BranchObservation,
         PhaseResult,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
 
 
 def failed_phase_elapsed_seconds(
@@ -62,30 +72,145 @@ def failed_phase_elapsed_seconds(
     return ((now or datetime.now(UTC)) - started_at).total_seconds()
 
 
+@dataclass(frozen=True)
+class PhaseFailure:
+    """Everything a dying execution records about the exception that killed it.
+
+    Four sinks describe one failure - the phase's `PhaseResult`, the session's
+    `session_error` observation, the `FailExecutionCommand` the aggregate
+    stores, and the execution result handed back to the caller - and each used
+    to spell the description itself as `str(error)`. That is "" for an
+    exception raised with no arguments, so the four went blank together; #1196
+    is what one of them looked like by the time it reached a user.
+
+    Deciding it here is what stops a fifth sink deciding it again. A caller
+    reads `reason` and cannot tell whether the exception named itself, which is
+    the point: that is not a question a call site should be answering.
+
+    `reason` and `error_type` describe the failure and are always present.
+    `duration_seconds` and `result` describe the phase and are None together
+    when the execution died before any phase started - there is no phase to
+    report on, but there is still a failure to describe.
+
+    `observed_branches` describes where the phase's repositories STAND, which
+    is a different question from why it failed and is answered here so that the
+    four sinks above cannot answer it four ways (#1200).
+    """
+
+    reason: str
+    error_type: str
+    duration_seconds: float | None
+    result: PhaseResult | None
+    observed_branches: tuple[BranchObservation, ...] | None = None
+    """Branches read from git at failure time, `()` for "read, and none of them
+    differs from how the phase found it", and None for "nothing could tell us".
+    Straight from `ObservedBranches.recorded`, because deciding it twice is how
+    the two would come to disagree."""
+    phase_id: str | None = None
+    """Which phase this describes, None when the execution died before one
+    started. Carried so the command below names the phase this failure is
+    about rather than one the caller names again alongside it."""
+
+    def as_command(
+        self, execution_id: str, *, completed_phases: int, total_phases: int
+    ) -> FailExecutionCommand:
+        """The aggregate's command for this failure.
+
+        ASSEMBLED WHERE THE FAILURE IS DESCRIBED, for the reason the rest of
+        this class exists. Four of the command's fields are this object's, and
+        a call site that copies them across by hand is one edit away from
+        sending the aggregate a different account of the failure than the one
+        every other sink got - which is the shape #1196 arrived in, and the
+        shape a fifth field made likelier rather than less (#1200).
+
+        The three parameters are the ones that are genuinely not the failure's:
+        which execution it belongs to, and how far through its phases it got.
+        """
+        return FailExecutionCommand(
+            execution_id=execution_id,
+            error=self.reason,
+            error_type=self.error_type,
+            failed_phase_id=self.phase_id,
+            completed_phases=completed_phases,
+            total_phases=total_phases,
+            failed_phase_duration_seconds=self.duration_seconds,
+            observed_branches=self.observed_branches,
+        )
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        phase_results: list[PhaseResult],
+        artifact_ids: list[str],
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller.
+
+        The fourth sink, assembled here for the same reason as the third. It
+        was already pure assembly living beside `completed_phase` rather than
+        in the processor; what it was still taking from the call site was
+        `error_message`, hand-copied from `reason` - the one field this class
+        exists to decide exactly once.
+        """
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="failed",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=artifact_ids,
+            metrics=ExecutionMetrics.from_results(phase_results),
+            error_message=self.reason,
+        )
+
+
 def failed_phase_outcome(
+    error: BaseException,
     phase_id: str | None,
     started_at_by_phase: Mapping[str, DateTime],
     session_id_by_phase: Mapping[str, str],
-    error_message: str,
     now: DateTime | None = None,
-) -> tuple[float | None, PhaseResult | None]:
-    """The duration and result for a phase that failed.
+    observed: ObservedBranches | None = None,
+) -> PhaseFailure:
+    """What a failed run reports, derived from the exception that ended it.
 
-    One call rather than three lookups at the call site: the processor is over
-    its file-size threshold, and the caller does not need to know that "how long
-    did it run" and "what result does it produce" share a start timestamp.
+    One call rather than three lookups and a description at the call site: the
+    processor is at its file-size threshold, and the caller does not need to
+    know that "how long did it run" and "what result does it produce" share a
+    start timestamp, nor how an exception with nothing to say gets named.
+
+    Takes the exception rather than a rendered message so that the rendering
+    happens once. The processor used to do it and hand the string in, which put
+    the decision back at the call site the moment a second call site appeared.
+
+    `observed` is what git showed about where this workspace's branches stood,
+    and it is APPENDED to the reason rather than replacing any of it: #1167
+    saying the output contract was unmet stays exactly as loud, and where the
+    branches stand follows it as a separate paragraph (#1200). None - nothing
+    could be read - reads the same as it did before this existed.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
-    return (
-        failed_phase_elapsed_seconds(started_at, now=ended_at),
-        failed_phase_result(
+    reason = describe_exception(error)
+    if observed is not None:
+        reason = f"{reason}\n\n{describe_observed_branches(observed)}"
+    return PhaseFailure(
+        reason=reason,
+        error_type=type(error).__name__,
+        observed_branches=observed.recorded if observed is not None else None,
+        phase_id=phase_id,
+        duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
+        result=failed_phase_result(
             phase_id,
             started_at,
             session_id_by_phase.get(phase_id or "", ""),
-            error_message,
+            reason,
             ended_at=ended_at,
         ),
     )
@@ -223,30 +348,121 @@ def completed_phase(
     )
 
 
-def failed_execution_result(
-    *,
-    workflow_id: str,
-    execution_id: str,
-    started_at: DateTime,
-    phase_results: list[PhaseResult],
-    artifact_ids: list[str],
-    error_message: str,
-    now: DateTime | None = None,
-) -> WorkflowExecutionResult:
-    """Assemble the result an execution returns when it dies.
+@dataclass(frozen=True)
+class CompletedExecution:
+    """Everything a successfully completed execution reports.
 
-    Pure assembly, so it lives beside `completed_phase` rather than in the
-    processor: the two are the same statement made on opposite paths, and the
-    failure half is the one that historically drifted.
+    The third terminal outcome, and the last one the processor was still
+    assembling by hand. `PhaseFailure` above already decides what a DYING
+    execution tells its aggregate and its caller; leaving the other two paths
+    to answer the same question inline is what let the failure half go
+    uncomputed for so long (see this module's docstring). All three now answer
+    it here.
+
+    Split into `as_command` and `execution_result` for the same reason
+    `PhaseFailure` is: the command is issued before the save and the result is
+    built after it, so a single builder would have to stamp `completed_at`
+    before the execution was durably recorded.
     """
-    return WorkflowExecutionResult(
-        workflow_id=workflow_id,
-        execution_id=execution_id,
-        status="failed",
-        started_at=started_at,
-        completed_at=now or datetime.now(UTC),
+
+    metrics: ExecutionMetrics
+    phase_results: list[PhaseResult]
+    artifact_ids: list[str]
+
+    def as_command(self, execution_id: str, *, total_phases: int) -> CompleteExecutionCommand:
+        """The aggregate's command for this completion."""
+        return CompleteExecutionCommand(
+            execution_id=execution_id,
+            completed_phases=self.metrics.completed_phases,
+            total_phases=total_phases,
+            total_input_tokens=self.metrics.total_input_tokens,
+            total_output_tokens=self.metrics.total_output_tokens,
+            total_cache_creation_tokens=self.metrics.total_cache_creation_tokens,
+            total_cache_read_tokens=self.metrics.total_cache_read_tokens,
+            duration_seconds=self.metrics.total_duration_seconds,
+            artifact_ids=self.artifact_ids,
+        )
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller."""
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="completed",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=self.phase_results,
+            artifact_ids=self.artifact_ids,
+            metrics=self.metrics,
+        )
+
+
+def completed_execution(
+    phase_results: list[PhaseResult], artifact_ids: list[str]
+) -> CompletedExecution:
+    """Total up a finished run, ONCE, for both of the sinks that report it.
+
+    The command and the result both carry the run's totals. Deriving them
+    twice is how the two would come to disagree about the same execution - the
+    failure this module exists to make unrepresentable, one level up.
+    """
+    return CompletedExecution(
+        metrics=ExecutionMetrics.from_results(phase_results),
         phase_results=phase_results,
         artifact_ids=artifact_ids,
-        metrics=ExecutionMetrics.from_results(phase_results),
-        error_message=error_message,
+    )
+
+
+@dataclass(frozen=True)
+class CancelledExecution:
+    """What a cancelled execution reports.
+
+    No command: the aggregate is already CANCELLED by the time the to-do list
+    empties, so there is nothing left to tell it. `reason` is still resolved
+    here rather than at the call site, because the open sessions are closed
+    with it and the caller is handed it, and two sinks spelling the same
+    default two ways is a difference nothing downstream can attribute.
+    """
+
+    reason: str
+    phase_results: list[PhaseResult]
+    artifact_ids: list[str]
+
+    def execution_result(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        *,
+        started_at: DateTime,
+        now: DateTime | None = None,
+    ) -> WorkflowExecutionResult:
+        """The result the execution hands back to its caller."""
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="cancelled",
+            started_at=started_at,
+            completed_at=now or datetime.now(UTC),
+            phase_results=self.phase_results,
+            artifact_ids=self.artifact_ids,
+            metrics=ExecutionMetrics.from_results(self.phase_results),
+            error_message=self.reason,
+        )
+
+
+def cancelled_execution(
+    reason: str | None, phase_results: list[PhaseResult], artifact_ids: list[str]
+) -> CancelledExecution:
+    """Name what was cancelled and why, before anything is torn down."""
+    return CancelledExecution(
+        reason=reason or "Cancelled by user",
+        phase_results=phase_results,
+        artifact_ids=artifact_ids,
     )

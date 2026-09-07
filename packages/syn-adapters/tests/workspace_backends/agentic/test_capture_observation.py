@@ -9,6 +9,7 @@ import pytest
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     build_expectations,
+    read_agent_session_ids,
     record_capture_outcome,
 )
 from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
@@ -138,7 +139,6 @@ class TestThePhaseToAgentSessionMapping:
             CaptureExpectations,
             parse_capture_result,
         )
-        from syn_api.routes.capture import _agent_session_ids
 
         document = json.dumps(
             {
@@ -171,7 +171,7 @@ class TestThePhaseToAgentSessionMapping:
         )
 
         stored = json.loads(json.dumps(writer.calls[0]["data"]))
-        assert _agent_session_ids(stored) == expected
+        assert read_agent_session_ids(stored) == expected
 
     @pytest.mark.asyncio
     async def test_the_payload_survives_a_json_round_trip_into_an_entry(self) -> None:
@@ -181,8 +181,6 @@ class TestThePhaseToAgentSessionMapping:
         and they are exactly the two that must not.
         """
         import json
-
-        from syn_api.routes.capture import _agent_session_ids
 
         for ids, expected in ((None, None), ((), []), (("a", "b"), ["a", "b"])):
             writer = _Writer()
@@ -198,7 +196,7 @@ class TestThePhaseToAgentSessionMapping:
                 partition="e-1/w-1",
             )
             stored = json.loads(json.dumps(writer.calls[0]["data"]))
-            assert _agent_session_ids(stored) == expected
+            assert read_agent_session_ids(stored) == expected
 
 
 @pytest.mark.unit

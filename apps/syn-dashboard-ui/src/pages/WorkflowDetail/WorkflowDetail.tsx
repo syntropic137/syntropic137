@@ -54,7 +54,8 @@ function WorkflowDetailHeader({ workflow }: { workflow: WorkflowResponse }) {
 export function WorkflowDetail() {
   const { workflowId } = useParams<{ workflowId: string }>()
   const navigate = useNavigate()
-  const { workflow, metrics, artifacts, executions, loading, error, refetch } = useWorkflowData(workflowId)
+  const { workflow, metrics, artifacts, artifactTotal, executions, loading, error, refetch } =
+    useWorkflowData(workflowId)
   const [selectedPhaseId, setSelectedPhaseId] = useState<string | null>(null)
 
   if (loading) return <PageLoader />
@@ -87,7 +88,7 @@ export function WorkflowDetail() {
       <WorkflowMetrics
         workflow={workflow}
         metrics={metrics}
-        artifacts={artifacts}
+        artifactCount={artifactTotal}
         executions={executions}
         workflowId={workflowId!}
       />

@@ -32,7 +32,7 @@ This deployment provides:
 
 ### Accounts
 - [Cloudflare account](https://dash.cloudflare.com/) with a domain (recommended — free TLS, DDoS protection, no port forwarding)
-- [GitHub App](../../../docs/deployment/github-app-setup.md) configured
+- [GitHub App](../../docs/deployment/github-app-setup.md) configured
 
 ## Step-by-Step Deployment
 
