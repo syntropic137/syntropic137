@@ -68,12 +68,15 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from http.client import HTTPMessage
+    from typing import IO
 
 # Duplicated rather than imported so this file stays copyable to a host with no
 # repo (see "Standalone by design"). Sources of truth:
@@ -98,7 +101,53 @@ class DrainCheckUnavailable(RuntimeError):
 
     Deliberately distinct from "nothing is in flight". Callers must not treat
     this as an all-clear -- see the module docstring.
+
+    Every message carried by this exception is printed to stderr, so no message
+    may name a credential: not the token, not the password, not the derived
+    ``Authorization`` header, and not a URL that embeds userinfo. The two
+    guards that make that true are :func:`_api_root` and the header check in
+    :func:`_get_json`; after those, the URL is safe to name and the credential
+    is never available to name.
     """
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Answer a redirect with "could not tell" rather than following it.
+
+    ``urlopen`` follows redirects by default, and the stock
+    ``HTTPRedirectHandler`` rebuilds the redirected request from the original
+    headers, dropping only ``Content-Length`` and ``Content-Type`` -- so
+    ``Authorization`` is re-sent verbatim to whatever host ``Location`` names.
+    A 302 from the API to a third-party host therefore hands that host the
+    deploy credential, and nothing in the output would say so.
+
+    Refusing is also the right answer on the merits, not just the safe one: the
+    only answer this gate may act on is one from the API it was configured to
+    ask. An answer from somewhere else is precisely the "could not tell" case,
+    which exits 2.
+    """
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[str],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        # The redirect target is deliberately not named: it is attacker-chosen
+        # if the origin is compromised, and it is not needed to act on this.
+        del req, fp, msg, headers, newurl
+        raise DrainCheckUnavailable(
+            f"the API answered HTTP {code} (a redirect), which this check refuses to "
+            "follow -- the credential would be sent to the redirect target"
+        )
+
+
+#: One opener for every request this module makes, so the redirect rule cannot
+#: be bypassed by calling ``urlopen`` (whose default opener follows redirects).
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
 
 
 @dataclass(frozen=True)
@@ -131,7 +180,7 @@ def running_executions(
     which is the safety-critical fact. A failed lookup degrades the reported
     phase to ``"unknown"`` and never removes the execution from the list.
     """
-    url = f"{base_url.rstrip('/')}{API_PREFIX}"
+    url = _api_root(base_url)
     collected: dict[str, RunningExecution] = {}
 
     for page in range(1, MAX_PAGES + 1):
@@ -167,6 +216,33 @@ def running_executions(
     return list(collected.values())
 
 
+def _api_root(base_url: str) -> str:
+    """Return the API root to query, refusing a URL this check may not use.
+
+    Six of the messages below name the URL they could not read, and all of them
+    are printed. ``http://user:password@host`` would therefore print the
+    password. Rejecting userinfo here -- before any request, any exception and
+    any message -- is what makes those six safe: past this point no URL in this
+    module can carry a credential, so none of them needs to remember not to.
+
+    Both refusals name neither the username, the password, nor the URL itself,
+    since the URL is the thing that may be carrying them.
+    """
+    try:
+        parts = urllib.parse.urlsplit(base_url)
+    except ValueError:
+        raise DrainCheckUnavailable(
+            "the configured API URL could not be parsed (SYN_API_URL / --api-url)"
+        ) from None
+    if parts.username is not None or parts.password is not None:
+        raise DrainCheckUnavailable(
+            "the configured API URL embeds credentials (user:password@host), which "
+            "this check would print when reporting a failure -- remove them and use "
+            "SYN_API_TOKEN or SYN_API_PASSWORD instead"
+        )
+    return f"{base_url.rstrip('/')}{API_PREFIX}"
+
+
 def _running_phase(url: str, execution_id: str, auth_header: str | None, timeout: float) -> str:
     """Name the phase currently running, or ``"unknown"`` if it cannot be read."""
     try:
@@ -185,12 +261,30 @@ def _running_phase(url: str, execution_id: str, auth_header: str | None, timeout
 
 
 def _get_json(url: str, *, auth_header: str | None, timeout: float) -> dict[str, object]:
-    """GET a JSON object, translating every failure into DrainCheckUnavailable."""
-    request = urllib.request.Request(url, method="GET")
-    if auth_header:
-        request.add_header("Authorization", auth_header)
+    """GET a JSON object, translating every failure into DrainCheckUnavailable.
+
+    These messages may name ``url`` only because :func:`_api_root` has already
+    refused any URL carrying userinfo. They never name ``auth_header``.
+    """
+    if auth_header and any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in auth_header):
+        # http.client would otherwise raise ``ValueError: Invalid header value
+        # b'Bearer <token>...'`` -- quoting the credential -- from inside the
+        # block below, where the text of the exception ends up in a message we
+        # print. Rejecting the value here means that exception cannot be raised,
+        # rather than being raised and then carefully not printed.
+        raise DrainCheckUnavailable(
+            "the configured API credential contains a control character (a stray "
+            "newline in SYN_API_TOKEN is the usual cause) and cannot be sent as an "
+            "HTTP header -- its value is deliberately not shown"
+        )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        # Constructed inside the guard: a malformed URL makes Request.__init__
+        # raise ValueError, which outside the guard is an uncaught traceback
+        # rather than the exit code a deploy script branches on.
+        request = urllib.request.Request(url, method="GET")
+        if auth_header:
+            request.add_header("Authorization", auth_header)
+        with _OPENER.open(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise DrainCheckUnavailable(f"{url} returned HTTP {exc.code}") from exc

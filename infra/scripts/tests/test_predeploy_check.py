@@ -76,6 +76,10 @@ class _FakeResponse:
 class _FakeApi:
     """Serves the two endpoints the check calls, recording every Request.
 
+    Patched over ``predeploy._OPENER.open`` rather than ``urlopen``: the module
+    opens through its own opener so that the redirect rule cannot be bypassed,
+    and that opener is the transport seam.
+
     ``pages`` is indexed by the ``page`` query parameter, so paging is
     exercised rather than assumed.
     """
@@ -126,7 +130,7 @@ class _MalformedApi:
 
 
 def _run(urlopen: _FakeApi | _UnreachableApi | _MalformedApi, argv: list[str] | None = None) -> int:
-    with patch.object(predeploy.urllib.request, "urlopen", urlopen):
+    with patch.object(predeploy._OPENER, "open", urlopen):  # noqa: SLF001
         return predeploy.main(argv or [])
 
 
@@ -284,7 +288,7 @@ def test_running_executions_raises_rather_than_returning_an_empty_list() -> None
 
     unreachable = _UnreachableApi(urllib.error.URLError("Connection refused"))
     with (
-        patch.object(predeploy.urllib.request, "urlopen", unreachable),
+        patch.object(predeploy._OPENER, "open", unreachable),  # noqa: SLF001
         pytest.raises(predeploy.DrainCheckUnavailable),
     ):
         predeploy.running_executions("http://localhost:8137")
