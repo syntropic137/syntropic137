@@ -16,8 +16,12 @@ unhealthy) when work is most likely still in flight.
 from __future__ import annotations
 
 import json
+import threading
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -130,7 +134,7 @@ class _MalformedApi:
 
 
 def _run(urlopen: _FakeApi | _UnreachableApi | _MalformedApi, argv: list[str] | None = None) -> int:
-    with patch.object(predeploy._OPENER, "open", urlopen):  # noqa: SLF001
+    with patch.object(predeploy._OPENER, "open", urlopen):
         return predeploy.main(argv or [])
 
 
@@ -288,7 +292,7 @@ def test_running_executions_raises_rather_than_returning_an_empty_list() -> None
 
     unreachable = _UnreachableApi(urllib.error.URLError("Connection refused"))
     with (
-        patch.object(predeploy._OPENER, "open", unreachable),  # noqa: SLF001
+        patch.object(predeploy._OPENER, "open", unreachable),
         pytest.raises(predeploy.DrainCheckUnavailable),
     ):
         predeploy.running_executions("http://localhost:8137")
@@ -371,3 +375,218 @@ def test_the_check_is_copyable_to_a_host_with_no_repo() -> None:
     assert not (imported & repo_packages), (
         f"predeploy_check.py must stay standalone; it imports {imported & repo_packages}"
     )
+
+
+# --- credential material must not leave the origin, or reach any output ------
+#
+# These four defects were found by review of #1181, not by the suite above,
+# because every test above asserts on what the *client* did. A leaked header is
+# invisible from there: urllib rebuilds a redirected request internally, so the
+# only witness to what was actually sent is the machine that received it. The
+# redirect test below therefore asserts against two real servers.
+
+_TOKEN_SENTINEL = "TOKEN_SENTINEL_DO_NOT_USE"
+_PASSWORD_SENTINEL = "PASSWORD_SENTINEL_DO_NOT_USE"
+
+
+@dataclass(frozen=True)
+class _Received:
+    """One request as the receiving server saw it -- not as the client meant it."""
+
+    path: str
+    authorization: str | None
+
+
+class _RecordingServer:
+    """A real HTTP server on localhost that records what it was actually sent.
+
+    ``redirect_to`` makes every response a 302 to that URL, which is how the
+    cross-host leak is reproduced: the stock redirect handler copies the
+    ``Authorization`` header into the follow-up request.
+    """
+
+    def __init__(self, *, redirect_to: str | None = None) -> None:
+        self.received: list[_Received] = []
+        received = self.received
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                received.append(_Received(self.path, self.headers.get("Authorization")))
+                if redirect_to is not None:
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to)
+                    self.end_headers()
+                    return
+                body = json.dumps({"executions": [], "total": 0}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format: str, *args: object) -> None:
+                del format, args  # keep the server's access log out of pytest output
+
+        self._httpd = HTTPServer(("127.0.0.1", 0), _Handler)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self._httpd.server_port}"
+
+    def close(self) -> None:
+        self._httpd.shutdown()
+        self._httpd.server_close()
+        self._thread.join(timeout=5)
+
+
+@contextmanager
+def _serving(*, redirect_to: str | None = None) -> Iterator[_RecordingServer]:
+    server = _RecordingServer(redirect_to=redirect_to)
+    try:
+        yield server
+    finally:
+        server.close()
+
+
+def test_a_redirect_does_not_carry_the_credential_to_another_host(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The defect this whole section exists for: a 302 hands over the token.
+
+    ``urlopen`` follows redirects, and ``HTTPRedirectHandler.redirect_request``
+    rebuilds the request from the original headers dropping only
+    ``Content-Length`` and ``Content-Type`` -- so ``Authorization`` is re-sent
+    to whatever host ``Location`` names. Before the fix, ``elsewhere.received``
+    below contained ``Bearer TOKEN_SENTINEL_DO_NOT_USE``.
+
+    The assertion is on what each server observed. A client-side assertion
+    cannot see this class of defect at all, which is why it survived review.
+    """
+    with _serving() as elsewhere, _serving(redirect_to=elsewhere.url) as origin:
+        monkeypatch.setenv("SYN_API_URL", origin.url)
+        monkeypatch.setenv("SYN_API_TOKEN", _TOKEN_SENTINEL)
+
+        exit_code = predeploy.main([])
+
+        # The origin is the one host allowed to see it -- and did, so a passing
+        # test below is the header being withheld, not never being sent.
+        assert origin.received, "the origin was never contacted; the test proves nothing"
+        assert origin.received[0].authorization == f"Bearer {_TOKEN_SENTINEL}"
+
+        assert elsewhere.received == [], f"the redirect target was contacted: {elsewhere.received}"
+        assert all(r.authorization is None for r in elsewhere.received)
+
+    assert exit_code == predeploy.EXIT_UNAVAILABLE
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert _TOKEN_SENTINEL not in combined
+    # An unfollowable redirect is "could not tell", never "clear".
+    assert "Nothing in flight" not in combined
+    assert "Safe to deploy" not in combined
+
+
+def test_a_redirect_is_refused_even_back_to_the_same_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refusing only cross-host redirects would leave the decision to a comparison.
+
+    The gate may act only on an answer from the API it was told to ask, so a
+    redirect is "could not tell" wherever it points. That also means there is
+    no same-host special case to get wrong later.
+    """
+    with _serving() as server:
+        # Bound before use, so the server can be told to redirect to itself.
+        server_url = server.url
+        monkeypatch.setenv("SYN_API_URL", server_url)
+
+        with _serving(redirect_to=server_url) as looping:
+            monkeypatch.setenv("SYN_API_URL", looping.url)
+
+            assert predeploy.main([]) == predeploy.EXIT_UNAVAILABLE
+            assert len(looping.received) == 1, "the redirect was followed"
+        assert server.received == []
+
+
+@pytest.mark.parametrize(
+    "argv_and_env",
+    [
+        pytest.param("env", id="SYN_API_URL"),
+        pytest.param("flag", id="--api-url"),
+    ],
+)
+def test_a_url_embedding_a_password_never_reaches_an_output_stream(
+    argv_and_env: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Six failure messages name the URL, and all of them are printed."""
+    url = f"http://operator:{_PASSWORD_SENTINEL}@127.0.0.1:1/"
+    argv: list[str] = []
+    if argv_and_env == "env":
+        monkeypatch.setenv("SYN_API_URL", url)
+    else:
+        argv = ["--api-url", url]
+
+    exit_code = predeploy.main(argv)
+
+    assert exit_code == predeploy.EXIT_UNAVAILABLE
+    captured = capsys.readouterr()
+    assert _PASSWORD_SENTINEL not in captured.out
+    assert _PASSWORD_SENTINEL not in captured.err
+    assert "operator" not in captured.err, "the username is credential material too"
+    # It must still say enough for an operator to fix it.
+    assert "embeds credentials" in captured.err
+
+
+def test_a_credential_that_cannot_be_sent_is_refused_without_being_quoted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """http.client raises ``Invalid header value b'Bearer <token>'`` -- with the token."""
+    monkeypatch.setenv("SYN_API_TOKEN", f"{_TOKEN_SENTINEL}\nX-Injected: 1")
+
+    exit_code = predeploy.main([])
+
+    assert exit_code == predeploy.EXIT_UNAVAILABLE
+    captured = capsys.readouterr()
+    assert _TOKEN_SENTINEL not in captured.out
+    assert _TOKEN_SENTINEL not in captured.err
+    assert "control character" in captured.err
+
+
+def test_a_malformed_url_is_an_exit_code_not_a_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``Request.__init__`` raises ValueError on this; a deploy script cannot branch on that."""
+    exit_code = predeploy.main(["--api-url", "http://[::1/malformed"])
+
+    assert exit_code == predeploy.EXIT_UNAVAILABLE
+    combined = capsys.readouterr()
+    assert "Traceback" not in (combined.out + combined.err)
+    assert "Nothing in flight" not in (combined.out + combined.err)
+
+
+@pytest.mark.parametrize(
+    ("urlopen", "expected"),
+    [
+        pytest.param(_FakeApi(pages=[[]]), predeploy.EXIT_CLEAR, id="clear"),
+        pytest.param(
+            _FakeApi(pages=[[_summary(_EXEC_A, _DURATION_A)]]),
+            predeploy.EXIT_IN_FLIGHT,
+            id="in-flight",
+        ),
+        pytest.param(
+            _UnreachableApi(urllib.error.URLError("Connection refused")),
+            predeploy.EXIT_UNAVAILABLE,
+            id="could-not-tell",
+        ),
+    ],
+)
+def test_the_three_exit_codes_survive_the_credential_guards(
+    urlopen: _FakeApi | _UnreachableApi, expected: int
+) -> None:
+    """The guards added for the leaks must not have changed what the gate decides."""
+    assert _run(urlopen) == expected

@@ -130,7 +130,7 @@ class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
         req: urllib.request.Request,
-        fp: IO[str],
+        fp: IO[bytes],
         code: int,
         msg: str,
         headers: HTTPMessage,
