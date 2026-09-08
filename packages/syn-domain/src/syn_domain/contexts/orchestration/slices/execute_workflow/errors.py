@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_shared.process_exit import describe_exit_status
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
@@ -314,7 +316,7 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
         lines.append(f"    quarantined at {work.pushed_ref}")
         lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
     else:
-        lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+        lines.append(f"    NOT RECOVERABLE: {work.push_error}")
     return lines
 
 
@@ -430,7 +432,9 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    if failure.timed_out:
+        return "timed out, so it did not finish"
+    return describe_exit_status(failure.exit_code)
 
 
 def _render_inspection_failure(

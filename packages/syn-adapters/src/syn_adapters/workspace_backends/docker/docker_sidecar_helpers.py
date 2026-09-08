@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from syn_shared.process_exit import describe_process_failure
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         SidecarConfig,
@@ -87,9 +89,19 @@ async def run_sidecar_container(docker_cmd: list[str]) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
+    # communicate() returns only once the process has exited, so the status is set.
+    exit_code = proc.returncode
+    assert exit_code is not None
 
-    if proc.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"Failed to start sidecar: {error_msg}")
+    if exit_code != 0:
+        # Same discard as #1158: stderr alone cannot tell a docker that refused
+        # from a docker that was killed, and only the status can.
+        raise RuntimeError(
+            describe_process_failure(
+                "Starting the sidecar container",
+                exit_code=exit_code,
+                output=stderr.decode(),
+            )
+        )
 
     return stdout.decode().strip()
