@@ -7,7 +7,9 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 
 ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
 /workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
-of each repo's AGENTS.md and CLAUDE.md, so Claude starts fully hydrated.
+of each repo's instruction files, so Claude starts fully hydrated - each
+distinct file once, so a repo serving both conventions from one blob is not
+loaded twice (#1192).
 """
 
 from __future__ import annotations
@@ -82,6 +84,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+#: The instruction-file conventions a repo may follow, in import order. AGENTS.md
+#: is the cross-platform standard; CLAUDE.md is what Claude Code auto-loads.
+_CONTEXT_FILENAMES: Final[tuple[str, ...]] = ("AGENTS.md", "CLAUDE.md")
+
+#: Marks that the context-file probe script ran to completion, so that "no files
+#: on disk" is distinguishable from "the probe never executed" (#1192).
+_SENTINEL: Final = "__syn_context_probe_ok__"
 
 #: `owner` and `repo`: the two trailing path segments every accepted repo shape
 #: ends with, whatever prefix it carries.
@@ -537,15 +547,17 @@ class WorkspaceProvisionHandler:
         logger.info("Setup phase completed, secrets cleared")
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
-        # Both files are identical: direct @-imports of each repo's AGENTS.md and
-        # CLAUDE.md. Direct imports keep repo content at L2 (not L3 via indirection),
+        # Both files are identical: direct @-imports of each repo's instruction
+        # files. Direct imports keep repo content at L2 (not L3 via indirection),
         # preserving maximum @import depth for repo-internal context.
         #
         # Only for repos that are actually ON DISK. Every line of this file is
         # `@/workspace/repos/<name>/...`, so emitting it for a phase that did
-        # not clone would point the agent at paths that do not exist.
+        # not clone would point the agent at paths that do not exist. That is
+        # also why the generator reads the workspace: it can only tell an
+        # AGENTS.md that duplicates CLAUDE.md from one that does not by looking.
         cloned_repos = effective_repos if clone_repos else []
-        context = self._generate_workspace_context(cloned_repos)
+        context = await self._generate_workspace_context(workspace, cloned_repos)
         if context:
             await workspace.inject_files(
                 [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
@@ -785,26 +797,92 @@ class WorkspaceProvisionHandler:
             workspace.workspace_id,
         )
 
-    @staticmethod
-    def _generate_workspace_context(repos: list[str]) -> str:
+    async def _generate_workspace_context(
+        self,
+        workspace: ManagedWorkspace,
+        repos: list[str],
+    ) -> str:
         """Generate content for both /workspace/CLAUDE.md and /workspace/AGENTS.md.
 
         Both files receive identical content: direct @-imports of each repo's
-        AGENTS.md then CLAUDE.md. Direct imports (not via an intermediary file)
-        keep repo content at depth L2, leaving L3-L5 for repo-internal imports
-        within Claude Code's 5-level absolute limit. Non-existent files are
-        silently ignored by Claude Code's @import system.
+        instruction files. Direct imports (not via an intermediary file) keep
+        repo content at depth L2, leaving L3-L5 for repo-internal imports within
+        Claude Code's 5-level absolute limit.
 
         AGENTS.md is the Linux Foundation AAIF standard (Dec 2025), loaded by 15+
         platforms. CLAUDE.md is required because Claude Code does not auto-load
-        AGENTS.md (issue #6235). Both files ensure full hydration regardless of
-        which platform runs the agent.
+        AGENTS.md (issue #6235). Importing both is what makes hydration
+        independent of which convention a repo follows.
+
+        EACH DISTINCT FILE IS IMPORTED ONCE (#1192). Serving both conventions
+        from byte-identical files is the normal way to do it - this repo's own
+        AGENTS.md and CLAUDE.md are the same git blob - and importing both then
+        loads that content into the agent's context TWICE. It is not free: the
+        copy sits in the cached prompt prefix, so every turn of every phase of
+        every execution re-reads it. Measured on the bootstrap phase of
+        exec-5c3635d8b8db, the duplicate was 11,436 tokens of a 41,056-token
+        prefix - 27.9% of the context the agent starts with, buying nothing.
+
+        So we ask the workspace what is actually on disk and emit one @-import
+        per distinct file. A repo whose two files genuinely differ still gets
+        both, in AGENTS.md-then-CLAUDE.md order.
         """
         if not repos:
             return ""
+        digests = await self._read_repo_context_digests(workspace, repos)
         lines: list[str] = []
         for url in repos:
             name = WorkspaceProvisionHandler._repo_name(url)
-            lines.append(f"@/workspace/repos/{name}/AGENTS.md")
-            lines.append(f"@/workspace/repos/{name}/CLAUDE.md")
+            paths = [f"/workspace/repos/{name}/{f}" for f in _CONTEXT_FILENAMES]
+            if digests is None:
+                # We could not look. Import everything and pay for the copy
+                # rather than risk an agent starting with no project context.
+                lines.extend(f"@{path}" for path in paths)
+                continue
+            seen: set[str] = set()
+            for path in paths:
+                digest = digests.get(path)
+                if digest is None or digest in seen:
+                    continue
+                seen.add(digest)
+                lines.append(f"@{path}")
+        if not lines:
+            return ""
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    async def _read_repo_context_digests(
+        workspace: ManagedWorkspace,
+        repos: list[str],
+    ) -> dict[str, str] | None:
+        """Digest every candidate instruction file, or ``None`` if we cannot look.
+
+        ``None`` and ``{}`` mean different things and the caller depends on the
+        difference: ``{}`` is "we looked, no repo has one of these files", while
+        ``None`` is "the probe did not run". A backend that answers an exec with
+        empty output would otherwise be indistinguishable from a repo with no
+        instructions, and would silently strip the agent's whole context.
+        ``_SENTINEL`` is what separates the two - it is only in the output if
+        the script itself ran to completion.
+        """
+        paths = [
+            f"/workspace/repos/{WorkspaceProvisionHandler._repo_name(url)}/{filename}"
+            for url in repos
+            for filename in _CONTEXT_FILENAMES
+        ]
+        script = f"sha256sum -- {' '.join(paths)} 2>/dev/null; echo {_SENTINEL}"
+        try:
+            result = await workspace.execute(["sh", "-c", script])
+            stdout = result.stdout
+        except Exception:  # noqa: BLE001 - any probe failure means "we could not look"
+            logger.warning("Context-file probe failed; importing every candidate", exc_info=True)
+            return None
+        if not isinstance(stdout, str) or _SENTINEL not in stdout:
+            logger.warning("Context-file probe returned no sentinel; importing every candidate")
+            return None
+        digests: dict[str, str] = {}
+        for line in stdout.splitlines():
+            digest, _, path = line.partition("  ")
+            if path in paths:
+                digests[path] = digest
+        return digests
