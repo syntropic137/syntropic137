@@ -208,9 +208,7 @@ class TestCollectionErrorsAreNotAnImprovement:
             "cannot tell a collection break from a usage error"
         )
 
-    def test_refusal_carries_the_module_that_failed_to_import(
-        self, tmp_path: Path
-    ) -> None:
+    def test_refusal_carries_the_module_that_failed_to_import(self, tmp_path: Path) -> None:
         """pytest reports collection errors on stdout, so a stderr-only
         diagnostic would be empty exactly when the reason is needed."""
         (tmp_path / "test_broken.py").write_text(self.BROKEN)
@@ -226,9 +224,7 @@ class TestCollectionErrorsAreNotAnImprovement:
 
         assert collect_census(str(tmp_path)) == 2
 
-    def test_a_filter_that_matches_nothing_is_a_census_of_zero(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_filter_that_matches_nothing_is_a_census_of_zero(self, tmp_path: Path) -> None:
         """Exit 5 is the goal state of the unmarked ratchet, not a breakage.
 
         Its summary reads "no tests collected", which no parser here matches,

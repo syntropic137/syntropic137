@@ -408,9 +408,7 @@ class TestScopeCannotBeSilentlyEmptied:
             "is indistinguishable from a clean one"
         )
 
-    def test_a_repository_with_nothing_in_scope_is_a_legitimate_empty(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_repository_with_nothing_in_scope_is_a_legitimate_empty(self, tmp_path: Path) -> None:
         """Exit 0 with no output means there is genuinely nothing to judge."""
         subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
 
