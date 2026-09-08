@@ -15,7 +15,7 @@ and on a codex phase where a tool allowlist would not have applied at all.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import httpx
 import pytest
@@ -37,12 +37,26 @@ _GRANTED = {
 }
 
 
+class _TokenRequest(TypedDict):
+    """The body `client_token` posts to the token-mint endpoint.
+
+    Not `dict[str, Any]`: the production caller sends either exactly this or
+    no body at all (`client_token.py`), and which of the two it sent is the
+    single thing every test below reads. `permissions` is required because a
+    body that omits it is not something that caller can produce - so the
+    "present but empty" case is unrepresentable here rather than a branch each
+    reader has to rule out.
+    """
+
+    permissions: dict[str, str]
+
+
 class _FakeHttp:
     """Records what was asked of GitHub, and answers as GitHub would."""
 
     def __init__(self, granted: dict[str, str]) -> None:
         self._granted = granted
-        self.token_requests: list[dict[str, Any] | None] = []
+        self.token_requests: list[_TokenRequest | None] = []
         self.minted = 0
 
     async def get(self, path: str, headers: dict[str, str] | None = None) -> httpx.Response:
@@ -57,14 +71,14 @@ class _FakeHttp:
         self,
         path: str,
         headers: dict[str, str] | None = None,
-        json: dict[str, Any] | None = None,
+        json: _TokenRequest | None = None,
     ) -> httpx.Response:
         self.token_requests.append(json)
         self.minted += 1
-        # GitHub echoes back the permissions the token actually carries. When
-        # `permissions` is omitted the token gets the installation's full set -
-        # which is exactly the behaviour that let `implement` publish.
-        effective = json["permissions"] if json and "permissions" in json else self._granted
+        # GitHub echoes back the permissions the token actually carries. A
+        # request with no body at all gets the installation's full set - which
+        # is exactly the behaviour that let `implement` publish.
+        effective = json["permissions"] if json else self._granted
         expires = datetime.now(UTC) + timedelta(hours=1)
         return httpx.Response(
             201,
@@ -97,7 +111,7 @@ def _as_client(fake: _FakeClient) -> GitHubAppClient:
 def _requested_permissions(fake: _FakeClient) -> dict[str, str] | None:
     assert fake.http.token_requests, "no installation token was ever requested"
     body = fake.http.token_requests[-1]
-    return None if body is None else body.get("permissions")
+    return None if body is None else body["permissions"]
 
 
 @pytest.mark.unit
