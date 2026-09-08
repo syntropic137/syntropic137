@@ -310,9 +310,9 @@ class TestTheNodeLevelEntry:
         """The PR #1186 evasion, applied to a Protocol signature."""
         opaque = frozenset({"str", "Any", "object"})
         for spelling in ("dict[str, object]", "Mapping[str, object]", "Dict[str, Any]"):
-            assert contains_dict_shaped_state(self._annotation(f"x: {spelling}\n"), values=opaque), (
-                spelling
-            )
+            assert contains_dict_shaped_state(
+                self._annotation(f"x: {spelling}\n"), values=opaque
+            ), spelling
 
 
 @pytest.mark.unit
