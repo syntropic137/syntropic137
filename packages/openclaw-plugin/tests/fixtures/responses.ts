@@ -6,6 +6,7 @@
 
 import type {
   ArtifactDetail,
+  ArtifactListResponse,
   ArtifactSummary,
   ControlResponse,
   ExecutionCost,
@@ -269,7 +270,12 @@ export const metricsResponse: MetricsResponse = {
   phases: [],
 };
 
-export const artifactList: ArtifactSummary[] = [
+// The ENVELOPE, like every other list fixture here. This was a bare
+// `ArtifactSummary[]` -- a shape `GET /artifacts` has never returned -- and
+// the tool read `.artifacts` off it, got undefined and threw. Nothing caught
+// it because `tsc` does not see `tests/`, and the hand-written response type
+// it was annotated against could not have caught it either.
+export const artifactSummaries: ArtifactSummary[] = [
   {
     id: "art-001",
     workflow_id: "wf-issue-001",
@@ -280,6 +286,20 @@ export const artifactList: ArtifactSummary[] = [
     created_at: "2026-03-16T12:02:00Z",
   },
 ];
+
+export const artifactList: ArtifactListResponse = {
+  artifacts: artifactSummaries,
+  total: 1,
+  page: 1,
+  page_size: 50,
+};
+
+export const artifactListEmpty: ArtifactListResponse = {
+  artifacts: [],
+  total: 0,
+  page: 1,
+  page_size: 50,
+};
 
 export const artifactDetail: ArtifactDetail = {
   id: "art-001",

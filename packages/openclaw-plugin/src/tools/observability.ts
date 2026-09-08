@@ -37,9 +37,9 @@ export async function synGetExecutionCost(
       ["Sessions", String(c.session_count)],
       ["Complete", c.is_complete ? "Yes" : "No"],
     ]),
-    ...buildBreakdownSection("Cost by Phase", Object.entries(c.cost_by_phase)),
-    ...buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model)),
-    ...buildBreakdownSection("Cost by Tool", Object.entries(c.cost_by_tool)),
+    ...buildBreakdownSection("Cost by Phase", Object.entries(c.cost_by_phase ?? {})),
+    ...buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model ?? {})),
+    ...buildBreakdownSection("Cost by Tool", Object.entries(c.cost_by_tool ?? {})),
   ];
 
   return { content: sections.join("\n") };
@@ -74,11 +74,12 @@ export async function synGetMetrics(
     ]),
   ];
 
-  if (m.phases.length > 0) {
+  const phases = m.phases ?? [];
+  if (phases.length > 0) {
     sections.push("", "### Phase Breakdown");
-    for (const p of m.phases) {
+    for (const p of phases) {
       sections.push(
-        `- **${p.phase_name}** (${p.status}) — ${p.total_tokens.toLocaleString()} tokens, $${p.cost_usd}, ${p.duration_seconds.toFixed(1)}s`,
+        `- **${p.phase_name}** (${p.status}) — ${p.total_tokens.toLocaleString()} tokens, $${p.cost_usd}, ${(p.duration_seconds ?? 0).toFixed(1)}s`,
       );
     }
   }

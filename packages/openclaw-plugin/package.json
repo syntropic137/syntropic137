@@ -15,12 +15,16 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:types": "tsx scripts/generate-types.ts",
+    "check:api-drift": "tsx scripts/generate-types.ts --check"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "3.2.6",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "openapi-typescript": "^7.0.0",
+    "tsx": "^4.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

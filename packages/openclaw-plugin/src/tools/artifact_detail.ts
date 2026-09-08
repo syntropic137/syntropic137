@@ -31,7 +31,8 @@ export async function synGetArtifact(
   ];
   if (a.created_at) rows.push(["Created", a.created_at]);
   if (a.created_by) rows.push(["Created By", a.created_by]);
-  if (a.derived_from.length > 0) rows.push(["Derived From", a.derived_from.join(", ")]);
+  const derivedFrom = a.derived_from ?? [];
+  if (derivedFrom.length > 0) rows.push(["Derived From", derivedFrom.join(", ")]);
 
   const sections = [...buildMarkdownTable(`Artifact: ${a.title ?? a.id}`, rows)];
 

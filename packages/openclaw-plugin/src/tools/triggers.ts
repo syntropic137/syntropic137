@@ -26,7 +26,8 @@ export async function synListTriggers(
   const result = await client.get<TriggerListResponse>("/triggers", params);
   if (!result.ok) return formatError(result.error);
 
-  const { triggers, total } = result.data;
+  const { total } = result.data;
+  const triggers = result.data.triggers ?? [];
   if (triggers.length === 0) {
     return { content: "No trigger rules found." };
   }

@@ -1762,7 +1762,7 @@ docs-sync: check-env-example
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts packages/openclaw-plugin/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
         echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
@@ -1782,6 +1782,8 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Generating OpenClaw plugin TypeScript types..."
+    cd packages/openclaw-plugin && pnpm run generate:types
     @echo "📄 Exporting plugin JSON schemas..."
     uv run python scripts/export_plugin_schemas.py
     @echo "✅ All generated artifacts up to date"

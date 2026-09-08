@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SyntropicClient } from "../../src/client.js";
 import { synGetArtifact, synListArtifacts } from "../../src/tools/artifacts.js";
-import { artifactDetail, artifactList } from "../fixtures/responses.js";
+import { artifactDetail, artifactList, artifactListEmpty } from "../fixtures/responses.js";
 
 const mockFetch = vi.fn<typeof globalThis.fetch>();
 let client: SyntropicClient;
@@ -35,7 +35,7 @@ describe("synListArtifacts", () => {
   });
 
   it("handles empty list", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    mockFetch.mockResolvedValueOnce(jsonResponse(artifactListEmpty));
 
     const result = await synListArtifacts(client, {});
     expect(result.content).toBe("No artifacts found.");
