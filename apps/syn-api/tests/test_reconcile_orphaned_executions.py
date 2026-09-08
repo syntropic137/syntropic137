@@ -13,6 +13,7 @@ halfway is a restart that leaves zombies.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -22,7 +23,11 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
+from syn_api.services.reconciliation import (
+    _MAX_ORPHANS_PER_STARTUP,
+    CleanupResult,
+    reconcile_orphaned_executions,
+)
 
 _REAPED = CleanupResult(fully_reaped=True)
 #: Every execution in these fixtures started before this, so the cutoff never
@@ -42,11 +47,13 @@ class _StubExecutionList:
     def __init__(self, rows: Sequence[_Summary]) -> None:
         self._rows = list(rows)
         self.status_filter_seen: str | None = None
+        self.limit_seen: int | None = None
 
     async def get_all(
         self, limit: int = 100, offset: int = 0, status_filter: str | None = None
     ) -> list[_Summary]:
         self.status_filter_seen = status_filter
+        self.limit_seen = limit
         return self._rows[offset : offset + limit]
 
 
@@ -254,3 +261,91 @@ async def test_the_failure_names_the_phase_that_was_running(
     await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
 
     assert getattr(agg.failed_with, "failed_phase_id", "") == "implement"
+
+
+# The count in the summary line and the ceiling warning are what an operator
+# reads after a restart to decide whether anything is still wrong. Both are
+# assembled from a value that crosses a seam - whether one row was failed, and
+# how many rows survived the cutoff - so they are asserted through the log the
+# operator actually sees rather than on either object at the ends of that hop.
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_summary_counts_only_the_executions_actually_failed(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One of three: a ghost row and a rejecting aggregate are not successes.
+
+    An operator who reads "Reconciled 3 of 3" after two rows were skipped has
+    been told the sweep was clean when two executions are still 'running'.
+    """
+    _install(
+        monkeypatch,
+        [_Summary("exec-ok"), _Summary("exec-ghost"), _Summary("exec-terminal")],
+        {
+            "exec-ok": _StubAggregate("exec-ok"),
+            "exec-ghost": None,
+            "exec-terminal": _StubAggregate("exec-terminal", raises=True),
+        },
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+
+    summaries = [r.getMessage() for r in caplog.records if "Reconciled" in r.getMessage()]
+    assert summaries == ["Reconciled 1 of 3 stranded execution(s) -> marked as failed"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_one_startup_asks_for_at_most_the_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unbounded, a pathological backlog turns a restart into an outage."""
+    manager, _ = _install(monkeypatch, [_Summary("exec-1")], {"exec-1": _StubAggregate("exec-1")})
+
+    await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+
+    assert manager.workflow_execution_list.limit_seen == _MAX_ORPHANS_PER_STARTUP
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_full_page_says_more_may_remain(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ceiling is silent unless it was reached, and loud when it was."""
+    ids = [f"exec-{n}" for n in range(_MAX_ORPHANS_PER_STARTUP)]
+    _install(
+        monkeypatch,
+        [_Summary(i) for i in ids],
+        {i: _StubAggregate(i) for i in ids},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+
+    assert any("may remain for the next startup" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_full_page_thinned_by_the_cutoff_is_not_the_ceiling(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ceiling counts candidates, not rows read.
+
+    A full page of which one row started after this process did is 499
+    candidates: nothing was left behind, and telling an operator to expect more
+    next startup would send them looking for work that does not exist.
+    """
+    ids = [f"exec-{n}" for n in range(_MAX_ORPHANS_PER_STARTUP)]
+    rows = [_Summary(i) for i in ids]
+    rows[0] = _Summary(ids[0], started_at=datetime(2026, 9, 3, 9, 0, tzinfo=UTC))
+    _install(monkeypatch, rows, {i: _StubAggregate(i) for i in ids})
+
+    with caplog.at_level(logging.WARNING):
+        await reconcile_orphaned_executions(
+            _REAPED, started_before=datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
+        )
+
+    assert not any("may remain for the next startup" in r.getMessage() for r in caplog.records)
