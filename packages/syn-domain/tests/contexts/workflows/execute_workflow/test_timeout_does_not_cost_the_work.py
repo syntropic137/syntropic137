@@ -375,11 +375,23 @@ async def test_work_the_completion_gate_already_saved_is_not_pushed_twice(
 ) -> None:
     """#1184's refusal IS a failure, and it arrives here with the work already out.
 
-    The quarantine ref is unique to the phase run and pushed WITHOUT force, so
-    a second attempt writes a different commit over the same ref and is
-    rejected as a non-fast-forward. The work is in the origin either way; what
-    breaks is the report, which would print "NONE OF IT IS RECOVERABLE"
-    directly beneath the gate's own "All of it is recoverable".
+    The gate quarantines and then raises, and that exception becomes this
+    failure's reason - so the recovery ref is ALREADY in the message before
+    the terminal path does anything. Saving again finds the same work (a
+    quarantine pushes outside `refs/remotes`, so git still calls those commits
+    unpushed) and appends a second report of it, naming one ref twice with two
+    different headlines. An operator reading a message that says the same
+    commits were saved twice cannot tell whether there were two saves.
+
+    ASSERTED ON THE COUNT, not on the ref's value, because the ref usually
+    does not move: `_IDENTITY` fixes the author and committer, so the second
+    `commit-tree` differs from the first only in its timestamp and is the
+    identical object whenever both land in the same whole second. When they
+    do not, the differing commit is pushed WITHOUT force over a ref it is not
+    a descendant of, is rejected as a non-fast-forward, and prints "NONE OF IT
+    IS RECOVERABLE" directly beneath the gate's "All of it is recoverable".
+    The duplicate report happens every time; the contradiction happens on a
+    clock boundary. Both are the same second save, so this catches both.
     """
     processor = await _provisioned(clone)
     saved = clone.commit("state_machine.py", "committed, never pushed\n")
@@ -398,6 +410,11 @@ async def test_work_the_completion_gate_already_saved_is_not_pushed_twice(
 
     failed = await _timed_out(processor, error=refused.value)
 
+    recovery = f"recover with: git fetch origin {_QUARANTINE_REF}"
+    assert failed.error_message.count(recovery) == 1, (
+        "the work was saved a second time and reported twice under one "
+        f"failure, once per save: {failed.error_message}"
+    )
     assert clone.origin_refs()[_QUARANTINE_REF] == gate_pushed, (
         "the ref the gate pushed was overwritten or moved by a second save"
     )

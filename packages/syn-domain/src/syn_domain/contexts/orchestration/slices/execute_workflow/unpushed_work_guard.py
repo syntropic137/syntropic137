@@ -294,12 +294,19 @@ def already_saved_by_the_completion_gate(error: BaseException) -> bool:
     calls those commits unpushed afterwards and cannot answer "already saved"
     itself.
 
-    The second push then writes a DIFFERENT commit (a new committer
-    timestamp) to a ref that is unique to this phase run and pushed without
-    force, so it is rejected as a non-fast-forward and reported as work that
-    is gone. The result is "NONE OF IT IS RECOVERABLE" printed directly under
-    the gate's own "All of it is recoverable", about the same commits, one of
-    which is false. Asking here is what stops that, and it is asked once.
+    So the message would name one ref twice, under two headlines, about one
+    save. That is the certain cost and it is enough on its own: a reader who
+    is told the same commits were saved twice has no way to tell that they
+    were not.
+
+    The uncertain cost is worse and lands on a clock boundary. `_IDENTITY`
+    fixes the author and committer but not the date, so the second
+    `commit-tree` is the identical object only while both attempts fall in the
+    same whole second. Across one, it is a different commit pushed WITHOUT
+    force over a ref it does not descend from, rejected as a non-fast-forward,
+    and rendered as work that is gone - "NONE OF IT IS RECOVERABLE" directly
+    beneath the gate's own "All of it is recoverable", about the same commits,
+    one of them false. Asking here is what stops both, and it is asked once.
     """
     return isinstance(error, UnpushedWorkQuarantinedError | WorkspaceInspectionFailedError)
 
