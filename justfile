@@ -1097,6 +1097,10 @@ check-agent-docs:
 
 # Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
+#
+# Also fails when the interpreter differs from the one the workflows pin: the
+# same command on a different Python is a different run (#1018). `uv run` is
+# what honours .python-version here, so keep it.
 check-ci-parity:
     uv run python scripts/check_ci_parity.py
 

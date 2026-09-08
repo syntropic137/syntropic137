@@ -9,6 +9,7 @@ the whole gate deleted with every test still green.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -399,3 +400,30 @@ def test_ci_disagreeing_with_itself_is_reported_not_guessed() -> None:
 def test_ci_pinning_nothing_leaves_nothing_to_match() -> None:
     """No pin anywhere means CI takes the runner default; there is no contract."""
     assert check_ci_parity.python_version_problems({"docs-lint.yml": None}, None, "3.14") == []
+
+
+def test_every_uv_project_this_repo_owns_pins_the_same_interpreter() -> None:
+    """`just feedback-install` is a second `uv sync`, with the same defect.
+
+    A lockfile marks a project whose interpreter resolves on its own: `uv` stops
+    looking for a pin at the project root, so the root file does not reach one.
+    Discovered from the tracked lockfiles rather than listed, because a list
+    here would drift the moment someone adds a third project - the same bug one
+    level up. Submodules pin their own interpreters and are not this repo's to
+    set; `git ls-files` excludes them by construction.
+    """
+    root = check_ci_parity.REPO_ROOT
+    locks = subprocess.run(
+        ["git", "ls-files", "*uv.lock"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    expected = check_ci_parity.PYTHON_PIN.read_text().strip()
+
+    assert "uv.lock" in locks, "no root project found: discovery is broken, not the repo"
+    for lock in locks:
+        pin = root / lock.replace("uv.lock", ".python-version")
+        assert pin.is_file(), f"{lock} is a uv project with no pinned interpreter"
+        assert pin.read_text().strip() == expected

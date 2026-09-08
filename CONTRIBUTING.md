@@ -10,8 +10,9 @@ This project follows the [Contributor Covenant v2.1](CODE_OF_CONDUCT.md). By par
 
 ### Prerequisites
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- [uv](https://docs.astral.sh/uv/) (Python package manager) — it installs the
+  interpreter too: `.python-version` pins Python 3.12, the version CI runs, so
+  `uv sync` builds the same venv everywhere. Run tests through `uv run`.
 - [pnpm](https://pnpm.io/) (Node.js package manager — never npm or yarn)
 - [just](https://github.com/casey/just) (task runner)
 - Docker and Docker Compose
