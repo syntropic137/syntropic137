@@ -524,3 +524,111 @@ class TestNamedTupleIsDeliberatelyNotCounted:
     def test_but_an_erased_field_inside_one_still_counts(self) -> None:
         """Excluding the container does not excuse what it holds."""
         assert count("class P(NamedTuple):\n    a: dict[str, Any]\n") == 1
+
+
+@pytest.mark.unit
+class TestAssignmentRenamesDoNotHide:
+    """(j) A rename is a rename, whichever statement performs it.
+
+    ``TestImportAliasesDoNotHide`` closed the rename that happens on the import
+    line. It left open the cheaper one: ``D = dict`` needs no import at all, is
+    one line, and every constructor this gate knows about could be spelled
+    through it without spending a byte of budget. Closing a spelling and
+    leaving that open recreates #1188 one level up - a number that stays still
+    for a shape nobody listed - which is the defect this gate exists to stop.
+
+    A rename writes no type. ``D = dict`` erases nothing on its own; the
+    erasure arrives later at ``D[str, Any]`` and is counted there, exactly as
+    it is for ``from typing import Dict as D``. That is what separates it from
+    ``D = dict[str, Any]`` in ``TestAliases``, which is a complete type
+    expression and is counted where it is written.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("renamed builtin dict", "D = dict\nx: D[str, Any]\n"),
+            ("renamed typing.Dict", "from typing import Dict\nD = Dict\nx: D[str, Any]\n"),
+            ("renamed Mapping", "from collections.abc import Mapping\nM = Mapping\nx: M[str, object]\n"),
+            (
+                "renamed MutableMapping",
+                "from collections.abc import MutableMapping\nMM = MutableMapping\nx: MM[str, Any]\n",
+            ),
+            ("renamed by attribute", "import typing\nD = typing.Dict\nx: D[str, Any]\n"),
+            (
+                "renamed TypedDict base",
+                "from typing import TypedDict\nTD = TypedDict\nclass P(TD):\n    a: int\n",
+            ),
+            (
+                "renamed TypedDict, functional",
+                'from typing import TypedDict\nTD = TypedDict\nP = TD("P", {"a": int})\n',
+            ),
+            ("renamed value type", "from typing import Any\nA = Any\nx: dict[str, A]\n"),
+            ("renamed key type", "S = str\nx: dict[S, Any]\n"),
+            ("renamed inside a forward reference", 'D = dict\nx: "D[str, Any]"\n'),
+            ("renamed under an annotation", "from typing import TypeAlias\nD: TypeAlias = dict\nx: D[str, Any]\n"),
+            ("renamed by a type statement", "type D = dict\nx: D[str, Any]\n"),
+            ("renamed twice", "D = dict\nE = D\nx: E[str, Any]\n"),
+            (
+                "renamed from an import rename",
+                "from typing import Dict as D\nE = D\nx: E[str, Any]\n",
+            ),
+        ],
+    )
+    def test_the_rename_is_resolved(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_rename_itself_writes_no_type(self) -> None:
+        """``D = dict`` is not an erased mapping until someone parameterises it."""
+        assert count("D = dict\nE = Mapping\n") == 0
+
+    def test_an_unrelated_rename_is_not_invented(self) -> None:
+        """Resolution must not turn every assigned name into a mapping."""
+        source = """
+        from decimal import Decimal
+        D = Decimal
+        x: D
+        y: dict[str, D]
+        """
+        assert count(source) == 0
+
+    def test_a_rename_cycle_terminates(self) -> None:
+        """``a = b`` and ``b = a`` name nothing and must not hang the walk."""
+        assert count("a = b\nb = a\nx: a[str, Any]\n") == 0
+
+    def test_the_erased_use_is_reported_at_its_own_line(self) -> None:
+        """The budget is spent where the type is written, not where it is named."""
+        source = textwrap.dedent(
+            """
+            D = dict
+
+            def one(a: D[str, Any]) -> None: ...
+            """
+        )
+        (occurrence,) = find_dict_shaped_state(source)
+        assert occurrence == Occurrence(line=4, text="D[str, Any]")
+
+    def test_every_use_of_a_renamed_namespace_counts(self) -> None:
+        """``SimpleNamespace`` is counted per use, so a rename must not pool them.
+
+        Two constructions behind a renamed constructor are two ad-hoc shapes,
+        the same as two written out in full. Before renames were resolved this
+        source counted one - the name on the rename line - however many objects
+        it went on to build.
+
+        Three and not two: the rename line writes ``SimpleNamespace`` itself,
+        and the rule for this shape is that every written mention is a place
+        the erasure has to be repaired. Deleting the rename is one of the ways
+        to repair it, so it is a fair place to charge for.
+        """
+        source = """
+        from types import SimpleNamespace
+        NS = SimpleNamespace
+        first = NS(a=1)
+        second = NS(b=2)
+        """
+        assert count(source) == 3
+
+    def test_a_name_being_bound_is_not_a_use(self) -> None:
+        """Resolving the rename must not make the rename line count twice."""
+        assert count("from types import SimpleNamespace\nNS = SimpleNamespace\n") == 1

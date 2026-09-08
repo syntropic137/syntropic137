@@ -51,9 +51,12 @@ declared in:
 read by attribute, so it is what the rule asks people to move toward, not away
 from; the reasoning is pinned in the tests so the exclusion stays a decision.
 
-Names are resolved through the module's own imports, so a shape renamed on the
-way in (``from typing import Dict as D``) is the shape it was renamed from.
-Without that, closing a spelling only moves the dodge into the import line.
+Names are resolved through the module's own renames, so a shape given a second
+name - on the import (``from typing import Dict as D``) or by assignment
+(``D = dict``) - is the shape it was renamed from. Without that, closing a
+spelling only moves the dodge into the line that names the shape, which is
+cheaper than any of the spellings above: one line, no import, and nothing for a
+reader of the annotation to notice.
 
 See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md, #1188
 and #1248.
@@ -144,28 +147,79 @@ def _trailing_name(node: ast.expr) -> str | None:
     return None
 
 
-def _import_aliases(tree: ast.Module) -> Mapping[str, str]:
-    """Every ``import ... as`` in a module, as local name -> original name.
+def _renamed_shape(node: ast.AST) -> str | None:
+    """The name an assignment renames, or ``None`` when it is not a rename.
+
+    ``D = dict``, ``D: TypeAlias = dict`` and ``type D = dict`` are one line in
+    three spellings, and each gives a constructor a second name while writing
+    no type at all. The erasure arrives later, at ``D[str, Any]``, and is
+    counted there - exactly as it is for ``from typing import Dict as D``.
+
+    ``D = dict[str, Any]`` is not a rename. It is a complete type expression,
+    already fully spelled out where it stands, and is counted there like any
+    other annotation. The dividing line is whether the right-hand side is a
+    bare name: a rename copies a name, an alias writes a type.
+    """
+    if not isinstance(node, ast.Assign | ast.AnnAssign | ast.TypeAlias):
+        return None
+    if not isinstance(node.value, ast.Name | ast.Attribute):
+        return None
+    return _trailing_name(node.value)
+
+
+def _follow(name: str, renames: Mapping[str, str]) -> str:
+    """The original name at the end of a chain of renames.
+
+    ``D = dict`` followed by ``E = D`` is two lines and hides exactly as well
+    as one, so the walk continues until it runs out of renames. A chain that
+    closes on itself (``a = b`` beside ``b = a``) renames nothing and stops
+    where it closes rather than spinning.
+    """
+    seen = {name}
+    while (original := renames.get(name)) is not None and original not in seen:
+        seen.add(original)
+        name = original
+    return name
+
+
+def _renames(tree: ast.Module) -> Mapping[str, str]:
+    """Every rename in a module, as local name -> the name it renames.
 
     ``_trailing_name`` answers what a type is *called at the point of use*,
-    which is why the dotted spellings resolve. It cannot see a rename that
-    happened in the import statement, and ``from typing import Dict as D``
-    leaves ``D[str, Any]`` matching nothing here. Undoing the rename first is
-    what stops "close a spelling, the dodge moves to the import line".
+    which is why the dotted spellings resolve. It cannot see a rename, and
+    ``from typing import Dict as D`` leaves ``D[str, Any]`` matching nothing
+    here. Undoing renames first is what stops "close a spelling, the dodge
+    moves to the line that names the shape".
 
-    Dotted module imports keep their last segment (``import collections.abc as
-    c`` records ``c -> abc``), which resolves nothing on its own and costs
-    nothing: an entry only matters if it lands on one of the names below.
-    ``ast.walk`` rather than ``tree.body`` because a function-local import
-    renames just as effectively as a top-level one.
+    Both statements that can rename a shape are read, because closing one and
+    leaving the other open just moves the dodge again: ``import ... as`` and
+    the assignment forms in ``_renamed_shape``. Assignment is the cheaper of
+    the two - it needs no import at all - so it is the one a ratchet under
+    pressure meets first.
+
+    Every rename is recorded, not only the ones landing on a name this gate
+    cares about, because that is what lets a chain resolve without depending on
+    the order the statements appear in. An entry that resolves to nothing costs
+    nothing; only the names below are ever looked up. Dotted module imports
+    keep their last segment (``import collections.abc as c`` records
+    ``c -> abc``) on the same reasoning. ``ast.walk`` rather than ``tree.body``
+    because a function-local rename renames just as effectively as a top-level
+    one.
     """
-    aliases: dict[str, str] = {}
+    renames: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             for alias in node.names:
                 if alias.asname is not None:
-                    aliases[alias.asname] = alias.name.rpartition(".")[2]
-    return aliases
+                    renames[alias.asname] = alias.name.rpartition(".")[2]
+        elif (original := _renamed_shape(node)) is not None:
+            # The names a rename binds are its targets, which are the only
+            # names it stores to - true of all three assignment spellings
+            # without having to take each of them apart.
+            for target in ast.walk(node):
+                if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
+                    renames[target.id] = original
+    return {name: _follow(name, renames) for name in renames}
 
 
 def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
@@ -184,21 +238,21 @@ class _DictShapedStateCollector(ast.NodeVisitor):
     - are left alone, which is the whole reason this is a parser and not a
     search. Comments are not in the tree at all.
 
-    ``aliases`` comes from the enclosing module. It is empty when the caller
+    ``renames`` comes from the enclosing module. It is empty when the caller
     handed over a bare expression instead of a module, because a rename cannot
-    be undone without the import that made it - a limitation of that input, not
-    a second definition of the shape.
+    be undone without the statement that made it - a limitation of that input,
+    not a second definition of the shape.
     """
 
-    def __init__(self, values: frozenset[str], aliases: Mapping[str, str]) -> None:
+    def __init__(self, values: frozenset[str], renames: Mapping[str, str]) -> None:
         self.values = values
-        self.aliases = aliases
+        self.renames = renames
         self.found: list[Occurrence] = []
 
     def _name(self, node: ast.expr) -> str | None:
-        """``_trailing_name``, with any import rename undone."""
+        """``_trailing_name``, with any rename undone."""
         name = _trailing_name(node)
-        return None if name is None else self.aliases.get(name, name)
+        return None if name is None else self.renames.get(name, name)
 
     def _is_untyped_str_mapping(self, node: ast.Subscript) -> bool:
         """Whether ``node`` maps ``str`` to one of ``self.values``."""
@@ -259,14 +313,21 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         self._note_namespace(node)
         self.generic_visit(node)
 
-    def _note_namespace(self, node: ast.expr) -> None:
+    def _note_namespace(self, node: ast.Name | ast.Attribute) -> None:
         """Every written ``SimpleNamespace`` counts - annotation or construction.
 
         Unlike an alias or a ``TypedDict`` there is no declaration to attribute
         it to: each construction invents its own ad-hoc shape, so each is a
         separate place the erasure has to be repaired. An ``import`` is not a
         use and does not count, because it names no shape on its own.
+
+        A name being *bound* is not a use either, for the same reason and with
+        more force now that renames resolve: without this, ``NS =
+        SimpleNamespace`` would count twice, once for the name it copies and
+        once for the name it defines, which resolves to the same shape.
         """
+        if not isinstance(node.ctx, ast.Load):
+            return
         if self._name(node) == NAMESPACE_NAME:
             self.found.append(Occurrence(line=node.lineno, text=NAMESPACE_NAME))
 
@@ -302,7 +363,7 @@ class _DictShapedStateCollector(ast.NodeVisitor):
             inner = ast.parse(node.value, mode="eval")
         except SyntaxError:
             return
-        nested = _DictShapedStateCollector(self.values, self.aliases)
+        nested = _DictShapedStateCollector(self.values, self.renames)
         nested.visit(inner)
         self.found.extend(Occurrence(line=node.lineno, text=hit.text) for hit in nested.found)
 
@@ -338,7 +399,7 @@ def find_dict_shaped_state(
     count of zero.
     """
     tree = ast.parse(source)
-    collector = _DictShapedStateCollector(values, _import_aliases(tree))
+    collector = _DictShapedStateCollector(values, _renames(tree))
     collector.visit(tree)
     return collector.found
 
@@ -354,8 +415,8 @@ def contains_dict_shaped_state(
     fooled by a form the ratchet would have caught.
 
     Two shapes are unreachable from an expression and so never answer true
-    here: a ``TypedDict`` declaration is a statement, and an import rename
-    cannot be undone without the module that made it. An annotation naming a
+    here: a ``TypedDict`` declaration is a statement, and a rename cannot be
+    undone without the module that made it. An annotation naming a
     ``TypedDict`` is not itself the declaration, so this is the same answer
     ``find_dict_shaped_state`` gives for that line.
     """
