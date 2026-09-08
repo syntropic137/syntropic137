@@ -74,7 +74,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 9  # Bumped: cancelled/interrupted phases now record their real duration
+    VERSION = 10  # Bumped: phase counts are now recorded (#1147)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -127,6 +127,20 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         )
         detail["total_duration_seconds"] = detail.get("total_duration_seconds", 0.0) + duration
 
+    @staticmethod
+    def _restate_completed_phases(detail: dict[str, Any], event_data: dict) -> None:
+        """Take the count a terminal event states, keeping the accumulation if silent.
+
+        A run that ends states how many phases it got through, and that figure
+        is authoritative over the one accumulated from PhaseCompleted -- the
+        accumulation misses any phase whose completion this projection never
+        saw. Same precedence the list projection applies to the same field
+        (#1147), which is what keeps the two views agreeing.
+        """
+        detail["completed_phases"] = event_data.get(
+            "completed_phases", detail.get("completed_phases", 0)
+        )
+
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
 
@@ -159,6 +173,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "artifact_ids": [],
             "error_message": None,
             "repos": repos,
+            # How many phases this run set out to do, and how many it has done.
+            # Read off the SAME event the list projection reads them off, so a
+            # run cannot report three phases in one view and one in the other
+            # (#1147). total_phases is required on the event, so there is no
+            # default worth defending here; 0 would be a run with no phases.
+            "total_phases": event_data.get("total_phases", 0),
+            "completed_phases": 0,
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
@@ -257,6 +278,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         )
 
         self._track_artifact(existing, event_data.get("artifact_id"))
+        existing["completed_phases"] = existing.get("completed_phases", 0) + 1
 
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
@@ -276,6 +298,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
+        self._restate_completed_phases(existing, event_data)
 
         # Update with final totals from event if provided.
         #
@@ -339,6 +362,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["status"] = "failed"
             existing["completed_at"] = event_data.get("failed_at")
             existing["error_message"] = event_data.get("error_message")
+            self._restate_completed_phases(existing, event_data)
 
             # Mark failed phase if specified
             failed_phase_id = event_data.get("failed_phase_id")
