@@ -6,7 +6,10 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import pathlib
+from typing import Final
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -865,7 +868,11 @@ class TestWorkspaceProvisionHandler:
     """Tests for WorkspaceProvisionHandler static helpers and inject behaviour."""
 
     @staticmethod
-    def _probe_workspace(contents: dict[str, bytes] | None) -> object:
+    def _probe_workspace(
+        contents: dict[str, bytes] | None,
+        *,
+        search_path: str | None = None,
+    ) -> object:
         """A workspace whose /workspace/repos tree holds exactly ``contents``.
 
         The probe is a shell script, so this runs it in a real shell against a
@@ -876,6 +883,13 @@ class TestWorkspaceProvisionHandler:
 
         ``None`` stands for a backend whose exec is unusable, which is the case
         the generator has to distinguish from an empty tree (#1192).
+
+        ``search_path`` replaces ``PATH`` for the probe's shell, which is how the
+        tests reach the other half of that distinction: a workspace where the
+        files are all present but the tools the probe runs on are not. Passing
+        ``""`` removes every external command; passing a directory of stubs makes
+        them fail instead. The shell is invoked by absolute path so that hobbling
+        ``PATH`` hobbles the probe and not the harness.
         """
         import subprocess
         import tempfile
@@ -891,13 +905,37 @@ class TestWorkspaceProvisionHandler:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(body)
 
+        env = dict(os.environ)
+        if search_path is not None:
+            env["PATH"] = search_path
+
         async def fake_execute(command: list[str], **_kwargs: object) -> object:
             script = command[-1].replace("/workspace/repos/", f"{root}/")
-            done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, check=False)
+            done = subprocess.run(
+                ["/bin/sh", "-c", script], capture_output=True, text=True, check=False, env=env
+            )
             return MagicMock(exit_code=done.returncode, stdout=done.stdout)
 
         workspace.execute = AsyncMock(side_effect=fake_execute)
         return workspace
+
+    @staticmethod
+    def _failing_tool_path(tool: str) -> str:
+        """A ``PATH`` on which ``tool`` exists and exits non-zero, saying nothing.
+
+        Absence is not the only way a dependency stops answering, and it is the
+        easier half to get right. A tool that runs, fails and prints nothing is
+        the case where the probe still gets a clean exit status from its own
+        shell, so nothing about the failure is visible unless the answer itself
+        carries it.
+        """
+        import tempfile
+
+        stub_dir = tempfile.mkdtemp()
+        stub = pathlib.Path(stub_dir) / tool
+        stub.write_text("#!/bin/sh\nexit 3\n")
+        stub.chmod(0o755)
+        return f"{stub_dir}:{os.environ['PATH']}"
 
     @staticmethod
     def _handler() -> object:
@@ -1117,6 +1155,132 @@ class TestWorkspaceProvisionHandler:
         )
         assert "@/workspace/repos/repo-a/AGENTS.md" in context
         assert "@/workspace/repos/repo-a/CLAUDE.md" in context
+
+    # -- "I could not measure" is not "I measured zero" (#1192) ----------------
+    #
+    # The probe's whole job is to say whether a repo's two instruction files are
+    # the same blob. It answers that by running `sha256sum` and `cut`, which can
+    # be missing or broken, and for three attempts an absent `sha256sum` was
+    # spelled exactly like an absent file. These tests fix the shape of the
+    # distinction rather than any one symptom of losing it, so the fixture is a
+    # repo whose two files ARE identical: that makes all three answers different
+    # strings, and no two of them can be confused for each other.
+    #
+    #   measured, duplicated  -> one import line
+    #   could not measure     -> both import lines (pay the duplicate, keep context)
+    #   measured, no files    -> no lines at all
+    #
+    # A happy-path test cannot see any of this, which is how the defect survived.
+
+    _IDENTICAL: Final = b"# one blob serving both conventions\n"
+
+    def _duplicated_repo(self, *, search_path: str | None) -> object:
+        """A repo whose AGENTS.md and CLAUDE.md are the same bytes, both present."""
+        return self._probe_workspace(
+            {
+                "/workspace/repos/repo-a/AGENTS.md": self._IDENTICAL,
+                "/workspace/repos/repo-a/CLAUDE.md": self._IDENTICAL,
+            },
+            search_path=search_path,
+        )
+
+    @pytest.mark.anyio
+    async def test_digest_probe_reports_unmeasurable_distinctly_from_absent(self) -> None:
+        """The three outcomes are three values, and none of them is a sentinel.
+
+        This is the invariant the rest of the fix hangs off: ``_digest_paths``
+        must be able to say "I could not look" about files that are right there.
+        Encoding that as ``{}`` - which is what a missing ``sha256sum`` used to
+        produce - hands the caller a measurement it never took.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        paths = [
+            "/workspace/repos/repo-a/AGENTS.md",
+            "/workspace/repos/repo-a/CLAUDE.md",
+        ]
+        digest = hashlib.sha256(self._IDENTICAL).hexdigest()
+
+        measured = await WorkspaceProvisionHandler._digest_paths(  # type: ignore[arg-type]
+            self._duplicated_repo(search_path=None), paths
+        )
+        no_files = await WorkspaceProvisionHandler._digest_paths(  # type: ignore[arg-type]
+            self._probe_workspace({}), paths
+        )
+        unmeasurable = await WorkspaceProvisionHandler._digest_paths(  # type: ignore[arg-type]
+            self._duplicated_repo(search_path=""), paths
+        )
+
+        assert measured == dict.fromkeys(paths, digest), measured
+        assert no_files == {}, no_files
+        assert unmeasurable is None, (
+            "a probe that could not run reported a measurement instead of a failure"
+        )
+
+    @pytest.mark.anyio
+    async def test_missing_digest_tool_does_not_read_as_no_duplication(self) -> None:
+        """`sha256sum` gone, both files present and identical: import both.
+
+        Against the code this replaces, the same workspace produced ``""`` - no
+        imports at all - because every path answered ``absent``. That is the
+        worst available answer: it is what a repo carrying no instructions looks
+        like, so the agent starts blind and nothing anywhere has failed.
+        """
+        context = await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            self._duplicated_repo(search_path=""), ["https://github.com/org/repo-a"]
+        )
+        assert "@/workspace/repos/repo-a/AGENTS.md" in context, context
+        assert "@/workspace/repos/repo-a/CLAUDE.md" in context, context
+
+    @pytest.mark.anyio
+    async def test_failing_digest_tool_does_not_read_as_no_duplication(self) -> None:
+        """Present-but-broken is the harder half: the shell still exits 0.
+
+        A stub that runs and exits non-zero prints nothing, so the probe's own
+        exit status stays clean and the only place the failure can show up is the
+        per-path answer.
+        """
+        context = await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            self._duplicated_repo(search_path=self._failing_tool_path("sha256sum")),
+            ["https://github.com/org/repo-a"],
+        )
+        assert "@/workspace/repos/repo-a/AGENTS.md" in context, context
+        assert "@/workspace/repos/repo-a/CLAUDE.md" in context, context
+
+    @pytest.mark.anyio
+    async def test_failing_cut_does_not_read_as_no_duplication(self) -> None:
+        """`sha256sum` is not the only tool in the pipeline, so it is not the only fix.
+
+        Digesting works and the digest never arrives. Pinning only the
+        ``sha256sum`` case would leave the identical defect one command to the
+        right of it.
+        """
+        context = await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            self._duplicated_repo(search_path=self._failing_tool_path("cut")),
+            ["https://github.com/org/repo-a"],
+        )
+        assert "@/workspace/repos/repo-a/AGENTS.md" in context, context
+        assert "@/workspace/repos/repo-a/CLAUDE.md" in context, context
+
+    @pytest.mark.anyio
+    async def test_absent_file_still_reads_as_absent_without_a_digest_tool(self) -> None:
+        """The fix must not buy its honesty by calling every missing file an error.
+
+        Existence is decided by a shell builtin precisely so that it survives the
+        tools around it. If this regressed, a repo that legitimately ships one
+        convention would start importing a dead path.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        result = await WorkspaceProvisionHandler._digest_paths(  # type: ignore[arg-type]
+            self._probe_workspace({}, search_path=""),
+            ["/workspace/repos/repo-a/AGENTS.md"],
+        )
+        assert result == {}, result
 
     @pytest.mark.anyio
     async def test_handle_injects_both_agents_and_claude_md(self) -> None:

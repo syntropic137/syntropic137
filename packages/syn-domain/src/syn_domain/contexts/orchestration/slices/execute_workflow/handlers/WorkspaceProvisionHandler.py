@@ -91,11 +91,27 @@ logger = logging.getLogger(__name__)
 _CONTEXT_FILENAMES: Final[tuple[str, ...]] = ("AGENTS.md", "CLAUDE.md")
 
 #: The context-file probe answers positionally: one line per path asked about,
-#: in the order asked, then ``_PROBE_SENTINEL``. A line is either a sha256 digest
-#: or ``_PROBE_ABSENT``. It never echoes a filename back, so nothing has to parse
-#: one out of the output - which is what makes a repo name containing a space, a
-#: backslash or a newline harmless here rather than a silently dropped import.
+#: in the order asked, then ``_PROBE_SENTINEL``. A line is a sha256 digest,
+#: ``_PROBE_ABSENT`` or ``_PROBE_UNREADABLE``. It never echoes a filename back, so
+#: nothing has to parse one out of the output - which is what makes a repo name
+#: containing a space, a backslash or a newline harmless here rather than a
+#: silently dropped import.
+#:
+#: ``_PROBE_ABSENT`` is a finding: the path is not there. It is decided by a shell
+#: builtin so that it stays a statement about the checkout even when every external
+#: command in the workspace is broken.
 _PROBE_ABSENT: Final = "absent"
+
+#: The path is there and we could not digest it - `sha256sum` or `cut` missing,
+#: non-zero or silent, the file unreadable. Not a finding: a failure to look.
+#:
+#: It needs its own value because the alternative is the one that shipped, where an
+#: absent `sha256sum` answered ``_PROBE_ABSENT`` for every path and the caller read
+#: that as "this repo carries no instructions" - the exact reading the sentinel
+#: exists to prevent, arrived at one layer lower. A probe that reports "no
+#: duplication" when it cannot run is worse than no probe, because the zero gets
+#: believed (#1192).
+_PROBE_UNREADABLE: Final = "__syn_context_probe_unreadable__"
 
 #: Last line of a probe that ran to completion. Without it, an exec that answers
 #: nothing at all is indistinguishable from a workspace where no repo carries an
@@ -898,9 +914,16 @@ class WorkspaceProvisionHandler:
         difference: ``{}`` is "we looked, none of these files exist", while
         ``None`` is "the probe did not run". Collapsing them would let one
         unhealthy exec backend strip the agent's entire project context without
-        anything failing, so the probe answers positionally and terminates with
-        ``_PROBE_SENTINEL``: an answer short of one line per path, or missing the
-        sentinel, is not an answer.
+        anything failing.
+
+        So there is one rule, and every way of failing is held to it: **anything
+        short of a complete, trustworthy answer for every path is ``None``.** The
+        probe answers positionally and terminates with ``_PROBE_SENTINEL``, and an
+        answer missing the sentinel, short of one line per path, or carrying a
+        single ``_PROBE_UNREADABLE`` is not an answer. That last one is the case
+        that has to be stated rather than assumed: the tools the probe runs on can
+        be missing or broken, and a per-path failure that is spelled like a finding
+        is indistinguishable from the finding once it reaches the caller.
 
         The caller passes the paths rather than the repo URLs on purpose. Two
         places deriving the same path strings independently is how a lookup
@@ -909,32 +932,44 @@ class WorkspaceProvisionHandler:
         if not paths:
             return {}
         listed = " ".join(shlex.quote(path) for path in paths)
+        # Existence is settled before `sha256sum` is asked anything, by a shell
+        # builtin that no missing binary can take away. That ordering is the whole
+        # point: it is what stops "the digest tool is gone" from being spelled the
+        # same way as "the file is gone". The test is written negated so that a
+        # shell where even `[` fails takes the digest branch, where an absent file
+        # reads as `_PROBE_UNREADABLE` - conservative - rather than the reverse.
         script = (
             f"for path in {listed}; do "
-            f'digest=$(sha256sum < "$path" 2>/dev/null | cut -d" " -f1); '
-            f'echo "${{digest:-{_PROBE_ABSENT}}}"; '
+            f'if [ ! -e "$path" ]; then echo {_PROBE_ABSENT}; else '
+            f'digest=$(sha256sum < "$path" | cut -d" " -f1); '
+            f'echo "${{digest:-{_PROBE_UNREADABLE}}}"; '
+            f"fi; "
             f"done; "
             f"echo {_PROBE_SENTINEL}"
         )
-        # One rule for everything that can go wrong here: anything short of a
-        # complete, correctly-sized answer is "we could not look". Provisioning
-        # must survive an unusable exec backend - raising out of here would fail
-        # the whole phase over an optimisation - so the read and the parse sit
-        # inside the same guard as the call.
+        # The rule above, enforced in one place. Provisioning must survive an
+        # unusable exec backend - raising out of here would fail the whole phase
+        # over an optimisation - so the read and the parse sit inside the same
+        # guard as the call, and every way of not-answering leaves by the same
+        # door: a logged warning and `None`.
         try:
             result = await workspace.execute(
                 ["sh", "-c", script],
                 timeout_seconds=_PROBE_TIMEOUT_SECONDS,
             )
-            # exit_code is deliberately not consulted: a repo carrying only one of
-            # the two conventions makes that `sha256sum` fail, which is the
-            # ordinary case. The per-path answers already say which files exist.
+            # exit_code is deliberately not consulted, and cannot be: the script
+            # ends in an `echo`, so it exits 0 whatever happened inside the loop.
+            # The per-path answers carry that, which is why each of them has to be
+            # able to say "I could not answer" in its own right.
             answers = result.stdout.splitlines()
             # `.index` raises when the sentinel is absent, which is the point:
             # a probe that did not finish has not answered either.
             answers = answers[: answers.index(_PROBE_SENTINEL)]
             if len(answers) != len(paths):
                 raise ValueError(f"probe answered {len(answers)} of {len(paths)} paths")
+            unreadable = answers.count(_PROBE_UNREADABLE)
+            if unreadable:
+                raise ValueError(f"probe could not digest {unreadable} of {len(paths)} paths")
             return {
                 path: digest
                 for path, digest in zip(paths, answers, strict=True)
