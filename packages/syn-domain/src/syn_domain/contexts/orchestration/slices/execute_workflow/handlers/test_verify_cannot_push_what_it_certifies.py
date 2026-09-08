@@ -68,7 +68,7 @@ pytestmark = pytest.mark.unit
 #: Resolved from this file, not the process cwd, so moving a workflow fails
 #: loudly here instead of silently skipping.
 _REPO_ROOT = Path(__file__).resolve().parents[9]
-_WORKFLOWS = _REPO_ROOT / "workflows" / "sdlc"
+_WORKFLOWS = _REPO_ROOT / "workflows"
 
 _REPO_URL = "https://github.com/syntropic137/syntropic137"
 
@@ -204,16 +204,26 @@ class TestTheDeclarationReachesTheCredential:
 
     @pytest.mark.parametrize(
         ("workflow", "phase_id"),
-        [("implement", "verify"), ("pr-review", "investigate"), ("pr-review", "verify")],
+        [
+            ("sdlc/implement", "verify"),
+            ("sdlc/pr-review", "investigate"),
+            ("sdlc/pr-review", "verify"),
+            # The bake-off workflows are clones of sdlc-implement-v1 with one
+            # model swapped, so the defect was in four files, not one.
+            ("custom/bake-haiku", "verify"),
+            ("custom/bake-opus", "verify"),
+            ("custom/bake-sonnet", "verify"),
+        ],
     )
     async def test_a_phase_that_declared_no_push_is_given_a_read_only_token(
         self, workflow: str, phase_id: str
     ) -> None:
         """All three declaring phases, not just the one that was caught.
 
-        `sdlc-pr-review-v1`'s two phases have not been observed pushing, but
-        nothing was stopping them, and a fix that covers only the reproduction
-        leaves the same hole one workflow over.
+        `sdlc-pr-review-v1`'s two phases and the three bake-off clones have
+        not been observed pushing, but nothing was stopping them, and a fix
+        that covers only the reproduction leaves the same hole in four files
+        one directory over.
         """
         phases = await _executable_phases(workflow)
         phase = phases[phase_id]
@@ -223,7 +233,13 @@ class TestTheDeclarationReachesTheCredential:
 
     @pytest.mark.parametrize(
         ("workflow", "phase_id"),
-        [("implement", "implement"), ("implement", "open_pr"), ("pr-review", "report")],
+        [
+            ("sdlc/implement", "implement"),
+            ("sdlc/implement", "open_pr"),
+            ("sdlc/pr-review", "report"),
+            ("custom/bake-opus", "implement"),
+            ("custom/bake-opus", "open_pr"),
+        ],
     )
     async def test_a_phase_whose_job_is_to_publish_still_gets_a_writing_token(
         self, workflow: str, phase_id: str

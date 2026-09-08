@@ -89,6 +89,13 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # CANNOT PUBLISH (#1161). These bake-off workflows are clones of
+    # sdlc-implement-v1 - same four phases, same prompts, one model swapped -
+    # so they carry the same defect its verify phase was caught committing
+    # three times, and the whole point of a bake-off is that its verdicts are
+    # trustworthy enough to choose a model on. See that file for why this is a
+    # token scope rather than `agent.sandbox: read-only`.
+    can_push: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
