@@ -72,6 +72,7 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -124,22 +125,10 @@ class _SecondPhaseFails(FakeAgentExecutionHandler):
         agent_model: str | None,
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
-        runner: Runner | None = None,
+        runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
         self._exit_code = 0 if not self.calls else 1
-        if runner is None:
-            return await super().handle(
-                todo,
-                workspace,
-                agent_env,
-                claude_cmd,
-                session_id,
-                agent_model,
-                timeout_seconds,
-                collector,
-                on_launch=on_launch,
-            )
         return await super().handle(
             todo,
             workspace,
