@@ -102,6 +102,17 @@ NAMESPACE_NAME = "SimpleNamespace"
 #: the same erasure in different words.
 UNCONSTRAINED_VALUES: frozenset[str] = frozenset({"Any", "object"})
 
+#: Every name this gate matches on, and therefore every name a rename is not
+#: allowed to redefine. See ``_renames``: without this, ``object = object.func``
+#: - a local rebinding, three words long, in ``_pytest/doctest.py`` today -
+#: would resolve ``object`` to something the gate does not know and switch off
+#: counting for every ``dict[str, object]`` in the file. That is a wider hole
+#: than any this gate closes, so resolution is confined to one direction: it
+#: may map a name *onto* a shape below, never one of these away from itself.
+MATCHED_NAMES: frozenset[str] = (
+    MAPPING_NAMES | UNCONSTRAINED_VALUES | {TYPED_DICT_NAME, NAMESPACE_NAME, "str", "cast"}
+)
+
 #: Directory fragments that are never first-party source. ``.claude/worktrees``
 #: holds complete repo copies, so counting them would count the same annotation
 #: once per live agent worktree - the false positive that
@@ -197,27 +208,43 @@ def _renames(tree: ast.Module) -> Mapping[str, str]:
     the two - it needs no import at all - so it is the one a ratchet under
     pressure meets first.
 
-    Every rename is recorded, not only the ones landing on a name this gate
-    cares about, because that is what lets a chain resolve without depending on
-    the order the statements appear in. An entry that resolves to nothing costs
-    nothing; only the names below are ever looked up. Dotted module imports
-    keep their last segment (``import collections.abc as c`` records
-    ``c -> abc``) on the same reasoning. ``ast.walk`` rather than ``tree.body``
-    because a function-local rename renames just as effectively as a top-level
-    one.
+    Resolution runs one way only. A rename may give one of the names in
+    ``MATCHED_NAMES`` a second name; it may never take one of those names away
+    from itself, so this pass can add counts and cannot remove them - the one
+    property that makes it safe to put in front of a ratchet. Python cannot
+    tell a type rename from a runtime rebinding of the same name, and the
+    rebinding is both far more common and, left unguarded, the better dodge.
+
+    Every other rename is recorded, not only the ones landing on a name this
+    gate cares about, because that is what lets a chain resolve without
+    depending on the order the statements appear in. An entry that resolves to
+    nothing costs nothing; only the names above are ever looked up. Dotted
+    module imports keep their last segment (``import collections.abc as c``
+    records ``c -> abc``) on the same reasoning. ``ast.walk`` rather than
+    ``tree.body`` because a function-local rename renames just as effectively
+    as a top-level one - and, being name-based rather than flow-based, it reads
+    ``annotation = Any`` in one branch of one function as a rename for the
+    whole module. That over-counts, which is the direction a ratchet is allowed
+    to be wrong in.
     """
     renames: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             for alias in node.names:
-                if alias.asname is not None:
+                if alias.asname is not None and alias.asname not in MATCHED_NAMES:
                     renames[alias.asname] = alias.name.rpartition(".")[2]
         elif (original := _renamed_shape(node)) is not None:
             # The names a rename binds are its targets, which are the only
             # names it stores to - true of all three assignment spellings
-            # without having to take each of them apart.
+            # without having to take each of them apart. A target in
+            # MATCHED_NAMES is skipped: see there for the hole that opens
+            # otherwise.
             for target in ast.walk(node):
-                if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
+                if (
+                    isinstance(target, ast.Name)
+                    and isinstance(target.ctx, ast.Store)
+                    and target.id not in MATCHED_NAMES
+                ):
                     renames[target.id] = original
     return {name: _follow(name, renames) for name in renames}
 

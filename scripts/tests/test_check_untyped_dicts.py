@@ -638,3 +638,25 @@ class TestAssignmentRenamesDoNotHide:
     def test_a_name_being_bound_is_not_a_use(self) -> None:
         """Resolving the rename must not make the rename line count twice."""
         assert count("from types import SimpleNamespace\nNS = SimpleNamespace\n") == 1
+
+    def test_rebinding_a_matched_name_does_not_switch_counting_off(self) -> None:
+        """The hole that resolving renames opens if it is allowed both ways.
+
+        Python cannot tell ``D = dict`` (a type rename) from ``object =
+        object.func`` (a local rebinding) - and the second is real code, in
+        ``_pytest/doctest.py``, where it sits in the same file as a
+        ``dict[str, object]`` the gate must go on counting. Resolving it would
+        make three words anywhere in a file switch off counting for every
+        erased mapping in that file: a wider dodge than any this gate closes,
+        and a silent one, because the annotation at the point of use is
+        unchanged and still reads as erased.
+        """
+        source = """
+        def f(x: dict[str, object]) -> None:
+            object = object.func
+        """
+        assert count(source) == 1
+
+    def test_a_rename_cannot_redefine_the_value_types(self) -> None:
+        """``Any = str`` must not talk the gate out of a hit either."""
+        assert count("Any = str\nx: dict[str, Any]\n") == 1
