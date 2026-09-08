@@ -624,13 +624,26 @@ def _run_gh(
     )
 
 
-#: The preamble EXACTLY as it read before #1187 made it conditional, copied in
-#: rather than imported. A golden re-derived from the code it guards guards
-#: nothing: `render_workspace_prompt(clone_repos=True)` would agree with any
-#: edit to the cloning branch, which is the one thing this must catch. The
-#: pending experiment's baseline is these bytes, so changing them is a decision
-#: to invalidate that baseline, and should cost a deliberate edit here.
-_THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD = """\
+#: The preamble a cloning phase gets, copied in rather than imported. A golden
+#: re-derived from the code it guards guards nothing:
+#: `render_workspace_prompt(clone_repos=True)` would agree with any edit to the
+#: cloning branch, which is the one thing this must catch. The pending
+#: experiment's baseline is these bytes, so changing them is a decision to
+#: invalidate that baseline, and should cost a deliberate edit here.
+#:
+#: THESE BYTES HAVE MOVED ONCE, deliberately, and the log belongs here so the
+#: next reader can tell a decision from a drift:
+#:
+#: * #1187 made the tree and the starting point conditional on `clone_repos`.
+#:   A cloning phase kept exactly the bytes it had; only the no-checkout
+#:   rendering was new.
+#: * #1221 rewrote "Completing Your Task" so the deliverable is required for
+#:   every outcome rather than being step 4 of an action sequence. This one
+#:   DOES change what a cloning phase receives, because the defect was in the
+#:   shared template and `implement` hits it too. Confining the fix to the
+#:   no-checkout rendering would have left the same bug in the branch the
+#:   experiment measures, which is a carve-out, not a fix.
+_THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
 You are an agent running in an ephemeral Docker workspace managed by Syntropic137.
@@ -661,6 +674,20 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ## Completing Your Task
 
+**The deliverable is not conditional on having acted.** `artifacts/output/` is
+how a phase reports, so it is written for every outcome:
+
+- **you did the work** - describe what you changed and where it is
+- **it was already done, or turned out not to be needed** - say so, and show
+  what you checked that established it
+- **you declined to act**, because acting would have been wrong - say why
+- **you could not act** - say what stopped you
+
+"Nothing needed doing" is a conclusion, and the evidence behind it is the
+deliverable. Reaching it and writing no file reports nothing at all: from
+outside it is indistinguishable from a phase that ran and produced nothing,
+and that fails the execution.
+
 ### For coding tasks (commits, PRs, code changes):
 
 Your primary deliverable is **code on GitHub**. The artifact is your summary.
@@ -669,9 +696,9 @@ Your primary deliverable is **code on GitHub**. The artifact is your summary.
 2. Make changes, commit with clear messages
 3. Push to GitHub, create PR if needed
 4. Write summary to `artifacts/output/deliverable.md` with:
-   - What you actually changed
-   - Your actual commit hashes
-   - The actual PR URL you created
+   - What you actually changed, or what you found already correct
+   - Your actual commit hashes, if you made any
+   - The actual PR URL - the one you opened, or the one that was already there
    - Brief executive summary
 
 ### For non-coding tasks (research, analysis, design, planning):
@@ -769,13 +796,16 @@ class TestThePromptTellsTheTruthAboutCloning:
         It sets no `clone_repos`, so it still clones and must still be told the
         repository is pre-cloned. Equality, not a substring check: a baseline
         that tolerates additions is not a baseline.
+
+        When this fails, the question is not "what is the new text" but "was
+        moving the baseline the intended change". See the log above the golden.
         """
         phases = await _executable_phases()
         provisioned = await _provision(phases["verify"], completed={})
 
         preamble, separator, _ = provisioned.prompt.partition("\n\n## Task\n")
         assert separator, "the prompt no longer has a `## Task` section to split on"
-        assert preamble == _THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD
+        assert preamble == _THE_PREAMBLE_A_CLONING_PHASE_GETS
 
     async def test_a_no_checkout_phase_is_not_told_the_repository_is_on_disk(self) -> None:
         """The whole prompt, not the preamble: `open_pr.md` made the claim too.
