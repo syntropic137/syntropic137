@@ -6,6 +6,7 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
+import pathlib
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -867,24 +868,33 @@ class TestWorkspaceProvisionHandler:
     def _probe_workspace(contents: dict[str, bytes] | None) -> object:
         """A workspace whose /workspace/repos tree holds exactly ``contents``.
 
+        The probe is a shell script, so this runs it in a real shell against a
+        real temporary tree rather than pattern-matching the script text. The
+        quoting, the ``sha256sum`` invocation and the absent-file answer are the
+        parts most likely to be wrong, and a fake that recognises the script
+        cannot be wrong about any of them.
+
         ``None`` stands for a backend whose exec is unusable, which is the case
         the generator has to distinguish from an empty tree (#1192).
         """
-        import hashlib
+        import subprocess
+        import tempfile
 
         workspace = AsyncMock()
         if contents is None:
             workspace.execute = AsyncMock(side_effect=RuntimeError("exec unavailable"))
             return workspace
 
+        root = tempfile.mkdtemp()
+        for path, body in contents.items():
+            target = pathlib.Path(root) / path.removeprefix("/workspace/repos/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(body)
+
         async def fake_execute(command: list[str], **_kwargs: object) -> object:
-            script = command[-1]
-            lines = [
-                f"{hashlib.sha256(body).hexdigest()}  {path}"
-                for path, body in contents.items()
-                if path in script
-            ]
-            return MagicMock(exit_code=0, stdout="\n".join([*lines, "__syn_context_probe_ok__"]))
+            script = command[-1].replace("/workspace/repos/", f"{root}/")
+            done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, check=False)
+            return MagicMock(exit_code=done.returncode, stdout=done.stdout)
 
         workspace.execute = AsyncMock(side_effect=fake_execute)
         return workspace
@@ -1045,6 +1055,59 @@ class TestWorkspaceProvisionHandler:
         assert "@/workspace/repos/repo-a/CLAUDE.md" in context
 
     @pytest.mark.anyio
+    async def test_probe_answering_fewer_paths_than_asked_is_not_an_answer(self) -> None:
+        """A truncated answer must not read as "these files do not exist".
+
+        The sentinel alone does not cover this: a probe can terminate and still
+        have skipped paths. Counting the answers is what keeps a partial reply
+        from silently stripping the imports it never spoke about.
+        """
+        workspace = AsyncMock()
+        workspace.execute = AsyncMock(
+            return_value=MagicMock(exit_code=0, stdout="absent\n__syn_context_probe_ok__\n")
+        )
+        context = await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            workspace, ["https://github.com/org/repo-a"]
+        )
+        assert "@/workspace/repos/repo-a/AGENTS.md" in context
+        assert "@/workspace/repos/repo-a/CLAUDE.md" in context
+
+    @pytest.mark.anyio
+    async def test_probe_is_given_a_timeout(self) -> None:
+        """A probe that hangs must be able to fail, or provisioning hangs with it.
+
+        Every fallback here assumes the probe eventually answers or raises. An
+        exec with no timeout does neither.
+        """
+        workspace = self._probe_workspace({})
+        await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            workspace, ["https://github.com/org/repo-a"]
+        )
+        assert workspace.execute.call_args.kwargs["timeout_seconds"] > 0  # type: ignore[attr-defined]
+
+    @pytest.mark.anyio
+    async def test_repo_name_a_shell_would_escape_still_gets_its_context(self) -> None:
+        """The probe must not depend on reading a filename back out of its output.
+
+        ``_repo_name`` is the last URL segment, unsanitised, so a name can carry
+        a backslash - and GNU coreutils escapes any checksum line whose filename
+        does, which no longer matches the path that was asked about. Answering
+        positionally is what makes that a non-event instead of a repo whose
+        instructions vanish with nothing logged.
+        """
+        same = b"# instructions\n"
+        workspace = self._probe_workspace(
+            {
+                "/workspace/repos/re\\po/AGENTS.md": same,
+                "/workspace/repos/re\\po/CLAUDE.md": same,
+            }
+        )
+        context = await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            workspace, ["https://github.com/org/re\\po"]
+        )
+        assert context == "@/workspace/repos/re\\po/AGENTS.md\n", context
+
+    @pytest.mark.anyio
     async def test_probe_without_sentinel_falls_back_to_importing_everything(self) -> None:
         """Empty exec output without the sentinel is 'we never looked', not 'empty'."""
         workspace = AsyncMock()
@@ -1072,6 +1135,12 @@ class TestWorkspaceProvisionHandler:
         workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
         workspace.inject_files = AsyncMock()
         workspace.workspace_id = "ws-test"
+        # A repo whose two instruction files differ, so both are imported.
+        workspace.execute = AsyncMock(
+            return_value=MagicMock(
+                exit_code=0, stdout="a" * 64 + "\n" + "b" * 64 + "\n__syn_context_probe_ok__\n"
+            )
+        )
 
         workspace_cm = AsyncMock()
         workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
@@ -1147,10 +1216,18 @@ class TestWorkspaceProvisionHandler:
         workspace = AsyncMock()
         workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, stdout="x"))
         await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
-            workspace, ["https://github.com/org/repo;rm -rf /"]
+            workspace, ["https://github.com/org/repo;echo INJECTED"]
         )
         script = workspace.execute.call_args.args[0][-1]
-        assert "sha256sum -- '/workspace/repos/repo;rm -rf /AGENTS.md'" in script, script
+        assert "'/workspace/repos/repo;echo INJECTED/AGENTS.md'" in script, script
+
+        # And the quoting holds where it matters. Run the script for real: an
+        # unquoted path turns the repo name into a second command, so INJECTED
+        # would appear in the output.
+        import subprocess
+
+        done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, check=False)
+        assert done.stdout.splitlines() == ["absent", "absent", "__syn_context_probe_ok__"], done
 
     @pytest.mark.anyio
     async def test_handle_injects_deduplicated_context_for_identical_files(self) -> None:
@@ -1176,13 +1253,10 @@ class TestWorkspaceProvisionHandler:
 
         async def fake_execute(command: list[str], **_kwargs: object) -> object:
             del command
+            # Both candidates present with the same digest, answered positionally.
             return MagicMock(
                 exit_code=0,
-                stdout=(
-                    f"{digest}  /workspace/repos/repo-a/AGENTS.md\n"
-                    f"{digest}  /workspace/repos/repo-a/CLAUDE.md\n"
-                    "__syn_context_probe_ok__\n"
-                ),
+                stdout=f"{digest}\n{digest}\n__syn_context_probe_ok__\n",
             )
 
         workspace = AsyncMock()

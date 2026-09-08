@@ -90,9 +90,22 @@ logger = logging.getLogger(__name__)
 #: is the cross-platform standard; CLAUDE.md is what Claude Code auto-loads.
 _CONTEXT_FILENAMES: Final[tuple[str, ...]] = ("AGENTS.md", "CLAUDE.md")
 
-#: Marks that the context-file probe script ran to completion, so that "no files
-#: on disk" is distinguishable from "the probe never executed" (#1192).
-_SENTINEL: Final = "__syn_context_probe_ok__"
+#: The context-file probe answers positionally: one line per path asked about,
+#: in the order asked, then ``_PROBE_SENTINEL``. A line is either a sha256 digest
+#: or ``_PROBE_ABSENT``. It never echoes a filename back, so nothing has to parse
+#: one out of the output - which is what makes a repo name containing a space, a
+#: backslash or a newline harmless here rather than a silently dropped import.
+_PROBE_ABSENT: Final = "absent"
+
+#: Last line of a probe that ran to completion. Without it, an exec that answers
+#: nothing at all is indistinguishable from a workspace where no repo carries an
+#: instruction file - and the two demand opposite responses (#1192).
+_PROBE_SENTINEL: Final = "__syn_context_probe_ok__"
+
+#: The probe is one `sha256sum` per candidate file on a local disk. A workspace
+#: that has not answered in this long is not slow, it is unreachable, and the
+#: caller is built to carry on without it.
+_PROBE_TIMEOUT_SECONDS: Final[int] = 30
 
 #: `owner` and `repo`: the two trailing path segments every accepted repo shape
 #: ends with, whatever prefix it carries.
@@ -838,73 +851,96 @@ class WorkspaceProvisionHandler:
         EACH DISTINCT FILE IS IMPORTED ONCE (#1192). Serving both conventions
         from byte-identical files is the normal way to do it - this repo's own
         AGENTS.md and CLAUDE.md are the same git blob - and importing both then
-        loads that content into the agent's context TWICE. It is not free: the
-        copy sits in the cached prompt prefix, so every turn of every phase of
-        every execution re-reads it. Measured on the bootstrap phase of
-        exec-5c3635d8b8db, the duplicate was 11,436 tokens of a 41,056-token
-        prefix - 27.9% of the context the agent starts with, buying nothing.
+        loads that content into the agent's context twice. The copy is not paid
+        once: it sits in the cached prompt prefix, which every API turn of the
+        phase re-reads. Cache reads are 96.6% of a bootstrap phase's tokens and
+        the median phase takes 37 turns, so the multiplier on any prefix waste is
+        the turn count, not one. Measurements are in #1192.
 
-        So we ask the workspace what is actually on disk and emit one @-import
-        per distinct file. A repo whose two files genuinely differ still gets
-        both, in AGENTS.md-then-CLAUDE.md order.
+        Whether the two files are the same is a fact about the checkout, not
+        about their names, so we look: one @-import per distinct file, and a repo
+        whose two files genuinely differ still gets both, AGENTS.md first.
         """
         if not repos:
             return ""
-        digests = await self._read_repo_context_digests(workspace, repos)
-        lines: list[str] = []
-        for url in repos:
-            name = WorkspaceProvisionHandler._repo_name(url)
-            paths = [f"/workspace/repos/{name}/{f}" for f in _CONTEXT_FILENAMES]
-            if digests is None:
-                # We could not look. Import everything and pay for the copy
-                # rather than risk an agent starting with no project context.
-                lines.extend(f"@{path}" for path in paths)
-                continue
-            seen: set[str] = set()
-            for path in paths:
-                digest = digests.get(path)
-                if digest is None or digest in seen:
-                    continue
-                seen.add(digest)
-                lines.append(f"@{path}")
-        if not lines:
-            return ""
-        return "\n".join(lines) + "\n"
+        candidates = [
+            [
+                f"/workspace/repos/{WorkspaceProvisionHandler._repo_name(url)}/{filename}"
+                for filename in _CONTEXT_FILENAMES
+            ]
+            for url in repos
+        ]
+        digests = await self._digest_paths(workspace, [p for paths in candidates for p in paths])
+        if digests is None:
+            # We could not look. Import every candidate and pay for the duplicate
+            # rather than risk an agent starting with no project context at all.
+            imported = [path for paths in candidates for path in paths]
+        else:
+            imported = []
+            for paths in candidates:
+                seen: set[str] = set()
+                for path in paths:
+                    digest = digests.get(path)
+                    if digest is None or digest in seen:
+                        continue
+                    seen.add(digest)
+                    imported.append(path)
+        return "".join(f"@{path}\n" for path in imported)
 
     @staticmethod
-    async def _read_repo_context_digests(
+    async def _digest_paths(
         workspace: ManagedWorkspace,
-        repos: list[str],
+        paths: list[str],
     ) -> dict[str, str] | None:
-        """Digest every candidate instruction file, or ``None`` if we cannot look.
+        """Content digest of each path that exists, or ``None`` if we cannot look.
 
         ``None`` and ``{}`` mean different things and the caller depends on the
-        difference: ``{}`` is "we looked, no repo has one of these files", while
-        ``None`` is "the probe did not run". A backend that answers an exec with
-        empty output would otherwise be indistinguishable from a repo with no
-        instructions, and would silently strip the agent's whole context.
-        ``_SENTINEL`` is what separates the two - it is only in the output if
-        the script itself ran to completion.
+        difference: ``{}`` is "we looked, none of these files exist", while
+        ``None`` is "the probe did not run". Collapsing them would let one
+        unhealthy exec backend strip the agent's entire project context without
+        anything failing, so the probe answers positionally and terminates with
+        ``_PROBE_SENTINEL``: an answer short of one line per path, or missing the
+        sentinel, is not an answer.
+
+        The caller passes the paths rather than the repo URLs on purpose. Two
+        places deriving the same path strings independently is how a lookup
+        starts missing every key while both halves still look correct.
         """
-        paths = [
-            f"/workspace/repos/{WorkspaceProvisionHandler._repo_name(url)}/{filename}"
-            for url in repos
-            for filename in _CONTEXT_FILENAMES
-        ]
-        quoted = " ".join(shlex.quote(path) for path in paths)
-        script = f"sha256sum -- {quoted} 2>/dev/null; echo {_SENTINEL}"
+        if not paths:
+            return {}
+        listed = " ".join(shlex.quote(path) for path in paths)
+        script = (
+            f"for path in {listed}; do "
+            f'digest=$(sha256sum < "$path" 2>/dev/null | cut -d" " -f1); '
+            f'echo "${{digest:-{_PROBE_ABSENT}}}"; '
+            f"done; "
+            f"echo {_PROBE_SENTINEL}"
+        )
         try:
-            result = await workspace.execute(["sh", "-c", script])
-            stdout = result.stdout
-        except Exception:  # any probe failure means "we could not look"
+            result = await workspace.execute(
+                ["sh", "-c", script],
+                timeout_seconds=_PROBE_TIMEOUT_SECONDS,
+            )
+        except Exception:
             logger.warning("Context-file probe failed; importing every candidate", exc_info=True)
             return None
-        if not isinstance(stdout, str) or _SENTINEL not in stdout:
-            logger.warning("Context-file probe returned no sentinel; importing every candidate")
+        # exit_code is deliberately not consulted: a repo that carries only one of
+        # the two conventions makes the probe's last `sha256sum` fail, and that is
+        # the ordinary case. The per-path answers already say which files exist.
+        answers = result.stdout.splitlines()
+        if _PROBE_SENTINEL not in answers:
+            logger.warning("Context-file probe did not complete; importing every candidate")
             return None
-        digests: dict[str, str] = {}
-        for line in stdout.splitlines():
-            digest, _, path = line.partition("  ")
-            if path in paths:
-                digests[path] = digest
-        return digests
+        answers = answers[: answers.index(_PROBE_SENTINEL)]
+        if len(answers) != len(paths):
+            logger.warning(
+                "Context-file probe answered %d of %d paths; importing every candidate",
+                len(answers),
+                len(paths),
+            )
+            return None
+        return {
+            path: digest
+            for path, digest in zip(paths, answers, strict=True)
+            if digest != _PROBE_ABSENT
+        }
