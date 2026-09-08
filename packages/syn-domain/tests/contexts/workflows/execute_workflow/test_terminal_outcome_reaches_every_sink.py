@@ -85,11 +85,14 @@ from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
+    )
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
     )
     from syn_domain.contexts.orchestration import AgentExecutionResult
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
@@ -209,7 +212,7 @@ class _Observation:
     """
 
     session_id: str
-    observation_type: str
+    observation_type: ObservationType | str
     data: dict[str, Any]
     execution_id: str | None
     phase_id: str | None
@@ -233,7 +236,7 @@ class _RecordingObservabilityWriter:
     async def record_observation(
         self,
         session_id: str,
-        observation_type: object,
+        observation_type: ObservationType | str,
         data: dict[str, Any],
         execution_id: str | None = None,
         phase_id: str | None = None,
@@ -242,7 +245,10 @@ class _RecordingObservabilityWriter:
         self.observations.append(
             _Observation(
                 session_id=session_id,
-                observation_type=str(observation_type),
+                # Kept as it arrived rather than str()-ed: the recorder accepts an
+                # enum or a bare string, and flattening one into the other here
+                # would hide a sink that swapped which it sends.
+                observation_type=observation_type,
                 data=dict(data),
                 execution_id=execution_id,
                 phase_id=phase_id,
@@ -529,4 +535,258 @@ async def test_a_cancelled_run_closes_its_session_with_the_reason_it_reports() -
     cancelled = [s for s in sinks.completed_sessions if s.status == SessionStatus.CANCELLED]
     assert [s.error_message for s in cancelled] == [reason], (
         "The session was closed with a different reason than the caller was given."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The whole of every sink, against what the sinks held before #1205
+# ---------------------------------------------------------------------------
+#
+# Everything above asserts SELECTED properties, which is the right shape for
+# saying what matters and why. It is the wrong shape for the claim #1205 makes.
+# "Nothing changed" is not a property of a few named fields; it is a property of
+# the entire output, and a named-field assertion is silent about every field it
+# does not name - a `metadata` key that appeared, an `artifact_id` that stopped
+# being None, a token count that started arriving from somewhere else. Those are
+# exactly what a refactor drops, and exactly what nothing above would notice.
+#
+# So the rest of this file captures ALL of every sink and compares the whole
+# thing. The two mechanisms that make that mean something:
+#
+#   COMPLETENESS is structural, not a list. `_canonical` reads fields off the
+#   type - `model_fields` for events, `dataclasses.fields` for value objects,
+#   every key of every dict - so a field ADDED to any sink appears in the
+#   snapshot with no edit here, and a field REMOVED disappears from it. Either
+#   one fails the comparison. There is no list of fields to keep in step,
+#   because a list is the thing that goes stale.
+#
+#   THE EXPECTATION IS NOT OURS. It was produced by running this same harness
+#   against the tree with 1b8c259a reverted - the code as it stood BEFORE the
+#   refactor - and is committed beside this file. Deriving it from the current
+#   implementation would produce a test that agrees with whatever the refactor
+#   did, which is the one thing it must not do. `_write_golden` refuses to run
+#   at all on a tree where the refactor is present, so that cannot be done by
+#   accident later either.
+
+_GOLDEN = Path(__file__).with_name("terminal_outcome_prerefactor_golden.json")
+
+REGENERATE_ENV = "SYN_1205_WRITE_PREREFACTOR_GOLDEN"
+"""Set to "1" to rewrite the golden. See `_write_golden` for what it costs you."""
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+class _PerRunEntropy:
+    """Stable stand-ins for the values no two runs can agree on.
+
+    A uuid and a wall-clock reading differ between any two runs of any two
+    checkouts, so pinning them literally would pin the machine and not the code.
+    Each DISTINCT value gets a token instead, numbered in the order the walk
+    first meets it, and that keeps precisely what the refactor could have broken:
+
+      - WHICH fields carry an id or an instant at all (a field that stopped
+        being filled holds None, not a token, and the comparison says so);
+      - WHETHER two fields carry the SAME one. The failed phase's session id
+        appears in three sinks and the failure's single clock reading appears in
+        two, and both are one token everywhere they appear. A sink that started
+        reading its own clock, or reaching for a different session, gets a
+        different token and fails - and that cross-sink agreement is asserted
+        here by the structure rather than by remembering to write it down.
+
+    Zero is not entropy and is never tokenised: `0.0` is what a failed phase's
+    duration used to be when nothing computed it (#1036), so "no time at all"
+    and "some time" have to stay different values in the snapshot.
+    """
+
+    def __init__(self) -> None:
+        self._tokens: dict[tuple[str, object], str] = {}
+        self._counts: dict[str, int] = {}
+
+    def token(self, kind: str, value: object) -> str:
+        key = (kind, value)
+        token = self._tokens.get(key)
+        if token is None:
+            token = f"<{kind}-{self._counts.get(kind, 0)}>"
+            self._tokens[key] = token
+            self._counts[kind] = self._counts.get(kind, 0) + 1
+        return token
+
+
+def _canonical(value: object, entropy: _PerRunEntropy) -> object:
+    """One sink value as comparable data, with nothing left out.
+
+    Unknown types RAISE rather than falling back to `repr`. A repr fallback is
+    how a snapshot test quietly stops covering the field it was added for: the
+    value still appears, still differs when it differs, and hides a type change
+    behind a string. If this raises, a sink has grown a field holding something
+    new and somebody has to decide how it is compared - which is the point.
+    """
+    if value is None:
+        return None
+    # BEFORE str and int, both of which these subclass. A `StrEnum` member caught
+    # by the `str` branch would be recorded as its bare value, and a sink that
+    # swapped an enum for the string it happens to equal would read as unchanged.
+    if isinstance(value, Enum):
+        return f"{type(value).__name__}.{value.name}"
+    if isinstance(value, bool | int):
+        return value
+    if isinstance(value, float):
+        # See `_PerRunEntropy` on why zero is kept and everything else tokenised.
+        return 0.0 if value == 0.0 else entropy.token("seconds", value)
+    if isinstance(value, str):
+        return _UUID.sub(lambda m: entropy.token("uuid", m.group(0)), value)
+    if isinstance(value, datetime):
+        return entropy.token("instant", value.isoformat())
+    if isinstance(value, BaseModel):
+        return _canonical_fields(value, value.__class__.model_fields, entropy)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _canonical_fields(value, [f.name for f in dataclasses.fields(value)], entropy)
+    if isinstance(value, dict):
+        keys = [str(key) for key in value]  # pyright: ignore[reportUnknownVariableType]
+        return {key: _canonical(value[key], entropy) for key in sorted(keys)}
+    if isinstance(value, list):
+        return [_canonical(item, entropy) for item in value]  # pyright: ignore[reportUnknownVariableType]
+    msg = (
+        f"A sink now holds a {type(value).__name__}, which this snapshot does not "
+        "know how to compare. Decide how it should be compared and teach "
+        "`_canonical` - do not let it fall back to a string."
+    )
+    raise TypeError(msg)
+
+
+def _canonical_fields(
+    value: object, field_names: Iterable[str], entropy: _PerRunEntropy
+) -> dict[str, object]:
+    """Every declared field of one object, plus the type that declared them.
+
+    `__type__` is carried because a sink whose value object was swapped for a
+    look-alike with the same fields is a change, and one the field values alone
+    cannot show.
+    """
+    canonical: dict[str, object] = {"__type__": type(value).__name__}
+    for name in field_names:
+        canonical[name] = _canonical(getattr(value, name), entropy)
+    return canonical
+
+
+def _flatten(value: object, path: str = "") -> dict[str, object]:
+    """The canonical form as one flat path -> leaf mapping.
+
+    Flat because that is what makes a failure readable: comparing two nested
+    structures reports that they differ, comparing two flat mappings reports
+    WHICH PATH differs, and pytest prints the paths present in one and not the
+    other - which is what "a field disappeared" looks like from here.
+
+    Empty containers get a leaf of their own. Without one, a field holding `[]`
+    and a field that is not there at all would flatten to the same thing -
+    nothing - and "the artifact ids stopped being reported" would pass.
+    """
+    if isinstance(value, dict):
+        entries: dict[str, object] = value  # pyright: ignore[reportUnknownMemberType]
+        if not entries:
+            return {path: "{}"}
+        flat: dict[str, object] = {}
+        for key, item in entries.items():
+            flat.update(_flatten(item, f"{path}/{key}"))
+        return flat
+    if isinstance(value, list):
+        items: list[object] = value  # pyright: ignore[reportUnknownMemberType]
+        if not items:
+            return {path: "[]"}
+        flat = {}
+        for index, item in enumerate(items):
+            flat.update(_flatten(item, f"{path}[{index}]"))
+        return flat
+    return {path: value}
+
+
+def _snapshot(sinks: _Sinks) -> dict[str, object]:
+    """All four sinks of one failure, canonicalised against ONE entropy map.
+
+    One map across all four is what makes the cross-sink identities visible: the
+    same session id read by three sinks is the same token in all three, so a
+    sink that started reaching for a different one shows up as a token mismatch
+    rather than as two unrelated uuids that were never compared.
+    """
+    entropy = _PerRunEntropy()
+    return _flatten(
+        _canonical(
+            {
+                "sink1_phase_results": sinks.result.phase_results,
+                "sink2_session_error_observations": sinks.observations,
+                "sink2_session_completed_events": sinks.completed_sessions,
+                "sink3_stored_failure_event": sinks.failure_event,
+                "sink4_execution_result": sinks.result,
+            },
+            entropy,
+        )
+    )
+
+
+def _describe(actual: dict[str, object], expected: dict[str, object]) -> str:
+    """What differs, as paths - the message a reader gets at 2am."""
+    lines: list[str] = []
+    for path in sorted(set(expected) - set(actual)):
+        lines.append(f"  GONE     {path}: was {expected[path]!r}")
+    for path in sorted(set(actual) - set(expected)):
+        lines.append(f"  NEW      {path}: now {actual[path]!r}")
+    for path in sorted(set(actual) & set(expected)):
+        if actual[path] != expected[path]:
+            lines.append(f"  CHANGED  {path}: was {expected[path]!r}, now {actual[path]!r}")
+    return "\n".join(lines)
+
+
+def _write_golden(snapshot: dict[str, object]) -> None:
+    """Freeze this run as the expectation - only from a tree without the refactor.
+
+    THE GUARD IS THE POINT. A golden regenerated from the current implementation
+    would make this test assert that the code does what the code does, and it
+    would still be green, which is the failure mode that leaves everyone
+    believing the refactor was checked. So the only tree this will write from is
+    one where `PhaseFailure.record_in` and `CancelledExecution.wind_down` do not
+    exist - that is, one where 1b8c259a is not applied.
+
+    To regenerate::
+
+        git worktree add /tmp/pre-1205 HEAD
+        git -C /tmp/pre-1205 revert --no-commit --no-edit 1b8c259a
+        cp <this file> /tmp/pre-1205/<same path>
+        cd /tmp/pre-1205 && SYN_1205_WRITE_PREREFACTOR_GOLDEN=1 uv run pytest <that file>
+        cp /tmp/pre-1205/<golden> <golden>
+    """
+    for owner, method in (("PhaseFailure", "record_in"), ("CancelledExecution", "wind_down")):
+        if hasattr(getattr(phase_outcome, owner), method):
+            msg = (
+                f"Refusing to write the golden: {owner}.{method} exists, so this tree "
+                "HAS #1205's refactor applied. An expectation taken from it would agree "
+                "with the refactor by construction and prove nothing. Revert 1b8c259a "
+                "first - see this function's docstring."
+            )
+            raise AssertionError(msg)
+    _GOLDEN.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+
+
+async def test_every_sink_holds_exactly_what_it_held_before_the_refactor() -> None:
+    """The whole of all four sinks, against the tree that predates #1205.
+
+    This is the only assertion in this file that can fail for a reason nobody
+    thought of in advance, which is the reason it exists. The tests above encode
+    what somebody knew to look for; a refactor's risk is the field nobody
+    thought to look at.
+
+    A failure here is NOT automatically a bug - a later change may legitimately
+    alter one of these sinks. It is a claim that #1205's "byte-identical" no
+    longer holds, and the paths in the message say where. Read them, decide
+    whether the change was meant, and if it was, regenerate as `_write_golden`
+    describes.
+    """
+    snapshot = _snapshot(await _failed_run("exec-1205-golden"))
+
+    if os.environ.get(REGENERATE_ENV) == "1":
+        _write_golden(snapshot)
+
+    expected: dict[str, object] = json.loads(_GOLDEN.read_text())
+    assert snapshot == expected, (
+        "A sink no longer holds what it held before #1205 was applied:\n"
+        + _describe(snapshot, expected)
     )
