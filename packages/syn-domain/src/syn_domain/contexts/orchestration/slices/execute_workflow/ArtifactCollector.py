@@ -219,8 +219,10 @@ class ArtifactCollector:
         Args:
             workspace: The workspace being provisioned for the NEXT phase.
             completed_phase_ids: Every phase already finished, not just the last.
-            phase_outputs: phase_id -> primary deliverable content. Feeds the
-                flat ``artifacts/input/<phase-id>.md`` alias.
+            phase_outputs: phase_id -> primary deliverable content, the
+                pre-#988 cache shape. Used only for a phase whose output tree
+                is unknown, and then it IS that phase's tree - a single file
+                whose path was never recorded.
             execution_id: Used to re-query the projection after a restart.
             phase_files: phase_id -> that phase's whole output tree (#988).
                 Omitted or missing a phase means "resolve it from the
@@ -230,24 +232,37 @@ class ArtifactCollector:
             return
 
         resolved = await self._resolve_phase_outputs(
-            completed_phase_ids, phase_outputs, execution_id
+            completed_phase_ids, phase_files or {}, phase_outputs, execution_id
         )
-        resolved_files = await self._resolve_phase_files(
-            completed_phase_ids, phase_files or {}, execution_id
-        )
-        await self._inject_and_log(workspace, resolved, resolved_files, completed_phase_ids)
+        await self._inject_and_log(workspace, resolved, completed_phase_ids)
 
-    async def _resolve_phase_files(
+    async def _resolve_phase_outputs(
         self,
         completed_phase_ids: list[str],
         phase_files: dict[str, list[PhaseOutputFile]],
+        phase_outputs: dict[str, str],
         execution_id: str,
     ) -> dict[str, list[PhaseOutputFile]]:
-        """Resolve phase output trees from cache, falling back to the projection.
+        """What each completed phase produced. The single authority (#1149).
 
-        Mirrors ``_resolve_phase_outputs``. The fallback matters because the
-        in-process cache dies with the processor; without it a restart would
-        hand the next phase the flat alias only and quietly lose the tree.
+        Every shape the next workspace receives is derived from this one
+        answer. There used to be a second resolution, for the flat alias
+        alone, with its own cache-then-projection fallback; nothing forced
+        the two to agree and they did not have to fail together, so a phase
+        could resolve as files and not as an output string and arrive with a
+        tree and no alias.
+
+        Sources in order of how much they know, first hit wins per phase:
+        the caller's file cache, the projection, then the caller's pre-#988
+        primary string. The last is a tree of one file with no recorded path
+        - the same shape a pre-v5 artifact has, and it reaches the next phase
+        the same way, through the alias only.
+
+        The projection is not asked for the alias separately because it
+        cannot answer differently: ``get_files_for_phase_injection`` applies
+        the same filter and the same ``_injection_rank`` as
+        ``get_for_phase_injection`` and returns the latter's answer as its
+        first entry.
         """
         resolved = {pid: phase_files[pid] for pid in completed_phase_ids if pid in phase_files}
         missing = [pid for pid in completed_phase_ids if pid not in resolved]
@@ -258,55 +273,69 @@ class ArtifactCollector:
                     completed_phase_ids=missing,
                 )
             )
-        return resolved
-
-    async def _resolve_phase_outputs(
-        self,
-        completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
-        execution_id: str,
-    ) -> dict[str, str]:
-        """Resolve phase outputs from cache, falling back to projection query."""
-        resolved = {pid: phase_outputs[pid] for pid in completed_phase_ids if pid in phase_outputs}
-        missing = [pid for pid in completed_phase_ids if pid not in resolved]
-        if missing and self._query_service:
-            projection_outputs = await self._query_service.get_for_phase_injection(
-                execution_id=execution_id,
-                completed_phase_ids=missing,
-            )
-            resolved.update(projection_outputs)
+        for phase_id in completed_phase_ids:
+            if phase_id not in resolved and phase_id in phase_outputs:
+                resolved[phase_id] = [
+                    PhaseOutputFile(source_path=None, content=phase_outputs[phase_id])
+                ]
         return resolved
 
     @classmethod
-    def _tree_files(
+    def _injectable(
         cls,
-        resolved_files: dict[str, list[PhaseOutputFile]],
+        phase_id: str,
+        produced: list[PhaseOutputFile],
         seen: set[str],
     ) -> list[tuple[str, bytes]]:
-        """Every produced file that may safely be injected, as (path, bytes).
+        """Everything one completed phase contributes, as (path, bytes).
 
-        Extracted from `_inject_and_log` rather than inlined: with the
-        containment refusal added, that method crossed the cognitive-complexity
-        threshold. Splitting on "which files are eligible" versus "write them"
-        is the natural seam anyway - the eligibility rules are what carry the
-        security argument and deserve to be readable on their own.
+        BOTH shapes come from the one list, which is the whole point of
+        #1149: the tree is every file whose path was recorded, and the flat
+        alias is the head of the same list. Deriving them together is what
+        makes "the tree exists but the alias does not" unrepresentable rather
+        than merely unlikely.
 
-        Mutates `seen` so the flat alias emitted afterwards can skip a path this
-        already claimed.
+        A file whose ``source_path`` is None predates ArtifactCreated v5, or
+        arrived as a bare pre-#988 primary string. Its path was never
+        recorded, so it reaches the next phase through the alias only;
+        inventing a path the author never chose is worse.
+
+        Mutates ``seen``: the first write to a path wins, across phases.
         """
         out: list[tuple[str, bytes]] = []
-        for phase_id, produced_files in resolved_files.items():
-            for produced in produced_files:
-                if produced.source_path is None:
-                    continue  # pre-v5 artifact: no path, alias only
-                path = cls._tree_path(phase_id, produced.source_path)
-                if path is None:
-                    continue  # refused: would escape the workspace
-                if path in seen:
-                    continue
-                seen.add(path)
-                out.append((path, produced.content.encode()))
+        for produced_file in produced:
+            if produced_file.source_path is None:
+                continue  # path unknown: this one travels as the alias
+            path = cls._tree_path(phase_id, produced_file.source_path)
+            if path is None:
+                continue  # refused: would escape the workspace
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append((path, produced_file.content.encode()))
+
+        primary = cls._primary_deliverable(produced)
+        alias = cls._flat_alias_path(phase_id)
+        if primary is not None and alias not in seen:
+            seen.add(alias)
+            out.append((alias, primary.encode()))
         return out
+
+    @staticmethod
+    def _primary_deliverable(produced: list[PhaseOutputFile]) -> str | None:
+        """The one file that stands for the phase, or None if it produced none.
+
+        The head of the list, because both sources put the primary
+        deliverable there: the projection sorts by ``_injection_rank``, which
+        ranks the explicitly-flagged primary first (#997), and the live path
+        collects in the order it flagged. Choosing here by any other rule
+        would recreate the disagreement #1149 removed, one layer down.
+
+        Empty content is not a deliverable - `CreateArtifactCommand` rejects
+        it and every other reader skips it, so a legacy or corrupt row cannot
+        become the alias.
+        """
+        return next((f.content for f in produced if f.content), None)
 
     @staticmethod
     def _tree_path(phase_id: str, source_path: str) -> str | None:
@@ -375,8 +404,7 @@ class ArtifactCollector:
     async def _inject_and_log(
         cls,
         workspace: ArtifactWorkspace,
-        resolved_outputs: dict[str, str],
-        resolved_files: dict[str, list[PhaseOutputFile]],
+        resolved: dict[str, list[PhaseOutputFile]],
         completed_phase_ids: list[str],
     ) -> None:
         """Inject every earlier phase's output tree, plus the flat alias.
@@ -388,29 +416,21 @@ class ArtifactCollector:
         * ``artifacts/input/<phase-id>.md`` - the primary deliverable under the
           pre-#988 name, so existing workflows keep reading.
 
-        A file whose ``source_path`` is None predates ArtifactCreated v5. Its
-        original path was never recorded, so it gets the flat alias only; the
-        alternative would be inventing a path the author never chose.
+        Both are derived from ``resolved``, per phase, so a phase that
+        contributes one contributes the other.
         """
         files_to_inject: list[tuple[str, bytes]] = []
         seen: set[str] = set()
 
-        for path, content in cls._tree_files(resolved_files, seen):
-            files_to_inject.append((path, content))
-
-        for phase_id, content in resolved_outputs.items():
-            alias = cls._flat_alias_path(phase_id)
-            if alias in seen:
-                continue
-            seen.add(alias)
-            files_to_inject.append((alias, content.encode()))
+        for phase_id, produced in resolved.items():
+            files_to_inject.extend(cls._injectable(phase_id, produced, seen))
 
         if files_to_inject:
             await workspace.inject_files(files_to_inject)
             logger.info(
                 "Injected %d file(s) from previous phases: %s",
                 len(files_to_inject),
-                sorted(set(resolved_outputs) | set(resolved_files)),
+                sorted(resolved),
             )
         elif completed_phase_ids:
             logger.warning(
