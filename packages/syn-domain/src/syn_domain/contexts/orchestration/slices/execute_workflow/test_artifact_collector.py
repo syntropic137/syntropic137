@@ -558,3 +558,161 @@ class TestADeclaredOutputMustBeProduced:
         )
 
         assert [a.artifact_type for a in repo.saved] == [ArtifactType.PLAN]
+
+
+@pytest.mark.unit
+class TestTheFlatAliasDerivesFromTheTree:
+    """The alias and the tree come from ONE resolution (issue #1149).
+
+    They used to be two: `_resolve_phase_files` fed
+    `artifacts/input/<phase-id>/<path>` and a separate `_resolve_phase_outputs`
+    fed `artifacts/input/<phase-id>.md`, each with its own cache-then-projection
+    fallback. Nothing forced them to agree, so a phase could resolve as files
+    and not as an output string, receive the tree, receive no alias, and every
+    prompt reading the alias - half the corpus - found nothing and stopped with
+    zero commands run. Three container sessions died that way.
+
+    These drive the real collector and assert on what reaches the workspace,
+    which is the only place the disagreement was ever visible.
+    """
+
+    @staticmethod
+    async def _inject(
+        *,
+        phase_outputs: dict[str, str],
+        phase_files: dict[str, list[PhaseOutputFile]] | None,
+        query_service: object | None = None,
+    ) -> dict[str, bytes]:
+        collector = ArtifactCollector(MockArtifactRepo(), None, query_service)  # type: ignore[arg-type]
+        workspace = MockWorkspace()
+        await collector.inject_from_previous_phases_explicit(
+            workspace=workspace,
+            completed_phase_ids=["p1"],
+            phase_outputs=phase_outputs,
+            execution_id="e1",
+            phase_files=phase_files,
+        )
+        return dict(workspace.injected_files)
+
+    @pytest.mark.asyncio
+    async def test_a_phase_resolved_from_the_projection_gets_both_shapes(self) -> None:
+        """The reported incident, at the hop that showed it.
+
+        The projection answers for the tree; the phase is absent from both
+        halves of the in-process cache, which is what a restart looks like.
+        Before #1149 the second resolution ran independently and could come
+        back empty, and then only the tree was written.
+        """
+
+        class FilesOnlyQueryService:
+            async def get_for_phase_injection(
+                self, execution_id: str, completed_phase_ids: list[str]
+            ) -> dict[str, str]:
+                del execution_id, completed_phase_ids
+                return {}
+
+            async def get_files_for_phase_injection(
+                self, execution_id: str, completed_phase_ids: list[str]
+            ) -> dict[str, list[PhaseOutputFile]]:
+                del execution_id, completed_phase_ids
+                return {
+                    "p1": [
+                        PhaseOutputFile(
+                            source_path="artifacts/output/deliverable.md",
+                            content="# Findings\nthe real deliverable",
+                        )
+                    ]
+                }
+
+        injected = await self._inject(
+            phase_outputs={},
+            phase_files={},
+            query_service=FilesOnlyQueryService(),
+        )
+
+        assert injected["artifacts/input/p1/deliverable.md"] == b"# Findings\nthe real deliverable"
+        assert injected["artifacts/input/p1.md"] == b"# Findings\nthe real deliverable"
+
+    @pytest.mark.asyncio
+    async def test_a_phase_cached_as_files_only_gets_both_shapes(self) -> None:
+        """The same divergence on the live path, with no projection at all.
+
+        `PhaseOutputCache` records `primary` and `files` under separate
+        truthiness checks, so the caller can hand over one without the other.
+        """
+        injected = await self._inject(
+            phase_outputs={},
+            phase_files={
+                "p1": [
+                    PhaseOutputFile(
+                        source_path="artifacts/output/deliverable.md",
+                        content="# Findings\nthe real deliverable",
+                    )
+                ]
+            },
+        )
+
+        assert injected["artifacts/input/p1/deliverable.md"] == b"# Findings\nthe real deliverable"
+        assert injected["artifacts/input/p1.md"] == b"# Findings\nthe real deliverable"
+
+    @pytest.mark.asyncio
+    async def test_when_the_two_sources_disagree_the_tree_wins(self) -> None:
+        """Presence is not enough: the two shapes must name the same content.
+
+        Both resolutions succeeding is the case the old code got least wrong
+        and still got wrong - it wrote the tree from one source and the alias
+        from the other, so a phase could read a deliverable at
+        `<phase-id>.md` that no file under `<phase-id>/` matched. The stale
+        string here cannot be the answer unless a second resolution still
+        feeds the alias.
+        """
+        injected = await self._inject(
+            phase_outputs={"p1": "STALE: a second resolution answered this"},
+            phase_files={
+                "p1": [
+                    PhaseOutputFile(
+                        source_path="artifacts/output/deliverable.md",
+                        content="# Findings\nthe real deliverable",
+                    )
+                ]
+            },
+        )
+
+        assert injected["artifacts/input/p1.md"] == b"# Findings\nthe real deliverable"
+        assert injected["artifacts/input/p1.md"] == injected["artifacts/input/p1/deliverable.md"]
+
+    @pytest.mark.asyncio
+    async def test_the_alias_is_the_phases_primary_deliverable(self) -> None:
+        """Which file of several stands for the phase.
+
+        Both sources rank the primary deliverable first - `_injection_rank` on
+        the projection path, collection order on the live one - so the alias is
+        the head of the list, not an arbitrary member of it.
+        """
+        injected = await self._inject(
+            phase_outputs={},
+            phase_files={
+                "p1": [
+                    PhaseOutputFile(
+                        source_path="artifacts/output/deliverable.md", content="the primary"
+                    ),
+                    PhaseOutputFile(
+                        source_path="artifacts/output/review.yaml", content="findings: []"
+                    ),
+                ]
+            },
+        )
+
+        assert injected["artifacts/input/p1.md"] == b"the primary"
+
+    @pytest.mark.asyncio
+    async def test_a_phase_that_produced_nothing_gets_neither_shape(self) -> None:
+        """The alias must not appear for a phase with no resolvable output.
+
+        Deriving it from the tree could have been implemented as "always write
+        something", which would hand the next phase an empty file and turn a
+        loud missing input into a silent empty one.
+        """
+        injected = await self._inject(phase_outputs={}, phase_files={"p1": []})
+
+        assert injected == {}
