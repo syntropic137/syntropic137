@@ -317,3 +317,85 @@ def test_the_pinned_python_version_is_read_from_the_workflow() -> None:
 
 def test_the_local_python_version_is_a_minor_version() -> None:
     assert local_python_version().count(".") == 1
+
+
+# --- The interpreter itself (#1018) -----------------------------------------
+#
+# `qa-ci` claims "CI will pass". It cannot mean that if the tests ran on an
+# interpreter CI never uses, so the version is part of the parity contract and
+# these drive it the same way the rest of this file drives the job mapping:
+# through the gate's failure.
+
+
+def test_the_repo_pins_the_interpreter_ci_uses() -> None:
+    """A committed pin is what makes the mismatch impossible rather than noticed.
+
+    `uv` reads `.python-version` before falling back to the newest interpreter
+    on the machine, so this file is the mechanism; everything below is only the
+    check that it has not drifted.
+    """
+    pin = check_ci_parity.PYTHON_PIN
+
+    assert pin.is_file(), f"{pin.name} is missing: nothing makes a local venv match CI"
+    assert pin.read_text().strip() == ci_python_version(
+        (check_ci_parity.WORKFLOW_DIR / "ci.yml").read_text()
+    )
+
+
+def test_main_fails_when_the_gate_runs_on_an_interpreter_ci_does_not_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dropped hop this guards: a checker that exists but nothing calls.
+
+    Driven through `main()` against the real repo, because a mismatch that only
+    `python_version_problems()` knows about still reports "CI will pass".
+    """
+    monkeypatch.setattr(check_ci_parity, "local_python_version", lambda: "3.99")
+
+    assert check_ci_parity.main() == 1
+
+
+def test_main_passes_on_the_pinned_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other direction: the pinned interpreter must not be reported as drift.
+
+    Pinned rather than ambient so this asserts the same thing on a machine that
+    is currently running the wrong Python - which is exactly when it is read.
+    """
+    monkeypatch.setattr(
+        check_ci_parity,
+        "local_python_version",
+        lambda: check_ci_parity.PYTHON_PIN.read_text().strip(),
+    )
+
+    assert check_ci_parity.main() == 0
+
+
+def test_an_unpinned_repo_is_a_problem() -> None:
+    """#1018 itself: `requires-python = ">=3.12"` alone resolves to 3.14."""
+    problems = check_ci_parity.python_version_problems({"ci.yml": "3.12"}, None, "3.12")
+
+    assert len(problems) == 1
+    assert ".python-version" in problems[0]
+
+
+def test_a_pin_that_drifted_from_ci_is_a_problem() -> None:
+    """Bumping ci.yml and forgetting the pin recreates the bug, silently."""
+    problems = check_ci_parity.python_version_problems({"ci.yml": "3.13"}, "3.12", "3.13")
+
+    assert len(problems) == 1
+    assert "3.12" in problems[0] and "3.13" in problems[0]
+
+
+def test_ci_disagreeing_with_itself_is_reported_not_guessed() -> None:
+    """With two pins there is no version a local venv could match; say so."""
+    problems = check_ci_parity.python_version_problems(
+        {"ci.yml": "3.12", "e2e-container.yml": "3.13", "docs-lint.yml": None}, "3.12", "3.12"
+    )
+
+    assert len(problems) == 1
+    assert "e2e-container.yml" in problems[0]
+
+
+def test_ci_pinning_nothing_leaves_nothing_to_match() -> None:
+    """No pin anywhere means CI takes the runner default; there is no contract."""
+    assert check_ci_parity.python_version_problems({"docs-lint.yml": None}, None, "3.14") == []
