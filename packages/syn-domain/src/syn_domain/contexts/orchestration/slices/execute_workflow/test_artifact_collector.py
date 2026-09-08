@@ -154,25 +154,39 @@ class TestArtifactCollector:
 
     @pytest.mark.asyncio
     async def test_inject_from_query_service(self) -> None:
-        """Test injection path that falls back to query service for missing phases."""
+        """Test injection path that falls back to query service for missing phases.
+
+        p2's artifacts predate ArtifactCreated v5, so no file carries a
+        source_path and only the flat alias is written for it.
+
+        The mock returns those rows from `get_files_for_phase_injection` with
+        `source_path=None`, which is what the real `ArtifactQueryService`
+        does - it filters and ranks the same rows for both readers, and a
+        missing path is a None field, not a missing row. It previously
+        returned `{}` here and separately answered `get_for_phase_injection`,
+        a shape the real service cannot produce; #1149 removed the second
+        lookup that made the difference invisible.
+        """
         queried: list[tuple[str, list[str]]] = []
 
         class MockQueryService:
             async def get_for_phase_injection(
                 self, execution_id: str, completed_phase_ids: list[str]
             ) -> dict[str, str]:
-                queried.append((execution_id, completed_phase_ids))
-                return {"p2": "content from projection"}
+                del execution_id, completed_phase_ids
+                raise AssertionError(
+                    "injection resolves the tree only; the alias derives from it (#1149)"
+                )
 
             async def get_files_for_phase_injection(
                 self,
                 execution_id: str,
                 completed_phase_ids: list[str],
             ) -> dict[str, list[PhaseOutputFile]]:
-                # This execution predates ArtifactCreated v5, so no file
-                # carries a source_path and only the flat alias is written.
-                del execution_id, completed_phase_ids
-                return {}
+                queried.append((execution_id, completed_phase_ids))
+                return {
+                    "p2": [PhaseOutputFile(source_path=None, content="content from projection")]
+                }
 
         collector = ArtifactCollector(MockArtifactRepo(), None, MockQueryService())  # type: ignore[arg-type]
         workspace = MockWorkspace()
@@ -183,11 +197,15 @@ class TestArtifactCollector:
         await collector.inject_from_previous_phases(workspace, ctx)  # type: ignore[arg-type]
         assert len(workspace.injected_files) == 2
         # p1 from cache, p2 from query service
-        paths = [f[0] for f in workspace.injected_files]
-        assert "artifacts/input/p1.md" in paths
-        assert "artifacts/input/p2.md" in paths
-        assert len(queried) == 1
-        assert queried[0] == ("e1", ["p2"])
+        injected = dict(workspace.injected_files)
+        assert injected["artifacts/input/p1.md"] == b"cached content"
+        assert injected["artifacts/input/p2.md"] == b"content from projection"
+        # One query, for both phases. p1 is cached as a bare primary string
+        # only, and the projection knows strictly more than that - it has the
+        # tree - so it is still asked. This fan-out is what the files
+        # resolution has always done; #1149 removed the SECOND query beside
+        # it, not this one.
+        assert queried == [("e1", ["p1", "p2"])]
 
     @pytest.mark.asyncio
     async def test_collect_partial_success(self) -> None:
