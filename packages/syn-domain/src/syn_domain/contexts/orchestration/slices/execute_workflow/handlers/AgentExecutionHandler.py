@@ -80,6 +80,76 @@ def _detect_exit_code(
     return 0
 
 
+async def _phase_exit_code(
+    *,
+    runner: AgentRunner,
+    stream_result: StreamResult,
+    workspace: ManagedWorkspace,
+    phase_id: str,
+    tokens: TokenAccumulator,
+) -> int:
+    """The exit code the PHASE gets, which is not always the process's.
+
+    `_detect_exit_code` answers what the CLI did. This answers what that means
+    for the phase, which for codex is a different question: its parser reserves
+    `error_reason` for a BROKEN stream (malformed JSON, or no terminal
+    `turn.completed`), and a broken stream is a failed phase even when the
+    process exited 0.
+
+    ONE exception (issue #1111): a stream that simply stopped before
+    `turn.completed`, having produced the phase's deliverable, is a telemetry
+    gap and not a failed phase. Failing it discards finished work and skips
+    every downstream phase - three complete codex reviews were lost this way in
+    twelve hours. An auth failure or a malformed line still fails, because it
+    carries a DIFFERENT reason and because a codex that never authenticated
+    writes nothing to artifacts/output.
+    """
+    exit_code = _detect_exit_code(stream_result, workspace, phase_id, tokens)
+    if runner != AgentRunner.CODEX or stream_result.error_reason is None or exit_code != 0:
+        return exit_code
+    if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
+        await _produced_deliverable(workspace, phase_id)
+    ):
+        logger.warning(
+            "Codex stream ended without turn.completed but the phase produced "
+            "a deliverable (phase=%s) - completing with ESTIMATED usage",
+            phase_id,
+        )
+        return exit_code
+    return 1
+
+
+async def _record_phase_summary(
+    *,
+    collector: ObservabilityCollector | None,
+    runner: AgentRunner,
+    stream_result: StreamResult,
+    usage: FinalUsage,
+) -> None:
+    """Emit the phase's end-of-run totals to Lane 2, if this runner owes one.
+
+    ISS-217. Codex is silent here because `CodexStreamProcessor` already emits
+    its own summary; emitting a second one would double-count the same phase.
+
+    `total_cost_usd` stays whatever the harness said, including None: a NULL
+    cost is priced downstream from these tokens and this model, which is
+    exactly the estimate wanted for a phase killed before it could report one.
+    Passing 0.0 instead would be taken as authoritative and priced verbatim.
+    """
+    if collector is None or runner == AgentRunner.CODEX:
+        return
+    await collector.record_session_summary(
+        total_cost_usd=stream_result.total_cost_usd,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_creation=usage.cache_creation,
+        cache_read=usage.cache_read,
+        num_turns=stream_result.num_turns,
+        duration_ms=stream_result.duration_ms,
+        totals_are_authoritative=usage.is_authoritative,
+    )
+
+
 #: The only directory a phase's work survives in (ADR-036). ArtifactCollector
 #: collects exactly this glob, so "did the phase produce anything" and "will
 #: anything be collected" are the same question, asked of the same path.
@@ -326,34 +396,13 @@ class AgentExecutionHandler:
         finally:
             await launch.settle(workspace.last_stream_exit_code)
 
-        exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
-        if (
-            runner == AgentRunner.CODEX
-            and stream_result.error_reason is not None
-            and exit_code == 0
-        ):
-            # The codex parser reserves error_reason for a BROKEN stream
-            # (malformed JSON / missing terminal turn.completed); force a
-            # non-zero phase exit even when the process exit was 0.
-            #
-            # ONE exception (issue #1111): a stream that simply stopped before
-            # `turn.completed`, having produced the phase's deliverable, is a
-            # telemetry gap, not a failed phase. Failing it discards finished
-            # work and skips every downstream phase - three complete codex
-            # reviews were lost this way in twelve hours. An auth failure or a
-            # malformed line still fails here, because it carries a DIFFERENT
-            # reason and because a codex that never authenticated writes
-            # nothing to artifacts/output.
-            if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
-                await _produced_deliverable(workspace, todo.phase_id)
-            ):
-                logger.warning(
-                    "Codex stream ended without turn.completed but the phase produced "
-                    "a deliverable (phase=%s) - completing with ESTIMATED usage",
-                    todo.phase_id,
-                )
-            else:
-                exit_code = 1
+        exit_code = await _phase_exit_code(
+            runner=runner,
+            stream_result=stream_result,
+            workspace=workspace,
+            phase_id=todo.phase_id,
+            tokens=tokens,
+        )
 
         # Resolved ONCE, for both lanes. The session_summary used to be written
         # straight from `stream_result.result_*` while the command below used
@@ -362,26 +411,9 @@ class AgentExecutionHandler:
         # what the cost ledger reads (#1164).
         usage = FinalUsage.resolve(stream_result, tokens)
 
-        # ISS-217: Emit session_summary with the phase's end-of-run totals (Lane 2).
-        # The codex path already emits its summary inside CodexStreamProcessor
-        # (single-layer), so the handler skips it for runner == "codex".
-        #
-        # `total_cost_usd` stays whatever the harness said, including None: a
-        # NULL cost is priced downstream from these tokens and this model,
-        # which is exactly the estimate wanted for a phase that was killed
-        # before it could report one. Passing 0.0 instead would be taken as
-        # authoritative and priced verbatim.
-        if collector is not None and runner != AgentRunner.CODEX:
-            await collector.record_session_summary(
-                total_cost_usd=stream_result.total_cost_usd,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_creation=usage.cache_creation,
-                cache_read=usage.cache_read,
-                num_turns=stream_result.num_turns,
-                duration_ms=stream_result.duration_ms,
-                totals_are_authoritative=usage.is_authoritative,
-            )
+        await _record_phase_summary(
+            collector=collector, runner=runner, stream_result=stream_result, usage=usage
+        )
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
