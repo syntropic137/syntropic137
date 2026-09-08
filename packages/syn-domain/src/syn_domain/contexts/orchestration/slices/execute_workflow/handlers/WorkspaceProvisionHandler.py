@@ -15,6 +15,7 @@ loaded twice (#1192).
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Final
 
@@ -870,7 +871,8 @@ class WorkspaceProvisionHandler:
             for url in repos
             for filename in _CONTEXT_FILENAMES
         ]
-        script = f"sha256sum -- {' '.join(paths)} 2>/dev/null; echo {_SENTINEL}"
+        quoted = " ".join(shlex.quote(path) for path in paths)
+        script = f"sha256sum -- {quoted} 2>/dev/null; echo {_SENTINEL}"
         try:
             result = await workspace.execute(["sh", "-c", script])
             stdout = result.stdout

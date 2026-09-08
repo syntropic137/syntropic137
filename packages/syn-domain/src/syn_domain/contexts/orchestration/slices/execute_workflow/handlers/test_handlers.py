@@ -1128,6 +1128,21 @@ class TestWorkspaceProvisionHandler:
         assert result is not None
 
     @pytest.mark.anyio
+    async def test_probe_quotes_the_paths_it_interpolates(self) -> None:
+        """A repo name is untrusted input and the probe runs it through a shell.
+
+        ``_repo_name`` is the last URL segment with no sanitising, so anything
+        that reaches the probe script has to be quoted there.
+        """
+        workspace = AsyncMock()
+        workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, stdout="x"))
+        await self._handler()._generate_workspace_context(  # type: ignore[attr-defined]
+            workspace, ["https://github.com/org/repo;rm -rf /"]
+        )
+        script = workspace.execute.call_args.args[0][-1]
+        assert "sha256sum -- '/workspace/repos/repo;rm -rf /AGENTS.md'" in script, script
+
+    @pytest.mark.anyio
     async def test_handle_injects_deduplicated_context_for_identical_files(self) -> None:
         """The file the AGENT reads carries one @-import, not two (#1192).
 
