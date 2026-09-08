@@ -349,3 +349,69 @@ async def test_a_full_page_thinned_by_the_cutoff_is_not_the_ceiling(
         )
 
     assert not any("may remain for the next startup" in r.getMessage() for r in caplog.records)
+
+
+# Reconciliation is a NON-FATAL startup step, and its deferred imports are part
+# of that promise. `_init_degradable_services` awaits it outside the registry's
+# per-service handler (lifecycle.py), so an exception escaping this function is
+# not a skipped sweep - it aborts startup, and the subscription coordinator, the
+# GitHub pollers and the recovery loop initialised after it never start. These
+# assert the fatal surface directly, because it is invisible to every test that
+# only checks which rows were failed.
+
+
+def _hide(monkeypatch: pytest.MonkeyPatch, module: str, name: str) -> None:
+    """Make `from module import name` raise ImportError, as it would if the
+    symbol were renamed or moved out from under this deferred import."""
+    import importlib
+
+    monkeypatch.delattr(importlib.import_module(module), name, raising=True)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_unresolvable_repository_import_does_not_abort_startup(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A repository import that no longer resolves degrades; it does not raise."""
+    _install(monkeypatch, [_Summary("exec-1")], {"exec-1": _StubAggregate("exec-1")})
+    _hide(
+        monkeypatch,
+        "syn_adapters.storage.repositories",
+        "get_workflow_execution_repository",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+
+    assert any(r.levelno >= logging.ERROR for r in caplog.records), (
+        "a dependency this step could not resolve must still be reported"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_an_unresolvable_command_import_does_not_abort_startup(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`_fail_as_orphaned` says it never raises; its own import must obey that.
+
+    Outside the try, a command class that moved would take the whole sweep - and
+    the startup around it - down on the first row.
+    """
+    _, repository = _install(
+        monkeypatch,
+        [_Summary("exec-1"), _Summary("exec-2")],
+        {"exec-1": _StubAggregate("exec-1"), "exec-2": _StubAggregate("exec-2")},
+    )
+    _hide(monkeypatch, "syn_domain.contexts.orchestration", "FailExecutionCommand")
+
+    with caplog.at_level(logging.WARNING):
+        await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+
+    assert repository.saved == []
+    # Every row was attempted and reported, not just the one that raised first.
+    per_row = [
+        r for r in caplog.records if "Could not reconcile stranded execution" in r.getMessage()
+    ]
+    assert len(per_row) == 2

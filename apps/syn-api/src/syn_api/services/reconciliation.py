@@ -120,12 +120,17 @@ async def reconcile_orphaned_executions(
     if not stranded:
         return
 
-    # Safe unprotected: `_executions_this_restart_may_fail` returns a non-empty
-    # list only after `syn_api._wiring` imported, and that module imports
-    # `syn_adapters.storage.repositories` at module scope - so this import is
-    # already resolved. The CALL is deliberately outside a handler, as before:
-    # no repository means no reconciliation worth continuing into.
-    from syn_adapters.storage.repositories import get_workflow_execution_repository
+    # Guarded, because this whole function is a non-fatal startup step and an
+    # import is a way it can fail. `_init_degradable_services` awaits it OUTSIDE
+    # the registry's per-service handler, so anything that escapes here aborts
+    # startup itself and the services initialised after it - the subscription
+    # coordinator, the GitHub pollers, the recovery loop - never start at all.
+    # Trading a sweep for a dead API is not a trade reconciliation gets to make.
+    try:
+        from syn_adapters.storage.repositories import get_workflow_execution_repository
+    except Exception:
+        logger.exception("Could not import the execution repository (non-fatal)")
+        return
 
     repository = get_workflow_execution_repository()
     failed = 0
@@ -192,16 +197,17 @@ async def _fail_as_orphaned(
 ) -> bool:
     """Fail one stranded execution through its aggregate; report whether it was.
 
-    Never raises. A restart that gives up halfway is a restart that leaves
-    zombies, so every way one row can fail to reconcile - a read-model row with
-    no event stream behind it, an aggregate that has already gone terminal and
-    rejects the command, a storage error - is the same answer here: False, said
-    once in the log, and the sweep goes on to the next row.
+    Never raises, and the deferred import is INSIDE the try for that reason: a
+    restart that gives up halfway is a restart that leaves zombies, so every way
+    one row can fail to reconcile - a read-model row with no event stream behind
+    it, an aggregate that has already gone terminal and rejects the command, a
+    storage error, an import that does not resolve - is the same answer here:
+    False, said once in the log, and the sweep goes on to the next row.
     """
-    from syn_domain.contexts.orchestration import FailExecutionCommand
-
     execution_id = summary.workflow_execution_id
     try:
+        from syn_domain.contexts.orchestration import FailExecutionCommand
+
         aggregate = await repository.get_by_id(execution_id)
         if aggregate is None:
             logger.warning(
