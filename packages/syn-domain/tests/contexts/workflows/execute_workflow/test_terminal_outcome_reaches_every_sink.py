@@ -49,9 +49,18 @@ but that all four carry the same bytes of it is not.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+import dataclasses
+import json
+import os
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import pytest
+from pydantic import BaseModel
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
@@ -65,6 +74,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseStatus,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import WorkflowFailedEvent
+from syn_domain.contexts.orchestration.slices.execute_workflow import phase_outcome
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -188,6 +198,59 @@ class _SilentArtifactRepository:
         return None
 
 
+@dataclass(frozen=True)
+class _Observation:
+    """One call to the observability recorder, every argument of it kept.
+
+    A frozen dataclass rather than a tuple so the snapshot below names the
+    arguments: an observation that started arriving with `phase_id=None` is a
+    real regression and a positional capture would only say that "the third
+    field" changed.
+    """
+
+    session_id: str
+    observation_type: str
+    data: dict[str, Any]
+    execution_id: str | None
+    phase_id: str | None
+    workspace_id: str | None
+
+
+class _RecordingObservabilityWriter:
+    """The observability lane, kept in order. Sink 2's other half.
+
+    `wind_down` -> `report_failed` -> `complete_failure` writes twice: a domain
+    event on the session aggregate, and a `session_error` observation that is the
+    only trace a run leaves for the dashboard when its agent never produced any
+    telemetry of its own. `#1196` was that observation arriving blank, so it is
+    the half of sink 2 the fix was actually about, and leaving it unwired would
+    leave the test blind to it.
+    """
+
+    def __init__(self) -> None:
+        self.observations: list[_Observation] = []
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: object,
+        data: dict[str, Any],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.observations.append(
+            _Observation(
+                session_id=session_id,
+                observation_type=str(observation_type),
+                data=dict(data),
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+            )
+        )
+
+
 async def _prompt(
     phase: ExecutablePhase,
     execution_id: str,
@@ -234,10 +297,12 @@ class _Sinks:
         result: WorkflowExecutionResult,
         execution_events: list[object],
         session_events: list[object],
+        observations: list[_Observation],
     ) -> None:
         self.result = result
         self.execution_events = execution_events
         self.session_events = session_events
+        self.observations = observations
 
     @staticmethod
     def _of_type(events: Sequence[object], event_type: type[_Event]) -> list[_Event]:
@@ -260,6 +325,7 @@ async def _run(handler: FakeAgentExecutionHandler, execution_id: str) -> _Sinks:
     """Drive the full processor over two phases and collect what it wrote."""
     execution_repository = _RecordingExecutionRepository()
     session_repository = _RecordingSessionRepository()
+    observability = _RecordingObservabilityWriter()
     processor = WorkflowExecutionProcessor(
         execution_repository=execution_repository,  # type: ignore[arg-type]
         session_repository=session_repository,  # type: ignore[arg-type]
@@ -268,7 +334,7 @@ async def _run(handler: FakeAgentExecutionHandler, execution_id: str) -> _Sinks:
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
-        observability_writer=None,
+        observability_writer=observability,  # type: ignore[arg-type]
         controller=None,
         prompt_builder=_prompt,
         command_builder=_command,
@@ -282,7 +348,12 @@ async def _run(handler: FakeAgentExecutionHandler, execution_id: str) -> _Sinks:
         inputs={},
         execution_id=execution_id,
     )
-    return _Sinks(result, execution_repository.events, session_repository.events)
+    return _Sinks(
+        result,
+        execution_repository.events,
+        session_repository.events,
+        observability.observations,
+    )
 
 
 async def _failed_run(execution_id: str) -> _Sinks:
