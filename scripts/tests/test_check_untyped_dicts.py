@@ -549,7 +549,10 @@ class TestAssignmentRenamesDoNotHide:
         [
             ("renamed builtin dict", "D = dict\nx: D[str, Any]\n"),
             ("renamed typing.Dict", "from typing import Dict\nD = Dict\nx: D[str, Any]\n"),
-            ("renamed Mapping", "from collections.abc import Mapping\nM = Mapping\nx: M[str, object]\n"),
+            (
+                "renamed Mapping",
+                "from collections.abc import Mapping\nM = Mapping\nx: M[str, object]\n",
+            ),
             (
                 "renamed MutableMapping",
                 "from collections.abc import MutableMapping\nMM = MutableMapping\nx: MM[str, Any]\n",
@@ -566,7 +569,10 @@ class TestAssignmentRenamesDoNotHide:
             ("renamed value type", "from typing import Any\nA = Any\nx: dict[str, A]\n"),
             ("renamed key type", "S = str\nx: dict[S, Any]\n"),
             ("renamed inside a forward reference", 'D = dict\nx: "D[str, Any]"\n'),
-            ("renamed under an annotation", "from typing import TypeAlias\nD: TypeAlias = dict\nx: D[str, Any]\n"),
+            (
+                "renamed under an annotation",
+                "from typing import TypeAlias\nD: TypeAlias = dict\nx: D[str, Any]\n",
+            ),
             ("renamed by a type statement", "type D = dict\nx: D[str, Any]\n"),
             ("renamed twice", "D = dict\nE = D\nx: E[str, Any]\n"),
             (

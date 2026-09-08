@@ -156,10 +156,17 @@ Three shapes:
 | A `SimpleNamespace` | every written occurrence | declares no fields at all, so says even less than `dict[str, Any]` |
 
 All spellings of each: plain or dotted, quoted, wrapped across lines, or
-renamed on the way in (`from typing import Dict as D`) — imports are resolved
-before names are matched. Docstrings and comments are not code and do not
-count. An alias, and equally a `TypedDict`, counts where it is defined and not
-at each use, because the definition is the one place a fix has to happen.
+renamed — on the import (`from typing import Dict as D`) or by assignment
+(`D = dict`, `D: TypeAlias = dict`, `type D = dict`), chains included. Renames
+are resolved before names are matched, because a rename is the cheapest dodge
+there is: one line, no import, and nothing at the point of use for a reader to
+notice. Docstrings and comments are not code and do not count.
+
+A rename is not an alias. `D = dict` writes no type and spends no budget; the
+erasure arrives at `D[str, Any]` and is counted there. `D = dict[str, Any]` is
+a complete type, so it counts once at that line and not at each use — the same
+rule as a `TypedDict`, and for the same reason: the definition is the one place
+a fix has to happen.
 
 `NamedTuple` is deliberately **not** counted. It names and types every field
 and is read by attribute, so it satisfies both halves of the rule; it is what
@@ -177,6 +184,11 @@ ratchet pressure taking the cheapest green path:
   gate was declared a `TypedDict` instead and it went green (PR #1246), while
   independent review refused the head anyway. So: **a `TypedDict` is not a fix
   for an untyped dict.** Use a `@dataclass` or a Pydantic `BaseModel`.
+- **It listed one rename** (caught in review on #1248, before merge). Closing
+  the import rename and not `D = dict` would have left every constructor above
+  reachable under a name the gate does not know, which is the #1188 defect one
+  level up: not a number that moves for a rename, but a number that stays
+  still. When you close a spelling, close the class it belongs to.
 
 Both fixes re-baselined the packages rather than raising them — #1188 to 413 /
 205 / 139 / 22 / 11, #1248 to 440 / 208 / 146 / 22 / 16. `syn-api` at #1188 is
