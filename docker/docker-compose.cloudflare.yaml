@@ -10,6 +10,21 @@
 
 services:
   # ===========================================================================
+  # GATEWAY — told that a tunnel publishes it
+  # ===========================================================================
+  # A container cannot see that something else in its stack is publishing it to
+  # the internet, so this overlay says so. The gateway entrypoint then requires
+  # SYN_API_PASSWORD and refuses to start without one, which is what stops an
+  # unauthenticated tunnel existing at all (#1148).
+  #
+  # Derived from the token rather than hard-wired to "yes": the token is what
+  # actually makes cloudflared connect, so this is set exactly when a tunnel
+  # can come up. Only the marker crosses over -- the token stays below.
+  gateway:
+    environment:
+      - SYN_GATEWAY_TUNNEL=${CLOUDFLARE_TUNNEL_TOKEN:+cloudflare}
+
+  # ===========================================================================
   # CLOUDFLARE TUNNEL
   # ===========================================================================
   # Provides secure, zero-trust access without port forwarding.

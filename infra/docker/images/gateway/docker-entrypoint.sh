@@ -3,30 +3,42 @@ set -e
 
 # Generate nginx auth config and shared locations from env vars.
 #
-# Two listeners, one rule: a listener that is reachable from beyond this host
-# requires Basic Auth.
+# One rule, applied to the whole gateway: if this gateway is reachable from
+# beyond this host, SYN_API_PASSWORD is mandatory and nginx does not start
+# without it.
 #
-#   Port 8081 is the tunnel listener. It is never host-published, but
-#     cloudflared reaches it from the internet, so its auth follows
-#     SYN_API_PASSWORD exactly as before.
+# There are exactly two ways to reach it from beyond this host, and a container
+# can observe neither of them by itself, so both are handed in by the compose
+# file that creates them:
 #
-#   Port 80 is the listener the host publishes, at SYN_GATEWAY_BIND. While
-#     that is a loopback address the port is reachable from this host only,
-#     so auth stays off and local dev/testing/Playwright is unaffected. Bound
-#     anywhere else it is reachable from that network, so a password becomes
-#     mandatory: without one this script exits non-zero and nginx never
-#     starts (#1022). That is the whole point - before this, binding off
-#     loopback published an unauthenticated API while SYN_API_PASSWORD sat
-#     set in the operator's .env, protecting a port nothing published.
+#   SYN_GATEWAY_BIND is the host address port 80 is published on. While that is
+#     a loopback address the port is reachable from this host only, so auth
+#     stays off and local dev/testing/Playwright is unaffected. Bound anywhere
+#     else it is reachable from that network (#1022).
 #
-# A container cannot observe its own host port mapping, so the compose file
-# has to pass SYN_GATEWAY_BIND in alongside the `ports:` entry that uses it.
-# Forgetting that wiring would silently disarm the check, so it is enforced by
-# ci/fitness/infrastructure/test_gateway_bind.py.
+#   SYN_GATEWAY_TUNNEL is non-empty when a tunnel in this stack publishes it to
+#     the internet. A tunnel has no host port to bind, so the locality half of
+#     the rule has nothing to say about it and binding it to loopback would
+#     just delete the feature; what remains is the auth half, which is the
+#     whole of the requirement here (#1148). Its value names the tunnel, and
+#     only that: the token itself stays with the tunnel container.
+#
+# The compose files publish the gateway and hand these in, so forgetting either
+# one silently disarms the check on that stack -- which is the whole of #1148.
+# Both wirings are enforced from the compose files themselves by
+# infra/scripts/tests/test_gateway_auth_binding.py, which discovers the stacks
+# rather than being told them.
+#
+# What this canNOT decide is where a tunnel points. Tunnel routing lives in the
+# provider's dashboard, not in this repo, so a tunnel aimed at api:8000 or at
+# an unauthenticated port 80 bypasses nginx entirely. Requiring credentials to
+# exist is the part that is enforceable here; pointing the tunnel at the
+# authenticated listener is documented beside each tunnel overlay.
 AUTH_DIR="${AUTH_DIR:-/tmp/nginx-auth}"
 mkdir -p "$AUTH_DIR"
 
 GATEWAY_BIND="${SYN_GATEWAY_BIND:-127.0.0.1}"
+GATEWAY_TUNNEL="${SYN_GATEWAY_TUNNEL:-}"
 
 # 127.0.0.0/8, ::1 (docker accepts it bracketed or bare), and the name that
 # resolves to them. Docker also treats an empty host IP as "every interface",
@@ -42,17 +54,29 @@ is_loopback() {
     esac
 }
 
-if ! is_loopback "$GATEWAY_BIND" && [ -z "${SYN_API_PASSWORD:-}" ]; then
+# Why this gateway is reachable from beyond this host, in the operator's own
+# terms. Empty means it is not, and then a password stays optional.
+REACH=""
+if ! is_loopback "$GATEWAY_BIND"; then
+    REACH="  SYN_GATEWAY_BIND=${GATEWAY_BIND} publishes port 80 to that network."
+fi
+if [ -n "$GATEWAY_TUNNEL" ]; then
+    REACH="${REACH:+${REACH}
+}  A ${GATEWAY_TUNNEL} tunnel in this stack publishes it to the internet."
+fi
+
+if [ -n "$REACH" ] && [ -z "${SYN_API_PASSWORD:-}" ]; then
     cat >&2 <<ERROR
 gateway: refusing to start.
 
-  SYN_GATEWAY_BIND=${GATEWAY_BIND} publishes the dashboard and the API to that
-  network, and SYN_API_PASSWORD is empty, so nothing would ask a caller for
-  credentials.
+${REACH}
 
-  Either set SYN_API_PASSWORD (generate one with: openssl rand -hex 32), or
-  leave SYN_GATEWAY_BIND at 127.0.0.1 and reach the stack over a VPN or
-  tunnel.
+  SYN_API_PASSWORD is empty, so nothing would ask a caller for credentials, and
+  the dashboard and the whole API would be served to whoever can reach it.
+
+  Set SYN_API_PASSWORD (generate one with: openssl rand -hex 32), or stop
+  publishing the gateway: leave SYN_GATEWAY_BIND at 127.0.0.1 and start the
+  stack without its tunnel overlay.
 ERROR
     exit 1
 fi

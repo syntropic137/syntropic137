@@ -6,8 +6,40 @@
 #
 # This is the dev-mode equivalent of docker-compose.cloudflare.yaml,
 # which routes through the selfhost gateway instead.
+#
+# WHAT THIS OVERLAY PUBLISHES, AND WHAT THE COUPLING CAN AND CANNOT DO (#1148)
+#
+# A tunnel has no host port, so "bind it to loopback" is not available here and
+# would delete the feature if it were. What remains of "reaching the network
+# and requiring auth are coupled" is the auth half: a stack that runs a tunnel
+# must have SYN_API_PASSWORD set. `just dev` refuses without one
+# (infra/scripts/require-tunnel-auth.sh) and so does the gateway itself, via
+# the SYN_GATEWAY_TUNNEL marker below.
+#
+# That coupling is enforced. What it does NOT yet buy in dev is a listener the
+# password actually guards: nginx.conf.dev, which docker-compose.dev.yaml
+# mounts over the baked config, has no auth stanza and no port 8081, and the
+# service URL above points past the gateway at the API, which has no auth layer
+# of its own. So in dev the password makes the exposure deliberate rather than
+# accidental; it does not authenticate it. Giving the dev gateway an
+# authenticated tunnel listener, or dropping this path for smee, is #1250.
 
 services:
+  # The dev gateway hard-wires SYN_API_PASSWORD to "" in
+  # docker-compose.dev.yaml, which is right for a loopback-only stack and wrong
+  # the moment a tunnel is in the same project: it would make the requirement
+  # unsatisfiable, exactly as the on-demand stack's hard-wired empty password
+  # did. Reopen it here so an operator has a way through.
+  gateway:
+    environment:
+      # TODO(#1250): dev has nowhere for this to take effect - nginx.conf.dev
+      # serves one unauthenticated port 80 and no tunnel listener.
+      SYN_API_PASSWORD: ${SYN_API_PASSWORD:-}
+      # Set exactly when a tunnel can come up, since the token is what makes
+      # cloudflared connect. The gateway cannot see a sibling container
+      # publishing it, so this is how it is told.
+      SYN_GATEWAY_TUNNEL: ${CLOUDFLARE_TUNNEL_TOKEN:+cloudflare}
+
   cloudflared:
     image: cloudflare/cloudflared:2026.2.0
     container_name: syn-cloudflared
@@ -18,3 +50,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      # Not service_healthy: the dev gateway's baked HEALTHCHECK probes /health,
+      # which nginx.conf.dev proxies to the Vite dev server rather than
+      # answering, so waiting on it would deadlock. Ordering is enough here -
+      # the refusal that matters happens before `up` runs at all.
+      gateway:
+        condition: service_started

@@ -353,7 +353,7 @@ install-hooks:
 
 # Setup and run the FULL development environment (backend + frontend)
 # Always rebuilds images to pick up code changes
-dev: _workspace-check
+dev: _workspace-check _require-tunnel-auth
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🚀 Starting full dev stack..."
@@ -416,7 +416,7 @@ dev: _workspace-check
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
 # Fresh start: wipe all data and restart from scratch
-dev-fresh: _workspace-check
+dev-fresh: _workspace-check _require-tunnel-auth
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🧹 Fresh start: wiping databases and restarting full stack..."
@@ -1479,7 +1479,7 @@ selfhost-up: _selfhost-preflight _workspace-check
     just selfhost-status
 
 # Start self-hosted Syn137 stack with Cloudflare Tunnel (recommended)
-selfhost-up-tunnel: _selfhost-preflight _workspace-check
+selfhost-up-tunnel: _selfhost-preflight _require-tunnel-auth _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
@@ -2037,6 +2037,20 @@ proxy-start:
 
 # --- Internal Helpers (hidden from --list) ---
 
+# Refuse to bring a stack up through a tunnel with no way to authenticate it (#1148).
+#
+# Every recipe that can start cloudflared depends on this, and
+# infra/scripts/tests/test_gateway_auth_binding.py discovers those recipes from
+# this file and fails if one of them does not. The rule itself is stated in
+# infra/scripts/require-tunnel-auth.sh; the env loading is here because that is
+# what differs between a dev stack and a selfhost one, not the rule.
+_require-tunnel-auth:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # shellcheck disable=SC1091
+    source infra/scripts/selfhost-env.sh 2>/dev/null || true
+    sh infra/scripts/require-tunnel-auth.sh
+
 # Build the dev compose command, auto-including cloudflare overlay when tunnel token is set.
 # Usage in bash: _COMPOSE=$(_dev_compose_cmd)
 # Must be called AFTER infra env vars are loaded.
@@ -2182,6 +2196,7 @@ _webhook-start:
             echo "5  Webhooks via Cloudflare tunnel (${_HOSTNAME})"
         else
             echo "5️⃣  ⚠️  Cloudflare tunnel not running — starting it..."
+            just _require-tunnel-auth
             $(just _dev-compose-cmd) up -d cloudflared
         fi
         echo "   Webhook URL: https://${_HOSTNAME}/webhooks/github"

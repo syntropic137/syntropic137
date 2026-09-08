@@ -275,19 +275,38 @@ def _apply_collector_overrides(services: dict) -> None:
     svc["secrets"] = secrets
 
 
-def _add_cloudflared(services: dict) -> None:
-    """Add cloudflared service from the cloudflare overlay.
+def _add_tunnel(services: dict) -> None:
+    """Fold the whole cloudflare overlay into the published stack.
 
-    The cloudflare overlay (docker-compose.cloudflare.yaml) defines a
-    standalone tunnel service. For the published compose, we include it
-    with profiles: [tunnel] so it only starts when explicitly enabled,
-    plus security hardening consistent with other selfhost services.
+    A self-hoster has no justfile and no `-f` chain: they run
+    `docker compose -f docker-compose.syntropic137.yaml --profile tunnel up`,
+    so whatever `docker-compose.cloudflare.yaml` says about running a tunnel
+    has to already be inside the published file or it does not apply to them
+    at all. That is how the published tunnel came to publish the gateway with
+    no coupling to SYN_API_PASSWORD (#1148): only the `cloudflared` service was
+    ever carried across, and the overlay's effect on the *gateway* was left
+    behind on the `just` path.
+
+    So this carries every service the overlay touches, not a named one. The
+    tunnel service itself is additionally profile-gated and hardened, because
+    the published stack starts it on request rather than by being asked for a
+    different `-f` chain; the rest is merged exactly as compose would merge it.
     """
+    cf = yaml.safe_load(CLOUDFLARE_COMPOSE.read_text())
+    overlay_svcs = cf.get("services", {}) or {}
+
+    for name, overlay_svc in overlay_svcs.items():
+        if name == "cloudflared":
+            continue
+        existing = services.get(name)
+        services[name] = (
+            _merge_service(existing, overlay_svc) if existing else copy.deepcopy(overlay_svc)
+        )
+
     if "cloudflared" in services:
         return  # Already present (e.g., if selfhost overlay is updated later)
 
-    cf = yaml.safe_load(CLOUDFLARE_COMPOSE.read_text())
-    cf_svc = (cf.get("services", {}) or {}).get("cloudflared")
+    cf_svc = overlay_svcs.get("cloudflared")
     if not cf_svc:
         return
 
@@ -371,7 +390,7 @@ def generate() -> dict:
     _apply_api_overrides(merged_svcs)
     _apply_envoy_overrides(merged_svcs)
     _apply_collector_overrides(merged_svcs)
-    _add_cloudflared(merged_svcs)
+    _add_tunnel(merged_svcs)
 
     # Gateway environment: selfhost overlay uses list form, normalize to dict
     if "gateway" in merged_svcs:
