@@ -4,8 +4,8 @@ WHY THIS EXISTS (issue #1018). `requires-python = ">=3.12"` let `uv sync` build
 the venv on the newest interpreter installed while every CI job pinned 3.12, so
 "3149 tests passed locally" was a true statement about a Python CI never runs.
 The remedy is a committed `.python-version`, and the guard is this module: a pin
-that nothing checks drifts back the moment someone bumps one of the other twenty
-places a version is written down.
+that nothing checks drifts back the moment someone bumps one of the two dozen
+other places a version is written down.
 
 WHAT MAKES IT A GUARD AND NOT A GESTURE. The first version of this check read
 one regex match per workflow FILE. `ci.yml` has four jobs, each with its own
@@ -25,8 +25,8 @@ interpreter runs this repo's code:
                            mypy `python_version`
   - `pyrightconfig.json`   `pythonVersion`
   - `**/Dockerfile*`       `FROM python:X.Y...`
-  - the justfile           a recipe must reach a repo script through `uv run`,
-                           which is the only thing that honours the pin
+  - justfile, pre-commit   a command must reach a repo script through `uv run`,
+                           the only thing that honours the pin
   - the live interpreter   a gate measured on the wrong Python measures nothing
 
 Discovery is `git ls-files`, so submodules - which pin their own interpreters
@@ -45,17 +45,19 @@ import platform
 import re
 import subprocess
 import tomllib
-from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
 #: Both spellings GitHub Actions and the Python tools use for the same idea.
 _VERSION_KEYS: Final = frozenset({"python-version", "python_version"})
 
-#: A repo-relative `scripts/x.py` in the justfile, but not `/app/scripts/x.py`,
+#: A repo-relative `scripts/x.py` in a command, but not `/app/scripts/x.py`,
 #: which is a path inside a container and runs that image's interpreter.
 _JUST_SCRIPT: Final = re.compile(r"(?<![\w/])((?:[\w.-]+/)*scripts/[\w.-]+\.py)")
 
