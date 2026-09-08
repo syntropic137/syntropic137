@@ -1,0 +1,18 @@
+{
+  // `tsconfig.json` is the BUILD config: rootDir "src", so it cannot see the
+  // tests or the codegen script without changing what `dist/` looks like.
+  // That left `tests/fixtures/responses.ts` -- which declares what syn-api
+  // responses look like -- checked by nothing at all, and it had drifted:
+  // twelve fixtures were missing fields the API requires, and one mocked
+  // GET /artifacts with a bare array (#1182).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // The base config EXCLUDES "tests", and exclude wins over include, so
+  // restating it here is load-bearing -- without it this file silently
+  // checks exactly what tsconfig.json already checked.
+  "exclude": ["node_modules", "dist"],
+  "include": ["src", "tests", "scripts"]
+}

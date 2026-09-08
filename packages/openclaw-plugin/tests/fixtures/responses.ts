@@ -29,6 +29,8 @@ export const workflowList: WorkflowListResponse = {
       phase_count: 3,
       created_at: "2026-03-15T10:00:00Z",
       runs_count: 12,
+      is_archived: false,
+      requires_repos: true,
     },
     {
       id: "wf-review-001",
@@ -37,6 +39,8 @@ export const workflowList: WorkflowListResponse = {
       phase_count: 2,
       created_at: "2026-03-14T08:00:00Z",
       runs_count: 5,
+      is_archived: false,
+      requires_repos: false,
     },
   ],
   total: 2,
@@ -63,13 +67,22 @@ export const executionList: ExecutionListResponse = {
       completed_phases: 1,
       total_phases: 3,
       total_tokens: 15000,
+      total_tokens_display: "15.0K",
+      total_input_tokens: 11000,
+      total_output_tokens: 4000,
+      total_cache_creation_tokens: 0,
+      total_cache_read_tokens: 0,
       total_cost_usd: "0.45",
+      total_cost_display: "$0.45",
+      unpriced_observation_count: 0,
+      duration_display: "5m 30s",
       tool_call_count: 8,
     },
   ],
   total: 1,
   page: 1,
   page_size: 50,
+  excluded_undated: 0,
 };
 
 /**
@@ -84,6 +97,7 @@ export const executionListPaged: ExecutionListResponse = {
   total: 137,
   page: 2,
   page_size: 50,
+  excluded_undated: 0,
 };
 
 export const executionDetail: ExecutionDetail = {
@@ -102,7 +116,10 @@ export const executionDetail: ExecutionDetail = {
       artifact_id: "art-001",
       input_tokens: 5000,
       output_tokens: 3000,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
       total_tokens: 8000,
+      unpriced_observation_count: 0,
       duration_seconds: 120.5,
       cost_usd: "0.24",
       started_at: "2026-03-16T12:00:00Z",
@@ -118,7 +135,10 @@ export const executionDetail: ExecutionDetail = {
       artifact_id: "art-002",
       input_tokens: 10000,
       output_tokens: 7000,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
       total_tokens: 17000,
+      unpriced_observation_count: 0,
       duration_seconds: 210.0,
       cost_usd: "0.51",
       started_at: "2026-03-16T12:02:00Z",
@@ -129,7 +149,11 @@ export const executionDetail: ExecutionDetail = {
   ],
   total_input_tokens: 15000,
   total_output_tokens: 10000,
+  total_cache_creation_tokens: 0,
+  total_cache_read_tokens: 0,
   total_tokens: 25000,
+  unpriced_observation_count: 0,
+  unknown_duration_phase_count: 0,
   total_cost_usd: "0.75",
   total_duration_seconds: 330.5,
   artifact_ids: ["art-001", "art-002"],
@@ -180,9 +204,19 @@ export const sessionDetail: SessionDetail = {
   status: "completed",
   workspace_path: "/workspaces/exec-abc-123",
   input_tokens: 5000,
+  input_tokens_display: "5.0K",
   output_tokens: 3000,
+  output_tokens_display: "3.0K",
+  cache_creation_tokens: 0,
+  cache_creation_tokens_display: "0",
+  cache_read_tokens: 0,
+  cache_read_tokens_display: "0",
   total_tokens: 8000,
+  total_tokens_display: "8.0K",
   total_cost_usd: "0.24",
+  total_cost_display: "$0.24",
+  unpriced_observation_count: 0,
+  duration_display: "2m 0s",
   operations: [
     {
       operation_id: "op-001",
@@ -251,6 +285,7 @@ export const executionCost: ExecutionCost = {
   cost_by_phase: { "phase-analyze": "0.24", "phase-implement": "0.51" },
   cost_by_model: { "claude-sonnet-4-6": "0.75" },
   cost_by_tool: { Read: "0.10", Edit: "0.15" },
+  unpriced_observation_count: 0,
   is_complete: true,
   started_at: "2026-03-16T12:00:00Z",
   completed_at: "2026-03-16T12:05:30Z",
@@ -263,6 +298,8 @@ export const metricsResponse: MetricsResponse = {
   total_sessions: 20,
   total_input_tokens: 100000,
   total_output_tokens: 75000,
+  total_cache_creation_tokens: 0,
+  total_cache_read_tokens: 0,
   total_tokens: 175000,
   total_cost_usd: "5.25",
   total_artifacts: 15,
@@ -292,6 +329,7 @@ export const artifactList: ArtifactListResponse = {
   total: 1,
   page: 1,
   page_size: 50,
+  excluded_undated: 0,
 };
 
 export const artifactListEmpty: ArtifactListResponse = {
@@ -299,6 +337,7 @@ export const artifactListEmpty: ArtifactListResponse = {
   total: 0,
   page: 1,
   page_size: 50,
+  excluded_undated: 0,
 };
 
 export const artifactDetail: ArtifactDetail = {
@@ -327,6 +366,7 @@ export const triggerList: TriggerListResponse = {
       event: "issues.opened",
       repository: "org/repo",
       workflow_id: "wf-issue-001",
+      workflow_name: "Issue Resolution",
       status: "active",
       fire_count: 7,
     },
