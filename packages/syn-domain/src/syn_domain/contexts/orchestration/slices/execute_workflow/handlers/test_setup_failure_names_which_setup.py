@@ -34,8 +34,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 FAILING_PHASE_NAME = "Make the change"
 
 
-def _handler_for(setup_result: ExecutionResult) -> tuple[WorkspaceProvisionHandler, MagicMock]:
-    """A provision handler whose in-phase setup step returns ``setup_result``."""
+def _workspace_service_whose_setup_returns(setup_result: ExecutionResult) -> MagicMock:
+    """A workspace service whose ADR-024 setup step returns ``setup_result``."""
     workspace = AsyncMock()
     workspace.proxy_url = "http://envoy:10000"
     workspace.workspace_id = "ws-1236"
@@ -47,30 +47,11 @@ def _handler_for(setup_result: ExecutionResult) -> tuple[WorkspaceProvisionHandl
 
     workspace_service = MagicMock()
     workspace_service.create_workspace.return_value = workspace_cm
-
-    async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
-        return "Do the task"
-
-    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-        return ["claude", "--print", prompt]
-
-    handler = WorkspaceProvisionHandler(
-        workspace_service=workspace_service,
-        prompt_builder=fake_prompt_builder,
-        command_builder=fake_command_builder,
-    )
-    return handler, workspace_cm
+    return workspace_service
 
 
-async def _provision_error_message(setup_result: ExecutionResult) -> str:
-    """Provision a phase whose setup step fails; return the operator-facing text."""
-    handler, _ = _handler_for(setup_result)
-    todo = TodoItem(
-        execution_id="exec-80394dfd862a",
-        action=TodoAction.PROVISION_WORKSPACE,
-        phase_id="phase-2",
-    )
-    phase = ExecutablePhase(
+def _the_failing_phase() -> ExecutablePhase:
+    return ExecutablePhase(
         phase_id="phase-2",
         name=FAILING_PHASE_NAME,
         order=2,
@@ -79,6 +60,28 @@ async def _provision_error_message(setup_result: ExecutionResult) -> str:
         prompt_template="Do the task",
         output_artifact_types=("text",),
     )
+
+
+async def _provision_error_message(setup_result: ExecutionResult) -> str:
+    """Provision a phase whose setup step fails; return the operator-facing text."""
+
+    async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+        return "Do the task"
+
+    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+        return ["claude", "--print", prompt]
+
+    handler = WorkspaceProvisionHandler(
+        workspace_service=_workspace_service_whose_setup_returns(setup_result),
+        prompt_builder=fake_prompt_builder,
+        command_builder=fake_command_builder,
+    )
+    todo = TodoItem(
+        execution_id="exec-80394dfd862a",
+        action=TodoAction.PROVISION_WORKSPACE,
+        phase_id="phase-2",
+    )
+    phase = _the_failing_phase()
 
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as mock_secrets:
         mock_secrets.create = AsyncMock(return_value=MagicMock())
@@ -146,3 +149,58 @@ async def test_setup_failure_with_no_output_at_all_still_names_setup_and_phase()
     assert f"phase '{FAILING_PHASE_NAME}'" in message
     assert "SIGSEGV" in message
     assert "no output captured" in message
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_the_execution_record_an_operator_reads_names_the_setup_and_the_phase() -> None:
+    """The message has to survive the hop from the handler into the RECORD.
+
+    #1236 was reported from the stored execution, not from a stack trace: the
+    operator read ``error_message`` and went to the wrong phase. So run the
+    real processor over a phase whose in-phase setup dies, and read the field
+    they actually read.
+    """
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+        WorkflowExecutionProcessor,
+    )
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
+    )
+
+    workspace_service = _workspace_service_whose_setup_returns(
+        ExecutionResult(exit_code=-11, success=False, duration_ms=10_000.0, stderr="")
+    )
+    processor = WorkflowExecutionProcessor(
+        execution_repository=AsyncMock(),
+        session_repository=AsyncMock(),
+        workspace_service=workspace_service,
+        artifact_repository=AsyncMock(),
+        artifact_content_storage=None,
+        artifact_query=None,
+        conversation_storage=None,
+        observability_writer=None,
+        controller=None,
+        prompt_builder=AsyncMock(return_value="Do the task"),
+        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+    )
+    processor._journal._repository.save = AsyncMock()
+
+    with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as mock_secrets:
+        mock_secrets.create = AsyncMock(return_value=MagicMock())
+        result = await processor.run(
+            workflow_id="wf-1",
+            workflow_name="Fix the thing",
+            phases=[_the_failing_phase()],
+            inputs={},
+            execution_id="exec-80394dfd862a",
+        )
+
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "Secret-injection setup failed" in result.error_message
+    assert f"phase '{FAILING_PHASE_NAME}'" in result.error_message
+    assert "SIGSEGV" in result.error_message
+    assert "Setup phase failed" not in result.error_message
