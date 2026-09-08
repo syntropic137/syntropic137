@@ -62,25 +62,5 @@ async def test_failure_log_names_the_secret_injection_setup(
     assert "Secret-injection setup failed" in message
     assert "Setup phase failed" not in message
     assert "ws-1236" in message
-    assert "exit code 1" in message
+    assert "exit=1" in message
     assert "could not read Username" in message
-
-
-@pytest.mark.unit
-@pytest.mark.anyio
-async def test_failure_log_records_the_signal_and_the_stdout_of_a_signal_death(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    message = await _failure_log(
-        ExecutionResult(
-            exit_code=-11,
-            success=False,
-            duration_ms=10_000.0,
-            stdout="Cloning into 'syntropic137'...\n",
-            stderr="",
-        ),
-        caplog,
-    )
-
-    assert "SIGSEGV" in message
-    assert "Cloning into 'syntropic137'" in message

@@ -120,35 +120,21 @@ async def test_setup_failure_names_the_secret_injection_step_and_the_phase() -> 
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_signal_death_records_the_signal_name_and_what_the_step_wrote() -> None:
-    """#1236's SIGSEGV left `exit code -11 (no stderr output)` and nothing else."""
+async def test_setup_failure_with_no_stderr_still_names_setup_and_phase() -> None:
+    """The naming has to hold on the path with no stderr to append to it.
+
+    That is the path #1236 was reported from: the record read "Setup phase
+    failed: exit code 2 (no stderr output)", so the wording was the only thing
+    the operator had to go on, and it pointed at the wrong phase.
+    """
     message = await _provision_error_message(
-        ExecutionResult(
-            exit_code=-11,
-            success=False,
-            duration_ms=10_000.0,
-            stdout="Cloning into 'syntropic137'...\nSubmodule path 'lib/agentic-primitives'\n",
-            stderr="",
-        )
-    )
-
-    assert "SIGSEGV" in message
-    # Whatever it DID write before dying, rather than "(no stderr output)".
-    assert "Submodule path 'lib/agentic-primitives'" in message
-    assert f"phase '{FAILING_PHASE_NAME}'" in message
-
-
-@pytest.mark.unit
-@pytest.mark.anyio
-async def test_setup_failure_with_no_output_at_all_still_names_setup_and_phase() -> None:
-    message = await _provision_error_message(
-        ExecutionResult(exit_code=-11, success=False, duration_ms=10_000.0)
+        ExecutionResult(exit_code=2, success=False, duration_ms=10_000.0)
     )
 
     assert "Secret-injection setup failed" in message
     assert f"phase '{FAILING_PHASE_NAME}'" in message
-    assert "SIGSEGV" in message
-    assert "no output captured" in message
+    assert "Setup phase failed" not in message
+    assert "exit code 2" in message
 
 
 @pytest.mark.unit
@@ -170,7 +156,12 @@ async def test_the_execution_record_an_operator_reads_names_the_setup_and_the_ph
     )
 
     workspace_service = _workspace_service_whose_setup_returns(
-        ExecutionResult(exit_code=-11, success=False, duration_ms=10_000.0, stderr="")
+        ExecutionResult(
+            exit_code=1,
+            success=False,
+            duration_ms=10_000.0,
+            stderr="fatal: could not read Username for 'https://github.com'",
+        )
     )
     processor = WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
@@ -202,5 +193,5 @@ async def test_the_execution_record_an_operator_reads_names_the_setup_and_the_ph
     assert result.error_message is not None
     assert "Secret-injection setup failed" in result.error_message
     assert f"phase '{FAILING_PHASE_NAME}'" in result.error_message
-    assert "SIGSEGV" in result.error_message
+    assert "could not read Username" in result.error_message
     assert "Setup phase failed" not in result.error_message

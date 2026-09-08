@@ -538,10 +538,8 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            msg = (
-                f"Secret-injection setup failed for phase '{phase_name}': "
-                f"{setup_result.failure_description()}"
-            )
+            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
+            msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             raise RuntimeError(msg)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 

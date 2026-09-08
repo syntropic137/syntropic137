@@ -139,9 +139,10 @@ async def run_setup_phase(
             # a similar name runs alongside it and reading one as the other sent
             # an operator to a phase that had completed (#1236).
             logger.error(
-                "Secret-injection setup failed (workspace=%s): %s",
+                "Secret-injection setup failed (workspace=%s, exit=%d): %s",
                 ws.workspace_id,
-                result.failure_description(),
+                result.exit_code,
+                result.stderr,
             )
 
         return result

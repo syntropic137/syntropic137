@@ -1088,9 +1088,6 @@ class TestWorkspaceProvisionHandler:
             AgentConfiguration,
             ExecutablePhase,
         )
-        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-            ExecutionResult,
-        )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             WorkspaceProvisionHandler,
         )
@@ -1099,9 +1096,7 @@ class TestWorkspaceProvisionHandler:
         workspace.proxy_url = "http://envoy:10000"
         workspace.workspace_id = "ws-test"
         workspace.run_setup_phase = AsyncMock(
-            return_value=ExecutionResult(
-                exit_code=1, success=False, duration_ms=100.0, stderr="Script error"
-            )
+            return_value=MagicMock(exit_code=1, stderr="Script error")
         )
 
         workspace_cm = AsyncMock()
