@@ -204,8 +204,12 @@ async def _prompt(
     execution_id: str,
     workflow_id: str,
     repo_url: str | None,
-    phase_outputs: dict[str, object],
-    inputs: dict[str, object],
+    phase_outputs: dict[str, str],
+    # `object` rather than the alias's own `dict[str, Any]`: this builder reads
+    # none of its arguments, and widening an ignored parameter is sound for a
+    # callback. Spelling it `dict[str, Any]` to mirror the alias would have added
+    # to the untyped-dict ratchet to say nothing.
+    inputs: object,
 ) -> str:
     return "prompt"
 
