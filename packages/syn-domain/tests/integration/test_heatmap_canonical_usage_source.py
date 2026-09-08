@@ -22,11 +22,15 @@ messages actually produced 767. The placeholder is not a rounding error.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -100,7 +104,7 @@ async def _record_observation_on(
     session_id: str,
     execution_id: str,
     observation_type: str,
-    data: dict[str, object],
+    data: Mapping[str, int | float | str | None],
     *,
     seconds_past_midday: int = 0,
 ) -> None:
