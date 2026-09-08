@@ -874,7 +874,7 @@ class WorkspaceProvisionHandler:
         try:
             result = await workspace.execute(["sh", "-c", script])
             stdout = result.stdout
-        except Exception:  # noqa: BLE001 - any probe failure means "we could not look"
+        except Exception:  # any probe failure means "we could not look"
             logger.warning("Context-file probe failed; importing every candidate", exc_info=True)
             return None
         if not isinstance(stdout, str) or _SENTINEL not in stdout:
