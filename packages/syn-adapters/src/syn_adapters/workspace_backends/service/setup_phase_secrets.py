@@ -161,12 +161,16 @@ class _GitHubClientProtocol(Protocol):
     """Structural protocol for GitHubAppClient — avoids circular import."""
 
     async def get_installation_for_repo(self, full_name: str) -> str: ...
-    async def get_installation_token(self, installation_id: str) -> str: ...
+    async def get_installation_token(
+        self, installation_id: str, *, read_only: bool = False
+    ) -> str: ...
 
 
 async def _resolve_github_auth(
     repos: list[str],
     require_github: bool,
+    *,
+    read_only: bool = False,
 ) -> tuple[dict[str, str], str | None, str | None]:
     """Resolve GitHub App tokens for all repos and return (repo_tokens, author_name, author_email).
 
@@ -185,7 +189,9 @@ async def _resolve_github_auth(
 
     client: _GitHubClientProtocol = GitHubAppClient(github_settings)  # type: ignore[arg-type]
     url_to_installation = await _lookup_installations(client, repos, require_github)
-    repo_tokens = await _mint_tokens_per_installation(client, url_to_installation)
+    repo_tokens = await _mint_tokens_per_installation(
+        client, url_to_installation, read_only=read_only
+    )
     return repo_tokens, github_settings.bot_name, github_settings.bot_email
 
 
@@ -224,17 +230,28 @@ async def _lookup_installations(
 async def _mint_tokens_per_installation(
     client: _GitHubClientProtocol,
     url_to_installation: dict[str, str],
+    *,
+    read_only: bool = False,
 ) -> dict[str, str]:
-    """Mint one token per unique installation and return url → token mapping."""
+    """Mint one token per unique installation and return url → token mapping.
+
+    ``read_only`` mints credentials GitHub refuses to write with, for a phase
+    that declared ``can_push: false`` (#1161).
+    """
     installation_to_urls: dict[str, list[str]] = {}
     for url, inst_id in url_to_installation.items():
         installation_to_urls.setdefault(inst_id, []).append(url)
 
     tokens_by_installation: dict[str, str] = {}
     for inst_id, urls in installation_to_urls.items():
-        token = await client.get_installation_token(inst_id)
+        token = await client.get_installation_token(inst_id, read_only=read_only)
         tokens_by_installation[inst_id] = token
-        logger.info("Generated token for installation %s (%d repo(s))", inst_id, len(urls))
+        logger.info(
+            "Generated %s token for installation %s (%d repo(s))",
+            "read-only" if read_only else "read-write",
+            inst_id,
+            len(urls),
+        )
 
     return {url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()}
 
@@ -283,16 +300,19 @@ class SetupPhaseSecrets:
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
     can_push: bool = True
-    """Whether the AGENT inherits the GitHub credentials this setup uses (#1161).
+    """Whether this phase's GitHub credentials may write (#1161).
 
-    The clone always runs authenticated; this decides only whether the
-    credential survives the setup phase. False revokes it on the last lines of
-    the script, so the agent starts with a full checkout and no way to publish
-    from it.
+    False mints READ-ONLY installation tokens instead of read-write ones. The
+    setup script is byte-identical either way: the phase still clones, still
+    fetches, still reads pull requests, and a `git push` fails 403 because
+    GitHub will not accept it. That is deliberate - a token scope cannot be
+    undone from inside the container, and a shell line that deletes a
+    credential file can.
 
-    A verify phase must still be able to write - it mutates the code to prove a
-    new test can fail - so no sandbox level expresses what it needs. "Cannot
-    write" was never the requirement; "cannot push what it certifies" is."""
+    Not a sandbox level. A verify phase must be able to WRITE - mutating the
+    code to prove a new test can fail is its most valuable check - and it must
+    be able to READ GitHub to fetch the branch it is verifying. Only the
+    publish needs to go, so only the publish does."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -322,9 +342,9 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
-            can_push: If False, the GitHub credentials are revoked at the end
-                of the setup script, so the agent gets the checkout without the
-                ability to push from it (#1161).
+            can_push: If False, the repos are credentialed with READ-ONLY
+                installation tokens, so the phase can clone, fetch and read
+                pull requests but GitHub refuses its pushes (#1161).
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -344,7 +364,7 @@ class SetupPhaseSecrets:
 
         if repos:
             repo_tokens, git_author_name, git_author_email = await _resolve_github_auth(
-                repos, require_github
+                repos, require_github, read_only=not can_push
             )
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
@@ -391,7 +411,7 @@ class SetupPhaseSecrets:
             repositories: Optional list of repo URLs (no tokens fetched)
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             clone_repos: False to credential the repos without checking them out (#1187)
-            can_push: False to revoke the GitHub credentials before the agent runs (#1161)
+            can_push: Carried for parity with create(); this path mints no tokens (#1161)
         """
         import os
 
@@ -423,9 +443,10 @@ class SetupPhaseSecrets:
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
         - Configures gh CLI using the first repo's token for PR/issue operations
-        - Revokes all of the above on the final lines when ``can_push`` is
-          False, so the phase keeps the checkout and loses the ability to
-          publish from it (#1161)
+
+        When ``can_push`` is False the credentials written here are READ-ONLY
+        ones (#1161). The script is identical either way, which is the point:
+        the restriction is GitHub's, not a shell line an agent could undo.
 
         Returns:
             Complete bash script string to run during the setup phase.
@@ -443,7 +464,6 @@ class SetupPhaseSecrets:
             self._append_git_credentials(lines)
             if self.clone_repos:
                 self._append_repo_clones(lines)
-            self._append_credential_revocation(lines)
 
         return "\n".join(lines) + "\n"
 
@@ -503,40 +523,6 @@ class SetupPhaseSecrets:
             lines.append("    git_protocol: https")
             lines.append("GHEOF")
             lines.append("chmod 600 ~/.config/gh/hosts.yml")
-
-    def _append_credential_revocation(self, lines: list[str]) -> None:
-        """Remove every GitHub credential this script installed, when ``can_push`` is False.
-
-        LAST, and deliberately: the clone above needs the credential, the agent
-        does not. Everything written by ``_append_git_credentials`` is undone
-        here - the store file, the helper that reads it, and the gh token -
-        which is why the two methods sit next to each other. Adding a
-        credential above without a matching removal here is the bug this
-        pairing exists to make visible.
-
-        Not folded into ``clear_secrets``: that runs for every phase and keeps
-        ~/.git-credentials on purpose, because the phases that DO push need it.
-        The decision is per phase, so it belongs where the phase's script is
-        built.
-
-        ``git config --global --unset-all`` returns 5 when the key is already
-        absent and the script runs under ``set -e``, so both unsets tolerate
-        that. The credential file itself is removed either way; an orphaned
-        helper setting with no store behind it authenticates nothing.
-        """
-        if self.can_push or not self.repo_tokens:
-            return
-
-        lines.extend(
-            [
-                "",
-                "# Revoke the GitHub credentials before the agent starts (#1161).",
-                "# The checkout stays; the ability to push from it does not.",
-                "rm -f ~/.git-credentials ~/.config/gh/hosts.yml",
-                "git config --global --unset-all credential.helper || true",
-                "git config --global --unset-all credential.https://github.com.useHttpPath || true",
-            ]
-        )
 
     def _append_repo_clones(self, lines: list[str]) -> None:
         """Append repository clone commands with idempotency guards.

@@ -44,8 +44,12 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
-    # Read-only: this phase has no business editing the tree it is describing,
-    # and a review that modified the code under review would be unusable.
+    # CANNOT PUBLISH (#1161). A review that edited the branch it is
+    # describing would be unusable. The comment here used to call this phase
+    # "read-only", which it never was: `Bash` below is enough to commit and
+    # push, and the claim was doing the work of a control. Now the credential
+    # is read-only and the sentence is true.
+    can_push: false
     allowed_tools:
       - Read
       - Grep
@@ -66,6 +70,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # CANNOT PUBLISH (#1161). Same defect as sdlc-implement-v1's verify
+    # phase, same fix. This one has not been caught writing to a branch under
+    # review, but nothing was stopping it.
+    can_push: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.

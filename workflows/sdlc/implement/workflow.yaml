@@ -89,6 +89,18 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 3600
+    # CANNOT PUBLISH (#1161). This phase wrote and pushed the change it then
+    # certified, three times: exec-dff4ff410bb1, exec-de6c57f57984 and
+    # exec-b681ba61c9b7. Every one of those runs DECLARED the commit in its
+    # own report, so the prompt was being read and the phase acted anyway.
+    # That is why this is a token scope and not another paragraph.
+    #
+    # It keeps everything it needs: the checkout, the fetch, and the ability
+    # to edit files - mutating the code to prove a new test can fail is the
+    # most valuable thing this phase does, so `agent.sandbox: read-only`
+    # would have disabled the check while appearing to tighten it. Only the
+    # push goes.
+    can_push: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
