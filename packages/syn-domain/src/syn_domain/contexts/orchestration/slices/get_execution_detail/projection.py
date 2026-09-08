@@ -128,8 +128,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         detail["total_duration_seconds"] = detail.get("total_duration_seconds", 0.0) + duration
 
     @staticmethod
-    def _restate_completed_phases(detail: dict[str, Any], event_data: dict) -> None:
-        """Take the count a terminal event states, keeping the accumulation if silent.
+    def _completed_phases_after(event_data: dict, accumulated: int) -> int:
+        """The count a terminal event states, or the accumulation if it is silent.
 
         A run that ends states how many phases it got through, and that figure
         is authoritative over the one accumulated from PhaseCompleted -- the
@@ -137,9 +137,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         saw. Same precedence the list projection applies to the same field
         (#1147), which is what keeps the two views agreeing.
         """
-        detail["completed_phases"] = event_data.get(
-            "completed_phases", detail.get("completed_phases", 0)
-        )
+        stated = event_data.get("completed_phases")
+        return accumulated if stated is None else int(stated)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
@@ -298,7 +297,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
 
         existing["status"] = "completed"
         existing["completed_at"] = event_data.get("completed_at")
-        self._restate_completed_phases(existing, event_data)
+        existing["completed_phases"] = self._completed_phases_after(
+            event_data, existing.get("completed_phases", 0)
+        )
 
         # Update with final totals from event if provided.
         #
@@ -362,7 +363,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["status"] = "failed"
             existing["completed_at"] = event_data.get("failed_at")
             existing["error_message"] = event_data.get("error_message")
-            self._restate_completed_phases(existing, event_data)
+            existing["completed_phases"] = self._completed_phases_after(
+                event_data, existing.get("completed_phases", 0)
+            )
 
             # Mark failed phase if specified
             failed_phase_id = event_data.get("failed_phase_id")

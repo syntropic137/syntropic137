@@ -1,16 +1,16 @@
 """#1147: the detail endpoint must report how many phases a run set out to do.
 
-`GET /executions/{id}` reported `total_phases: null` for every execution while
-`GET /executions` reported 3 for the same run, because the detail projection
-read nine fields off `WorkflowExecutionStarted` where the list projection read
-ten. On the execution detail page a three-phase run that died in phase one
-rendered as a one-phase execution: the two phases that never started were
-indistinguishable from phases that do not exist.
+`GET /executions/{id}` reported no `total_phases` at all while `GET /executions`
+reported 3 for the same run, because the detail projection read nine fields off
+`WorkflowExecutionStarted` where the list projection read ten. On the execution
+detail page a three-phase run that died in phase one rendered as a one-phase
+execution: the two phases that never started were indistinguishable from phases
+that do not exist.
 
 These drive the REAL projection with a real event stream and then read the
 answer out of the HTTP response model, because the defect lives in the hops
-between - the projection dict, the read model, `ExecutionDetailFull`, and
-`ExecutionDetailResponse` each had to carry the field, and any one of them
+between - the projection dict, the read model, `ExecutionDetailFull` and
+`ExecutionDetailResponse` each have to carry the field, and any one of them
 dropping it puts the page back to counting `phases`, which is a different
 number by construction.
 
@@ -22,11 +22,20 @@ every number here is distinguishable from every default and from
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+    PhaseCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import PhaseStartedEvent
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import WorkflowFailedEvent
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
@@ -34,72 +43,86 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
     WorkflowExecutionListProjection,
 )
 
+if TYPE_CHECKING:
+    from event_sourcing import AutoDispatchProjection, DomainEvent
+
+    from syn_api.routes.executions.models import ExecutionDetailResponse
+
 pytestmark = pytest.mark.unit
 
 #: The execution from the issue's own reproduction.
 EXECUTION_ID = "exec-0cd860b80128"
+WORKFLOW_ID = "wf-1147"
 TOTAL_PHASES = 3
 COMPLETED_PHASES = 1
 #: What the detail view counted instead: the phases that had reached it.
 PHASES_SEEN = 2
 
-
-def _started() -> dict[str, Any]:
-    return {
-        "execution_id": EXECUTION_ID,
-        "workflow_id": "wf-1147",
-        "workflow_name": "implement-verify-report",
-        "started_at": "2026-09-07T18:00:00+00:00",
-        "total_phases": TOTAL_PHASES,
-        "inputs": {},
-    }
+_STARTED_AT = datetime(2026, 9, 7, 18, 0, tzinfo=UTC)
+_FAILED_AT = datetime(2026, 9, 7, 18, 30, tzinfo=UTC)
 
 
-def _phase_started(phase_id: str) -> dict[str, Any]:
-    return {
-        "execution_id": EXECUTION_ID,
-        "phase_id": phase_id,
-        "phase_name": phase_id,
-        "session_id": None,
-        "started_at": "2026-09-07T18:00:00+00:00",
-    }
+def _started() -> WorkflowExecutionStartedEvent:
+    return WorkflowExecutionStartedEvent(
+        workflow_id=WORKFLOW_ID,
+        execution_id=EXECUTION_ID,
+        workflow_name="implement-verify-report",
+        started_at=_STARTED_AT,
+        total_phases=TOTAL_PHASES,
+        inputs={},
+    )
 
 
-def _phase_completed(phase_id: str) -> dict[str, Any]:
-    return {
-        "execution_id": EXECUTION_ID,
-        "phase_id": phase_id,
-        "input_tokens": 11,
-        "output_tokens": 7,
-        "duration_seconds": 12.5,
-        "completed_at": "2026-09-07T18:05:00+00:00",
-    }
+def _phase_started(phase_id: str, order: int) -> PhaseStartedEvent:
+    return PhaseStartedEvent(
+        workflow_id=WORKFLOW_ID,
+        execution_id=EXECUTION_ID,
+        phase_id=phase_id,
+        phase_name=phase_id,
+        phase_order=order,
+        started_at=_STARTED_AT,
+    )
 
 
-def _failed() -> dict[str, Any]:
-    return {
-        "execution_id": EXECUTION_ID,
-        "workflow_id": "wf-1147",
-        "workflow_name": "implement-verify-report",
-        "failed_at": "2026-09-07T18:30:00+00:00",
-        "failed_phase_id": "verify",
-        "error_message": "phase timed out",
-        "completed_phases": COMPLETED_PHASES,
-        "total_phases": TOTAL_PHASES,
-    }
+def _phase_completed(phase_id: str) -> PhaseCompletedEvent:
+    return PhaseCompletedEvent(
+        workflow_id=WORKFLOW_ID,
+        execution_id=EXECUTION_ID,
+        phase_id=phase_id,
+        completed_at=_STARTED_AT,
+        success=True,
+        input_tokens=11,
+        output_tokens=7,
+        duration_seconds=12.5,
+    )
+
+
+def _failed() -> WorkflowFailedEvent:
+    return WorkflowFailedEvent(
+        workflow_id=WORKFLOW_ID,
+        execution_id=EXECUTION_ID,
+        failed_at=_FAILED_AT,
+        failed_phase_id="verify",
+        error_message="phase timed out",
+        completed_phases=COMPLETED_PHASES,
+        total_phases=TOTAL_PHASES,
+    )
 
 
 #: One run, as it happened: implement finished, verify started, the run died.
-_STREAM: tuple[tuple[str, Any], ...] = (
-    ("on_workflow_execution_started", _started()),
-    ("on_phase_started", _phase_started("implement")),
-    ("on_phase_completed", _phase_completed("implement")),
-    ("on_phase_started", _phase_started("verify")),
-    ("on_workflow_failed", _failed()),
-)
+#: Built from the event classes themselves, so a field renamed on an event
+#: fails here rather than leaving a hand-written fixture agreeing with nothing.
+def _stream() -> tuple[tuple[str, DomainEvent], ...]:
+    return (
+        ("on_workflow_execution_started", _started()),
+        ("on_phase_started", _phase_started("implement", 0)),
+        ("on_phase_completed", _phase_completed("implement")),
+        ("on_phase_started", _phase_started("verify", 1)),
+        ("on_workflow_failed", _failed()),
+    )
 
 
-async def _replay(projection: Any) -> None:
+async def _replay(projection: AutoDispatchProjection) -> None:
     """Feed the stream to whichever handlers a projection declares.
 
     Skipping the rest is what AutoDispatchProjection does with an event nobody
@@ -108,10 +131,10 @@ async def _replay(projection: Any) -> None:
     what it needs to know, unlike the field it and the detail view derive from
     the SAME event and used to disagree about.
     """
-    for handler_name, payload in _STREAM:
+    for handler_name, event in _stream():
         handler = getattr(projection, handler_name, None)
         if handler is not None:
-            await handler(payload)
+            await handler(event.model_dump())
 
 
 @dataclass
@@ -126,7 +149,7 @@ class _StubProjectionManager:
     workflow_execution_detail: WorkflowExecutionDetailProjection
 
 
-async def _detail_response(monkeypatch: pytest.MonkeyPatch) -> Any:
+async def _detail_response(monkeypatch: pytest.MonkeyPatch) -> ExecutionDetailResponse:
     """Serve `GET /executions/{id}` off a projection built from real events."""
     from syn_api import _wiring
     from syn_api.routes.executions import queries
@@ -222,11 +245,11 @@ class TestPhaseCountsWithoutATerminalEvent:
     @pytest.mark.asyncio
     async def test_a_running_execution_accumulates_completed_phases(self) -> None:
         projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
-        await projection.on_workflow_execution_started(_started())
-        await projection.on_phase_started(_phase_started("implement"))
-        await projection.on_phase_completed(_phase_completed("implement"))
-        await projection.on_phase_started(_phase_started("verify"))
-        await projection.on_phase_completed(_phase_completed("verify"))
+        await projection.on_workflow_execution_started(_started().model_dump())
+        await projection.on_phase_started(_phase_started("implement", 0).model_dump())
+        await projection.on_phase_completed(_phase_completed("implement").model_dump())
+        await projection.on_phase_started(_phase_started("verify", 1).model_dump())
+        await projection.on_phase_completed(_phase_completed("verify").model_dump())
 
         row = await projection.get_by_id(EXECUTION_ID)
         assert row is not None
