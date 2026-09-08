@@ -946,7 +946,7 @@ format-check:
 # [untyped-dicts.*] (default threshold: 0). See scripts/check_untyped_dicts.py
 # for what counts and why, and #1188 for what it replaced.
 check-untyped-dicts:
-    @python3 scripts/check_untyped_dicts.py
+    @uv run python scripts/check_untyped_dicts.py
 
 # Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 # CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can

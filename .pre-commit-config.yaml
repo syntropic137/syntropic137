@@ -17,8 +17,8 @@ repos:
       # POKA-YOKE: Prevent xfail/skip without issue links
       - id: test-debt-check
         name: Check for test debt (xfail/skip without issues)
-        entry: python scripts/check_test_debt.py
-        language: python
+        entry: uv run python scripts/check_test_debt.py
+        language: system
         pass_filenames: false
         always_run: true
         stages: [commit]

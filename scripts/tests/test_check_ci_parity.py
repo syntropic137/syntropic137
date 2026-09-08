@@ -9,18 +9,16 @@ the whole gate deleted with every test still green.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
+import interpreter_agreement
 import pytest
 import yaml
 from scripts import check_ci_parity
 from scripts.check_ci_parity import (
-    ci_python_version,
     find_problems,
     job_ids,
     just_targets,
-    local_python_version,
     pr_triggered_workflows,
     qa_ci_dependencies,
 )
@@ -310,120 +308,29 @@ def test_targets_come_from_recipe_definitions_not_dependency_mentions() -> None:
     assert "ruff" not in targets
 
 
-def test_the_pinned_python_version_is_read_from_the_workflow() -> None:
-    assert ci_python_version('    python-version: "3.12"\n') == "3.12"
-    assert ci_python_version("    python-version: 3.13\n") == "3.13"
-    assert ci_python_version("no pin here\n") is None
-
-
-def test_the_local_python_version_is_a_minor_version() -> None:
-    assert local_python_version().count(".") == 1
-
-
 # --- The interpreter itself (#1018) -----------------------------------------
 #
 # `qa-ci` claims "CI will pass". It cannot mean that if the tests ran on an
-# interpreter CI never uses, so the version is part of the parity contract and
-# these drive it the same way the rest of this file drives the job mapping:
-# through the gate's failure.
-
-
-def test_the_repo_pins_the_interpreter_ci_uses() -> None:
-    """A committed pin is what makes the mismatch impossible rather than noticed.
-
-    `uv` reads `.python-version` before falling back to the newest interpreter
-    on the machine, so this file is the mechanism; everything below is only the
-    check that it has not drifted.
-    """
-    pin = check_ci_parity.PYTHON_PIN
-
-    assert pin.is_file(), f"{pin.name} is missing: nothing makes a local venv match CI"
-    assert pin.read_text().strip() == ci_python_version(
-        (check_ci_parity.WORKFLOW_DIR / "ci.yml").read_text()
-    )
+# interpreter CI never uses, so the version is part of the parity contract.
+# WHICH versions exist and whether they agree belongs to
+# `interpreter_agreement` and is tested there; what these two assert is the hop
+# between - that this gate's exit code actually carries that answer. A checker
+# nothing calls is the failure mode they exist for.
 
 
 def test_main_fails_when_the_gate_runs_on_an_interpreter_ci_does_not_use(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The dropped hop this guards: a checker that exists but nothing calls.
-
-    Driven through `main()` against the real repo, because a mismatch that only
-    `python_version_problems()` knows about still reports "CI will pass".
-    """
-    monkeypatch.setattr(check_ci_parity, "local_python_version", lambda: "3.99")
+    monkeypatch.setattr(interpreter_agreement, "running_python_version", lambda: (3, 99))
 
     assert check_ci_parity.main() == 1
 
 
-def test_main_passes_on_the_pinned_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The other direction: the pinned interpreter must not be reported as drift.
+def test_main_passes_when_the_repo_agrees_on_one_interpreter() -> None:
+    """The other direction, against the real tree: agreement is not reported.
 
-    Pinned rather than ambient so this asserts the same thing on a machine that
-    is currently running the wrong Python - which is exactly when it is read.
+    Not monkeypatched: `check-ci-parity` runs under `uv run`, which honours the
+    pin, so the interpreter reading this IS the one the repo names. If that ever
+    stops being true the gate is meant to go red, and so is this.
     """
-    monkeypatch.setattr(
-        check_ci_parity,
-        "local_python_version",
-        lambda: check_ci_parity.PYTHON_PIN.read_text().strip(),
-    )
-
     assert check_ci_parity.main() == 0
-
-
-def test_an_unpinned_repo_is_a_problem() -> None:
-    """#1018 itself: `requires-python = ">=3.12"` alone resolves to 3.14."""
-    problems = check_ci_parity.python_version_problems({"ci.yml": "3.12"}, None, "3.12")
-
-    assert len(problems) == 1
-    assert ".python-version" in problems[0]
-
-
-def test_a_pin_that_drifted_from_ci_is_a_problem() -> None:
-    """Bumping ci.yml and forgetting the pin recreates the bug, silently."""
-    problems = check_ci_parity.python_version_problems({"ci.yml": "3.13"}, "3.12", "3.13")
-
-    assert len(problems) == 1
-    assert "3.12" in problems[0] and "3.13" in problems[0]
-
-
-def test_ci_disagreeing_with_itself_is_reported_not_guessed() -> None:
-    """With two pins there is no version a local venv could match; say so."""
-    problems = check_ci_parity.python_version_problems(
-        {"ci.yml": "3.12", "e2e-container.yml": "3.13", "docs-lint.yml": None}, "3.12", "3.12"
-    )
-
-    assert len(problems) == 1
-    assert "e2e-container.yml" in problems[0]
-
-
-def test_ci_pinning_nothing_leaves_nothing_to_match() -> None:
-    """No pin anywhere means CI takes the runner default; there is no contract."""
-    assert check_ci_parity.python_version_problems({"docs-lint.yml": None}, None, "3.14") == []
-
-
-def test_every_uv_project_this_repo_owns_pins_the_same_interpreter() -> None:
-    """`just feedback-install` is a second `uv sync`, with the same defect.
-
-    A lockfile marks a project whose interpreter resolves on its own: `uv` stops
-    looking for a pin at the project root, so the root file does not reach one.
-    Discovered from the tracked lockfiles rather than listed, because a list
-    here would drift the moment someone adds a third project - the same bug one
-    level up. Submodules pin their own interpreters and are not this repo's to
-    set; `git ls-files` excludes them by construction.
-    """
-    root = check_ci_parity.REPO_ROOT
-    locks = subprocess.run(
-        ["git", "ls-files", "*uv.lock"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
-    expected = check_ci_parity.PYTHON_PIN.read_text().strip()
-
-    assert "uv.lock" in locks, "no root project found: discovery is broken, not the repo"
-    for lock in locks:
-        pin = root / lock.replace("uv.lock", ".python-version")
-        assert pin.is_file(), f"{lock} is a uv project with no pinned interpreter"
-        assert pin.read_text().strip() == expected

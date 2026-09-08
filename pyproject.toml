@@ -146,6 +146,7 @@ testpaths = [
     "packages/syn-tokens/tests",
     "scripts/workflows",
     "scripts/tests",
+    "scripts",  # gates import each other the way they do when run directly
     "infra/scripts/tests",
 ]
 pythonpath = [
@@ -157,6 +158,7 @@ pythonpath = [
     "packages/syn-tokens/tests",
     "scripts/workflows",
     "scripts/tests",
+    "scripts",  # gates import each other the way they do when run directly
     ".",  # infra/scripts importable from repo root
 ]
 python_files = ["test_*.py", "*_test.py"]

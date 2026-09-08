@@ -20,28 +20,25 @@ a hardcoded list is the same drift bug one level up.
 
 Exit 1 if a job is unmapped, a mapped target is missing from the justfile, a
 mapped target is not reachable from `qa-ci`, a mapping names a job that no
-longer exists, or the interpreter this runs on is not the one CI pins - a
-green run on the wrong Python is not evidence about CI (#1018).
+longer exists, or this repo does not agree with itself about which Python it
+runs on - a green run on the wrong interpreter is not evidence about CI. That
+last question is `interpreter_agreement`, which owns every place a version can
+be declared; this file only asks it (#1018).
 """
 
 from __future__ import annotations
 
-import platform
 import re
 import sys
 from pathlib import Path
 from typing import Final
 
 import yaml
+from interpreter_agreement import interpreter_problems
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 WORKFLOW_DIR: Final = REPO_ROOT / ".github" / "workflows"
 JUSTFILE: Final = REPO_ROOT / "justfile"
-
-#: The interpreter every local venv is built on. `uv` reads this before
-#: falling back to the newest Python installed, which is what makes matching
-#: CI mechanical rather than remembered (#1018).
-PYTHON_PIN: Final = REPO_ROOT / ".python-version"
 
 QA_CI_TARGET: Final = "qa-ci"
 
@@ -244,65 +241,6 @@ def script_step_problems(workflows: dict[str, dict[str, object]], justfile: str)
     return problems
 
 
-def ci_python_version(workflow: str) -> str | None:
-    """The Python minor version CI pins, or None if it pins none."""
-    match = re.search(r'python-version:\s*"?(\d+\.\d+)"?', workflow)
-    return match.group(1) if match else None
-
-
-def local_python_version() -> str:
-    """The running interpreter's minor version, e.g. "3.12"."""
-    major, minor, *_ = platform.python_version_tuple()
-    return f"{major}.{minor}"
-
-
-def python_version_problems(
-    ci_pins: dict[str, str | None], pin: str | None, running: str
-) -> list[str]:
-    """Every way the Python this repo runs on is not the Python CI runs on.
-
-    WHY THIS IS A FAILURE AND NOT A WARNING (issue #1018). It warned, because
-    the remedy used to be "install another interpreter" and that is the repo
-    owner's call, not something a lint should force. Committing a pin file
-    makes that call once and for all: `uv sync` and `uv run` now build the venv
-    on CI's interpreter, downloading it if the machine lacks one. What is left
-    is a bypass, and a bypass that only warns still lets `qa-ci` print "CI will
-    pass" about a run CI cannot reproduce.
-
-    Both directions of drift answer one question - is there exactly one Python
-    here, and is it the one running? - so they are checked together: a pin that
-    disagrees with the workflows is as silent as no pin at all.
-    """
-    pinned = {version for version in ci_pins.values() if version is not None}
-    if not pinned:
-        return []
-    if len(pinned) > 1:
-        disagreement = ", ".join(
-            f"{name} pins {version}" for name, version in sorted(ci_pins.items()) if version
-        )
-        return [
-            f"CI does not pin one Python version ({disagreement}), so no local "
-            f"interpreter can match it. Make the workflows agree first."
-        ]
-
-    (expected,) = pinned
-    problems: list[str] = []
-    if pin != expected:
-        found = "is missing" if pin is None else f"pins Python {pin}"
-        problems.append(
-            f"{PYTHON_PIN.name} {found}; CI runs Python {expected}. That file is what "
-            f"makes a local venv use CI's interpreter instead of the newest one "
-            f"installed, so write {expected} to it and re-run `uv sync`."
-        )
-    if running != expected:
-        problems.append(
-            f"this gate ran on Python {running}; CI runs {expected}. Nothing measured "
-            f"on this interpreter is evidence about CI. Run it as `uv run python "
-            f"scripts/check_ci_parity.py`, which honours {PYTHON_PIN.name}."
-        )
-    return problems
-
-
 def find_problems(
     workflows: dict[str, dict[str, object]], justfile: str
 ) -> tuple[list[str], int, int]:
@@ -355,13 +293,7 @@ def main() -> int:
     justfile = JUSTFILE.read_text()
     problems, covered, total = find_problems(workflows, justfile)
     problems.extend(script_step_problems(workflows, justfile))
-    problems.extend(
-        python_version_problems(
-            {name: ci_python_version((WORKFLOW_DIR / name).read_text()) for name in workflows},
-            PYTHON_PIN.read_text().strip() if PYTHON_PIN.is_file() else None,
-            local_python_version(),
-        )
-    )
+    problems.extend(interpreter_problems(REPO_ROOT))
 
     if problems:
         print("❌ local QA has drifted from CI:")
