@@ -337,7 +337,6 @@ async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) 
     """
     try:
         from syn_adapters.github import GitHubAppClient
-        from syn_adapters.github.agent_token import mint_agent_token
         from syn_adapters.github.client_endpoints import (
             get_installation_for_repo,
             list_installations,
@@ -359,8 +358,8 @@ async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) 
                     "No repo to route the GitHub token on (repo-less workflow); "
                     "using the first installation"
                 )
-                return await mint_agent_token(
-                    client, str(installations[0]["id"]), can_open_pr=can_open_pr
+                return await client.mint_agent_token(
+                    str(installations[0]["id"]), can_open_pr=can_open_pr
                 )
 
             for name in repo_names:
@@ -369,7 +368,7 @@ async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) 
                 except Exception:
                     logger.debug("No GitHub App installation owns %s", name, exc_info=True)
                     continue
-                return await mint_agent_token(client, installation_id, can_open_pr=can_open_pr)
+                return await client.mint_agent_token(installation_id, can_open_pr=can_open_pr)
 
             logger.warning(
                 "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
