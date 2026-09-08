@@ -23,11 +23,12 @@ what makes the drift unrepresentable.
 WHAT THIS DOES NOT DECIDE. It never talks to the aggregate, builds a command,
 or judges whether a phase succeeded. It is asked to hold, to hand back, and to
 let go - the caller decides when, and the ORDER in which it decides is
-load-bearing on two paths that are documented at their call sites rather than
-here: the unpushed-work guard must run before anything is popped (#1184), and a
-failing phase's branches must be read before teardown (#1200). Those orderings
-stay in the processor precisely so a reader of the completion path can see them
-without opening this file.
+load-bearing on three paths that are documented at their call sites rather than
+here: the unpushed-work guard must run before anything is popped (#1184), a
+failing phase's branches must be read before teardown (#1200), and a dying
+phase's work must be pushed out of its container before the same teardown
+(#1231). Those orderings stay in the processor precisely so a reader of any
+one path can see them without opening this file.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import SavedWork
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -43,6 +45,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     PhaseStartingPoints,
+    save_unpushed_work,
 )
 
 if TYPE_CHECKING:
@@ -55,7 +58,9 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+        ObservedBranches,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
         StreamResult,
@@ -330,6 +335,27 @@ class PhaseRuntime:
         `PhaseTimings` for what reading it late cost (#1036).
         """
         return PhaseTimings(started_at=dict(self._started_at), session_ids=dict(self._session_ids))
+
+    async def salvage(self, phase_id: str | None, *, execution_id: str) -> SavedWork:
+        """Push a dying phase's unsaved work out of its container (#1231).
+
+        MUST be called before `abandon_all`, for the reason `observe` must be:
+        once teardown has run, work that was only in that workspace is not
+        somewhere else, it is nowhere. That ordering is the whole of this
+        method's contract and it is documented at the two call sites, beside
+        the teardown it has to precede.
+
+        The caller says which phase died and which execution it belonged to.
+        Which container that is, and what it means for there to be none, are
+        decided here: a phase with no workspace is holding nothing that dying
+        could erase, which is `SavedWork()` - the same silence a workspace
+        that was genuinely clean produces, because for a caller deciding what
+        to tell an operator the two really are one answer.
+        """
+        workspace = self._workspaces.get(phase_id) if phase_id is not None else None
+        if workspace is None:
+            return SavedWork()
+        return await save_unpushed_work(workspace, execution_id=execution_id, phase_id=phase_id)
 
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""

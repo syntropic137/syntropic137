@@ -11,6 +11,14 @@ teardown, and both are wrong in the same way if they read an unanswered
 command as an answer, which is why they share `_checked` rather than being two
 modules that each own half a git.
 
+THE THIRD CALLER ASKS THE FIRST QUESTION ON THE SECOND PATH (#1231).
+`save_unpushed_work` runs the completion gate's walk on the paths that never
+reach it - a phase killed at its timeout, an execution the user cancelled -
+and reports what it saved as a value instead of a refusal, because those have
+already failed for a reason of their own and must keep it. It is the gate
+called and caught rather than a walk that resembles one: two implementations
+of "what would be lost" is exactly the drift this module is one file to avoid.
+
 WHERE A BRANCH STANDS IS A QUESTION ABOUT TWO MOMENTS, so the failing half
 needs a second call: `record_phase_starting_point` runs when the workspace is
 provisioned and records where each remote-tracking ref pointed then. Without
@@ -80,6 +88,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
     ObservedBranches,
     QuarantinedWork,
+    SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
@@ -235,6 +244,64 @@ async def quarantine_unpushed_work(
         ) from unreadable
     if quarantined:
         raise UnpushedWorkQuarantinedError(phase_id=phase_id, quarantined=tuple(quarantined))
+
+
+async def save_unpushed_work(
+    workspace: GitWorkspace,
+    *,
+    execution_id: str,
+    phase_id: str,
+) -> SavedWork:
+    """Empty a DYING workspace of everything no remote has, and say where it went.
+
+    THE SAME WALK THE COMPLETION GATE RUNS, on the paths that never reach it
+    (#1231). A phase killed at its ``timeout_seconds`` exits non-zero, which
+    `_handle_run_agent` turns into a raise, so it goes to the failure path and
+    never to `refuse_to_complete_unsaved_phase` - and the failure path only
+    ever LOOKED. Eight of a hundred executions ended with commits that existed,
+    were reported, and were then deleted with the container.
+
+    LITERALLY THE GATE, called and caught, rather than a second walk that
+    resembles it. The two paths must not be able to disagree about what counts
+    as unsaved, which ref the work goes to, or whether a push landed, and the
+    cheapest way to guarantee that is to have one implementation and no copy.
+
+    NEVER RAISES, and that is its whole contract to the terminal paths. It runs
+    on an execution that has ALREADY failed or been cancelled for a reason of
+    its own, and an exception here would replace that reason with this one - a
+    strictly worse error, about a different subject. A workspace that stops
+    answering becomes `SavedWork.unreadable`, which reports the absence of a
+    verdict rather than a verdict of "nothing was lost".
+    """
+    try:
+        await quarantine_unpushed_work(workspace, execution_id=execution_id, phase_id=phase_id)
+    except UnpushedWorkQuarantinedError as saved:
+        return SavedWork(quarantined=saved.quarantined)
+    except WorkspaceInspectionFailedError as unreadable:
+        logger.warning("Could not finish saving this workspace's work: %s", unreadable.summary)
+        return SavedWork(quarantined=unreadable.quarantined, unreadable=unreadable.summary)
+    return SavedWork()
+
+
+def already_saved_by_the_completion_gate(error: BaseException) -> bool:
+    """Whether this failure IS the completion gate's refusal, work and all (#1184).
+
+    THE ONE FAILURE THAT ARRIVES WITH THE WORKSPACE ALREADY EMPTIED. Both
+    errors below are raised only after `quarantine_unpushed_work` has pushed
+    everything it found, and both carry the report of it, which becomes the
+    failure's reason. Saving again would find the same work - a quarantine
+    pushes to `refs/syn/lost`, which is outside `refs/remotes`, so git still
+    calls those commits unpushed afterwards and cannot answer "already saved"
+    itself.
+
+    The second push then writes a DIFFERENT commit (a new committer
+    timestamp) to a ref that is unique to this phase run and pushed without
+    force, so it is rejected as a non-fast-forward and reported as work that
+    is gone. The result is "NONE OF IT IS RECOVERABLE" printed directly under
+    the gate's own "All of it is recoverable", about the same commits, one of
+    which is false. Asking here is what stops that, and it is asked once.
+    """
+    return isinstance(error, UnpushedWorkQuarantinedError | WorkspaceInspectionFailedError)
 
 
 @dataclass(frozen=True)

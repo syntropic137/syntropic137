@@ -541,6 +541,97 @@ def _render_quarantine_report(phase_id: str, quarantined: tuple[QuarantinedWork,
 
 
 @dataclass(frozen=True)
+class SavedWork:
+    """What a workspace was holding when a TERMINAL path emptied it (#1231).
+
+    THE SAME FACTS `UnpushedWorkQuarantinedError` CARRIES, on the paths where
+    they are not a refusal. The completion gate can afford to raise: refusing
+    IS the outcome it wants, because a phase holding unsaved work must not
+    report ``completed``. A phase killed at its timeout, or an execution the
+    user cancelled, has already failed for a reason of its own, and an
+    exception thrown while saving its work would replace that reason with this
+    one. So the same walk reports here as a value.
+
+    `unreadable` is why the walk stopped early, one line, and it is kept apart
+    from the records for the reason `ObservedBranches.unreadable` is: a walk
+    that could not finish has no verdict to give about the repositories it
+    never reached, and "we saved nothing" must never be printed for "we could
+    not look". Both empty means the walk finished and the workspace was holding
+    nothing - the ordinary case, and the one that prints no paragraph at all.
+    """
+
+    quarantined: tuple[QuarantinedWork, ...] = ()
+    unreadable: str | None = None
+
+    @property
+    def is_worth_reporting(self) -> bool:
+        """Whether there is anything true to say about this workspace.
+
+        False is the common case and must stay silent: a failing phase that
+        was holding nothing would otherwise be handed a paragraph about
+        quarantine refs that do not exist, which sends an operator looking for
+        work nobody lost.
+        """
+        return bool(self.quarantined or self.unreadable)
+
+
+#: What the terminal paths say about the work they saved, keyed exactly as
+#: ``_OBSERVED_HEADLINE`` is - ``(something was found, the walk stopped
+#: early)``. There is no ``(False, False)`` entry: nothing found and nothing
+#: unreadable is a workspace that was holding nothing, and
+#: ``is_worth_reporting`` keeps it out of the report rather than giving it a
+#: sentence.
+_SAVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
+    (True, False): (
+        "  THIS WORKSPACE WAS HOLDING WORK NO REMOTE HAD, and it was pushed "
+        "out of the container before teardown rather than dying with it. It "
+        "is on no branch, no PR shows it and no reviewer is sent it - fetch "
+        "it by name:"
+    ),
+    (True, True): (
+        "  PART OF WHAT THIS WORKSPACE WAS HOLDING WAS SAVED and the attempt "
+        "then stopped ({unreadable}), so there may be more it never reached. "
+        "What it did get to:"
+    ),
+    (False, True): (
+        "  WHETHER THIS WORKSPACE WAS HOLDING ANYTHING IS UNKNOWN: the "
+        "attempt to save it stopped before any repository was read "
+        "({unreadable}). That is not a report that nothing was lost, it is "
+        "the absence of one."
+    ),
+}
+
+
+def describe_saved_work(work: SavedWork) -> str:
+    """Say what was pushed out of a dying workspace, in the words an operator reads.
+
+    Appended to the failure's or cancellation's own reason rather than
+    replacing any of it, exactly as `describe_observed_branches` is: WHY the
+    execution ended and WHERE its work went are different questions, and the
+    first must stay as loud as it was.
+
+    Every sentence about durability comes from ``is_recoverable`` on the
+    records, through the same renderer and the same summary table the
+    completion gate prints, so a quarantine reported here cannot come to
+    describe itself differently from one reported there.
+    """
+    saved, lost = _by_durability(work.quarantined)
+    lines = [
+        _SAVED_HEADLINE[bool(work.quarantined), bool(work.unreadable)].format(
+            unreadable=work.unreadable
+        )
+    ]
+    lines.extend(line for record in (*saved, *lost) for line in _render_quarantined_work(record))
+    if work.quarantined:
+        lines.append(
+            _QUARANTINE_SUMMARY[bool(saved), bool(lost)].format(
+                saved=_repositories(len(saved)), lost=_repositories(len(lost))
+            )
+        )
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
 class ObservedBranches:
     """What a FAILED phase's workspace looked like to git, when nothing else says (#1200).
 
@@ -694,7 +785,7 @@ def _render_observed_branch(work: BranchObservation) -> list[str]:
     if work.unpushed_commits:
         lines.append(
             f"    {_commits(work.unpushed_commits)} here on no remote at all - "
-            f"lost with the workspace unless #1184 quarantined the branch"
+            f"the quarantine report above says where they went (#1231)"
         )
     return lines
 

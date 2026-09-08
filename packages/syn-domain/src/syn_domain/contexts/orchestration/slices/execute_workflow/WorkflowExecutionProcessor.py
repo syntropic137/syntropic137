@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import SavedWork
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -72,6 +73,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
     SessionLifecycleManager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    already_saved_by_the_completion_gate,
     refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
@@ -244,6 +246,7 @@ class WorkflowExecutionProcessor:
                     all_artifact_ids,
                     started_at,
                     cancel_reason=aggregate.cancel_reason,
+                    phase_id=dispatch_ctx.current_phase_id,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -356,13 +359,25 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         started_at: datetime,
         cancel_reason: str | None = None,
+        phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
         The aggregate is already in CANCELLED status - no new command needed.
+
+        ``phase_id`` is the phase that was mid-flight when the cancel landed,
+        from the run's own _DispatchContext for the same reason
+        ``failed_phase_id`` is: with concurrent runs sharing this processor,
+        anything else could name another execution's phase.
         """
-        cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
+        # BEFORE the teardown below: a cancelled phase's container is destroyed
+        # by `abandon_all`, and commits only in it go with it. The user asked
+        # for the run to stop, not for the work to be deleted (#1231).
+        saved = await self._runtime.salvage(phase_id, execution_id=execution_id)
+        cancellation = cancelled_execution(
+            cancel_reason, phase_results, all_artifact_ids, saved=saved
+        )
         await self._runtime.report_cancelled(cancellation.reason)
         await self._runtime.abandon_all("cancel")
         return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
@@ -406,10 +421,29 @@ class WorkflowExecutionProcessor:
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         timings = self._runtime.timings()
-        # Before the teardown below, the only window in which it is askable (#1200).
+        # Before the teardown below, the only window in which either is
+        # possible: save what would die with the container (#1231), then read
+        # where that leaves the branches (#1200). Saving first is what lets the
+        # branch report point at the quarantine ref instead of at nothing.
+        #
+        # The one failure that arrives with the workspace already emptied is
+        # the completion gate's own refusal, which quarantined before it raised
+        # (#1184). Saving again would push a second, differently-timestamped
+        # commit to the same ref, be rejected as a non-fast-forward, and report
+        # the work as lost directly under the gate's report that it is not.
+        saved = (
+            SavedWork()
+            if already_saved_by_the_completion_gate(error)
+            else await self._runtime.salvage(failed_phase_id, execution_id=execution_id)
+        )
         observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
-            error, failed_phase_id, timings.started_at, timings.session_ids, observed=observed
+            error,
+            failed_phase_id,
+            timings.started_at,
+            timings.session_ids,
+            observed=observed,
+            saved=saved,
         )
         if failure.result is not None:
             phase_results.append(failure.result)
