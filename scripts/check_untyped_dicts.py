@@ -56,7 +56,10 @@ name - on the import (``from typing import Dict as D``) or by assignment
 (``D = dict``) - is the shape it was renamed from. Without that, closing a
 spelling only moves the dodge into the line that names the shape, which is
 cheaper than any of the spellings above: one line, no import, and nothing for a
-reader of the annotation to notice.
+reader of the annotation to notice. A name bound more than once in a module
+keeps every binding rather than the last one, because this pass reads no scopes
+and the last binding textually is not the one in scope; ``_renames`` has the
+case that made keeping them all the only safe answer.
 
 See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md, #1188
 and #1248.
@@ -72,7 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Container, Mapping
 
 #: Mapping constructors that erase their value type when parameterised with
 #: ``Any``/``object``. Matched on the trailing name, so the dotted spellings
@@ -178,23 +181,34 @@ def _renamed_shape(node: ast.AST) -> str | None:
     return _trailing_name(node.value)
 
 
-def _follow(name: str, renames: Mapping[str, str]) -> str:
-    """The original name at the end of a chain of renames.
+def _origins(name: str, renames: Mapping[str, Collection[str]]) -> frozenset[str]:
+    """Every name ``name`` can end up at, following all of its bindings.
 
     ``D = dict`` followed by ``E = D`` is two lines and hides exactly as well
-    as one, so the walk continues until it runs out of renames. A chain that
-    closes on itself (``a = b`` beside ``b = a``) renames nothing and stops
-    where it closes rather than spinning.
+    as one, so each binding is walked until it runs out of renames. A name with
+    several bindings contributes the end of every one of them - see
+    ``_renames`` for why they are unioned rather than resolved to one. A chain
+    that closes on itself (``a = b`` beside ``b = a``) reaches no name at all
+    and contributes nothing, rather than spinning.
     """
-    seen = {name}
-    while (original := renames.get(name)) is not None and original not in seen:
-        seen.add(original)
-        name = original
-    return name
+    ends: set[str] = set()
+    seen: set[str] = set()
+    frontier = [name]
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        bindings = renames.get(current)
+        if bindings is None:
+            ends.add(current)
+        else:
+            frontier.extend(bindings)
+    return frozenset(ends)
 
 
-def _renames(tree: ast.Module) -> Mapping[str, str]:
-    """Every rename in a module, as local name -> the name it renames.
+def _renames(tree: ast.Module) -> Mapping[str, frozenset[str]]:
+    """Every rename in a module, as local name -> the names it can rename.
 
     ``_trailing_name`` answers what a type is *called at the point of use*,
     which is why the dotted spellings resolve. It cannot see a rename, and
@@ -208,7 +222,32 @@ def _renames(tree: ast.Module) -> Mapping[str, str]:
     the two - it needs no import at all - so it is the one a ratchet under
     pressure meets first.
 
-    Resolution runs one way only. A rename may give one of the names in
+    WHY A NAME MAPS TO A SET AND NOT TO ONE NAME. A module can bind the same
+    name twice, and the two bindings can be in different scopes::
+
+        from typing import Dict as D    # module scope: D is a mapping
+
+        def unrelated():
+            D = SomethingElse           # function scope: a different D
+
+        x: D[str, Any]                  # still the imported D
+
+    Nothing keyed on the bare name can tell those apart, so writing the second
+    binding over the first is a guess - and when it guessed wrong it silently
+    switched off counting for the annotation below, which is a hole of exactly
+    the shape this gate exists to close. Real scope tracking would settle it,
+    but that is a symbol table, and it is far more machinery than an AST
+    ratchet earns: the alternative is to keep *both* bindings and treat a name
+    as renamed if any of them makes it so. A name reachable to ``dict`` down
+    any binding is read as ``dict``.
+
+    That over-reports - the ``D`` inside ``unrelated`` above is counted as a
+    mapping when it is not one - and over-reporting is the direction this gate
+    is allowed to be wrong in. A false positive is an argument someone has in
+    a review; a false negative is a shape that walks past the ratchet and is
+    never mentioned again.
+
+    Resolution still runs one way only. A rename may give one of the names in
     ``MATCHED_NAMES`` a second name; it may never take one of those names away
     from itself, so this pass can add counts and cannot remove them - the one
     property that makes it safe to put in front of a ratchet. Python cannot
@@ -222,17 +261,14 @@ def _renames(tree: ast.Module) -> Mapping[str, str]:
     module imports keep their last segment (``import collections.abc as c``
     records ``c -> abc``) on the same reasoning. ``ast.walk`` rather than
     ``tree.body`` because a function-local rename renames just as effectively
-    as a top-level one - and, being name-based rather than flow-based, it reads
-    ``annotation = Any`` in one branch of one function as a rename for the
-    whole module. That over-counts, which is the direction a ratchet is allowed
-    to be wrong in.
+    as a top-level one.
     """
-    renames: dict[str, str] = {}
+    renames: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             for alias in node.names:
                 if alias.asname is not None and alias.asname not in MATCHED_NAMES:
-                    renames[alias.asname] = alias.name.rpartition(".")[2]
+                    renames.setdefault(alias.asname, set()).add(alias.name.rpartition(".")[2])
         elif (original := _renamed_shape(node)) is not None:
             # The names a rename binds are its targets, which are the only
             # names it stores to - true of all three assignment spellings
@@ -245,8 +281,8 @@ def _renames(tree: ast.Module) -> Mapping[str, str]:
                     and isinstance(target.ctx, ast.Store)
                     and target.id not in MATCHED_NAMES
                 ):
-                    renames[target.id] = original
-    return {name: _follow(name, renames) for name in renames}
+                    renames.setdefault(target.id, set()).add(original)
+    return {name: _origins(name, renames) for name in renames}
 
 
 def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
@@ -271,25 +307,34 @@ class _DictShapedStateCollector(ast.NodeVisitor):
     not a second definition of the shape.
     """
 
-    def __init__(self, values: frozenset[str], renames: Mapping[str, str]) -> None:
+    def __init__(self, values: frozenset[str], renames: Mapping[str, frozenset[str]]) -> None:
         self.values = values
         self.renames = renames
         self.found: list[Occurrence] = []
 
-    def _name(self, node: ast.expr) -> str | None:
-        """``_trailing_name``, with any rename undone."""
+    def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
+        """Whether a type expression names one of ``names``, renames undone.
+
+        Asked as a question rather than answered as a name because a name can
+        have more than one binding in a module and this pass does not claim to
+        know which one is in scope - see ``_renames``. Every caller here wants
+        to know whether a shape is among a set of them, which is answerable
+        without picking one: any binding landing in ``names`` is a hit.
+        """
         name = _trailing_name(node)
-        return None if name is None else self.renames.get(name, name)
+        if name is None:
+            return False
+        return any(origin in names for origin in self.renames.get(name, frozenset({name})))
 
     def _is_untyped_str_mapping(self, node: ast.Subscript) -> bool:
         """Whether ``node`` maps ``str`` to one of ``self.values``."""
-        if self._name(node.value) not in MAPPING_NAMES:
+        if not self._resolves_to(node.value, MAPPING_NAMES):
             return False
         arguments = _subscript_arguments(node)
         if len(arguments) != 2:
             return False
         key, value = arguments
-        return self._name(key) == "str" and self._name(value) in self.values
+        return self._resolves_to(key, {"str"}) and self._resolves_to(value, self.values)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         if self._is_untyped_str_mapping(node):
@@ -305,11 +350,11 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         # ``cast("dict[str, Any]", x)`` and ``cast(dict[str, Any], x)`` are the
         # same annotation. Counting only the second would leave the quotes as a
         # way to spell the type without spending the budget.
-        if self._name(node.func) == "cast" and node.args:
+        if self._resolves_to(node.func, {"cast"}) and node.args:
             self._descend_into_string(node.args[0])
         # ``P = TypedDict("P", {...})`` declares the same thing as the class
         # body below, one keystroke away from it.
-        if self._name(node.func) == TYPED_DICT_NAME and node.args:
+        if self._resolves_to(node.func, {TYPED_DICT_NAME}) and node.args:
             self.found.append(
                 Occurrence(
                     line=node.lineno,
@@ -326,7 +371,7 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         the only place a fix can happen. Counting references would measure how
         popular the type is instead of how much debt there is.
         """
-        if any(self._name(base) == TYPED_DICT_NAME for base in node.bases):
+        if any(self._resolves_to(base, {TYPED_DICT_NAME}) for base in node.bases):
             self.found.append(
                 Occurrence(line=node.lineno, text=f"class {node.name}({TYPED_DICT_NAME})")
             )
@@ -355,7 +400,7 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         """
         if not isinstance(node.ctx, ast.Load):
             return
-        if self._name(node) == NAMESPACE_NAME:
+        if self._resolves_to(node, {NAMESPACE_NAME}):
             self.found.append(Occurrence(line=node.lineno, text=NAMESPACE_NAME))
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:

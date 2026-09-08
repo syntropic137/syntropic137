@@ -674,3 +674,126 @@ class TestAssignmentRenamesDoNotHide:
         x: dict[str, object]
         """
         assert count(source) == 1
+
+
+@pytest.mark.unit
+class TestASecondBindingDoesNotUnbindTheFirst:
+    """(k) Two bindings of one name are two bindings, not the later one.
+
+    Resolving renames was first written as one map from name to name, which
+    can only hold one binding per name, so the last one written won. That is a
+    guess about scope made by a pass that reads no scopes, and it guessed
+    wrong in the ordinary direction: an unrelated rebinding of a short alias -
+    inside a function, where it cannot possibly affect a module-level
+    annotation - deleted the import that made the alias a mapping, and every
+    use of it below stopped counting.
+
+    The bug arrived *with* the fix for assignment renames and regressed import
+    renames, which had worked. Nothing caught it, because the tests for each
+    rename form used that form alone: a module with one binding per name is
+    the one module where last-one-wins is always right. So these cases all
+    combine two bindings of the same name, which is the smallest module that
+    can tell the two implementations apart.
+    """
+
+    def test_a_nested_rebinding_does_not_cancel_an_import_rename(self) -> None:
+        """The reported regression, in the fewest lines that show it."""
+        source = """
+        from typing import Dict as D
+
+        def unrelated():
+            D = SomeClass
+            return D
+
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_nested_rebinding_does_not_cancel_an_assignment_rename(self) -> None:
+        """The same module with the rename spelled the other way.
+
+        Both spellings feed one map, so both were exposed; fixing only the
+        import half would leave the cheaper half of the pair open, which is
+        the mistake this class of fix keeps being about.
+        """
+        source = """
+        D = dict
+
+        def unrelated():
+            D = SomeClass
+            return D
+
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_module_level_rebinding_does_not_cancel_it_either(self) -> None:
+        """Nesting is not what makes it wrong - having two bindings is."""
+        source = """
+        from typing import Dict as D
+        x: D[str, Any]
+        D = SomeClass
+        """
+        assert count(source) == 1
+
+    def test_the_order_of_the_two_bindings_does_not_decide_it(self) -> None:
+        """Whichever came first, the mapping binding still counts.
+
+        Pinned in both orders because "last one wins" and "first one wins" are
+        equally arbitrary: the walk order is the AST's, not the reader's, and
+        an answer that depends on it is an answer nobody can predict from the
+        source.
+        """
+        source = """
+        D = SomeClass
+        from typing import Dict as D
+        y: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_two_mapping_bindings_still_count_their_uses_once(self) -> None:
+        """Unioning bindings must not double-count the annotation below."""
+        source = """
+        from typing import Dict as D
+        D = Mapping
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_use_is_counted_when_any_binding_makes_it_a_mapping(self) -> None:
+        """The deliberate over-report, pinned so it stays a decision.
+
+        Reading only ``unrelated``'s own ``D``, this annotation names a class
+        and is not a mapping - and it is counted anyway, because some binding
+        of ``D`` in this module is ``dict``. Telling those apart needs a symbol
+        table, which is more than an AST ratchet earns.
+
+        The direction is the point. Over-reporting costs someone an argument
+        in review, where a human decides; under-reporting is a shape that
+        walks past the gate with nobody present to notice. A ratchet may only
+        be wrong the first way.
+        """
+        source = """
+        D = dict
+
+        def unrelated():
+            D = SomeClass
+            y: D[str, Any] = D()
+        """
+        assert count(source) == 1
+
+    def test_a_second_binding_still_cannot_switch_a_matched_name_off(self) -> None:
+        """Unioning must not reopen the hole the one-way rule closes.
+
+        ``object`` is matched on directly, so it is never recorded as a rename
+        target at all - not once, not twice. Keeping every binding of a name
+        would be a way to smuggle that back in if the guard were applied to
+        the map instead of to the write.
+        """
+        source = """
+        from decimal import Decimal as object
+
+        def f(x: dict[str, object]) -> None:
+            object = object.func
+        """
+        assert count(source) == 1
