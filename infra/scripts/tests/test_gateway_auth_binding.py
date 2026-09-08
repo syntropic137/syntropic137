@@ -338,6 +338,12 @@ def _split_port_spec(spec: str) -> list[str]:
     ``${SYN_GATEWAY_PORT:-8137}`` contains a colon of its own, so splitting the
     raw string gets the fields wrong -- quietly, and in a way that still yields
     three of them.
+
+    A two-field publish (``"9137:80"``) names no interface and so binds every
+    one of them -- that is the original #1148 defect, and it is reported as an
+    empty host_ip rather than raised. Raising here would abort collection and
+    take all of this file's tests with it, turning the clearest possible
+    finding into an error message about a list length.
     """
     fields: list[str] = [""]
     depth = 0
@@ -350,8 +356,8 @@ def _split_port_spec(spec: str) -> list[str]:
             fields.append("")
             continue
         fields[-1] += char
-    assert len(fields) == 3, f"expected host_ip:published:target, got {fields!r} from {spec!r}"
-    return fields
+    assert len(fields) <= 3, f"expected host_ip:published:target, got {fields!r} from {spec!r}"
+    return ["", *fields][-3:]
 
 
 def _environment(service: dict[str, object]) -> dict[str, str]:
@@ -462,6 +468,10 @@ def test_the_gateway_is_told_the_address_it_is_published_on(publish: Port80Publi
     on whatever address docker actually bound.
     """
     if not variable_names(publish.host_ip_expression):
+        assert publish.host_ip_expression, (
+            f"{publish} publishes port 80 with no host interface at all, which "
+            f"binds every one of them"
+        )
         assert binds_loopback(publish.host_ip_expression), (
             f"{publish} hard-wires the non-loopback address "
             f"{publish.host_ip_expression!r}, which nothing can opt out of"
