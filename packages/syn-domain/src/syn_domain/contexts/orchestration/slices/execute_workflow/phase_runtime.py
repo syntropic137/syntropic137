@@ -352,7 +352,9 @@ class PhaseRuntime:
         that was genuinely clean produces, because for a caller deciding what
         to tell an operator the two really are one answer.
         """
-        workspace = self._workspaces.get(phase_id) if phase_id is not None else None
+        if phase_id is None:
+            return SavedWork()
+        workspace = self._workspaces.get(phase_id)
         if workspace is None:
             return SavedWork()
         return await save_unpushed_work(workspace, execution_id=execution_id, phase_id=phase_id)
