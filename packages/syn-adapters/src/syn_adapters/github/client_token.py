@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -18,6 +19,35 @@ if TYPE_CHECKING:
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
 logger = logging.getLogger(__name__)
+
+
+class TokenRequest(BaseModel):
+    """The body of ``POST /app/installations/{id}/access_tokens``.
+
+    This endpoint's scoping contract, in one place: send this body and the
+    token carries exactly ``permissions``; send no body at all and it carries
+    the installation's full grant. The second case is what let a phase that
+    had been told not to publish publish anyway (#1197), so which of the two
+    went on the wire is the thing worth asserting on - and asserting on it
+    should not mean re-deriving the JSON shape at every call site.
+
+    Being a model rather than a dict literal is what makes the field name a
+    single edit: rename it here and pyright finds every reader, instead of the
+    scope silently going missing at runtime. ``extra="forbid"`` closes the
+    other direction, where a body grows a key the endpoint ignores.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    permissions: dict[str, str]
+    """Permission name to level, spelled as GitHub spells them
+    (``pull_requests``, ``contents``, ...).
+
+    Open-ended by necessity rather than by neglect: which permissions an
+    installation holds is operator-configured, and GitHub rejects a request
+    exceeding that set, so callers derive this from the installation instead
+    of enumerating it - see ``agent_token.mint_agent_token``.
+    """
 
 
 def check_token_response(response: httpx.Response, iid: str) -> None:
@@ -165,12 +195,13 @@ async def get_installation_token(
     logger.info("Generating new installation token for installation_id=%s", iid)
 
     jwt_token = client._generate_jwt()
+    body = None if permissions is None else TokenRequest(permissions=dict(permissions))
 
     try:
         response = await client._http.post(
             f"/app/installations/{iid}/access_tokens",
             headers={"Authorization": f"Bearer {jwt_token}"},
-            json=None if permissions is None else {"permissions": dict(permissions)},
+            json=None if body is None else body.model_dump(),
         )
 
         check_token_response(response, iid)

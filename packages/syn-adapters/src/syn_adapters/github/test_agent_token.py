@@ -15,12 +15,13 @@ and on a codex phase where a tool allowlist would not have applied at all.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
 
 from syn_adapters.github.agent_token import mint_agent_token
+from syn_adapters.github.client_token import TokenRequest
 
 if TYPE_CHECKING:
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
@@ -37,27 +38,30 @@ _GRANTED = {
 }
 
 
-class _TokenRequest(TypedDict):
-    """The body `client_token` posts to the token-mint endpoint.
-
-    Not `dict[str, Any]`: the production caller sends either exactly this or
-    no body at all (`client_token.py`), and which of the two it sent is the
-    single thing every test below reads. `permissions` is required because a
-    body that omits it is not something that caller can produce - so the
-    "present but empty" case is unrepresentable here rather than a branch each
-    reader has to rule out.
-    """
-
-    permissions: dict[str, str]
-
-
 class _FakeHttp:
-    """Records what was asked of GitHub, and answers as GitHub would."""
+    """Records what was asked of GitHub, and answers as GitHub would.
+
+    It keeps the JSON body verbatim, because that is what a transport has:
+    the request only becomes a `TokenRequest` when something reads it, which
+    is exactly the hop GitHub performs. Every reader below goes through
+    `last_token_request()` and gets it typed.
+    """
 
     def __init__(self, granted: dict[str, str]) -> None:
         self._granted = granted
-        self.token_requests: list[_TokenRequest | None] = []
+        self.token_request_bodies: list[dict[str, dict[str, str]] | None] = []
         self.minted = 0
+
+    def last_token_request(self) -> TokenRequest | None:
+        """The most recent token request, parsed as the endpoint parses it.
+
+        None means no body went on the wire at all - the case that grants the
+        installation's full permission set, and so the one that decides
+        whether a phase can publish (#1197).
+        """
+        assert self.token_request_bodies, "no installation token was ever requested"
+        body = self.token_request_bodies[-1]
+        return None if body is None else TokenRequest.model_validate(body)
 
     async def get(self, path: str, headers: dict[str, str] | None = None) -> httpx.Response:
         assert path.startswith("/app/installations/")
@@ -71,14 +75,15 @@ class _FakeHttp:
         self,
         path: str,
         headers: dict[str, str] | None = None,
-        json: _TokenRequest | None = None,
+        json: dict[str, dict[str, str]] | None = None,
     ) -> httpx.Response:
-        self.token_requests.append(json)
+        self.token_request_bodies.append(json)
         self.minted += 1
         # GitHub echoes back the permissions the token actually carries. A
         # request with no body at all gets the installation's full set - which
         # is exactly the behaviour that let `implement` publish.
-        effective = json["permissions"] if json else self._granted
+        requested = self.last_token_request()
+        effective = self._granted if requested is None else requested.permissions
         expires = datetime.now(UTC) + timedelta(hours=1)
         return httpx.Response(
             201,
@@ -109,9 +114,9 @@ def _as_client(fake: _FakeClient) -> GitHubAppClient:
 
 
 def _requested_permissions(fake: _FakeClient) -> dict[str, str] | None:
-    assert fake.http.token_requests, "no installation token was ever requested"
-    body = fake.http.token_requests[-1]
-    return None if body is None else body["permissions"]
+    """The scope the last token request asked for, or None for the full grant."""
+    requested = fake.http.last_token_request()
+    return None if requested is None else requested.permissions
 
 
 @pytest.mark.unit
@@ -127,6 +132,26 @@ async def test_a_phase_that_may_not_publish_cannot_create_a_pull_request() -> No
         "installation's full set, including pull_requests: write"
     )
     assert requested["pull_requests"] == "read"
+
+
+@pytest.mark.unit
+async def test_the_scope_goes_on_the_wire_under_the_name_github_reads() -> None:
+    """The one assertion that has to spell the JSON key out.
+
+    Every other test here reads the request back through `TokenRequest`, so a
+    field renamed or aliased on the model would round-trip green on both sides
+    while GitHub received a key it does not recognise - and an unrecognised
+    key means an unscoped token, which is the whole defect. This pins the
+    serialized body `get_installation_token` actually posts, against what the
+    endpoint documents.
+    """
+    fake = _FakeClient({"contents": "write", "pull_requests": "write"})
+
+    await mint_agent_token(_as_client(fake), "42", can_open_pr=False)
+
+    assert fake.http.token_request_bodies == [
+        {"permissions": {"contents": "write", "pull_requests": "read"}}
+    ]
 
 
 @pytest.mark.unit
