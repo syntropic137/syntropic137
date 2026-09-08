@@ -212,6 +212,5 @@ class TestTheFieldsAreAnswerableWithoutHavingActed:
 
         assert "or what you found already correct" in prompt
         assert "if you made any" in prompt, (
-            "a phase that committed nothing must not be asked for commit hashes "
-            "as though it had"
+            "a phase that committed nothing must not be asked for commit hashes as though it had"
         )
