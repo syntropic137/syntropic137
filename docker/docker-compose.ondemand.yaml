@@ -9,6 +9,18 @@
 #   Slot 2: Gateway=28137, API=29137, DB=25432, ...
 #   Event store uses a separate range: 60051, 61051, 62051, 63051
 #
+# BINDING. Every port here but the gateway's is hard-wired to 127.0.0.1, and no
+# variable may widen them. Behind them sit a superuser Postgres, a MinIO on
+# default credentials, an open Redis and the API's own port - none of which has
+# an authenticated mode to switch on, so there is no version of "widen this
+# safely" to offer. Reach them from another machine with an SSH tunnel.
+#
+# The gateway is the exception because it is the one listener that CAN require
+# credentials. It uses ${SYN_GATEWAY_BIND} - the same variable as the selfhost
+# and published stacks, so one variable and one rule cover every stack in the
+# repo - and hands that address to its container, which refuses to start off
+# loopback without SYN_API_PASSWORD (#1148).
+#
 # See: ADR-034 - Test Infrastructure Architecture
 # See: ADR-060 - On-Demand Environment Creation
 # Registry: infra/environments.json
@@ -17,7 +29,7 @@ services:
   timescaledb:
     container_name: syn-env-${SYN_ENV_NAME}-db
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_DB}:5432"
+      - "127.0.0.1:${SYN_ENV_PORT_DB}:5432"
     volumes:
       - ./init-db:/docker-entrypoint-initdb.d:ro
     # No persistent volume - ephemeral, clean slate on creation
@@ -25,12 +37,12 @@ services:
   event-store:
     container_name: syn-env-${SYN_ENV_NAME}-event-store
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_ES}:50051"
+      - "127.0.0.1:${SYN_ENV_PORT_ES}:50051"
 
   collector:
     container_name: syn-env-${SYN_ENV_NAME}-collector
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_COLLECTOR}:8080"
+      - "127.0.0.1:${SYN_ENV_PORT_COLLECTOR}:8080"
 
   # Definition in docker-compose.yaml; only container_name here
   docker-socket-proxy:
@@ -42,7 +54,7 @@ services:
       args:
         INCLUDE_DOCKER_CLI: "1"
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_API}:8000"
+      - "127.0.0.1:${SYN_ENV_PORT_API}:8000"
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     # root-path /api/v1 matches selfhost - gateway proxies /api/v1/* to here
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --root-path /api/v1"]
@@ -87,11 +99,19 @@ services:
       dockerfile: infra/docker/images/gateway/Dockerfile
     container_name: syn-env-${SYN_ENV_NAME}-gateway
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_GATEWAY}:80"
+      - "${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_ENV_PORT_GATEWAY}:80"
     environment:
-      # No auth for test environments
-      - SYN_API_PASSWORD=
-      - SYN_API_USER=admin
+      # A container cannot observe its own host port mapping, so the address
+      # the `ports:` entry above publishes on has to be handed in. The
+      # entrypoint refuses to serve an unauthenticated port 80 anywhere but
+      # loopback, and it can only do that if it is told - the same expression,
+      # or the two drift and the refusal silently stops firing (#1148).
+      - SYN_GATEWAY_BIND=${SYN_GATEWAY_BIND:-127.0.0.1}
+      # Empty by default, so the loopback-only environment these normally are
+      # stays unauthenticated for e2e and Playwright. Setting SYN_GATEWAY_BIND
+      # to anything else makes this mandatory rather than optional.
+      - SYN_API_PASSWORD=${SYN_API_PASSWORD:-}
+      - SYN_API_USER=${SYN_API_USER:-admin}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -105,20 +125,20 @@ services:
   minio:
     container_name: syn-env-${SYN_ENV_NAME}-minio
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_MINIO}:9000"
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_MINIO_CONSOLE}:9001"
+      - "127.0.0.1:${SYN_ENV_PORT_MINIO}:9000"
+      - "127.0.0.1:${SYN_ENV_PORT_MINIO_CONSOLE}:9001"
     # No persistent volume - ephemeral
 
   redis:
     container_name: syn-env-${SYN_ENV_NAME}-redis
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_REDIS}:6379"
+      - "127.0.0.1:${SYN_ENV_PORT_REDIS}:6379"
     # No persistent volume - ephemeral
 
   envoy-proxy:
     container_name: syn-env-${SYN_ENV_NAME}-envoy-proxy
     ports:
-      - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_ENVOY}:8081"
+      - "127.0.0.1:${SYN_ENV_PORT_ENVOY}:8081"
 
   token-injector:
     container_name: syn-env-${SYN_ENV_NAME}-token-injector
