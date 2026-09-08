@@ -660,3 +660,17 @@ class TestAssignmentRenamesDoNotHide:
     def test_a_rename_cannot_redefine_the_value_types(self) -> None:
         """``Any = str`` must not talk the gate out of a hit either."""
         assert count("Any = str\nx: dict[str, Any]\n") == 1
+
+    def test_an_import_cannot_redefine_a_matched_name_either(self) -> None:
+        """One rule for both statements, or the hole just moves back.
+
+        ``from x import y as object`` is the import spelling of the rebinding
+        above, and would silence the file the same way. Guarding assignments
+        and not imports would leave the cheaper half of the pair open, which is
+        the mistake this whole class of fix keeps being about.
+        """
+        source = """
+        from decimal import Decimal as object
+        x: dict[str, object]
+        """
+        assert count(source) == 1
