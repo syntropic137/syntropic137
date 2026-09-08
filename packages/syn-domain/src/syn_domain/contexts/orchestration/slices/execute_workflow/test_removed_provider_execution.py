@@ -27,6 +27,9 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
+)
 from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
@@ -137,8 +140,24 @@ class ExecutionSpies:
     """The infrastructure a remapped run WOULD have touched."""
 
     def __init__(self) -> None:
+        # The setup step fails explicitly: this test cares only about WHICH
+        # provider the run reached, so provisioning is stubbed to stop there
+        # rather than left to whatever a bare mock happens to answer.
+        workspace = AsyncMock()
+        workspace.run_setup_phase = AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=1,
+                success=False,
+                duration_ms=1.0,
+                stderr="stubbed workspace: setup never runs in this test",
+            )
+        )
+        workspace_cm = AsyncMock()
+        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+        workspace_cm.__aexit__ = AsyncMock(return_value=False)
+
         self.workspace_service = MagicMock()
-        self.workspace_service.create_workspace = MagicMock()
+        self.workspace_service.create_workspace = MagicMock(return_value=workspace_cm)
         self.command_builder = MagicMock(return_value=["claude", "-p", "do the thing"])
         self.execution_repository = AsyncMock()
 

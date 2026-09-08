@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -22,6 +25,33 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 )
 
 
+def _stub_workspace_service() -> MagicMock:
+    """A workspace service whose in-phase setup step fails, explicitly.
+
+    These tests only need provisioning to fail; they used to get that from a
+    bare ``MagicMock()``, whose stand-in for the setup RESULT answered every
+    attribute. The failure path now asks that result to describe itself, and a
+    mock that answers with a coroutine is a fixture lying about the contract -
+    so model the failure instead of relying on the mock plumbing to produce one.
+    """
+    workspace = AsyncMock()
+    workspace.run_setup_phase = AsyncMock(
+        return_value=ExecutionResult(
+            exit_code=1,
+            success=False,
+            duration_ms=1.0,
+            stderr="stubbed workspace: setup never runs in this test",
+        )
+    )
+    workspace_cm = AsyncMock()
+    workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+    workspace_cm.__aexit__ = AsyncMock(return_value=False)
+
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value = workspace_cm
+    return workspace_service
+
+
 def _make_processor() -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
@@ -31,7 +61,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
     return WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
+        workspace_service=_stub_workspace_service(),
         artifact_repository=AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,

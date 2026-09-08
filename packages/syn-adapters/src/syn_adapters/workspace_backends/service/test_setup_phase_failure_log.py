@@ -33,7 +33,9 @@ async def _failure_log(result: ExecutionResult, caplog: pytest.LogCaptureFixture
             "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
             new=AsyncMock(),
         ),
-        caplog.at_level(logging.ERROR, logger="syn_adapters.workspace_backends.service.setup_phase"),
+        caplog.at_level(
+            logging.ERROR, logger="syn_adapters.workspace_backends.service.setup_phase"
+        ),
     ):
         await run_setup_phase(workspace, SetupPhaseSecrets.for_testing())
 
