@@ -35,8 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_untyped_dicts import (
     Occurrence,
-    contains_untyped_mapping,
-    find_untyped_mappings,
+    contains_dict_shaped_state,
+    find_dict_shaped_state,
     main,
     scan_package,
 )
@@ -44,7 +44,7 @@ from check_untyped_dicts import (
 
 def count(source: str) -> int:
     """Occurrences in a dedented snippet, so tests can be written indented."""
-    return len(find_untyped_mappings(textwrap.dedent(source)))
+    return len(find_dict_shaped_state(textwrap.dedent(source)))
 
 
 @pytest.mark.unit
@@ -138,7 +138,7 @@ class TestProseIsNotCode:
     def test_the_module_docstring_of_the_gate_itself_counts_zero(self) -> None:
         """The regex counted its own explanation. This one must not."""
         gate = Path(__file__).resolve().parents[1] / "check_untyped_dicts.py"
-        occurrences = find_untyped_mappings(gate.read_text())
+        occurrences = find_dict_shaped_state(gate.read_text())
         assert occurrences == [], f"gate counts itself: {occurrences}"
 
 
@@ -191,7 +191,7 @@ class TestAliases:
             def one(a: D) -> D: ...
             """
         )
-        (occurrence,) = find_untyped_mappings(source)
+        (occurrence,) = find_dict_shaped_state(source)
         assert occurrence == Occurrence(line=2, text="dict[str, Any]")
 
 
@@ -215,7 +215,7 @@ class TestUnparseableFilesAreLoud:
 
     def test_the_parser_refuses_to_guess(self) -> None:
         with pytest.raises(SyntaxError):
-            find_untyped_mappings("def f(:\n")
+            find_dict_shaped_state("def f(:\n")
 
     def test_a_broken_file_is_named_in_the_scan(self, tmp_path: Path) -> None:
         scan = scan_package("pkg", self._package(tmp_path, broken=True), allowed=99, issue="#1188")
@@ -273,7 +273,7 @@ class TestPackageScanning:
 
 @pytest.mark.unit
 class TestTheNodeLevelEntry:
-    """``contains_untyped_mapping`` is what ADR-063's boundary gate consumes.
+    """``contains_dict_shaped_state`` is what ADR-063's boundary gate consumes.
 
     That gate used to run its own regex over annotation source text and so
     shared the defect this change fixes: renaming a Protocol parameter from
@@ -291,10 +291,10 @@ class TestTheNodeLevelEntry:
         ["x: dict[str, Any]\n", "x: Mapping[str, object]\n", "x: list[dict[str, Any]]\n"],
     )
     def test_finds_erased_mappings_by_default(self, source: str) -> None:
-        assert contains_untyped_mapping(self._annotation(source))
+        assert contains_dict_shaped_state(self._annotation(source))
 
     def test_a_typed_mapping_is_not_flagged(self) -> None:
-        assert not contains_untyped_mapping(self._annotation("x: Mapping[str, int]\n"))
+        assert not contains_dict_shaped_state(self._annotation("x: Mapping[str, int]\n"))
 
     def test_str_values_are_opaque_only_when_the_caller_says_so(self) -> None:
         """ADR-063 counts ``dict[str, str]``; the ratchet does not.
@@ -303,14 +303,14 @@ class TestTheNodeLevelEntry:
         by the caller rather than duplicated in a second regex.
         """
         annotation = self._annotation("x: dict[str, str]\n")
-        assert not contains_untyped_mapping(annotation)
-        assert contains_untyped_mapping(annotation, values=frozenset({"str", "Any", "object"}))
+        assert not contains_dict_shaped_state(annotation)
+        assert contains_dict_shaped_state(annotation, values=frozenset({"str", "Any", "object"}))
 
     def test_the_boundary_gate_can_no_longer_be_dodged_by_renaming(self) -> None:
         """The PR #1186 evasion, applied to a Protocol signature."""
         opaque = frozenset({"str", "Any", "object"})
         for spelling in ("dict[str, object]", "Mapping[str, object]", "Dict[str, Any]"):
-            assert contains_untyped_mapping(self._annotation(f"x: {spelling}\n"), values=opaque), (
+            assert contains_dict_shaped_state(self._annotation(f"x: {spelling}\n"), values=opaque), (
                 spelling
             )
 
@@ -348,7 +348,7 @@ class TestTypedDictIsDictShapedState:
         def read(p: Permissions) -> str:
             return p["contents"]
         """
-        (occurrence,) = find_untyped_mappings(textwrap.dedent(source))
+        (occurrence,) = find_dict_shaped_state(textwrap.dedent(source))
         assert occurrence.text == "class Permissions(TypedDict)"
 
     @pytest.mark.parametrize(

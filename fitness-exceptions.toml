@@ -48,13 +48,19 @@ value = 1200
 issue = "#185"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Untyped Dicts - str-keyed mappings with unconstrained values, per package.
+# Untyped Dicts - declarations of dict-shaped structured state, per package.
 # Default is 0 (clean). Every non-zero entry is grandfathered tech debt.
 #
 # RATCHET INVARIANT: values MAY ONLY DECREASE. Never bump a value up to
-# accommodate new untyped dicts. Type them with TypedDict or Pydantic
-# before merging. The threshold is a ceiling on existing tech debt, not
-# a budget for new debt.
+# accommodate new untyped dicts. Give the data a @dataclass or a Pydantic
+# BaseModel before merging. The threshold is a ceiling on existing tech debt,
+# not a budget for new debt.
+#
+# NOT with a TypedDict. This block used to say "type them with TypedDict or
+# Pydantic", and on PR #1246 someone did exactly that to turn this gate green.
+# A TypedDict is read as value["key"] and validates nothing at runtime, so it
+# fails the rule it appears to satisfy; since #1248 the gate counts it, and
+# converting a dict[str, Any] into one now moves the number nowhere.
 #
 # RE-BASELINED 2026-09-05 (#1188). These five values were re-measured, NOT
 # raised. The gate used to grep for the literal string "dict[str, Any]"; it now
@@ -76,21 +82,39 @@ issue = "#185"
 # Every value is now the exact measured count, so no entry carries headroom.
 # syn-domain previously allowed 391 against a real 387; a ratchet with slack in
 # it permits exactly the growth it exists to stop.
+#
+# RE-BASELINED 2026-09-08 (#1248). Same story, one level up. #1188 fixed how a
+# shape is written and left open which shapes are looked for, so TypedDict and
+# SimpleNamespace declarations - dict-shaped structured state by any reading of
+# the rule - had never been measured. Counting them adds 42 occurrences that
+# were already in the tree. No package's mapping count moved by one:
+#
+#                  mappings  TypedDict  SimpleNamespace   was -> now
+#   syn-domain          413         24                3   413 -> 440
+#   syn-adapters        205          3                0   205 -> 208
+#   syn-api             139          7                0   139 -> 146
+#   syn-collector        22          0                0    22 ->  22
+#   syn-shared           11          5                0    11 ->  16
+#
+# These 42 are recorded, not accepted: they ratchet to 0 alongside the rest,
+# and #1248 deliberately did not fix them, so that the change that made them
+# visible stays separable from the changes that remove them. Every value is
+# still the exact measured count, so there is still no headroom anywhere.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 413
+value = 440
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
 path = "packages/syn-adapters"
-value = 205
+value = 208
 issue = "#673"
 
 [untyped-dicts.syn-api]
 path = "apps/syn-api"
-value = 139
+value = 146
 issue = "#673"
 
 [untyped-dicts.syn-collector]
@@ -100,7 +124,7 @@ issue = "#673"
 
 [untyped-dicts.syn-shared]
 path = "packages/syn-shared"
-value = 11
+value = 16
 issue = "#673"
 
 # Test-marker census (justfile: check-test-markers).
