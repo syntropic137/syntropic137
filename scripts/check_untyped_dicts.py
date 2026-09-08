@@ -26,7 +26,43 @@ and a text search cannot tell them apart.
 Parsing removes the seam. Every spelling below resolves to one shape, and
 docstrings and comments are not part of the tree at all.
 
-See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md and #1188.
+WHY IT COUNTS THREE SHAPES AND NOT ONE. Parsing fixed how a shape is *written*
+and left open which shapes are *looked for*. On PR #1246 a change that failed
+this gate with a ``dict[str, Any]`` passed it by declaring a ``TypedDict`` with
+the same string keys - which is still read as ``value["key"]``, still has no
+runtime validation, and still fails both halves of the rule in AGENTS.md. The
+gate went green; independent review refused the head anyway, on the grounds
+that "passing the AST ratchet does not satisfy that requirement; it only shows
+the ratchet does not count this spelling". That is the same defect as #1188 one
+level up: not a number that moved for a rename, but a number that stayed still
+for a shape nobody had listed.
+
+So the subject here is dict-shaped structured state, in the three forms it is
+declared in:
+
+1. a str-keyed mapping whose value type constrains nothing - ``dict[str, Any]``
+   and every alias of it;
+2. a ``TypedDict`` declaration, class-based or functional, whatever its field
+   types, because the objection is the string-keyed access and not the erasure;
+3. a ``SimpleNamespace``, which declares no fields at all and so tells a type
+   checker strictly less than the ``dict[str, Any]`` in (1).
+
+``NamedTuple`` is deliberately absent. It names and types every field and is
+read by attribute, so it is what the rule asks people to move toward, not away
+from; the reasoning is pinned in the tests so the exclusion stays a decision.
+
+Names are resolved through the module's own renames, so a shape given a second
+name - on the import (``from typing import Dict as D``) or by assignment
+(``D = dict``) - is the shape it was renamed from. Without that, closing a
+spelling only moves the dodge into the line that names the shape, which is
+cheaper than any of the spellings above: one line, no import, and nothing for a
+reader of the annotation to notice. A name bound more than once in a module
+keeps every binding rather than the last one, because this pass reads no scopes
+and the last binding textually is not the one in scope; ``_renames`` has the
+case that made keeping them all the only safe answer.
+
+See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md, #1188
+and #1248.
 """
 
 from __future__ import annotations
@@ -36,6 +72,10 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Container, Mapping
 
 #: Mapping constructors that erase their value type when parameterised with
 #: ``Any``/``object``. Matched on the trailing name, so the dotted spellings
@@ -45,9 +85,36 @@ from pathlib import Path
 #: nobody uses is a branch the next reader has to rule out for nothing.
 MAPPING_NAMES: frozenset[str] = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
 
+#: A ``TypedDict`` declaration. Counted whatever its fields are annotated with,
+#: which is the one place this gate is not about erasure: ``contents: str``
+#: constrains the value perfectly and the object is still read as
+#: ``value["contents"]``, so it fails "no string-keyed lookups when attribute
+#: access is possible" on its own. There is no well-typed ``TypedDict`` for the
+#: purposes of this rule, only ones that have not been converted yet.
+TYPED_DICT_NAME = "TypedDict"
+
+#: ``types.SimpleNamespace``. Attribute access, so it passes the second half of
+#: the rule - and no declared fields at all, so it fails the first half harder
+#: than a ``dict[str, Any]`` does: a checker can say nothing whatsoever about
+#: ``ns.anything``. It is counted because ``SimpleNamespace(**payload)`` is a
+#: one-line way to turn a counted annotation into an uncounted object, which is
+#: precisely the move #1248 exists to stop.
+NAMESPACE_NAME = "SimpleNamespace"
+
 #: Value types that constrain nothing. ``typing.Any`` and a bare ``object`` are
 #: the same erasure in different words.
 UNCONSTRAINED_VALUES: frozenset[str] = frozenset({"Any", "object"})
+
+#: Every name this gate matches on, and therefore every name a rename is not
+#: allowed to redefine. See ``_renames``: without this, ``object = object.func``
+#: - a local rebinding, three words long, in ``_pytest/doctest.py`` today -
+#: would resolve ``object`` to something the gate does not know and switch off
+#: counting for every ``dict[str, object]`` in the file. That is a wider hole
+#: than any this gate closes, so resolution is confined to one direction: it
+#: may map a name *onto* a shape below, never one of these away from itself.
+MATCHED_NAMES: frozenset[str] = (
+    MAPPING_NAMES | UNCONSTRAINED_VALUES | {TYPED_DICT_NAME, NAMESPACE_NAME, "str", "cast"}
+)
 
 #: Directory fragments that are never first-party source. ``.claude/worktrees``
 #: holds complete repo copies, so counting them would count the same annotation
@@ -63,7 +130,7 @@ EXCLUDED_PATH_FRAGMENTS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class Occurrence:
-    """One str-keyed mapping with an unconstrained value type."""
+    """One declaration of dict-shaped structured state."""
 
     line: int
     text: str
@@ -94,6 +161,130 @@ def _trailing_name(node: ast.expr) -> str | None:
     return None
 
 
+def _renamed_shape(node: ast.AST) -> str | None:
+    """The name an assignment renames, or ``None`` when it is not a rename.
+
+    ``D = dict``, ``D: TypeAlias = dict`` and ``type D = dict`` are one line in
+    three spellings, and each gives a constructor a second name while writing
+    no type at all. The erasure arrives later, at ``D[str, Any]``, and is
+    counted there - exactly as it is for ``from typing import Dict as D``.
+
+    ``D = dict[str, Any]`` is not a rename. It is a complete type expression,
+    already fully spelled out where it stands, and is counted there like any
+    other annotation. The dividing line is whether the right-hand side is a
+    bare name: a rename copies a name, an alias writes a type.
+    """
+    if not isinstance(node, ast.Assign | ast.AnnAssign | ast.TypeAlias):
+        return None
+    if not isinstance(node.value, ast.Name | ast.Attribute):
+        return None
+    return _trailing_name(node.value)
+
+
+def _origins(name: str, renames: Mapping[str, Collection[str]]) -> frozenset[str]:
+    """Every name ``name`` can end up at, following all of its bindings.
+
+    ``D = dict`` followed by ``E = D`` is two lines and hides exactly as well
+    as one, so each binding is walked until it runs out of renames. A name with
+    several bindings contributes the end of every one of them - see
+    ``_renames`` for why they are unioned rather than resolved to one. A chain
+    that closes on itself (``a = b`` beside ``b = a``) reaches no name at all
+    and contributes nothing, rather than spinning.
+    """
+    ends: set[str] = set()
+    seen: set[str] = set()
+    frontier = [name]
+    while frontier:
+        current = frontier.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        bindings = renames.get(current)
+        if bindings is None:
+            ends.add(current)
+        else:
+            frontier.extend(bindings)
+    return frozenset(ends)
+
+
+def _renames(tree: ast.Module) -> Mapping[str, frozenset[str]]:
+    """Every rename in a module, as local name -> the names it can rename.
+
+    ``_trailing_name`` answers what a type is *called at the point of use*,
+    which is why the dotted spellings resolve. It cannot see a rename, and
+    ``from typing import Dict as D`` leaves ``D[str, Any]`` matching nothing
+    here. Undoing renames first is what stops "close a spelling, the dodge
+    moves to the line that names the shape".
+
+    Both statements that can rename a shape are read, because closing one and
+    leaving the other open just moves the dodge again: ``import ... as`` and
+    the assignment forms in ``_renamed_shape``. Assignment is the cheaper of
+    the two - it needs no import at all - so it is the one a ratchet under
+    pressure meets first.
+
+    WHY A NAME MAPS TO A SET AND NOT TO ONE NAME. A module can bind the same
+    name twice, and the two bindings can be in different scopes::
+
+        from typing import Dict as D    # module scope: D is a mapping
+
+        def unrelated():
+            D = SomethingElse           # function scope: a different D
+
+        x: D[str, Any]                  # still the imported D
+
+    Nothing keyed on the bare name can tell those apart, so writing the second
+    binding over the first is a guess - and when it guessed wrong it silently
+    switched off counting for the annotation below, which is a hole of exactly
+    the shape this gate exists to close. Real scope tracking would settle it,
+    but that is a symbol table, and it is far more machinery than an AST
+    ratchet earns: the alternative is to keep *both* bindings and treat a name
+    as renamed if any of them makes it so. A name reachable to ``dict`` down
+    any binding is read as ``dict``.
+
+    That over-reports - the ``D`` inside ``unrelated`` above is counted as a
+    mapping when it is not one - and over-reporting is the direction this gate
+    is allowed to be wrong in. A false positive is an argument someone has in
+    a review; a false negative is a shape that walks past the ratchet and is
+    never mentioned again.
+
+    Resolution still runs one way only. A rename may give one of the names in
+    ``MATCHED_NAMES`` a second name; it may never take one of those names away
+    from itself, so this pass can add counts and cannot remove them - the one
+    property that makes it safe to put in front of a ratchet. Python cannot
+    tell a type rename from a runtime rebinding of the same name, and the
+    rebinding is both far more common and, left unguarded, the better dodge.
+
+    Every other rename is recorded, not only the ones landing on a name this
+    gate cares about, because that is what lets a chain resolve without
+    depending on the order the statements appear in. An entry that resolves to
+    nothing costs nothing; only the names above are ever looked up. Dotted
+    module imports keep their last segment (``import collections.abc as c``
+    records ``c -> abc``) on the same reasoning. ``ast.walk`` rather than
+    ``tree.body`` because a function-local rename renames just as effectively
+    as a top-level one.
+    """
+    renames: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                if alias.asname is not None and alias.asname not in MATCHED_NAMES:
+                    renames.setdefault(alias.asname, set()).add(alias.name.rpartition(".")[2])
+        elif (original := _renamed_shape(node)) is not None:
+            # The names a rename binds are its targets, which are the only
+            # names it stores to - true of all three assignment spellings
+            # without having to take each of them apart. A target in
+            # MATCHED_NAMES is skipped: see there for the hole that opens
+            # otherwise.
+            for target in ast.walk(node):
+                if (
+                    isinstance(target, ast.Name)
+                    and isinstance(target.ctx, ast.Store)
+                    and target.id not in MATCHED_NAMES
+                ):
+                    renames.setdefault(target.id, set()).add(original)
+    return {name: _origins(name, renames) for name in renames}
+
+
 def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
     """The parameters of ``X[a, b]`` as a list; ``X[a]`` yields one element."""
     if isinstance(node.slice, ast.Tuple):
@@ -101,33 +292,52 @@ def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
     return [node.slice]
 
 
-def _is_untyped_str_mapping(node: ast.Subscript, values: frozenset[str]) -> bool:
-    """Whether ``node`` maps ``str`` to one of ``values``."""
-    if _trailing_name(node.value) not in MAPPING_NAMES:
-        return False
-    arguments = _subscript_arguments(node)
-    if len(arguments) != 2:
-        return False
-    key, value = arguments
-    return _trailing_name(key) == "str" and _trailing_name(value) in values
-
-
-class _MappingCollector(ast.NodeVisitor):
-    """Collects matching subscripts, including ones hidden inside strings.
+class _DictShapedStateCollector(ast.NodeVisitor):
+    """Collects the three declaration shapes, including ones hidden in strings.
 
     A quoted type is still a type, so strings are parsed and searched in the
     three places the language reads one: an annotation, a type parameter, and a
     ``cast`` target. Strings anywhere else - docstrings, fixtures, log messages
     - are left alone, which is the whole reason this is a parser and not a
     search. Comments are not in the tree at all.
+
+    ``renames`` comes from the enclosing module. It is empty when the caller
+    handed over a bare expression instead of a module, because a rename cannot
+    be undone without the statement that made it - a limitation of that input,
+    not a second definition of the shape.
     """
 
-    def __init__(self, values: frozenset[str]) -> None:
+    def __init__(self, values: frozenset[str], renames: Mapping[str, frozenset[str]]) -> None:
         self.values = values
+        self.renames = renames
         self.found: list[Occurrence] = []
 
+    def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
+        """Whether a type expression names one of ``names``, renames undone.
+
+        Asked as a question rather than answered as a name because a name can
+        have more than one binding in a module and this pass does not claim to
+        know which one is in scope - see ``_renames``. Every caller here wants
+        to know whether a shape is among a set of them, which is answerable
+        without picking one: any binding landing in ``names`` is a hit.
+        """
+        name = _trailing_name(node)
+        if name is None:
+            return False
+        return any(origin in names for origin in self.renames.get(name, frozenset({name})))
+
+    def _is_untyped_str_mapping(self, node: ast.Subscript) -> bool:
+        """Whether ``node`` maps ``str`` to one of ``self.values``."""
+        if not self._resolves_to(node.value, MAPPING_NAMES):
+            return False
+        arguments = _subscript_arguments(node)
+        if len(arguments) != 2:
+            return False
+        key, value = arguments
+        return self._resolves_to(key, {"str"}) and self._resolves_to(value, self.values)
+
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        if _is_untyped_str_mapping(node, self.values):
+        if self._is_untyped_str_mapping(node):
             self.found.append(Occurrence(line=node.lineno, text=ast.unparse(node)))
         # Type parameters are a type position: ``list["dict[str, Any]"]`` hides
         # a match that only exists once the string is parsed.
@@ -140,9 +350,58 @@ class _MappingCollector(ast.NodeVisitor):
         # ``cast("dict[str, Any]", x)`` and ``cast(dict[str, Any], x)`` are the
         # same annotation. Counting only the second would leave the quotes as a
         # way to spell the type without spending the budget.
-        if _trailing_name(node.func) == "cast" and node.args:
+        if self._resolves_to(node.func, {"cast"}) and node.args:
             self._descend_into_string(node.args[0])
+        # ``P = TypedDict("P", {...})`` declares the same thing as the class
+        # body below, one keystroke away from it.
+        if self._resolves_to(node.func, {TYPED_DICT_NAME}) and node.args:
+            self.found.append(
+                Occurrence(
+                    line=node.lineno,
+                    text=f"{TYPED_DICT_NAME}({ast.unparse(node.args[0])})",
+                )
+            )
         self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """A ``TypedDict`` is counted where it is declared, not where it is used.
+
+        Same rule as an alias, for the same reason: replacing the declaration
+        with a dataclass repairs every reference at once, so the declaration is
+        the only place a fix can happen. Counting references would measure how
+        popular the type is instead of how much debt there is.
+        """
+        if any(self._resolves_to(base, {TYPED_DICT_NAME}) for base in node.bases):
+            self.found.append(
+                Occurrence(line=node.lineno, text=f"class {node.name}({TYPED_DICT_NAME})")
+            )
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        self._note_namespace(node)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        self._note_namespace(node)
+        self.generic_visit(node)
+
+    def _note_namespace(self, node: ast.Name | ast.Attribute) -> None:
+        """Every written ``SimpleNamespace`` counts - annotation or construction.
+
+        Unlike an alias or a ``TypedDict`` there is no declaration to attribute
+        it to: each construction invents its own ad-hoc shape, so each is a
+        separate place the erasure has to be repaired. An ``import`` is not a
+        use and does not count, because it names no shape on its own.
+
+        A name being *bound* is not a use either, for the same reason and with
+        more force now that renames resolve: without this, ``NS =
+        SimpleNamespace`` would count twice, once for the name it copies and
+        once for the name it defines, which resolves to the same shape.
+        """
+        if not isinstance(node.ctx, ast.Load):
+            return
+        if self._resolves_to(node, {NAMESPACE_NAME}):
+            self.found.append(Occurrence(line=node.lineno, text=NAMESPACE_NAME))
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self._descend_into_string(node.annotation)
@@ -176,55 +435,64 @@ class _MappingCollector(ast.NodeVisitor):
             inner = ast.parse(node.value, mode="eval")
         except SyntaxError:
             return
-        nested = _MappingCollector(self.values)
+        nested = _DictShapedStateCollector(self.values, self.renames)
         nested.visit(inner)
         self.found.extend(Occurrence(line=node.lineno, text=hit.text) for hit in nested.found)
 
 
-def find_untyped_mappings(
+def find_dict_shaped_state(
     source: str, *, values: frozenset[str] = UNCONSTRAINED_VALUES
 ) -> list[Occurrence]:
-    """Every str-keyed mapping with an unconstrained value type in ``source``.
+    """Every declaration of dict-shaped structured state in ``source``.
 
-    One occurrence per written type expression, wherever it appears: an
+    The three shapes are listed in the module docstring. For an erased mapping
+    it is one occurrence per written type expression, wherever it appears: an
     annotation, a type alias, a ``cast`` target, a base class. Nesting is
     searched, so ``list[dict[str, Any]]`` is one. A mapping whose value type is
     itself a mapping is not erased by that - ``dict[str, dict[str, Any]]`` is
     one, the inner one - because ``dict`` is a constraint even when what it
     contains is not.
 
-    An alias is counted where it is defined and not where it is used, because
-    the definition is the one place a fix has to happen: typing
-    ``D = dict[str, Any]`` fixes every reference to ``D`` at once. Counting the
-    references instead would make the number track how popular a type is rather
-    than how much erasure there is, and would inflate the debt of exactly the
-    codebase that had centralised it well.
+    An alias, and equally a ``TypedDict``, is counted where it is defined and
+    not where it is used, because the definition is the one place a fix has to
+    happen: typing ``D = dict[str, Any]`` fixes every reference to ``D`` at
+    once. Counting the references instead would make the number track how
+    popular a type is rather than how much erasure there is, and would inflate
+    the debt of exactly the codebase that had centralised it well.
 
     ``values`` is the set of value types treated as constraining nothing.
     ADR-063's boundary gate widens it to include ``str``, because a
     ``dict[str, str]`` crossing a context boundary smuggles domain identity
-    just as effectively. The ratchet itself uses the default.
+    just as effectively. The ratchet itself uses the default. It does not reach
+    ``TypedDict``, whose fault is not erasure - see ``TYPED_DICT_NAME``.
 
     Raises ``SyntaxError`` if ``source`` does not parse. Callers must not
     swallow it: a file that cannot be measured has an unknown count, not a
     count of zero.
     """
-    collector = _MappingCollector(values)
-    collector.visit(ast.parse(source))
+    tree = ast.parse(source)
+    collector = _DictShapedStateCollector(values, _renames(tree))
+    collector.visit(tree)
     return collector.found
 
 
-def contains_untyped_mapping(
+def contains_dict_shaped_state(
     node: ast.expr, *, values: frozenset[str] = UNCONSTRAINED_VALUES
 ) -> bool:
-    """Whether a type expression contains a str-keyed mapping erased to ``values``.
+    """Whether a type expression declares dict-shaped structured state.
 
-    The node-level entry to the same definition ``find_untyped_mappings`` uses,
-    for callers that have already parsed and hold a single annotation. Quoted
-    and nested spellings are followed here too, so a caller cannot be fooled by
-    a form the ratchet would have caught.
+    The node-level entry to the same definition ``find_dict_shaped_state``
+    uses, for callers that have already parsed and hold a single annotation.
+    Quoted and nested spellings are followed here too, so a caller cannot be
+    fooled by a form the ratchet would have caught.
+
+    Two shapes are unreachable from an expression and so never answer true
+    here: a ``TypedDict`` declaration is a statement, and a rename cannot be
+    undone without the module that made it. An annotation naming a
+    ``TypedDict`` is not itself the declaration, so this is the same answer
+    ``find_dict_shaped_state`` gives for that line.
     """
-    collector = _MappingCollector(values)
+    collector = _DictShapedStateCollector(values, {})
     collector.visit(node)
     return bool(collector.found)
 
@@ -270,7 +538,7 @@ def scan_package(name: str, root: Path, allowed: int, issue: str) -> PackageScan
         if is_excluded(py_file):
             continue
         try:
-            count += len(find_untyped_mappings(py_file.read_text()))
+            count += len(find_dict_shaped_state(py_file.read_text()))
         except (SyntaxError, UnicodeDecodeError, OSError) as exc:
             unreadable.append(Unreadable(path=py_file, reason=f"{type(exc).__name__}: {exc}"))
     return PackageScan(
