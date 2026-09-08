@@ -63,6 +63,10 @@ _EVERY_FIELD: Mapping[str, object] = {
     # the mapping deleted -- the same tautology the execution_type and
     # sandbox comments describe.
     "clone_repos": False,
+    # NOT the default either, and in the opposite direction: False is the
+    # default for can_open_pr, so True is the only value that cannot be
+    # produced by a dropped mapping (#1197).
+    "can_open_pr": True,
     "argument_hint": "[task]",
     "model": "gpt-5.6-sol",
     "provider": "codex",
@@ -117,6 +121,10 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only
     # the caller's value arriving satisfies this (#1187).
     assert phase.clone_repos is False
+    # True cannot be produced by any fallback: the domain field, the `p.get`
+    # default and `PhaseYamlDefinition` all default to False, because a phase
+    # nobody has thought about must not be able to publish (#1197).
+    assert phase.can_open_pr is True
     assert phase.argument_hint == "[task]"
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"

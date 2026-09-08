@@ -224,7 +224,8 @@ class TestTheTreeAgreesWithTheAlias:
     """Both cold-path readers must name the same artifact.
 
     `get_for_phase_injection` feeds `<phase-id>.md`; `get_files_for_phase_injection`
-    (#988) feeds `<phase-id>/<source_path>`. `_tree_files()` dedups by
+    (#988) feeds `<phase-id>/<source_path>`, and since #1149 its head feeds
+    the alias too. `ArtifactCollector._injectable()` dedups by
     destination path first-wins, so the LIST ORDER here decides which content
     the tree keeps. If the two disagree, a restart injects two different
     versions of one deliverable -- worse than either being wrong alone.
@@ -243,7 +244,8 @@ class TestTheTreeAgreesWithTheAlias:
         alias = await service.get_for_phase_injection("exec-1", ["research"])
         tree = await service.get_files_for_phase_injection("exec-1", ["research"])
 
-        # `_tree_files` keeps the first entry per destination path.
+        # `_injectable` keeps the first entry per destination path, and
+        # takes that same first entry as the alias.
         assert tree["research"][0].content == alias["research"]
 
     @pytest.mark.asyncio

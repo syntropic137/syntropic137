@@ -2640,6 +2640,16 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */

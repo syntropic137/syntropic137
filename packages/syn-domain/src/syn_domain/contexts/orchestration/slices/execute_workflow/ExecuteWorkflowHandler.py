@@ -480,6 +480,7 @@ class ExecuteWorkflowHandler:
                     output_artifact_types=tuple(phase.output_artifact_types),
                     timeout_seconds=phase.timeout_seconds,
                     clone_repos=phase.clone_repos,
+                    can_open_pr=phase.can_open_pr,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )
