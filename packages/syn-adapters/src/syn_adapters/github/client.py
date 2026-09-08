@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from syn_adapters.github.agent_token import mint_agent_token as _mint_agent_token
 from syn_adapters.github.client_api import api_get as _api_get
 from syn_adapters.github.client_api import api_post as _api_post
 from syn_adapters.github.client_api import api_put as _api_put
@@ -248,6 +249,10 @@ class GitHubAppClient:
     ) -> str:
         """Get a valid installation access token. See client_token.get_installation_token."""
         return await _get_installation_token(self, installation_id, force_refresh)
+
+    async def mint_agent_token(self, installation_id: str, *, can_open_pr: bool) -> str:
+        """Mint the token an agent phase holds. See agent_token.mint_agent_token."""
+        return await _mint_agent_token(self, installation_id, can_open_pr=can_open_pr)
 
     async def api_get(self, path: str, installation_id: str | None = None) -> dict:
         """Make an authenticated GET request. See client_api.api_get for details."""
