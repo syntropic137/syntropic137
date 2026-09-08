@@ -8,10 +8,12 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
-from event_sourcing import ProjectionReadStore
+from event_sourcing import ProjectionStore
 
+from syn_domain.contexts.organization._shared.execution_correlation import (
+    executions_by_repo,
+)
 from syn_domain.contexts.organization._shared.projection_names import (
-    REPO_CORRELATION,
     REPO_COST,
     WORKFLOW_EXECUTIONS,
 )
@@ -85,7 +87,7 @@ class GetSystemPatternsHandler:
 
     def __init__(
         self,
-        store: ProjectionReadStore,
+        store: ProjectionStore,
         system_projection: SystemProjection,
         repo_projection: RepoProjection,
     ) -> None:
@@ -96,14 +98,7 @@ class GetSystemPatternsHandler:
     async def _get_execution_ids_for_system(self, system_id: str) -> dict[str, str]:
         """Map execution_id → repo_full_name for all repos in a system."""
         repos = await self._repo_projection.list_all(system_id=system_id)
-        repo_names = {r.full_name for r in repos}
-
-        correlations = await self._store.get_all(REPO_CORRELATION)
-        return {
-            c["execution_id"]: c["repo_full_name"]
-            for c in correlations
-            if c.get("repo_full_name") in repo_names
-        }
+        return await executions_by_repo(self._store, {r.full_name for r in repos})
 
     async def _find_failure_patterns(self, exec_to_repo: dict[str, str]) -> list[FailurePattern]:
         """Group failed executions by error type + message."""

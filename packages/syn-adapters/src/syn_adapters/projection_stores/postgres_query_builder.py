@@ -21,6 +21,21 @@ def _serialize_filter_value(value: _FilterValue) -> str:
     return str(value)
 
 
+def _condition(key: str, value: object, idx: int) -> tuple[str, object]:
+    """One filter, as SQL and its bound parameter.
+
+    A filter value may be one value or several, and several means ANY of them.
+    Without that, a caller asking "which executions belong to these twelve
+    repos" has only two moves: twelve round trips, or load the table and filter
+    in Python - and the second is what every caller actually did (#1253). The
+    predicate stays a single indexable comparison on ``data->>'key'`` either
+    way, so one expression index serves both shapes.
+    """
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return f"data->>'{key}' = ANY(${idx})", [_serialize_filter_value(v) for v in value]
+    return f"data->>'{key}' = ${idx}", _serialize_filter_value(value)
+
+
 def _build_where_clause(
     filters: dict[str, Any],
     start_idx: int,
@@ -29,8 +44,9 @@ def _build_where_clause(
     conditions: list[str] = []
     params: list[Any] = []
     for idx, (key, value) in enumerate(filters.items(), start=start_idx):
-        conditions.append(f"data->>'{key}' = ${idx}")
-        params.append(_serialize_filter_value(value))
+        condition, param = _condition(key, value, idx)
+        conditions.append(condition)
+        params.append(param)
     return " WHERE " + " AND ".join(conditions), params
 
 

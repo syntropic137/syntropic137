@@ -55,15 +55,13 @@ async def get_global_overview() -> dict[str, Any]:
 async def _get_execution_ids_for_system(system_id: str) -> set[str]:
     """Look up execution IDs correlated with repos in a system."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_domain.contexts.organization import REPO_CORRELATION, get_repo_projection
+    from syn_domain.contexts.organization import executions_by_repo, get_repo_projection
 
     repo_projection = get_repo_projection()
     repos = await repo_projection.list_all(system_id=system_id)
-    repo_names = {r.full_name for r in repos}
 
-    store = get_projection_store()
-    correlations = await store.get_all(REPO_CORRELATION)
-    return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
+    correlated = await executions_by_repo(get_projection_store(), {r.full_name for r in repos})
+    return set(correlated)
 
 
 def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
