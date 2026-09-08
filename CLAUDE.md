@@ -142,26 +142,47 @@ architectural it sounds.
 
 #### `untyped-dicts` counts the AST, not the text
 
-`just check-untyped-dicts` parses every file and counts str-keyed mappings
-whose value type constrains nothing. The logic and the full definition of what
+`just check-untyped-dicts` parses every file and counts **declarations of
+dict-shaped structured state**. The logic and the full definition of what
 counts live in `scripts/check_untyped_dicts.py`, pinned by
 `scripts/tests/test_check_untyped_dicts.py`.
 
-One shape, all spellings: `dict`, `Dict`, `Mapping` and `MutableMapping`,
-plain or dotted, parameterised with `Any` or `object` — quoted, aliased, or
-wrapped across lines. Docstrings and comments are not code and do not count.
-An alias counts where it is defined, not at each use.
+Three shapes:
 
-This was a regex until #1188, and it measured spelling. Renaming
-`dict[str, object]` to `Mapping[str, object]` moved the number without typing
-anything, and one agent found that seam under ratchet pressure on PR #1186.
-`Mapping` for a read-only parameter is still the better annotation on its
-merits — it just no longer buys you budget.
+| Shape | Counted where | Why |
+|---|---|---|
+| A str-keyed mapping erased to `Any`/`object` | every written type expression | the structure is gone |
+| A `TypedDict`, class-based or functional | its declaration | read as `value["key"]`, validates nothing at runtime |
+| A `SimpleNamespace` | every written occurrence | declares no fields at all, so says even less than `dict[str, Any]` |
 
-Re-measuring re-baselined all five packages (#1188). `syn-api` went 94 -> 139:
-a third of its untyped surface had never been visible to the gate. Those are
-re-baselines of the same debt, not a relaxed ratchet, and the values may only
-decrease from there.
+All spellings of each: plain or dotted, quoted, wrapped across lines, or
+renamed on the way in (`from typing import Dict as D`) — imports are resolved
+before names are matched. Docstrings and comments are not code and do not
+count. An alias, and equally a `TypedDict`, counts where it is defined and not
+at each use, because the definition is the one place a fix has to happen.
+
+`NamedTuple` is deliberately **not** counted. It names and types every field
+and is read by attribute, so it satisfies both halves of the rule; it is what
+you should be converting *to*, alongside `@dataclass` and Pydantic. Its
+tuple-ness is a separate concern and does not belong to this gate.
+
+Two ways this gate has been wrong, both found the same way — an agent under
+ratchet pressure taking the cheapest green path:
+
+- **It measured spelling** (a regex, until #1188). Renaming `dict[str, object]`
+  to `Mapping[str, object]` moved the number without typing anything (PR
+  #1186). `Mapping` for a read-only parameter is still the better annotation on
+  its merits — it just no longer buys you budget.
+- **It measured one shape** (until #1248). A `dict[str, Any]` that failed the
+  gate was declared a `TypedDict` instead and it went green (PR #1246), while
+  independent review refused the head anyway. So: **a `TypedDict` is not a fix
+  for an untyped dict.** Use a `@dataclass` or a Pydantic `BaseModel`.
+
+Both fixes re-baselined the packages rather than raising them — #1188 to 413 /
+205 / 139 / 22 / 11, #1248 to 440 / 208 / 146 / 22 / 16. `syn-api` at #1188 is
+the finding worth remembering: a third of its untyped surface had never been
+visible to the gate. Every one of those is the same debt measured correctly,
+never a relaxed ratchet, and the values may only decrease from there.
 
 ### API → CLI Type Pipeline
 
