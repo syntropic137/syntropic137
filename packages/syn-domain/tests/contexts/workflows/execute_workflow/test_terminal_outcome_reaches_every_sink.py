@@ -601,9 +601,9 @@ async def test_a_cancelled_run_closes_its_session_with_the_reason_it_reports() -
 #   against the tree with 1b8c259a reverted - the code as it stood BEFORE the
 #   refactor - and is committed beside this file. Deriving it from the current
 #   implementation would produce a test that agrees with whatever the refactor
-#   did, which is the one thing it must not do. `_write_golden` refuses to run
-#   at all on a tree where the refactor is present, so that cannot be done by
-#   accident later either.
+#   did, which is the one thing it must not do. `_before_the_refactor` refuses
+#   to run at all on a tree where the refactor is present, so that cannot be
+#   done by accident later either.
 
 _FAILURE_GOLDEN = Path(__file__).with_name("terminal_failure_prerefactor_golden.json")
 _CANCELLATION_GOLDEN = Path(__file__).with_name("terminal_cancellation_prerefactor_golden.json")
@@ -848,8 +848,8 @@ async def test_every_sink_holds_exactly_what_it_held_before_the_refactor() -> No
     A failure here is NOT automatically a bug - a later change may legitimately
     alter one of these sinks. It is a claim that #1205's "byte-identical" no
     longer holds, and the paths in the message say where. Read them, decide
-    whether the change was meant, and if it was, regenerate as `_write_golden`
-    describes.
+    whether the change was meant, and if it was, regenerate the way
+    `_before_the_refactor` describes.
     """
     snapshot = _failure_snapshot(await _failed_run("exec-1205-golden"))
 
