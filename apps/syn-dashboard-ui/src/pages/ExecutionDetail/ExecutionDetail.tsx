@@ -174,6 +174,14 @@ function ExecutionMetricsGrid({
   hasCostByModel: boolean
 }) {
   const completedPhases = execution.phases.filter((p) => p.status === 'completed').length
+  // The denominator is what the run SET OUT to do, and `phases` cannot say:
+  // it holds the phases that STARTED, so a three-phase run that died in phase
+  // one rendered as "0/1" - a complete-looking run of one phase, with the two
+  // that never ran indistinguishable from phases that do not exist (#1147).
+  //
+  // An em dash, not the phase tally, when the count is unknown: falling back
+  // to `phases.length` is the number that was wrong, and it looks right.
+  const totalPhases = execution.total_phases > 0 ? execution.total_phases : '—'
   const tokens = executionTokenTotals(execution)
   const attributedIn = tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
   const inOutSubtitle = `In: ${attributedIn.toLocaleString()} / Out: ${tokens.outputTokens.toLocaleString()}`
@@ -182,7 +190,7 @@ function ExecutionMetricsGrid({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard
         title="Phases"
-        value={`${completedPhases}/${execution.phases.length}`}
+        value={`${completedPhases}/${totalPhases}`}
         icon={CheckCircle2}
         color="success"
         subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`}
