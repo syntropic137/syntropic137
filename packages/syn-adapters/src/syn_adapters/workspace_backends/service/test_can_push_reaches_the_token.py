@@ -1,12 +1,17 @@
 """`can_push: false` in a workflow reaches the token GitHub mints (#1161).
 
-The unit tests beside `client_token` pin the request. This one pins the HOPS,
-because that is where this class of change dies: a declaration parsed
-correctly, carried through four value objects, and dropped at the one call that
-would have acted on it. Every object in between looks right at both ends.
+The unit tests beside `client_token` pin the HTTP request. This file pins the
+ADAPTER end of the chain only: authored YAML -> `PhaseYamlDefinition` ->
+`PhaseDefinition` -> `SetupPhaseSecrets.create` -> the scope
+`_resolve_github_auth` asks the client for.
 
-So the assertion is on `_resolve_github_auth`'s effect - what scope the client
-was asked for - starting from the YAML text a workflow author writes.
+It does NOT cover the two orchestration hops in between. Deleting
+`can_push=phase.can_push` from `ExecuteWorkflowHandler` or
+`WorkspaceProvisionHandler` leaves every test in this file passing - measured,
+not assumed. Those hops are covered by
+`syn_domain/.../execute_workflow/handlers/test_verify_cannot_push_what_it_certifies.py`,
+which drives the real workflow files end to end. Neither file is sufficient
+alone.
 
 Run: pytest -m unit packages/syn-adapters/src/syn_adapters/workspace_backends/service/test_can_push_reaches_the_token.py -v
 """
@@ -81,13 +86,12 @@ async def _scope_requested(*, can_push: bool) -> bool:
 
 @pytest.mark.asyncio
 async def test_the_verify_phases_declaration_reaches_the_mint_call() -> None:
-    """The end of the chain, driven from the start of it.
+    """The adapter end, driven from the YAML text a workflow author writes.
 
-    Every hop between is exercised for real - YAML parse, PhaseDefinition, the
-    keyword that `WorkspaceProvisionHandler` forwards - so a future refactor
-    that drops `can_push` at any one of them fails here rather than in
-    production, where the only symptom is a verify phase that can push again
-    and a report that reads exactly as it does today.
+    The parse and the mint call are exercised for real. The orchestration
+    hops between an installed template and this call are not - see the module
+    docstring for where they are covered, and for the measurement that says
+    this file cannot stand in for them.
     """
     phase = _phase(VERIFY_PHASE_YAML)
     assert phase.can_push is False, "the declaration was lost parsing the YAML"

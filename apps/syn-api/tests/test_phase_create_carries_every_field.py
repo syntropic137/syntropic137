@@ -63,6 +63,10 @@ _EVERY_FIELD: Mapping[str, object] = {
     # the mapping deleted -- the same tautology the execution_type and
     # sandbox comments describe.
     "clone_repos": False,
+    # NOT the default either, and for the same reason (#1161). True is what a
+    # phase gets by saying nothing, so a fixture asserting True would pass
+    # with the mapping deleted.
+    "can_push": False,
     "argument_hint": "[task]",
     "model": "gpt-5.6-sol",
     "provider": "codex",
@@ -117,6 +121,9 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only
     # the caller's value arriving satisfies this (#1187).
     assert phase.clone_repos is False
+    # Same argument as `clone_repos` above: every layer defaults to True, so
+    # False can only have come from the caller (#1161).
+    assert phase.can_push is False
     assert phase.argument_hint == "[task]"
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"

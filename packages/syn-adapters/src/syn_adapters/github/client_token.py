@@ -185,9 +185,7 @@ async def get_installation_token(
             # Omitted entirely for the default scope. Posting `{}` is NOT the
             # same request as posting no body: an empty permissions object is
             # a request for no permissions at all.
-            json=(
-                {"permissions": READ_ONLY_TOKEN_PERMISSIONS.copy()} if read_only else None
-            ),
+            json=({"permissions": READ_ONLY_TOKEN_PERMISSIONS.copy()} if read_only else None),
         )
 
         check_token_response(response, iid)

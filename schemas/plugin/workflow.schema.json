@@ -279,6 +279,11 @@
           "title": "Clone Repos",
           "type": "boolean"
         },
+        "can_push": {
+          "default": true,
+          "title": "Can Push",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {

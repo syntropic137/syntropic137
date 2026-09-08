@@ -519,15 +519,14 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
-    # Both default True, so only False is worth emitting - and only False
-    # carries a decision. Dropping either LAUNDERS it in exactly the way the
-    # comment above describes: a `can_push: false` verify phase reinstalls able
-    # to push the change it certifies (#1161), and a `clone_repos: false` phase
-    # reinstalls paying for the checkout it declared it did not need (#1187).
-    if not phase.can_push:
-        lines.append("    can_push: false")
-    if not phase.clone_repos:
-        lines.append("    clone_repos: false")
+    # NOT emitted here, and deliberately: `can_push` (#1161), `clone_repos`
+    # (#1187) and `sandbox` (#1157) never reach `PhaseDefinitionResponse` in
+    # the first place, so there is nothing to emit. That is a real laundering
+    # hole - an exported `can_push: false` phase reinstalls able to push - but
+    # closing it is a READ-PATH change spanning the projection, the detail read
+    # model, its `from_dict`, the response model and four regenerated artifacts
+    # (openapi.json, two api-types.ts, the API docs MDX). Tracked separately;
+    # see the PR description for #1161.
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))

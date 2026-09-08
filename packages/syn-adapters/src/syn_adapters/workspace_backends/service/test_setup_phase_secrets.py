@@ -497,7 +497,9 @@ class TestSetupPhaseSecretsCreate:
             secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
 
         # One token minted despite two repos
-        mock_client.get_installation_token.assert_called_once_with("inst-1")
+        # `read_only=False` is now part of the call: scope is a property of the
+        # token, not of the caller (#1161). A phase that pushes asks for it.
+        mock_client.get_installation_token.assert_called_once_with("inst-1", read_only=False)
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"
 
@@ -512,7 +514,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.get_installation_token.side_effect = lambda inst_id: (
+        mock_client.get_installation_token.side_effect = lambda inst_id, **_scope: (
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 

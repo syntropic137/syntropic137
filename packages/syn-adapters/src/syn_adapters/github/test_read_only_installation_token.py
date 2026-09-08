@@ -10,8 +10,8 @@ Run: pytest -m unit packages/syn-adapters/src/syn_adapters/github/test_read_only
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,15 +25,30 @@ from syn_adapters.github.client_token import (
 pytestmark = pytest.mark.unit
 
 
+@dataclass(frozen=True)
+class _MintCall:
+    """One request to the access-tokens endpoint, as it went out."""
+
+    path: str
+    headers: dict[str, str]
+    json_body: dict[str, dict[str, str]] | None
+
+
 class _RecordingHttp:
-    """Captures the POST kwargs so the test can assert on the request itself."""
+    """Captures the POST so the test can assert on the request itself."""
 
     def __init__(self, token: str = "ghs_minted") -> None:
         self.token = token
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[_MintCall] = []
 
-    async def post(self, path: str, **kwargs: Any) -> MagicMock:
-        self.calls.append({"path": path, **kwargs})
+    async def post(
+        self,
+        path: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, dict[str, str]] | None = None,
+    ) -> MagicMock:
+        self.calls.append(_MintCall(path=path, headers=headers, json_body=json))
         response = MagicMock()
         response.status_code = 201
         response.json.return_value = {
@@ -69,7 +84,9 @@ async def test_read_only_request_asks_github_to_withhold_write_permission() -> N
     await get_installation_token(_client(http), "12345", read_only=True)
 
     assert len(http.calls) == 1
-    permissions = http.calls[0]["json"]["permissions"]
+    body = http.calls[0].json_body
+    assert body is not None
+    permissions = body["permissions"]
     assert permissions == READ_ONLY_TOKEN_PERMISSIONS
     # Named explicitly rather than only compared to the constant: a future edit
     # that adds `contents: write` to that dict would satisfy the equality above
@@ -90,7 +107,7 @@ async def test_a_pushing_phase_sends_no_permissions_body_at_all() -> None:
 
     await get_installation_token(_client(http), "12345")
 
-    assert http.calls[0]["json"] is None
+    assert http.calls[0].json_body is None
 
 
 @pytest.mark.asyncio
@@ -114,7 +131,7 @@ async def test_a_pushing_phase_does_not_warm_the_cache_for_a_read_only_one() -> 
 
     assert verifying == "ghs_read_only"
     assert len(http.calls) == 2, "the read-only phase reused the read-write token"
-    assert http.calls[1]["json"] == {"permissions": READ_ONLY_TOKEN_PERMISSIONS}
+    assert http.calls[1].json_body == {"permissions": READ_ONLY_TOKEN_PERMISSIONS}
 
 
 @pytest.mark.asyncio
