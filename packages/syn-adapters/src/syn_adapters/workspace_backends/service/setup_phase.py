@@ -125,7 +125,7 @@ async def run_setup_phase(
             )
 
         # Run setup script WITH secrets
-        logger.info("Running setup phase with secrets (workspace=%s)", ws.workspace_id)
+        logger.info("Running secret-injection setup script (workspace=%s)", ws.workspace_id)
         from syn_shared.settings import get_settings
 
         result = await ws.execute(
@@ -135,8 +135,12 @@ async def run_setup_phase(
         )
 
         if result.exit_code != 0:
+            # Names the ADR-024 step, not "the setup phase": a workflow phase of
+            # a similar name runs alongside it and reading one as the other sent
+            # an operator to a phase that had completed (#1236).
             logger.error(
-                "Setup phase failed (exit=%d): %s",
+                "Secret-injection setup failed (workspace=%s, exit=%d): %s",
+                ws.workspace_id,
                 result.exit_code,
                 result.stderr,
             )
@@ -151,7 +155,8 @@ async def run_setup_phase(
             if secrets.codex_auth_json:
                 await _assert_codex_credential_removed(ws)
         logger.info(
-            "Setup phase complete, transient material cleared (workspace=%s)", ws.workspace_id
+            "Secret-injection setup complete, transient material cleared (workspace=%s)",
+            ws.workspace_id,
         )
 
 
