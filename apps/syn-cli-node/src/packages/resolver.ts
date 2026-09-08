@@ -141,9 +141,10 @@ function isValidGitHubRepoName(repo: string): boolean {
 // repository identity. Two segments that fail these character rules
 // (`C:/repo`, `foo/.`, `org/repo#v1`, `org/repo?x=y`, `" a/b "`, ...) are not
 // a GitHub repository and must not be turned into a fabricated github.com
-// URL. Exported so every place that needs to classify a source string (the
-// `workflow packages` command included) shares this one definition rather
-// than growing a second, divergent check.
+// URL. `parseSource` is the single authority on what a source is, and every
+// caller that needs to classify one goes through it; this is exported so the
+// rules above can be tested directly, not so a second caller can assemble a
+// rival classifier out of the parts (issues #1066, #1118).
 export function isGitHubShorthand(source: string): boolean {
   const segments = source.split("/");
   if (segments.length !== 2) return false;
