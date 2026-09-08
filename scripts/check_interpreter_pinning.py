@@ -10,7 +10,10 @@ is not in this repository.
 
 The pinned form is `uv run python`: uv resolves the interpreter from
 `pyproject.toml` and provisions it when absent, so the same command means the
-same version everywhere.
+same version everywhere. Where the workspace is not synced - a checkout without
+submodules cannot resolve the `lib/` path dependencies - the form is
+`uv run --no-project --python 3.12 python`, which pins the interpreter without
+building an environment the script does not use.
 
 WHAT COUNTS. A finding is a command whose PROGRAM is `python`, `python3` or
 `python3.N` - the first word, after any `VAR=value` assignments, of a command
@@ -71,42 +74,55 @@ PINNED_FORM: Final = "uv run python"
 #: no-op - see the module docstring.
 BLOCKED_ON_A_HUMAN: Final[dict[str, str]] = {
     ".github/workflows/_check-version.yml::python3 scripts/workflows/bump_version.py --check": (
-        "uv run python scripts/workflows/bump_version.py --check "
-        "(#1242: the job needs an astral-sh/setup-uv step first)"
+        "uv run --no-project --python 3.12 python "
+        "scripts/workflows/bump_version.py --check, after adding an "
+        "astral-sh/setup-uv step: the job has none. --no-project because it "
+        "also checks out without submodules, so a workspace sync could not "
+        "resolve the lib/ path dependencies - and the script is stdlib-only, "
+        "so it needs none of them"
     ),
     ".github/workflows/_check-version.yml::"
     "python3 scripts/workflows/bump_version.py --check-release": (
-        "uv run python scripts/workflows/bump_version.py --check-release "
-        "(#1242: the job needs an astral-sh/setup-uv step first)"
+        "uv run --no-project --python 3.12 python "
+        "scripts/workflows/bump_version.py --check-release, same job, same "
+        "reasoning as the step above"
     ),
     ".github/workflows/_check-version.yml::"
     "python3 -c \"import tomllib;print(tomllib.load(open('pyproject.toml','rb'))"
     "['project']['version'])\")": (
-        "uv run python -c ... (#1242: tomllib is 3.11+, so this step does not "
-        "merely prefer the pinned interpreter, it requires one)"
+        "uv run --no-project --python 3.12 python -c ... - and this one is not "
+        "a preference: tomllib is 3.11+, so the step needs a pinned "
+        "interpreter to be correct, not merely consistent"
     ),
     ".github/workflows/_check-codegen-sync.yml::"
     "python3 scripts/workflows/check_drift.py apps/syn-cli-node/src/generated/ "
     "apps/syn-docs/content/docs/cli/ apps/syn-docs/content/docs/api/ "
     "apps/syn-docs/openapi.json": (
-        "uv run python scripts/workflows/check_drift.py ... "
-        "(#1242: the job already has astral-sh/setup-uv and does not use it here)"
+        "uv run python scripts/workflows/check_drift.py ... - the plain form, "
+        "no extra step: this job already has astral-sh/setup-uv and "
+        "submodules, runs `just codegen` above, and simply does not use the "
+        "interpreter it set up"
     ),
     ".github/workflows/release-beta.yaml::"
     "python3 -c \"import tomllib;print(tomllib.load(open('pyproject.toml','rb'))"
     "['project']['version'])\")": (
-        "uv run python -c ... (#1242: tomllib is 3.11+; the guard job has no "
-        "Python setup step at all)"
+        "uv run --no-project --python 3.12 python -c ..., after adding an "
+        "astral-sh/setup-uv step: the guard job sets up no Python at all, and "
+        "tomllib is 3.11+"
     ),
     '.github/workflows/smoke-test.yml::python3 -c "': (
-        "uv run python -c ... (#1242: parses `docker compose config` output on "
-        "the RUNNER, not in a container)"
+        "uv run --no-project --python 3.12 python -c ..., after adding an "
+        "astral-sh/setup-uv step. The three sibling calls in this job are "
+        "`docker compose exec api python`, which are fine; this one parses "
+        "`docker compose config` output on the RUNNER"
     ),
     ".github/actions/setup-vsa/action.yml::"
     'python3 -c \'import json,sys; print(next(p["version"] for p in '
     'json.load(sys.stdin)["packages"] if p["name"]=="vsa-cli"))\')': (
-        "uv run python -c ... (#1242: stdlib-only today, so this one is the "
-        "cheapest to leave and the cheapest to fix)"
+        "jq -r '.packages[] | select(.name==\"vsa-cli\") | .version' - delete "
+        "the case rather than pin it. jq is on every GitHub runner, and a "
+        "composite action has no business assuming its caller ran setup-uv "
+        "first, which is the only reason the current line works"
     ),
 }
 
