@@ -520,6 +520,28 @@ Submodules (agentic-primitives, event-sourcing-platform) have independent versio
 - **Docker Compose** for local and selfhost deployment
 - QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
 
+### Invoking Python (#1018, #1242)
+
+Every command in the `justfile` and under `.github` runs Python as
+`uv run python`, never as a bare `python3`. A bare call does not name an
+interpreter - it names whatever PATH resolves, which is the runner image's
+default in CI and whichever interpreter is first on a contributor's machine
+locally. Such a step passes for a reason nothing in this repo states and
+nothing in this repo protects, and it breaks on the next image bump with no
+diff here to explain it.
+
+`just check-interpreter-pinning` enforces this, inside `preflight`.
+`scripts/check_interpreter_pinning.py` carries the exact rule and the seven
+calls under `.github/` that an App token cannot rewrite; each is listed with
+its replacement, and the gate fails on a listed call that has since been fixed
+just as it fails on a new unpinned one.
+
+The rule is about which program the machine is asked to run, so delegating to
+a container (`docker compose exec api python -c ...`) is not a finding: that
+interpreter belongs to a pinned image, not to this machine. The one deliberate
+exclusion is `infra/scripts/bootstrap.sh`, which probes bare `python3` in order
+to decide whether to install one - it runs before a pinned interpreter exists.
+
 ### Configuration (ADR-004)
 
 When working with environment variables or port/URL configuration, review

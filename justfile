@@ -779,7 +779,7 @@ e2e-smoke:
 
     # 4. Health endpoint
     echo "Checking health endpoint..."
-    curl -sf "${API_URL}/health" | python3 -m json.tool
+    curl -sf "${API_URL}/health" | uv run python -m json.tool
     echo ""
 
     # 5. Core CLI smoke tests
@@ -946,7 +946,7 @@ format-check:
 # [untyped-dicts.*] (default threshold: 0). See scripts/check_untyped_dicts.py
 # for what counts and why, and #1188 for what it replaced.
 check-untyped-dicts:
-    @python3 scripts/check_untyped_dicts.py
+    @uv run python scripts/check_untyped_dicts.py
 
 # Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 # CI runs `pytest -m unit`, so an unmarked test is collected by nothing and can
@@ -1056,7 +1056,7 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 check-openapi-drift:
     @uv run python scripts/check_openapi_drift.py
 
-preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-interpreter-pinning check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
@@ -1099,6 +1099,15 @@ check-agent-docs:
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
 check-ci-parity:
     uv run python scripts/check_ci_parity.py
+
+# Fail when a command in this justfile or under .github takes its Python from
+# PATH (`python3 foo.py`) rather than the interpreter the repo pins
+# (`uv run python foo.py`). A bare call passes on whatever the runner image
+# ships this month and breaks on the next one, with no diff here to explain it
+# (#1018, #1242). See scripts/check_interpreter_pinning.py for the exact rule
+# and for the seven .github calls an App token cannot rewrite.
+check-interpreter-pinning:
+    uv run python scripts/check_interpreter_pinning.py
 
 # Every CI gate a PR must pass, run locally, using the SAME commands CI uses.
 #
@@ -2264,16 +2273,16 @@ bump-version version:
     # The script writes the manifests and the schema $id values. uv.lock is
     # owned by uv and is regenerated rather than hand-edited - a hand-edited
     # lockfile drifts back the next time anyone runs `uv lock`.
-    python3 scripts/workflows/bump_version.py {{version}}
+    uv run python scripts/workflows/bump_version.py {{version}}
     echo ""
     echo "Regenerating uv.lock..."
     uv lock
     echo ""
-    python3 scripts/workflows/bump_version.py --check
+    uv run python scripts/workflows/bump_version.py --check
 
 # Validate every version-carrying file has the same version
 check-version:
-    python3 scripts/workflows/bump_version.py --check
+    uv run python scripts/workflows/bump_version.py --check
 
 registry := "ghcr.io/syntropic137"
 
