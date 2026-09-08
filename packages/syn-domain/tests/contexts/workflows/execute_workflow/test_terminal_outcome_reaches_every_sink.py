@@ -49,18 +49,22 @@ but that all four carry the same bytes of it is not.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeVar
 
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus
+from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+    SessionCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
     PhaseStatus,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import WorkflowFailedEvent
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -73,8 +77,14 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
     from syn_domain.contexts.orchestration import AgentExecutionResult
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
         AgentLaunchObserver,
     )
@@ -87,6 +97,8 @@ if TYPE_CHECKING:
     )
 
 pytestmark = pytest.mark.unit
+
+_Event = TypeVar("_Event")
 
 FIRST = "phase-001"
 FAILED_PHASE = "phase-002"
@@ -116,7 +128,18 @@ class _SecondPhaseFails(FakeAgentExecutionHandler):
         on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
         self._exit_code = 0 if not self.calls else 1
-        kwargs: dict[str, Any] = {} if runner is None else {"runner": runner}
+        if runner is None:
+            return await super().handle(
+                todo,
+                workspace,
+                agent_env,
+                claude_cmd,
+                session_id,
+                agent_model,
+                timeout_seconds,
+                collector,
+                on_launch=on_launch,
+            )
         return await super().handle(
             todo,
             workspace,
@@ -126,8 +149,8 @@ class _SecondPhaseFails(FakeAgentExecutionHandler):
             agent_model,
             timeout_seconds,
             collector,
-            on_launch=on_launch,
-            **kwargs,
+            runner,
+            on_launch,
         )
 
 
@@ -141,17 +164,17 @@ class _RecordingExecutionRepository:
 
     def __init__(self) -> None:
         self.events: list[object] = []
-        self._aggregates: dict[str, Any] = {}
+        self._aggregates: dict[str, WorkflowExecutionAggregate] = {}
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
         self.events.extend(envelope.event for envelope in aggregate._uncommitted_events)
         self._aggregates[aggregate.id] = aggregate
         aggregate._uncommitted_events.clear()
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
         await self.save(aggregate)
 
-    async def get_by_id(self, aggregate_id: str) -> Any:
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
         return self._aggregates.get(aggregate_id)
 
 
@@ -159,9 +182,9 @@ class _RecordingSessionRepository:
     """The session sink. Sessions are only ever saved, never read back."""
 
     def __init__(self) -> None:
-        self.events: list[Any] = []
+        self.events: list[object] = []
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: AgentSessionAggregate) -> None:
         self.events.extend(envelope.event for envelope in aggregate._uncommitted_events)
         aggregate._uncommitted_events.clear()
 
@@ -181,8 +204,8 @@ async def _prompt(
     execution_id: str,
     workflow_id: str,
     repo_url: str | None,
-    phase_outputs: dict[str, Any],
-    inputs: dict[str, Any],
+    phase_outputs: dict[str, object],
+    inputs: dict[str, object],
 ) -> str:
     return "prompt"
 
@@ -217,26 +240,27 @@ class _Sinks:
         self,
         result: WorkflowExecutionResult,
         execution_events: list[object],
-        session_events: list[Any],
+        session_events: list[object],
     ) -> None:
         self.result = result
         self.execution_events = execution_events
         self.session_events = session_events
 
-    def _named(self, events: Sequence[Any], type_name: str) -> list[Any]:
-        return [event for event in events if type(event).__name__ == type_name]
+    @staticmethod
+    def _of_type(events: Sequence[object], event_type: type[_Event]) -> list[_Event]:
+        return [event for event in events if isinstance(event, event_type)]
 
     @property
-    def failure_event(self) -> Any:
+    def failure_event(self) -> WorkflowFailedEvent:
         """The single `WorkflowFailedEvent` the aggregate stored - sink 3."""
-        events = self._named(self.execution_events, "WorkflowFailedEvent")
+        events = self._of_type(self.execution_events, WorkflowFailedEvent)
         assert len(events) == 1, f"Expected exactly one WorkflowFailedEvent, got {len(events)}"
         return events[0]
 
     @property
-    def completed_sessions(self) -> list[Any]:
+    def completed_sessions(self) -> list[SessionCompletedEvent]:
         """Every `SessionCompletedEvent`, in the order the sessions closed - sink 2."""
-        return self._named(self.session_events, "SessionCompletedEvent")
+        return self._of_type(self.session_events, SessionCompletedEvent)
 
 
 async def _run(handler: FakeAgentExecutionHandler, execution_id: str) -> _Sinks:
