@@ -118,15 +118,21 @@ FIRST = "phase-001"
 FAILED_PHASE = "phase-002"
 
 
-class _SecondPhaseFails(FakeAgentExecutionHandler):
-    """Exit 0 for the first phase this handler is given, non-zero for the rest.
+class _AfterOneGoodPhase(FakeAgentExecutionHandler):
+    """A run whose first phase succeeds and whose second ends some other way.
 
     Subclassed rather than rewritten so the run still goes through the real
     double - and so the Protocol assertion that guards `handle`'s signature keeps
-    guarding this too. `FakeAgentExecutionHandler` takes one exit code for the
-    whole run, and a run where every phase fails cannot show `completed_phases`
-    being anything but zero.
+    guarding this too. `FakeAgentExecutionHandler` takes one outcome for the whole
+    run, and a run where NO phase completes cannot show `completed_phases` being
+    anything but zero, nor carry a completed `PhaseResult` into what the terminal
+    outcome reports. Both terminal paths need that, which is why the turn is here
+    and only what it turns into is below.
     """
+
+    def _turn(self) -> None:
+        """Make every later phase end the way this handler is named for."""
+        raise NotImplementedError
 
     async def handle(
         self,
@@ -141,7 +147,8 @@ class _SecondPhaseFails(FakeAgentExecutionHandler):
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
     ) -> AgentExecutionResult:
-        self._exit_code = 0 if not self.calls else 1
+        if self.calls:
+            self._turn()
         return await super().handle(
             todo,
             workspace,
@@ -154,6 +161,28 @@ class _SecondPhaseFails(FakeAgentExecutionHandler):
             runner,
             on_launch,
         )
+
+
+class _SecondPhaseFails(_AfterOneGoodPhase):
+    """First phase exits 0, every later one exits non-zero."""
+
+    def _turn(self) -> None:
+        self._exit_code = 1
+
+
+class _SecondPhaseCancels(_AfterOneGoodPhase):
+    """First phase exits 0, every later one reports the interrupt a cancel sends.
+
+    The cancellation half of the pair, and the reason it exists is what the
+    snapshot below could not otherwise see: a run cancelled during its FIRST
+    phase reports `phase_results == []`, and `ExecutionMetrics.from_results([])`
+    is indistinguishable from `ExecutionMetrics()`. Three of the cancellation
+    result's fields were pinned at values no change to `CancelledExecution`
+    could move. One completed phase first is what makes them carry something.
+    """
+
+    def _turn(self) -> None:
+        self._interrupt = True
 
 
 class _RecordingExecutionRepository:
@@ -840,13 +869,19 @@ async def test_a_cancelled_run_holds_exactly_what_it_held_before_the_refactor() 
     everything else the cancellation reports. A cancelled run's sinks are pinned
     here for exactly the reason the failure's are.
 
-    Its most interesting field is the one that is EMPTY. `phase_results` is `[]`
-    because the run was cancelled during its first phase, and `[]` is a
-    different fact from "the field is gone" - `_flatten` gives an empty
-    container a leaf of its own so the two cannot be confused.
+    The run cancels its SECOND phase rather than its first, so the completed
+    first phase is in `phase_results` and the metrics derived from it are not
+    the ones an empty run would produce. Cancelling immediately - which is what
+    the test above it does - pins `phase_results`, `artifact_ids` and `metrics`
+    at values that no change to `CancelledExecution` could move, and a field
+    that cannot differ is not covered by a comparison that includes it.
+
+    `artifact_ids` is `[]` here even so, because this run produces none, and
+    `[]` is a different fact from "the field is gone" - `_flatten` gives an
+    empty container a leaf of its own so the two cannot be confused.
     """
     snapshot = _cancellation_snapshot(
-        await _run(FakeAgentExecutionHandler.cancelled(), "exec-1205-cancelled-golden")
+        await _run(_SecondPhaseCancels(), "exec-1205-cancelled-golden")
     )
 
     expected = _before_the_refactor(_CANCELLATION_GOLDEN, snapshot)
