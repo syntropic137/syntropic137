@@ -470,10 +470,10 @@ class TestSetupPhaseSecretsCreate:
 
     @pytest.mark.anyio
     async def test_single_installation_single_token_call(self) -> None:
-        """Two repos from same installation → one get_installation_token call."""
+        """Two repos from same installation → one mint_agent_token call."""
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.return_value = "inst-1"
-        mock_client.get_installation_token.return_value = "tok-inst1"
+        mock_client.mint_agent_token.return_value = "tok-inst1"
 
         repos = [
             "https://github.com/org/repo-a",
@@ -497,7 +497,7 @@ class TestSetupPhaseSecretsCreate:
             secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
 
         # One token minted despite two repos
-        mock_client.get_installation_token.assert_called_once_with("inst-1")
+        mock_client.mint_agent_token.assert_called_once_with("inst-1", can_open_pr=False)
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"
 
@@ -512,7 +512,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.get_installation_token.side_effect = lambda inst_id: (
+        mock_client.mint_agent_token.side_effect = lambda inst_id, can_open_pr: (
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 
@@ -534,7 +534,7 @@ class TestSetupPhaseSecretsCreate:
                 repositories=[repo_a, repo_b], require_github=True
             )
 
-        assert mock_client.get_installation_token.call_count == 2
+        assert mock_client.mint_agent_token.call_count == 2
         assert secrets.repo_tokens[repo_a] == "tok-a"
         assert secrets.repo_tokens[repo_b] == "tok-b"
 
@@ -566,7 +566,7 @@ class TestSetupPhaseSecretsCreate:
                     require_github=True,
                 )
 
-        mock_client.get_installation_token.assert_not_called()
+        mock_client.mint_agent_token.assert_not_called()
 
     @pytest.mark.anyio
     async def test_require_github_false_swallows_lookup_error(self) -> None:

@@ -154,6 +154,14 @@ class PhaseDefinition(BaseModel):
     needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
     repo list is deliberately still passed when this is False."""
 
+    can_open_pr: bool = False
+    """Whether this phase may create a pull request (#1197).
+
+    Sourced from the workflow YAML ``can_open_pr`` field, and enforced by the
+    permissions of the GitHub token the phase's workspace receives rather than
+    by anything the agent is asked to do. See
+    ``PhaseYamlDefinition.can_open_pr`` for why the default is False."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""
