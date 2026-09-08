@@ -182,6 +182,18 @@ class WorkflowExecutionDetail:
     total_duration_seconds: float = 0.0
     """Total duration of the execution."""
 
+    total_phases: int = 0
+    """Phases this run set out to do, as its WorkflowExecutionStarted event stated.
+
+    Distinct from ``len(phases)``, which only counts the phases that have
+    reached this projection: a three-phase run that died in phase one has one
+    entry in ``phases`` and 3 here, and the difference is the two phases that
+    never started (#1147).
+    """
+
+    completed_phases: int = 0
+    """Phases that finished, as accumulated and then restated by the terminal event."""
+
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
 
@@ -216,6 +228,8 @@ class WorkflowExecutionDetail:
             total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
             total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
             total_duration_seconds=data.get("total_duration_seconds", 0.0),
+            total_phases=data.get("total_phases", 0),
+            completed_phases=data.get("completed_phases", 0),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             repos=tuple(data.get("repos", [])),
@@ -245,6 +259,8 @@ class WorkflowExecutionDetail:
             "total_cache_creation_tokens": self.total_cache_creation_tokens,
             "total_cache_read_tokens": self.total_cache_read_tokens,
             "total_duration_seconds": self.total_duration_seconds,
+            "total_phases": self.total_phases,
+            "completed_phases": self.completed_phases,
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
             "repos": list(self.repos),
