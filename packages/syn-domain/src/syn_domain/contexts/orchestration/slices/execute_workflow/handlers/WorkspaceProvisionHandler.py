@@ -481,6 +481,7 @@ class WorkspaceProvisionHandler:
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
+                phase_name=phase.name,
                 clone_repos=phase.clone_repos,
                 include_codex_auth=include_codex_auth,
             )
@@ -510,10 +511,16 @@ class WorkspaceProvisionHandler:
         workspace: ManagedWorkspace,
         effective_repos: list[str],
         *,
+        phase_name: str,
         clone_repos: bool,
         include_codex_auth: bool,
     ) -> None:
-        """Run setup phase and inject synthetic context files (ADR-058).
+        """Run the secret-injection setup and inject synthetic context files (ADR-058).
+
+        ``phase_name`` is here for the failure message alone. The ADR-024 setup
+        step runs INSIDE every phase, so "setup failed" on its own points an
+        operator at the workflow phase usually called "Prepare the workspace" -
+        which is a different thing and, in #1236, had completed.
 
         ``clone_repos=False`` (#1187) still hands the full repo list to
         ``SetupPhaseSecrets``, so the phase keeps its per-repo git credentials
@@ -531,10 +538,12 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
-            msg = f"Setup phase failed: {detail}"
+            msg = (
+                f"Secret-injection setup failed for phase '{phase_name}': "
+                f"{setup_result.failure_description()}"
+            )
             raise RuntimeError(msg)
-        logger.info("Setup phase completed, secrets cleared")
+        logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
         # Both files are identical: direct @-imports of each repo's AGENTS.md and

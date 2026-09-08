@@ -11,6 +11,7 @@ All value objects are immutable (frozen dataclasses) per DDD principles.
 from __future__ import annotations
 
 import copy
+import signal
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -293,6 +294,14 @@ class TokenInjectionResult:
     error_message: str | None = None
 
 
+def _signal_name(number: int) -> str:
+    """SIGSEGV, not 11. Falls back to the number when the platform has no name."""
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return f"signal {number}"
+
+
 @dataclass(frozen=True)
 class ExecutionResult:
     """Result of command execution in workspace.
@@ -308,6 +317,36 @@ class ExecutionResult:
     stdout_lines: int = 0
     stderr_lines: int = 0
     timed_out: bool = False
+
+    def failure_description(self) -> str:
+        """Why this command failed, in terms someone reading the record can act on.
+
+        Call it once failure is established; it describes the result, it does
+        not judge it.
+
+        Two things made a failed command unattributable after the fact, and the
+        workspace is gone by the time anyone looks (#1236):
+
+        - a negative exit code is a signal death, and "-11" does not announce
+          itself as SIGSEGV to a reader;
+        - a command that dies mid-write often leaves nothing on stderr, and
+          "no stderr output" threw away the stdout it HAD written.
+        """
+        if self.timed_out:
+            cause = f"timed out after {self.duration_ms / 1000:.0f}s (exit code {self.exit_code})"
+        elif self.exit_code < 0:
+            cause = f"killed by {_signal_name(-self.exit_code)} (exit code {self.exit_code})"
+        else:
+            cause = f"exit code {self.exit_code}"
+        return f"{cause}; {self._captured_output()}"
+
+    def _captured_output(self) -> str:
+        """Whatever the command left behind, preferring stderr, never nothing."""
+        if self.stderr.strip():
+            return self.stderr
+        if self.stdout.strip():
+            return f"nothing on stderr, last stdout: {self.stdout}"
+        return "no output captured"
 
 
 @dataclass(frozen=True)
