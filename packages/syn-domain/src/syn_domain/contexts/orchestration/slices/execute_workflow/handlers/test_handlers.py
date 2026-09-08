@@ -1135,7 +1135,7 @@ class TestWorkspaceProvisionHandler:
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
             MockSecrets.create = AsyncMock(return_value=MagicMock())
-            with pytest.raises(RuntimeError, match="Setup phase failed"):
+            with pytest.raises(RuntimeError, match="Secret-injection setup failed"):
                 await handler.handle(
                     todo=todo,
                     phase=phase,
