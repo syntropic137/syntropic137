@@ -889,3 +889,106 @@ async def test_a_cancelled_run_holds_exactly_what_it_held_before_the_refactor() 
         "A cancellation sink no longer holds what it held before #1205 was applied:\n"
         + _describe(snapshot, expected)
     )
+
+
+# ---------------------------------------------------------------------------
+# The one thing the two comparisons above cannot see
+# ---------------------------------------------------------------------------
+#
+# `_PerRunEntropy` replaces every non-zero duration with a POSITIONAL token, so
+# `<seconds-1>` says "the second distinct duration this walk met" and nothing at
+# all about how long it was. That is what lets a golden captured on one machine
+# match a run on another, and it leaves a hole the size of the value: a duration
+# still present, still non-zero, and WRONG is `<seconds-1>` just the same. Both
+# of these leave every test above green, the whole-output comparisons included:
+#
+#     total_duration_seconds=duration + 99999.0   # a nonsense total
+#     for result in results[:1]:                  # only the first phase counted
+#
+# PRESENCE and ZERO are already covered and do not need restating here: a field
+# that vanished loses its path from the flattened snapshot, and one that fell
+# back to 0.0 stops being a token at all, since `_canonical` keeps zero
+# literally. Both fail the comparison today. MAGNITUDE is what escapes.
+#
+# Asserting it needs no wall clock and no tolerance. `total_duration_seconds` is
+# not an independent measurement - it is DEFINED as the sum of the phase elapsed
+# times, and those phases are in the same sinks. So the run is asked to agree
+# with itself, which is exact, and true on any machine at any speed.
+#
+# The instants are tokenised by position for the same reason and lose the same
+# thing: their ORDER. `<instant-0>` and `<instant-1>` stay those tokens at those
+# paths whether the phase took a second or finished before it began. Every
+# elapsed time below is therefore asserted positive, which is the same defect
+# class caught in the same pass.
+#
+# Two tokenised families are deliberately NOT pinned here. The `<uuid-N>` tokens
+# keep the only property a uuid has - which sinks carry the SAME one - and their
+# literal bytes are arbitrary. The session and event instants (`failed_at`, each
+# session's `completed_at`) are single readings that no reported value is
+# derived from, so there is no arithmetic for them to disagree with.
+
+
+def _assert_the_run_accounts_for_its_own_time(sinks: _Sinks) -> None:
+    """The run's reported duration, checked against the phases it reports.
+
+    Accumulated the way `ExecutionMetrics.from_results` accumulates it - from
+    0.0, left to right over `phase_results` - so the comparison is exact rather
+    than approximate. These are not two measurements of one thing that ought to
+    agree closely; they are one arithmetic performed twice over the same inputs,
+    and a tolerance would hide exactly the drift worth catching.
+
+    Each phase is required to carry both of its clock readings before its
+    elapsed time is taken. `from_results` SKIPS a phase missing either one, so
+    without that the total could agree perfectly while accounting for nothing.
+    """
+    expected = 0.0
+    for phase in sinks.result.phase_results:
+        assert phase.started_at is not None, (
+            f"{phase.phase_id} reports no start time. `from_results` skips such a "
+            "phase, so the total below would agree while leaving it out."
+        )
+        assert phase.completed_at is not None, f"{phase.phase_id} reports no completion time."
+        elapsed = (phase.completed_at - phase.started_at).total_seconds()
+        assert elapsed > 0.0, (
+            f"{phase.phase_id} reports running for {elapsed} seconds. The snapshot "
+            "tokenises both instants by position, so a phase that finished before "
+            "it started reads there as unchanged."
+        )
+        expected += elapsed
+
+    total = sinks.result.metrics.total_duration_seconds
+    assert total == expected, (
+        f"The run reports {total} seconds in total, but the "
+        f"{len(sinks.result.phase_results)} phase(s) it also reports account for "
+        f"{expected}. One run, one elapsed time."
+    )
+
+    assert sinks.result.started_at is not None, "The run reports no start time."
+    assert sinks.result.completed_at is not None, "The run reports no completion time."
+    assert sinks.result.completed_at > sinks.result.started_at, (
+        f"The run reports finishing at {sinks.result.completed_at} and starting at "
+        f"{sinks.result.started_at}. Both are tokenised by position in the snapshot, "
+        "so the order they are in is invisible there."
+    )
+
+
+async def test_a_failed_run_reports_the_time_its_phases_actually_took() -> None:
+    """The failure golden's `<seconds-1>`, given back the value it stands for.
+
+    Two phases contribute here, which is what makes the sum worth asserting: a
+    total that counted one of them, or counted one twice, is a different number
+    from the one the phases account for, and the same token either way.
+    """
+    _assert_the_run_accounts_for_its_own_time(await _failed_run("exec-1205-total-duration"))
+
+
+async def test_a_cancelled_run_reports_the_time_its_phases_actually_took() -> None:
+    """The cancellation golden's `<seconds-0>`, for the same reason.
+
+    `_SecondPhaseCancels` rather than an immediate cancel, exactly as its sibling
+    golden uses it: a run cancelled during its first phase reports no phase
+    results, and a total of 0.0 over no phases is a sum that cannot be wrong.
+    """
+    _assert_the_run_accounts_for_its_own_time(
+        await _run(_SecondPhaseCancels(), "exec-1205-cancelled-total-duration")
+    )
