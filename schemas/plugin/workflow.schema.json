@@ -279,6 +279,11 @@
           "title": "Clone Repos",
           "type": "boolean"
         },
+        "can_open_pr": {
+          "default": false,
+          "title": "Can Open Pr",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {

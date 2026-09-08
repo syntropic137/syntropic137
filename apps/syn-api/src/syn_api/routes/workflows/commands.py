@@ -157,6 +157,13 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # installed through the API that declared it did not need one
                 # (#1187) - the bootstrap cost the declaration exists to avoid.
                 clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
+                # Dropping this silently GRANTS publication to a phase that
+                # never asked for it, because the default it would fall back
+                # to is the field's own - and the whole point of #1197 is that
+                # a phase which may not publish must not hold a token that
+                # can. Defaulting to False here means the failure mode of
+                # forgetting is a phase that cannot publish, not one that can.
+                can_open_pr=_as_bool(p.get("can_open_pr", False), "can_open_pr"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

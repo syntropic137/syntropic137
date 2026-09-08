@@ -178,7 +178,7 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
 
 
 async def _build_agent_env(
-    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str]
+    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str], *, can_open_pr: bool
 ) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
@@ -246,7 +246,7 @@ async def _build_agent_env(
     #   {"total_count": 2,  "repos": ["AgentParadise/..."]}
     #   $ GH_TOKEN=<hosts.yml> gh api /installation/repositories
     #   {"total_count": 6,  "repos": ["syntropic137/syntropic137", ...]}
-    gh_token = await _resolve_github_app_token(repos)
+    gh_token = await _resolve_github_app_token(repos, can_open_pr=can_open_pr)
     if gh_token:
         env[ENV_GITHUB_TOKEN] = gh_token
 
@@ -304,8 +304,15 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
-async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
+async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) -> str | None:
     """Mint an installation token for the repo under work.
+
+    SCOPED TO WHAT THE PHASE MAY DO (#1197). `gh` prefers $GITHUB_TOKEN over
+    the hosts.yml credential the setup phase writes, so a full-permission
+    token here would hand publication back to a phase whose hosts.yml entry
+    had just been scoped to prevent it. The two credential paths have to
+    agree, which is the same lesson #1129 drew about which installation they
+    resolve.
 
     ASKS GITHUB WHICH INSTALLATION OWNS THE REPO, rather than listing every
     installation and matching account logins. `GET /repos/{owner}/{repo}/
@@ -334,7 +341,6 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
             get_installation_for_repo,
             list_installations,
         )
-        from syn_adapters.github.client_token import get_installation_token
         from syn_shared.settings.github import GitHubAppSettings
 
         github_settings = GitHubAppSettings()
@@ -352,7 +358,9 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
                     "No repo to route the GitHub token on (repo-less workflow); "
                     "using the first installation"
                 )
-                return await get_installation_token(client, str(installations[0]["id"]))
+                return await client.mint_agent_token(
+                    str(installations[0]["id"]), can_open_pr=can_open_pr
+                )
 
             for name in repo_names:
                 try:
@@ -360,7 +368,7 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
                 except Exception:
                     logger.debug("No GitHub App installation owns %s", name, exc_info=True)
                     continue
-                return await get_installation_token(client, installation_id)
+                return await client.mint_agent_token(installation_id, can_open_pr=can_open_pr)
 
             logger.warning(
                 "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
@@ -483,6 +491,7 @@ class WorkspaceProvisionHandler:
                 effective_repos,
                 phase_name=phase.name,
                 clone_repos=phase.clone_repos,
+                can_open_pr=phase.can_open_pr,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -513,6 +522,7 @@ class WorkspaceProvisionHandler:
         *,
         phase_name: str,
         clone_repos: bool,
+        can_open_pr: bool,
         include_codex_auth: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -533,6 +543,7 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            can_open_pr=can_open_pr,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
         )
@@ -710,7 +721,9 @@ class WorkspaceProvisionHandler:
             phase.agent_config.allow_delegation,
         )
         agent_env = (
-            await _build_agent_env(workspace, session_id, effective_repos)
+            await _build_agent_env(
+                workspace, session_id, effective_repos, can_open_pr=phase.can_open_pr
+            )
             if needs_claude_env
             else {}
         )
