@@ -1088,6 +1088,9 @@ class TestWorkspaceProvisionHandler:
             AgentConfiguration,
             ExecutablePhase,
         )
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
             WorkspaceProvisionHandler,
         )
@@ -1095,8 +1098,16 @@ class TestWorkspaceProvisionHandler:
         workspace = AsyncMock()
         workspace.proxy_url = "http://envoy:10000"
         workspace.workspace_id = "ws-test"
+        # A real ExecutionResult, not a MagicMock: every unset attribute of a
+        # MagicMock is a truthy stand-in, so `timed_out` read as True and the
+        # message described a timeout that never happened.
         workspace.run_setup_phase = AsyncMock(
-            return_value=MagicMock(exit_code=1, stderr="Script error")
+            return_value=ExecutionResult(
+                exit_code=1,
+                success=False,
+                duration_ms=5.0,
+                stderr="Script error",
+            )
         )
 
         workspace_cm = AsyncMock()
@@ -1135,7 +1146,7 @@ class TestWorkspaceProvisionHandler:
 
         with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
             MockSecrets.create = AsyncMock(return_value=MagicMock())
-            with pytest.raises(RuntimeError, match="Setup phase failed"):
+            with pytest.raises(RuntimeError, match="Setup phase exited 1"):
                 await handler.handle(
                     todo=todo,
                     phase=phase,
@@ -1146,6 +1157,121 @@ class TestWorkspaceProvisionHandler:
 
         # Container must have been cleaned up despite the failure
         workspace_cm.__aexit__.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_setup_phase_killed_by_a_signal_does_not_persist_as_a_git_failure(
+        self,
+    ) -> None:
+        """#1158: what gets STORED names the SIGKILL, not the clone it interrupted.
+
+        The failure reproduced here is the one from the issue: exit 137 with
+        nothing on stderr but git's clone progress, because the container was
+        killed while git was still working. The old message promoted that first
+        line and dropped the 137, so "the command failed" and "something killed
+        the container" - two different failure classes, one retryable and one
+        not - were indistinguishable in the only record that outlives the
+        container logs.
+
+        The assertion is deliberately at the FAR end of the chain. Four hops
+        sit between the raise and the field a triager reads
+        (``RuntimeError`` -> ``describe_exception`` -> ``PhaseFailure.reason``
+        -> ``PhaseResult.error_message``), and every one of them is somewhere
+        the status could be dropped a second time while both ends still looked
+        correct.
+        """
+        from datetime import UTC, datetime
+
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+            failed_phase_outcome,
+        )
+
+        clone_progress = "Cloning into '/workspace/repos/syntropic137'..."
+        workspace = AsyncMock()
+        workspace.proxy_url = "http://envoy:10000"
+        workspace.workspace_id = "ws-test"
+        workspace.run_setup_phase = AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=137,  # 128 + SIGKILL, as `docker exec` reports it
+                success=False,
+                duration_ms=1200.0,
+                stdout="",
+                stderr=clone_progress,
+            )
+        )
+
+        workspace_cm = AsyncMock()
+        workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
+        workspace_cm.__aexit__ = AsyncMock(return_value=False)
+
+        workspace_service = MagicMock()
+        workspace_service.create_workspace.return_value = workspace_cm
+
+        async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
+            return "Do the task"
+
+        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
+            return ["claude", "--print", prompt]
+
+        handler = WorkspaceProvisionHandler(
+            workspace_service=workspace_service,
+            prompt_builder=fake_prompt_builder,
+            command_builder=fake_command_builder,
+        )
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.PROVISION_WORKSPACE,
+            phase_id="phase-1",
+        )
+        phase = ExecutablePhase(
+            phase_id="phase-1",
+            name="Test Phase",
+            order=1,
+            description="",
+            agent_config=AgentConfiguration(),
+            prompt_template="Do the task",
+            output_artifact_types=("text",),
+        )
+
+        started_at = datetime(2026, 1, 1, tzinfo=UTC)
+        with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+            MockSecrets.create = AsyncMock(return_value=MagicMock())
+            with pytest.raises(RuntimeError) as raised:
+                await handler.handle(
+                    todo=todo,
+                    phase=phase,
+                    workflow_id="wf-1",
+                    session_id="sess-1",
+                    repos=["syntropic137/syntropic137"],
+                )
+
+        outcome = failed_phase_outcome(
+            raised.value,
+            "phase-1",
+            {"phase-1": started_at},
+            {"phase-1": "sess-1"},
+        )
+        assert outcome.result is not None
+        persisted = outcome.result.error_message
+        assert persisted is not None
+
+        assert "SIGKILL" in persisted, persisted
+        assert "137" in persisted, persisted
+        # The progress may still be quoted, but only AFTER the status and only
+        # once the message has said it is not an error. Leading with it is the
+        # bug.
+        assert persisted.index("SIGKILL") < persisted.index(clone_progress), persisted
+        assert not persisted.startswith(f"Setup phase failed: {clone_progress}"), persisted
 
 
 # =========================================================================

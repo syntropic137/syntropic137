@@ -24,14 +24,30 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 
 def _make_processor() -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
+    )
+
+    # These tests want provisioning to fail, and it does - but every attribute
+    # of an AsyncMock is another AsyncMock, so the setup result's `stderr` was
+    # a mock whose `.strip()` returns a coroutine nobody awaits. The failure is
+    # unchanged; it is now reported from a value that is actually a string.
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value.__aenter__.return_value.run_setup_phase = (
+        AsyncMock(
+            return_value=ExecutionResult(
+                exit_code=1, success=False, duration_ms=0.0, stderr="setup failed"
+            )
+        )
     )
 
     return WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
+        workspace_service=workspace_service,
         artifact_repository=AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,

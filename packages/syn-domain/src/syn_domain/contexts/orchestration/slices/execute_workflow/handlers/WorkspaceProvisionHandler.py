@@ -35,6 +35,7 @@ from syn_shared.env_constants import (
     ENV_GH_REPO,
     ENV_GITHUB_TOKEN,
 )
+from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -531,9 +532,17 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
-            msg = f"Setup phase failed: {detail}"
-            raise RuntimeError(msg)
+            # The exit status leads: this message is what a caller persists as
+            # the execution's error_message, and stderr alone made a killed
+            # container read as a git failure (#1158).
+            raise RuntimeError(
+                describe_process_failure(
+                    "Setup phase",
+                    exit_code=setup_result.exit_code,
+                    output=setup_result.stderr,
+                    timed_out=setup_result.timed_out,
+                )
+            )
         logger.info("Setup phase completed, secrets cleared")
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
