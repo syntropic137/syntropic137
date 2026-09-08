@@ -6,7 +6,16 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from syn_adapters.storage.repositories import RepositoryAdapter
+    from syn_domain.contexts.orchestration import WorkflowExecutionAggregate
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -107,66 +116,22 @@ async def reconcile_orphaned_executions(
     a second process, which is what the first version's "single-writer
     assumption" note got wrong.
     """
-    if not cleanup.fully_reaped:
-        logger.warning(
-            "Skipping execution reconciliation: the container reap did not complete (%s). "
-            "Stranded executions stay 'running' rather than being failed on the strength "
-            "of a reap that may have removed nothing.",
-            "; ".join(cleanup.failures) or "reason not recorded",
-        )
-        return
-
-    try:
-        from syn_adapters.storage.repositories import get_workflow_execution_repository
-        from syn_api._wiring import get_projection_mgr
-        from syn_domain.contexts.orchestration import ExecutionStatus, FailExecutionCommand
-
-        manager = get_projection_mgr()
-        stranded = await manager.workflow_execution_list.get_all(
-            limit=_MAX_ORPHANS_PER_STARTUP,
-            status_filter=ExecutionStatus.RUNNING,
-        )
-    except Exception:
-        logger.exception("Could not list stranded executions (non-fatal)")
-        return
-
-    stranded = [row for row in stranded if _started_before(row, started_before)]
+    stranded = await _executions_this_restart_may_fail(cleanup, started_before=started_before)
     if not stranded:
-        logger.debug("No stranded executions found")
         return
+
+    # Safe unprotected: `_executions_this_restart_may_fail` returns a non-empty
+    # list only after `syn_api._wiring` imported, and that module imports
+    # `syn_adapters.storage.repositories` at module scope - so this import is
+    # already resolved. The CALL is deliberately outside a handler, as before:
+    # no repository means no reconciliation worth continuing into.
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
 
     repository = get_workflow_execution_repository()
     failed = 0
     for summary in stranded:
-        execution_id = summary.workflow_execution_id
-        try:
-            aggregate = await repository.get_by_id(execution_id)
-            if aggregate is None:
-                logger.warning(
-                    "Execution %s is 'running' in the read model but has no "
-                    "aggregate; leaving it alone",
-                    execution_id,
-                )
-                continue
-            aggregate.fail_execution(
-                FailExecutionCommand(
-                    execution_id=execution_id,
-                    error=_ORPHAN_REASON,
-                    error_type="OrphanedByRestart",
-                    # The phase that was mid-flight, so both phase read models
-                    # terminalise it. With None they skip phase mutation
-                    # entirely and the phase stays "running" under a "failed"
-                    # execution, forever - PhaseCompleted is their only other
-                    # writer (#1036).
-                    failed_phase_id=aggregate.running_phase_id,
-                    completed_phases=summary.completed_phases,
-                    total_phases=summary.total_phases,
-                )
-            )
-            await repository.save(aggregate)
+        if await _fail_as_orphaned(summary, repository):
             failed += 1
-        except Exception:
-            logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
 
     logger.warning(
         "Reconciled %d of %d stranded execution(s) -> marked as failed", failed, len(stranded)
@@ -176,6 +141,94 @@ async def reconcile_orphaned_executions(
             "Hit the %d-execution reconciliation ceiling; more may remain for the next startup",
             _MAX_ORPHANS_PER_STARTUP,
         )
+
+
+async def _executions_this_restart_may_fail(
+    cleanup: CleanupResult, *, started_before: datetime
+) -> Sequence[WorkflowExecutionSummary]:
+    """The executions this startup is permitted to declare orphaned.
+
+    Empty means "fail nothing", and the caller does not need to know which of
+    the three reasons produced it: the reap could not be shown to have finished,
+    the read model could not be listed, or nothing still RUNNING predates this
+    process. Each reason logs itself at the severity it deserves - a reap that
+    could not finish is a warning, an empty sweep is debug - so a caller that
+    re-described them would only be repeating what was already said.
+
+    The two guards this owns are argued for in `reconcile_orphaned_executions`;
+    this is where they are applied.
+    """
+    if not cleanup.fully_reaped:
+        logger.warning(
+            "Skipping execution reconciliation: the container reap did not complete (%s). "
+            "Stranded executions stay 'running' rather than being failed on the strength "
+            "of a reap that may have removed nothing.",
+            "; ".join(cleanup.failures) or "reason not recorded",
+        )
+        return ()
+
+    try:
+        from syn_api._wiring import get_projection_mgr
+        from syn_domain.contexts.orchestration import ExecutionStatus
+
+        manager = get_projection_mgr()
+        running = await manager.workflow_execution_list.get_all(
+            limit=_MAX_ORPHANS_PER_STARTUP,
+            status_filter=ExecutionStatus.RUNNING,
+        )
+    except Exception:
+        logger.exception("Could not list stranded executions (non-fatal)")
+        return ()
+
+    stranded = [row for row in running if _started_before(row, started_before)]
+    if not stranded:
+        logger.debug("No stranded executions found")
+    return stranded
+
+
+async def _fail_as_orphaned(
+    summary: WorkflowExecutionSummary,
+    repository: RepositoryAdapter[WorkflowExecutionAggregate],
+) -> bool:
+    """Fail one stranded execution through its aggregate; report whether it was.
+
+    Never raises. A restart that gives up halfway is a restart that leaves
+    zombies, so every way one row can fail to reconcile - a read-model row with
+    no event stream behind it, an aggregate that has already gone terminal and
+    rejects the command, a storage error - is the same answer here: False, said
+    once in the log, and the sweep goes on to the next row.
+    """
+    from syn_domain.contexts.orchestration import FailExecutionCommand
+
+    execution_id = summary.workflow_execution_id
+    try:
+        aggregate = await repository.get_by_id(execution_id)
+        if aggregate is None:
+            logger.warning(
+                "Execution %s is 'running' in the read model but has no "
+                "aggregate; leaving it alone",
+                execution_id,
+            )
+            return False
+        aggregate.fail_execution(
+            FailExecutionCommand(
+                execution_id=execution_id,
+                error=_ORPHAN_REASON,
+                error_type="OrphanedByRestart",
+                # The phase that was mid-flight, so both phase read models
+                # terminalise it. With None they skip phase mutation entirely
+                # and the phase stays "running" under a "failed" execution,
+                # forever - PhaseCompleted is their only other writer (#1036).
+                failed_phase_id=aggregate.running_phase_id,
+                completed_phases=summary.completed_phases,
+                total_phases=summary.total_phases,
+            )
+        )
+        await repository.save(aggregate)
+    except Exception:
+        logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
+        return False
+    return True
 
 
 @dataclass(frozen=True)
