@@ -334,6 +334,11 @@ class ExecutablePhase:
     # contains, not how the agent is invoked.
     clone_repos: bool = True
 
+    # Whether this phase's agent can publish to GitHub (#1161). Beside
+    # `clone_repos` for the same reason: both decide what the WORKSPACE
+    # contains - a checkout, a credential - not how the agent is invoked.
+    can_push: bool = True
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.

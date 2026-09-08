@@ -321,6 +321,27 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
+    can_push: bool = True
+    """Whether this phase's agent is able to publish to GitHub (#1161).
+
+    False strips the GitHub credentials at the END of the setup phase, after
+    the clone and before the agent starts: no ~/.git-credentials, no gh
+    hosts.yml, no stored credential helper. The phase keeps its checkout and
+    can read, run and edit everything in it; `git push` and any authenticated
+    `gh` call fail because there is nothing to authenticate with.
+
+    WHY THIS AND NOT A SANDBOX LEVEL. A verify phase must be able to write -
+    its most valuable job is mutating the code to prove a new test can fail -
+    so `agent.sandbox: read-only` would disable the very check it exists to
+    run, on top of blocking its own deliverable (#1167). "Cannot write" was
+    never the requirement. "Cannot publish what it certifies" is, and the
+    credential is where that is decided.
+
+    Three times a codex verify phase wrote the change it then certified and
+    pushed it to the PR branch (#1161). Each run said so in its own report, so
+    the prompt saying "do not fix it silently" was being read and the phase
+    acted anyway. A phase with no credential does not get to choose."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -503,6 +524,7 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
+            can_push=self.can_push,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

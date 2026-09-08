@@ -154,6 +154,14 @@ class PhaseDefinition(BaseModel):
     needs no working tree. See ``PhaseYamlDefinition.clone_repos`` for why the
     repo list is deliberately still passed when this is False."""
 
+    can_push: bool = True
+    """Whether this phase's agent can publish to GitHub (#1161).
+
+    Sourced from the workflow YAML ``can_push`` field. False leaves the
+    checkout intact and removes the GitHub credentials before the agent
+    starts, so a phase that checks other work cannot push the work it
+    certifies. See ``PhaseYamlDefinition.can_push``."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""

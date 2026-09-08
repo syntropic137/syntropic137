@@ -157,6 +157,10 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # installed through the API that declared it did not need one
                 # (#1187) - the bootstrap cost the declaration exists to avoid.
                 clone_repos=_as_bool(p.get("clone_repos", True), "clone_repos"),
+                # Same again for the credential: dropping it would hand a
+                # verify phase installed through the API the push access it
+                # declared it must not have (#1161).
+                can_push=_as_bool(p.get("can_push", True), "can_push"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

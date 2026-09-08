@@ -519,6 +519,15 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    argument_hint: {_yaml_quote(phase.argument_hint)}")
     if phase.allowed_tools:
         lines.append(f"    allowed_tools: {_yaml_flow_list(list(phase.allowed_tools))}")
+    # Both default True, so only False is worth emitting - and only False
+    # carries a decision. Dropping either LAUNDERS it in exactly the way the
+    # comment above describes: a `can_push: false` verify phase reinstalls able
+    # to push the change it certifies (#1161), and a `clone_repos: false` phase
+    # reinstalls paying for the checkout it declared it did not need (#1187).
+    if not phase.can_push:
+        lines.append("    can_push: false")
+    if not phase.clone_repos:
+        lines.append("    clone_repos: false")
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))

@@ -482,6 +482,7 @@ class WorkspaceProvisionHandler:
                 workspace,
                 effective_repos,
                 clone_repos=phase.clone_repos,
+                can_push=phase.can_push,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
@@ -511,6 +512,7 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
         *,
         clone_repos: bool,
+        can_push: bool,
         include_codex_auth: bool,
     ) -> None:
         """Run setup phase and inject synthetic context files (ADR-058).
@@ -520,12 +522,17 @@ class WorkspaceProvisionHandler:
         and its gh hosts.yml entry; only the checkout is skipped. What the
         workspace ends up CONTAINING is the one thing that changes, which is
         why the synthetic context below is derived from it too.
+
+        ``can_push=False`` (#1161) is the other half of that pair: the
+        checkout stays and the credential goes, so a phase whose job is to
+        check other work cannot push the work it certifies.
         """
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            can_push=can_push,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
         )

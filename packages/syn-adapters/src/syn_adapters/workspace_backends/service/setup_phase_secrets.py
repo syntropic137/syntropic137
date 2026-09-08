@@ -282,6 +282,17 @@ class SetupPhaseSecrets:
     False therefore still resolves the installation, mints the token, writes
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
+    can_push: bool = True
+    """Whether the AGENT inherits the GitHub credentials this setup uses (#1161).
+
+    The clone always runs authenticated; this decides only whether the
+    credential survives the setup phase. False revokes it on the last lines of
+    the script, so the agent starts with a full checkout and no way to publish
+    from it.
+
+    A verify phase must still be able to write - it mutates the code to prove a
+    new test can fail - so no sandbox level expresses what it needs. "Cannot
+    write" was never the requirement; "cannot push what it certifies" is."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -294,6 +305,7 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
+        can_push: bool = True,
         require_github: bool = True,
         include_codex_auth: bool = False,
     ) -> SetupPhaseSecrets:
@@ -310,6 +322,9 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
+            can_push: If False, the GitHub credentials are revoked at the end
+                of the setup script, so the agent gets the checkout without the
+                ability to push from it (#1161).
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -341,6 +356,7 @@ class SetupPhaseSecrets:
             repo_tokens=repo_tokens,
             repositories=repos,
             clone_repos=clone_repos,
+            can_push=can_push,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -360,6 +376,7 @@ class SetupPhaseSecrets:
         repositories: list[str] | None = None,
         repo_tokens: dict[str, str] | None = None,
         clone_repos: bool = True,
+        can_push: bool = True,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -374,6 +391,7 @@ class SetupPhaseSecrets:
             repositories: Optional list of repo URLs (no tokens fetched)
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             clone_repos: False to credential the repos without checking them out (#1187)
+            can_push: False to revoke the GitHub credentials before the agent runs (#1161)
         """
         import os
 
@@ -387,6 +405,7 @@ class SetupPhaseSecrets:
             repo_tokens=repo_tokens or {},
             repositories=repositories or [],
             clone_repos=clone_repos,
+            can_push=can_push,
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -404,6 +423,9 @@ class SetupPhaseSecrets:
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
         - Configures gh CLI using the first repo's token for PR/issue operations
+        - Revokes all of the above on the final lines when ``can_push`` is
+          False, so the phase keeps the checkout and loses the ability to
+          publish from it (#1161)
 
         Returns:
             Complete bash script string to run during the setup phase.
@@ -421,6 +443,7 @@ class SetupPhaseSecrets:
             self._append_git_credentials(lines)
             if self.clone_repos:
                 self._append_repo_clones(lines)
+            self._append_credential_revocation(lines)
 
         return "\n".join(lines) + "\n"
 
@@ -480,6 +503,40 @@ class SetupPhaseSecrets:
             lines.append("    git_protocol: https")
             lines.append("GHEOF")
             lines.append("chmod 600 ~/.config/gh/hosts.yml")
+
+    def _append_credential_revocation(self, lines: list[str]) -> None:
+        """Remove every GitHub credential this script installed, when ``can_push`` is False.
+
+        LAST, and deliberately: the clone above needs the credential, the agent
+        does not. Everything written by ``_append_git_credentials`` is undone
+        here - the store file, the helper that reads it, and the gh token -
+        which is why the two methods sit next to each other. Adding a
+        credential above without a matching removal here is the bug this
+        pairing exists to make visible.
+
+        Not folded into ``clear_secrets``: that runs for every phase and keeps
+        ~/.git-credentials on purpose, because the phases that DO push need it.
+        The decision is per phase, so it belongs where the phase's script is
+        built.
+
+        ``git config --global --unset-all`` returns 5 when the key is already
+        absent and the script runs under ``set -e``, so both unsets tolerate
+        that. The credential file itself is removed either way; an orphaned
+        helper setting with no store behind it authenticates nothing.
+        """
+        if self.can_push or not self.repo_tokens:
+            return
+
+        lines.extend(
+            [
+                "",
+                "# Revoke the GitHub credentials before the agent starts (#1161).",
+                "# The checkout stays; the ability to push from it does not.",
+                "rm -f ~/.git-credentials ~/.config/gh/hosts.yml",
+                "git config --global --unset-all credential.helper || true",
+                "git config --global --unset-all credential.https://github.com.useHttpPath || true",
+            ]
+        )
 
     def _append_repo_clones(self, lines: list[str]) -> None:
         """Append repository clone commands with idempotency guards.
