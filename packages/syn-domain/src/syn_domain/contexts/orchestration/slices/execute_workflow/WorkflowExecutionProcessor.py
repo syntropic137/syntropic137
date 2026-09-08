@@ -363,8 +363,7 @@ class WorkflowExecutionProcessor:
         The aggregate is already in CANCELLED status - no new command needed.
         """
         cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
+        await cancellation.wind_down(self._runtime)
         return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _complete_execution(
@@ -411,11 +410,8 @@ class WorkflowExecutionProcessor:
         failure = failed_phase_outcome(
             error, failed_phase_id, timings.started_at, timings.session_ids, observed=observed
         )
-        if failure.result is not None:
-            phase_results.append(failure.result)
-
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
+        failure.record_in(phase_results)
+        await failure.wind_down(self._runtime)
 
         fail_cmd = failure.as_command(
             execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)

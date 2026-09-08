@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CompleteExecutionCommand,
@@ -72,6 +72,35 @@ def failed_phase_elapsed_seconds(
     return ((now or datetime.now(UTC)) - started_at).total_seconds()
 
 
+class TerminalRuntime(Protocol):
+    """What a run still holds when it ends, and the two ways of letting it go.
+
+    The teardown face of `PhaseRuntime`, named here so that a terminal outcome can
+    close itself out without this module importing the thing that holds workspaces
+    - and so that the outcomes below are testable against a double rather than a
+    live runtime.
+
+    Completing the sessions and releasing the workspaces are separate calls because
+    they must happen in that ORDER: `abandon_all` clears the session managers that
+    the two `report_*` methods iterate, so a run released first completes no session
+    at all and nothing downstream can tell that from a run with none open. That
+    ordering used to be spelled out at each terminal call site, once per path, which
+    is one edit away from the two paths disagreeing about it.
+    """
+
+    async def report_failed(self, error_message: str) -> None:
+        """Close every open session as failed, carrying the same account of why."""
+        ...
+
+    async def report_cancelled(self, reason: str) -> None:
+        """Close every open session as cancelled."""
+        ...
+
+    async def abandon_all(self, context: str) -> None:
+        """Probe, import and tear down every phase still holding a workspace."""
+        ...
+
+
 @dataclass(frozen=True)
 class PhaseFailure:
     """Everything a dying execution records about the exception that killed it.
@@ -110,6 +139,31 @@ class PhaseFailure:
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
     about rather than one the caller names again alongside it."""
+
+    def record_in(self, phase_results: list[PhaseResult]) -> None:
+        """Add this failure's phase to the run's results, if it had one.
+
+        THE FIRST SINK, and the one whose emptiness is a decision rather than an
+        absence: an execution that died before any phase started has no phase to
+        report on, and inventing one would put a phase that never ran into the
+        execution's results - and into the metrics derived from them. The caller
+        used to make that call by testing `result` for None, which is the same as
+        asking it to know that a failure might not have a phase.
+        """
+        if self.result is not None:
+            phase_results.append(self.result)
+
+    async def wind_down(self, runtime: TerminalRuntime) -> None:
+        """End every session this failure ends, then let the run go.
+
+        THE SECOND SINK. Which of the runtime's completion verbs applies, what the
+        sessions are told, and what the teardown is recorded under are all facts
+        about the failure; a call site choosing `report_failed` and spelling
+        `"failure"` beside it is choosing them again. See `TerminalRuntime` for why
+        the two calls are in this order and may not be swapped.
+        """
+        await runtime.report_failed(self.reason)
+        await runtime.abandon_all("failure")
 
     def as_command(
         self, execution_id: str, *, completed_phases: int, total_phases: int
@@ -434,6 +488,17 @@ class CancelledExecution:
     reason: str
     phase_results: list[PhaseResult]
     artifact_ids: list[str]
+
+    async def wind_down(self, runtime: TerminalRuntime) -> None:
+        """End every session this cancellation ends, then let the run go.
+
+        The same sink as `PhaseFailure.wind_down` and for the same reason: the
+        caller was reading `reason` back out in order to hand it to the verb it
+        had picked, which is how the resolved default above came to be spelled
+        in one place and used in another.
+        """
+        await runtime.report_cancelled(self.reason)
+        await runtime.abandon_all("cancel")
 
     def execution_result(
         self,
