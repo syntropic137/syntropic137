@@ -1566,7 +1566,7 @@ selfhost-seed:
     echo "✅ Seeding complete"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
-selfhost-update:
+selfhost-update: _require-tunnel-auth
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh

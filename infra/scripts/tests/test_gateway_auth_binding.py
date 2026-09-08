@@ -361,8 +361,14 @@ def _split_port_spec(spec: str) -> list[str]:
 
 
 def _environment(service: dict[str, object]) -> dict[str, str]:
-    """Compose accepts list and mapping form; the files differ."""
-    declared = service.get("environment", {})
+    """Compose accepts list and mapping form; the files differ.
+
+    A bare ``environment:`` parses as None, which is how it looks the moment
+    someone deletes the last key under it -- exactly the regression these tests
+    exist to catch. Read it as empty so that arrives as a named test failure
+    rather than an error while collecting the module.
+    """
+    declared = service.get("environment") or {}
     if isinstance(declared, list):
         pairs = [str(item).split("=", 1) for item in declared]
         return {key: value for key, *rest in pairs for value in (rest[0] if rest else "",)}
@@ -564,3 +570,485 @@ def test_widening_the_bind_with_a_password_is_supported_and_authenticated(
             f"SYN_API_PASSWORD did not let it start.\n{result.stderr}"
         )
         assert _AUTH_ON in _listener_auth(path, "80")
+
+
+# ---------------------------------------------------------------------------
+# The other way a gateway reaches the network: a tunnel
+# ---------------------------------------------------------------------------
+#
+# Everything above is about a host port, and a host port has an interface to
+# pin. A tunnel does not. Binding one to loopback is not a stricter default,
+# it is the deletion of the feature -- publishing the stack remotely is the
+# whole reason a tunnel is in the compose file. So the locality half of the
+# rule has nothing to say here and the auth half carries the whole of it: a
+# stack that runs a tunnel must have SYN_API_PASSWORD set, or nothing starts.
+#
+# The stacks below are discovered by asking which compose files run a tunnel,
+# for the same reason the port-80 checks discover theirs: the file that got
+# forgotten is always the one that was exposed. The published compose is the
+# case that makes the point. Its cloudflared service was copied out of the
+# selfhost overlay by scripts/generate_published_compose.py, but only that one
+# service was -- so a coupling added to the overlay's gateway reached the
+# `just` path and stopped there, and the self-hoster running
+# `docker compose --profile tunnel up` with no justfile at all got the old
+# behaviour. A list of "the tunnel files" would have had all three names on it
+# and still missed that the third one is generated.
+
+#: Images that publish this stack to the internet without a host port. Matched
+#: on the repository half, so a version bump does not silently empty this set.
+_TUNNEL_IMAGES = ("cloudflare/cloudflared",)
+
+#: Not a real Cloudflare token, but non-empty, which is the only property the
+#: coupling reads. Nothing in the repo could produce it, so a refusal that
+#: names it is a refusal caused by this value travelling from the shell,
+#: through the compose file, into the container -- not a default asserting
+#: itself.
+_TUNNEL_TOKEN = "eyJhIjoiTk9ULUEtUkVBTC1UT0tFTiJ9.syn137-test"
+
+_JUSTFILE = _REPO_ROOT / "justfile"
+
+
+def _justfile_variables() -> dict[str, str]:
+    """The justfile's `name := ...` string variables, concatenation resolved.
+
+    The compose chains live here (`compose_selfhost_cf := compose_selfhost +
+    " -f .../cloudflare.yaml"`), and a chain is what an overlay actually means:
+    on its own, `docker-compose.cloudflare.yaml` declares a gateway with one
+    environment key and no image. Reading the overlay alone would check half a
+    service and miss the failure that matters -- a stack that demands a
+    password while some file earlier in its chain hard-wires the password
+    empty, which is precisely how the on-demand stack had no way through.
+    """
+    resolved: dict[str, str] = {}
+    for name, expression in re.findall(r"^(\w+) *:= *(.+)$", _JUSTFILE.read_text(), re.MULTILINE):
+        parts: list[str] = []
+        for term in expression.split("+"):
+            term = term.strip()
+            parts.append(term[1:-1] if term.startswith('"') else resolved.get(term, ""))
+        resolved[name] = "".join(parts)
+    return resolved
+
+
+def _compose_chain(variable_value: str) -> list[Path]:
+    return [_REPO_ROOT / path for path in re.findall(r"-f +(\S+)", variable_value)]
+
+
+@dataclass(frozen=True)
+class TunnelStack:
+    """A stack that can publish itself through a tunnel, and its gateway.
+
+    `chain` is every compose file docker would be handed, in order, so
+    `gateway_environment` is the environment the container really receives
+    rather than the fragment one overlay happens to declare.
+    """
+
+    tunnel_file: Path
+    chain: tuple[Path, ...]
+    gateway_environment: dict[str, str]
+
+    def __str__(self) -> str:
+        return self.tunnel_file.name
+
+
+def _runs_a_tunnel(document: dict[str, object]) -> bool:
+    services = document.get("services")
+    if not isinstance(services, dict):
+        return False
+    return any(
+        isinstance(service, dict) and str(service.get("image", "")).startswith(_TUNNEL_IMAGES)
+        for service in services.values()
+    )
+
+
+def _tunnel_stacks() -> list[TunnelStack]:
+    """Every compose file that runs a tunnel, with the chain that carries it.
+
+    A file that declares both the tunnel and the gateway is its own chain --
+    that is the published compose, which a self-hoster runs with a single
+    `-f`. An overlay is looked up among the justfile's chains instead, because
+    an overlay used without the files under it is not a stack anyone runs.
+    """
+    chains = [_compose_chain(value) for value in _justfile_variables().values()]
+    stacks: list[TunnelStack] = []
+
+    for compose_file in _compose_files():
+        document = yaml.safe_load(compose_file.read_text()) or {}
+        if not _runs_a_tunnel(document):
+            continue
+
+        candidates = [chain for chain in chains if compose_file in chain]
+        chain = max(candidates, key=len) if candidates else [compose_file]
+        assert chain[-1] == compose_file, (
+            f"{compose_file.name} is not the last file in the chain that includes it "
+            f"({[p.name for p in chain]}), so the merge below would not reflect it"
+        )
+
+        environment: dict[str, str] = {}
+        for member in chain:
+            services = (yaml.safe_load(member.read_text()) or {}).get("services") or {}
+            gateway = services.get("gateway")
+            if isinstance(gateway, dict):
+                environment.update(_environment(gateway))
+
+        stacks.append(
+            TunnelStack(
+                tunnel_file=compose_file,
+                chain=tuple(chain),
+                gateway_environment=environment,
+            )
+        )
+
+    assert stacks, "no compose file runs a tunnel -- discovery is broken"
+    return stacks
+
+
+_TUNNEL_STACKS = _tunnel_stacks()
+
+
+@pytest.mark.unit
+def test_discovery_sees_every_stack_that_can_run_a_tunnel() -> None:
+    """Same reason as the port-80 version: an empty list passes every test.
+
+    docker-compose.syntropic137.yaml being on this list is the point. It is
+    generated, so it is the one nobody edits and the one a hand-maintained list
+    would describe as covered while the generator dropped the coupling.
+    """
+    assert {stack.tunnel_file.name for stack in _TUNNEL_STACKS} == {
+        "docker-compose.cloudflare.yaml",
+        "docker-compose.dev-cloudflare.yaml",
+        "docker-compose.syntropic137.yaml",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stack", _TUNNEL_STACKS, ids=str)
+def test_the_gateway_is_told_a_tunnel_publishes_it(stack: TunnelStack) -> None:
+    """The hop before the decision, for the tunnel half.
+
+    A container cannot see a sibling container publishing it, so the marker has
+    to be handed in -- and it has to be driven by the same variable that makes
+    the tunnel connect, or the two drift and the gateway is told "no tunnel"
+    while cloudflared is dialling out.
+    """
+    marker = stack.gateway_environment.get("SYN_GATEWAY_TUNNEL")
+
+    assert marker is not None, (
+        f"{stack} runs a tunnel but never passes SYN_GATEWAY_TUNNEL to the gateway, "
+        f"so the entrypoint cannot know it is published"
+    )
+
+    document = yaml.safe_load(stack.tunnel_file.read_text())
+    tunnel_service = next(
+        service
+        for service in document["services"].values()
+        if isinstance(service, dict) and str(service.get("image", "")).startswith(_TUNNEL_IMAGES)
+    )
+    token_variables = set(variable_names(str(_environment(tunnel_service).get("TUNNEL_TOKEN", ""))))
+
+    assert token_variables & set(variable_names(marker)), (
+        f"{stack} derives SYN_GATEWAY_TUNNEL from {variable_names(marker)} but the tunnel "
+        f"connects using {sorted(token_variables)}; a tunnel could run with the gateway "
+        f"believing it is unpublished"
+    )
+
+
+def _gateway_environment(stack: TunnelStack, shell: dict[str, str]) -> dict[str, str]:
+    return {key: interpolate(value, shell) for key, value in stack.gateway_environment.items()}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stack", _TUNNEL_STACKS, ids=str)
+def test_running_a_tunnel_with_no_password_refuses_to_start(stack: TunnelStack) -> None:
+    """The unsafe combination, built the way an operator builds it.
+
+    Set the token in the shell, resolve the whole `-f` chain the way docker
+    resolves it, hand the result to the real entrypoint. Before this change
+    every one of these started, and served the dashboard and the API to the
+    internet with nothing asking for credentials.
+    """
+    shell = {"CLOUDFLARE_TUNNEL_TOKEN": _TUNNEL_TOKEN}
+    container = _gateway_environment(stack, shell)
+
+    assert container.get("SYN_GATEWAY_TUNNEL"), (
+        f"{stack}: setting the tunnel token did not mark the gateway as tunnelled, so "
+        f"this test is not building the unsafe combination it claims to"
+    )
+    assert not container.get("SYN_API_PASSWORD"), (
+        f"{stack}: the chain supplies a password of its own, so no unauthenticated "
+        f"tunnel is constructible here and this test proves nothing"
+    )
+
+    with tempfile.TemporaryDirectory() as workdir:
+        result = _run_entrypoint_with(Path(workdir), container)
+
+    assert result.returncode != 0, (
+        f"{stack} published the stack through a tunnel and the gateway started anyway, "
+        f"unauthenticated:\n{result.stdout}"
+    )
+    assert "tunnel" in result.stderr, "the error must name the tunnel as the reason"
+    assert "SYN_API_PASSWORD" in result.stderr, "the error must name the way out"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stack", _TUNNEL_STACKS, ids=str)
+def test_running_a_tunnel_with_a_password_is_supported_and_authenticated(
+    stack: TunnelStack,
+) -> None:
+    """Without this, "refuses" is satisfiable by a stack that never starts.
+
+    Every tunnel path must have a way through, and the dev stack is why this is
+    checked rather than assumed: docker-compose.dev.yaml hard-wires
+    SYN_API_PASSWORD to "", so until its tunnel overlay reopened it, setting the
+    password the error message names would have changed nothing at all.
+    """
+    shell = {"CLOUDFLARE_TUNNEL_TOKEN": _TUNNEL_TOKEN, "SYN_API_PASSWORD": _PASSWORD}
+
+    with tempfile.TemporaryDirectory() as workdir:
+        path = Path(workdir)
+        result = _run_entrypoint_with(path, _gateway_environment(stack, shell))
+
+        assert result.returncode == 0, (
+            f"{stack} has no supported tunnelled configuration: setting SYN_API_PASSWORD "
+            f"did not let it start.\n{result.stderr}"
+        )
+        assert _AUTH_ON in _listener_auth(path, "8081"), (
+            f"{stack} starts a tunnel with port 8081 unauthenticated"
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stack", _TUNNEL_STACKS, ids=str)
+def test_the_same_stack_without_its_tunnel_still_starts_unauthenticated(
+    stack: TunnelStack,
+) -> None:
+    """The control, and the behaviour-preservation half.
+
+    Same files, same merge, same entrypoint -- only the tunnel token is absent.
+    If this failed, the tests above would be reporting a stack that cannot
+    start at all rather than a coupling that fires, and every loopback-only
+    stack in the repo would now be demanding a password it never needed.
+    """
+    with tempfile.TemporaryDirectory() as workdir:
+        result = _run_entrypoint_with(Path(workdir), _gateway_environment(stack, {}))
+
+    assert result.returncode == 0, (
+        f"{stack} refuses to start with no tunnel and no password, which is the "
+        f"loopback-only default:\n{result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The host side: the recipe refuses before docker is asked for anything
+# ---------------------------------------------------------------------------
+#
+# `docker compose up -d` returns 0 whether or not the gateway then exits, and
+# `restart: always` turns the refusal above into a container that quietly
+# restarts forever. An operator's first sign of trouble would be a health check
+# they went looking for. So the recipes that can start a tunnel state the same
+# rule first, on the host, where it can be a sentence.
+#
+# Two statements of one rule drift, so the last test here drives both with the
+# same input and requires them to agree.
+
+_REQUIRE_TUNNEL_AUTH = _REPO_ROOT / "infra" / "scripts" / "require-tunnel-auth.sh"
+
+
+def _run_require_tunnel_auth(shell: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(_REQUIRE_TUNNEL_AUTH)],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), **shell},
+        check=False,
+    )
+
+
+@pytest.mark.unit
+def test_the_host_side_check_refuses_a_tunnel_with_no_password() -> None:
+    result = _run_require_tunnel_auth({"CLOUDFLARE_TUNNEL_TOKEN": _TUNNEL_TOKEN})
+
+    assert result.returncode != 0, f"a tunnel with no password was waved through:\n{result.stdout}"
+    assert "SYN_API_PASSWORD" in result.stderr, "the error must name the way out"
+    assert "CLOUDFLARE_TUNNEL_TOKEN" in result.stderr, (
+        "the error must name what publishes the stack"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "shell",
+    [
+        {},
+        {"SYN_API_PASSWORD": _PASSWORD},
+        {"CLOUDFLARE_TUNNEL_TOKEN": _TUNNEL_TOKEN, "SYN_API_PASSWORD": _PASSWORD},
+        {"CLOUDFLARE_TUNNEL_TOKEN": ""},
+    ],
+    ids=["nothing-set", "password-only", "tunnel-and-password", "empty-token"],
+)
+def test_the_host_side_check_allows_everything_that_is_not_that(shell: dict[str, str]) -> None:
+    """It guards one combination. A check that blocks `just dev` on a laptop
+    with no tunnel would be removed within the week, and then nothing guards
+    the combination that matters."""
+    result = _run_require_tunnel_auth(shell)
+
+    assert result.returncode == 0, f"{shell} was refused:\n{result.stderr}"
+
+
+@pytest.mark.unit
+def test_the_host_check_and_the_entrypoint_agree_on_the_unsafe_combination() -> None:
+    """The rule is stated in two places because it is enforced in two contexts:
+    on the host, before docker is asked for anything, and in the container,
+    where it also reaches a self-hoster who has no justfile. Neither can be
+    dropped, so pin them together: the same combination must be refused by
+    both, and letting one drift open has to fail here."""
+    tunnelled = {"SYN_GATEWAY_TUNNEL": "cloudflare", "SYN_API_PASSWORD": ""}
+
+    with tempfile.TemporaryDirectory() as workdir:
+        container = _run_entrypoint_with(Path(workdir), tunnelled)
+    host = _run_require_tunnel_auth({"CLOUDFLARE_TUNNEL_TOKEN": _TUNNEL_TOKEN})
+
+    assert (container.returncode != 0) and (host.returncode != 0), (
+        f"the two halves of one rule disagree: entrypoint exited "
+        f"{container.returncode}, host check exited {host.returncode}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Which recipes have to ask
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Recipe:
+    name: str
+    dependencies: str
+    body: str
+
+    def mentions(self, token: str) -> bool:
+        return token in self.dependencies or token in self.body
+
+
+def _recipes() -> list[Recipe]:
+    """The justfile's recipes: header, declared dependencies, indented body."""
+    found: list[Recipe] = []
+    current: list[str] = []
+    name = dependencies = ""
+    for line in _JUSTFILE.read_text().splitlines():
+        header = re.match(r"^([a-zA-Z_][\w-]*) *((?:[\w-]+ *)*):(?!=)(.*)$", line)
+        if header:
+            if name:
+                found.append(Recipe(name, dependencies, "\n".join(current)))
+            name, dependencies, current = header.group(1), header.group(3), []
+        elif name and (line.startswith((" ", "\t")) or not line.strip()):
+            current.append(line)
+        elif name:
+            found.append(Recipe(name, dependencies, "\n".join(current)))
+            name, dependencies, current = "", "", []
+    if name:
+        found.append(Recipe(name, dependencies, "\n".join(current)))
+    return found
+
+
+#: A compose invocation followed by `up`, capturing how the command was
+#: spelled. This justfile uses four spellings and they all have to resolve, or
+#: the recipe reads as tunnel-free: `{{compose_selfhost_cf}} up`, `$COMPOSE up`,
+#: `${_COMPOSE} up`, and `$(just _dev-compose-cmd) up`.
+_COMPOSE_UP = re.compile(r"(\{\{[\w_]+\}\}|\$\{?[A-Za-z_]\w*\}?|\$\(just [\w-]+\))\s+up\b")
+
+#: `NAME="{{var}}"` or `NAME=$(just other)` inside a recipe body -- the hop
+#: `selfhost-update` takes, choosing its chain at runtime from what it finds
+#: running and only then calling `$COMPOSE up`.
+_ASSIGNMENT = r"^\s*{name}=(.+?)\s*$"
+
+
+def _resolve_compose_files(
+    expression: str, recipe: Recipe, recipes: dict[str, Recipe]
+) -> set[Path]:
+    """Every compose file `<expression> up` could be handed, across branches.
+
+    Across branches, not for one run: `selfhost-update` picks the tunnel chain
+    or the plain one depending on whether it finds cloudflared running, and
+    `_dev-compose-cmd` picks on whether a token is set. Either can start a
+    tunnel, so either makes the recipe one that has to ask first.
+    """
+    variables = _justfile_variables()
+
+    if expression.startswith("{{"):
+        return set(_compose_chain(variables.get(expression[2:-2], "")))
+
+    if expression.startswith("$(just "):
+        called = recipes.get(expression[len("$(just ") : -1])
+        return (
+            {
+                path
+                for name in re.findall(r"\{\{([\w_]+)\}\}", called.body)
+                for path in _compose_chain(variables.get(name, ""))
+            }
+            if called
+            else set()
+        )
+
+    name = expression.lstrip("$").strip("{}")
+    return {
+        path
+        for value in re.findall(_ASSIGNMENT.format(name=re.escape(name)), recipe.body, re.MULTILINE)
+        # `COMPOSE="{{compose_selfhost_cf}}"` and `_COMPOSE=$(just ...)` are the
+        # same hop; the quotes are shell noise.
+        for value in [value.strip("\"'")]
+        for path in _resolve_compose_files(value, recipe, recipes)
+    }
+
+
+def _recipes_that_can_start_a_tunnel() -> set[str]:
+    """Recipes whose `up` can be handed a compose file that runs a tunnel.
+
+    Resolved through the justfile rather than listed beside it. `dev` reads as
+    tunnel-free at a glance -- it runs `${_COMPOSE} up`, and _COMPOSE came from
+    a recipe that echoes one of two chains -- and it starts cloudflared
+    whenever a token is set.
+
+    Recipes that only stop a tunnel are deliberately not caught: refusing to
+    run `just dev-down` because the stack is misconfigured would trap an
+    operator inside the exposure this is meant to prevent.
+    """
+    recipes = {recipe.name: recipe for recipe in _recipes()}
+    tunnel_files = {stack.tunnel_file for stack in _TUNNEL_STACKS}
+
+    return {
+        recipe.name
+        for recipe in recipes.values()
+        if any(
+            _resolve_compose_files(expression, recipe, recipes) & tunnel_files
+            for expression in _COMPOSE_UP.findall(recipe.body)
+        )
+    }
+
+
+@pytest.mark.unit
+def test_every_recipe_that_can_start_a_tunnel_asks_for_auth_first() -> None:
+    """`selfhost-up-tunnel` is the obvious one and the one #1148 named. It is
+    not the only one: `just dev` and `just dev-fresh` add the dev tunnel
+    overlay whenever a token is set, `selfhost-update` switches to the tunnel
+    chain when it sees cloudflared running, and `_webhook-start` starts
+    cloudflared on its own when it finds it stopped. Four of the five were
+    never mentioned anywhere, which is the argument against writing them down
+    here and calling the set closed."""
+    starters = _recipes_that_can_start_a_tunnel()
+
+    assert starters == {
+        "dev",
+        "dev-fresh",
+        "selfhost-up-tunnel",
+        "selfhost-update",
+        "_webhook-start",
+    }, "the set of recipes that can start a tunnel changed; each one needs the guard"
+
+    unguarded = {
+        recipe.name
+        for recipe in _recipes()
+        if recipe.name in starters and not recipe.mentions("_require-tunnel-auth")
+    }
+    assert not unguarded, (
+        f"{sorted(unguarded)} can start a tunnel without first requiring "
+        f"SYN_API_PASSWORD, so `up -d` returns 0 while the gateway crash-loops"
+    )
