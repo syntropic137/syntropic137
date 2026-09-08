@@ -432,9 +432,7 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    if failure.timed_out:
-        return "timed out, so it did not finish"
-    return describe_exit_status(failure.exit_code)
+    return describe_exit_status(failure.exit_code, timed_out=failure.timed_out)
 
 
 def _render_inspection_failure(

@@ -735,6 +735,7 @@ async def _quarantine(
                 "The quarantine push",
                 exit_code=pushed.exit_code,
                 output=pushed.stderr or pushed.stdout,
+                timed_out=pushed.timed_out,
             ),
         )
     logger.warning("Quarantined unpushed work from %s at %s", repo, ref)

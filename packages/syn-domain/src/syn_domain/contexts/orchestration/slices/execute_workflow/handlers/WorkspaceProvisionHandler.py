@@ -540,6 +540,7 @@ class WorkspaceProvisionHandler:
                     "Setup phase",
                     exit_code=setup_result.exit_code,
                     output=setup_result.stderr,
+                    timed_out=setup_result.timed_out,
                 )
             )
         logger.info("Setup phase completed, secrets cleared")

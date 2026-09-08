@@ -605,17 +605,25 @@ class _BreaksOn:
     growing a second way to describe a failure.
     """
 
-    def __init__(self, inner: GitWorkspace, failing: str, *, in_repo: str | None = None) -> None:
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        in_repo: str | None = None,
+        result: ExecutionResult = _UNREACHABLE,
+    ) -> None:
         self._inner = inner
         self._failing = failing
         self._in_repo = in_repo
+        self._result = result
         self.attempted: list[str] = []
 
     async def execute(self, command: list[str]) -> ExecutionResult:
         operation = _operation(command)
         self.attempted.append(operation)
         if operation == self._failing and (self._in_repo is None or self._in_repo in command):
-            return _UNREACHABLE
+            return self._result
         return await self._inner.execute(command)
 
 
@@ -851,6 +859,42 @@ async def test_f_a_failed_quarantine_push_fails_the_phase_and_says_so(clone: _Cl
     assert "quarantined at" not in message
     assert "git fetch origin" not in message
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_quarantine_push_killed_by_a_signal_says_so_instead_of_quoting_progress(
+    clone: _Clone,
+) -> None:
+    """#1158, one file over: the push's progress output was the whole reason.
+
+    ``push_error`` is the sentence an operator reads to decide whether work
+    they cannot see is gone. It was built from stderr alone and
+    ``QuarantinedWork`` carried no exit status at all, so a push killed
+    mid-transfer reported "Enumerating objects: 5, done." as its reason -
+    output that says the push was going fine. Read at 2am that is worse than
+    silence, because it looks like an answer.
+
+    Asserted on the rendered error rather than the record, because the record
+    is what this change writes and the message is what anyone actually sees.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    progress = "Enumerating objects: 5, done."
+    killed_mid_push = ExecutionResult(
+        exit_code=137,  # 128 + SIGKILL
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr=progress,
+    )
+    run = _PhaseRun(_BreaksOn(clone.workspace, "push", result=killed_mid_push))
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message, message
+    assert "SIGKILL" in message, message
+    assert "137" in message, message
+    assert message.index("SIGKILL") < message.index(progress), message
 
 
 async def test_a_repository_with_no_commits_yet_is_not_an_unreachable_one(
