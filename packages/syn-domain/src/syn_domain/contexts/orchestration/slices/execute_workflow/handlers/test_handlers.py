@@ -850,8 +850,8 @@ class TestBuildAgentEnv:
         workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
             await _build_agent_env(
-            workspace, "sess-1", ["syntropic137/syntropic137"], can_open_pr=False
-        )
+                workspace, "sess-1", ["syntropic137/syntropic137"], can_open_pr=False
+            )
 
 
 # =========================================================================

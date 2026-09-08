@@ -7,13 +7,14 @@ Handles token response validation, parsing, caching, and retrieval.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
 logger = logging.getLogger(__name__)

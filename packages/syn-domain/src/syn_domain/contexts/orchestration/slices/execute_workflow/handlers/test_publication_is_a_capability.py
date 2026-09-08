@@ -25,8 +25,9 @@ top of six hops, any of which could drop it while both ends still look right.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,7 +38,7 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import Workfl
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (  # noqa: E501
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
 from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
@@ -46,12 +47,16 @@ from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand im
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (  # noqa: E501
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
 )
 from syn_shared.env_constants import ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -75,7 +80,7 @@ class _FakeGitHubClient:
     through it rather than each deciding for itself.
     """
 
-    mints: list[tuple[str, bool]] = []
+    mints: ClassVar[list[tuple[str, bool]]] = []
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         del args, kwargs
@@ -115,9 +120,24 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     captured: list[ExecutablePhase] = []
 
     class _Processor:
-        async def run(self, **kwargs: Any) -> Any:
-            captured.extend(kwargs["phases"])
-            return MagicMock(status="completed")
+        async def run(
+            self,
+            *,
+            workflow_id: str,
+            workflow_name: str,
+            phases: list[ExecutablePhase],
+            inputs: dict[str, str],
+            execution_id: str,
+            repos: list[RepositoryRef],
+        ) -> WorkflowExecutionResult:
+            del workflow_name, inputs, repos
+            captured.extend(phases)
+            return WorkflowExecutionResult(
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                status="completed",
+                started_at=datetime.now(UTC),
+            )
 
     class _Repo:
         async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate | None:

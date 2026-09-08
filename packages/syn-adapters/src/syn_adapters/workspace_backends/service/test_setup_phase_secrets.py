@@ -512,7 +512,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.mint_agent_token.side_effect = lambda inst_id, can_open_pr: (
+        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: (
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 

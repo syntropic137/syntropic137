@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from syn_adapters.github.agent_token import mint_agent_token as _mint_agent_token
 from syn_adapters.github.client_api import api_get as _api_get
 from syn_adapters.github.client_api import api_post as _api_post
 from syn_adapters.github.client_api import api_put as _api_put
@@ -44,7 +45,6 @@ from syn_adapters.github.client_jwt import (
 from syn_adapters.github.client_jwt import (
     JWT_ALGORITHM as JWT_ALGORITHM,
 )
-from syn_adapters.github.agent_token import mint_agent_token as _mint_agent_token
 from syn_adapters.github.client_token import get_installation_token as _get_installation_token
 
 if TYPE_CHECKING:
