@@ -313,3 +313,214 @@ class TestTheNodeLevelEntry:
             assert contains_untyped_mapping(self._annotation(f"x: {spelling}\n"), values=opaque), (
                 spelling
             )
+
+
+@pytest.mark.unit
+class TestTypedDictIsDictShapedState:
+    """(f) ``TypedDict`` is a dict that the ratchet used to be blind to.
+
+    The reproduction is #1248's, which is PR #1246's. A change failed
+    ``check-untyped-dicts`` with a ``dict[str, Any]``, replaced it with a
+    ``TypedDict`` carrying the same string keys, and the gate went green.
+    Independent review refused the head anyway::
+
+        A TypedDict is still dictionary-shaped structured state and is consumed
+        through json["permissions"]. Passing the AST ratchet does not satisfy
+        that requirement; it only shows the ratchet does not count this
+        spelling.
+
+    Unlike the mapping shapes, a ``TypedDict`` counts regardless of its value
+    types: ``contents: str`` constrains the value perfectly and still fails the
+    rule, because the rule is about string-keyed access to structured state,
+    not about erasure. So there is no "typed enough" ``TypedDict`` and no case
+    below that should score zero.
+    """
+
+    def test_the_issue_reproduction_is_reported(self) -> None:
+        """#1248 verbatim. Against the pre-fix gate this returns ``[]``."""
+        source = """
+        from typing import TypedDict
+
+        class Permissions(TypedDict):
+            contents: str
+            pull_requests: str
+
+        def read(p: Permissions) -> str:
+            return p["contents"]
+        """
+        (occurrence,) = find_untyped_mappings(textwrap.dedent(source))
+        assert occurrence.text == "class Permissions(TypedDict)"
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("bare base", "class P(TypedDict):\n    a: int\n"),
+            ("dotted base", "class P(typing.TypedDict):\n    a: int\n"),
+            (
+                "typing_extensions, the runtime-features spelling",
+                "class P(typing_extensions.TypedDict):\n    a: int\n",
+            ),
+            ("total=False", "class P(TypedDict, total=False):\n    a: int\n"),
+            ("functional syntax", 'P = TypedDict("P", {"a": int})\n'),
+            ("dotted functional syntax", 'P = typing.TypedDict("P", {"a": int})\n'),
+        ],
+    )
+    def test_every_declaration_form_counts_once(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_declaration_counts_and_its_usages_do_not(self) -> None:
+        """Same rule as an alias: the fix happens once, at the declaration.
+
+        Replacing the declaration with a dataclass repairs every reference to
+        it, so counting the references would measure popularity rather than
+        debt.
+        """
+        source = """
+        class P(TypedDict):
+            a: int
+
+        def one(p: P) -> P: ...
+        def two(p: P) -> None: ...
+        """
+        assert count(source) == 1
+
+    def test_a_docstring_about_typeddict_counts_zero(self) -> None:
+        """Prose is prose for the new shape too, not only for ``dict``."""
+        source = '''
+        def f(rows):
+            """Normalise rows.
+
+            The upstream payload is a TypedDict, so class P(TypedDict) applies.
+            """
+            return rows
+        '''
+        assert count(source) == 0
+
+    def test_a_plain_class_is_not_a_typed_dict(self) -> None:
+        source = """
+        @dataclass(frozen=True)
+        class P:
+            a: int
+        """
+        assert count(source) == 0
+
+
+@pytest.mark.unit
+class TestImportAliasesDoNotHide:
+    """(g) A shape renamed on the way in is the same shape.
+
+    ``_trailing_name`` answers what a type expression is *called*, which is why
+    the dotted spellings resolve. It cannot see a rename that happened in the
+    import statement: ``from typing import Dict as D`` makes ``D[str, Any]``
+    the same annotation under a name that appears in no constant here. That is
+    the same seam #1188 closed for formatting, left open for imports - and the
+    cheapest possible dodge once ``TypedDict`` is counted.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("aliased typing.Dict", "from typing import Dict as D\nx: D[str, Any]\n"),
+            (
+                "aliased collections.abc.Mapping",
+                "from collections.abc import Mapping as M\nx: M[str, object]\n",
+            ),
+            (
+                "aliased MutableMapping",
+                "from collections.abc import MutableMapping as MM\nx: MM[str, Any]\n",
+            ),
+            ("aliased builtin dict", "from builtins import dict as d\nx: d[str, Any]\n"),
+            ("aliased value type", "from typing import Any as A\nx: dict[str, A]\n"),
+            (
+                "aliased TypedDict base",
+                "from typing import TypedDict as TD\nclass P(TD):\n    a: int\n",
+            ),
+            (
+                "aliased TypedDict, functional",
+                'from typing import TypedDict as TD\nP = TD("P", {"a": int})\n',
+            ),
+            (
+                "aliased inside a forward reference",
+                'from typing import Dict as D\nx: "D[str, Any]"\n',
+            ),
+        ],
+    )
+    def test_the_alias_is_resolved(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_an_unrelated_alias_is_not_invented(self) -> None:
+        """Resolution must not turn every short name into a mapping."""
+        source = """
+        from decimal import Decimal as D
+        x: D
+        y: dict[str, D]
+        """
+        assert count(source) == 0
+
+    def test_a_module_alias_still_resolves_by_attribute(self) -> None:
+        """``import typing as t`` already worked; it must keep working."""
+        assert count("import typing as t\nx: t.Dict[str, Any]\n") == 1
+
+
+@pytest.mark.unit
+class TestSimpleNamespaceIsErasureWithDotSyntax:
+    """(h) ``SimpleNamespace`` is ``dict[str, Any]`` wearing attribute access.
+
+    It declares no fields at all, so a type checker knows less about it than
+    about the ``dict[str, Any]`` the gate already counts, and
+    ``SimpleNamespace(**payload)`` is a one-line way to turn a counted
+    annotation into an uncounted one. Every place the name is written is a
+    place the erasure has to be repaired, so each is counted - there is no
+    single declaration site to attribute it to the way there is for an alias or
+    a ``TypedDict``.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("construction", "obj = SimpleNamespace(a=1, b=2)\n"),
+            ("dotted construction", "obj = types.SimpleNamespace(a=1)\n"),
+            ("parameter annotation", "def f(o: SimpleNamespace) -> None: ...\n"),
+            ("return annotation", "def f() -> SimpleNamespace: ...\n"),
+            ("aliased import", "from types import SimpleNamespace as NS\nobj = NS(a=1)\n"),
+        ],
+    )
+    def test_counted_once(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_import_alone_is_not_a_use(self) -> None:
+        assert count("from types import SimpleNamespace\n") == 0
+
+
+@pytest.mark.unit
+class TestNamedTupleIsDeliberatelyNotCounted:
+    """(i) The judgement call #1248 asked for, pinned so it stays a decision.
+
+    A ``NamedTuple`` names and types every field and is read by attribute, so
+    it satisfies both halves of the rule this gate enforces: it is not a
+    dictionary, and there is no string-keyed lookup to replace. ``EventInfo``
+    in ``syn-domain`` is the shape the rule wants people to move *toward*;
+    charging budget for it would push them back to the thing it replaced.
+
+    Its real weaknesses - positional unpacking, index access, comparing equal
+    to a bare tuple - are a different concern from the one measured here, and
+    counting them would quietly widen the gate from "not dict-shaped" to "must
+    be a Pydantic model", which is not the rule AGENTS.md states. If that
+    becomes the rule, it should arrive as its own gate with its own budgets,
+    not smuggled in under this one.
+    """
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "class P(NamedTuple):\n    a: int\n",
+            "class P(typing.NamedTuple):\n    a: int\n",
+            'P = NamedTuple("P", [("a", int)])\n',
+        ],
+    )
+    def test_counts_zero(self, source: str) -> None:
+        assert count(source) == 0, f"should not count: {source!r}"
+
+    def test_but_an_erased_field_inside_one_still_counts(self) -> None:
+        """Excluding the container does not excuse what it holds."""
+        assert count("class P(NamedTuple):\n    a: dict[str, Any]\n") == 1
