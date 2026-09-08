@@ -67,10 +67,14 @@ from typing import Final
 _TREE_SLOT: Final[str] = "@@WORKSPACE_TREE@@"
 _STARTING_POINT_SLOT: Final[str] = "@@WHERE_THE_CODE_IS@@"
 
+#: Neither line names a repo file. Which of a repo's instruction files is
+#: imported is decided per checkout by digest, not by name (#1192), so a repo
+#: serving both conventions from one blob has ONE of them imported and a line
+#: promising "each repo's CLAUDE.md" would be pointing at the wrong file.
 _TREE_WITH_CHECKOUT: Final[str] = """\
 /workspace/
-├── CLAUDE.md    ← @-imports each repo's CLAUDE.md (loaded automatically)
-├── AGENTS.md    ← @-imports each repo's AGENTS.md (same content)
+├── CLAUDE.md    ← @-imports each repo's instructions (loaded automatically)
+├── AGENTS.md    ← the same imports, under the cross-platform name
 ├── artifacts/
 │   ├── input/   ← Previous phase outputs (read-only)
 │   └── output/  ← Write YOUR deliverables here

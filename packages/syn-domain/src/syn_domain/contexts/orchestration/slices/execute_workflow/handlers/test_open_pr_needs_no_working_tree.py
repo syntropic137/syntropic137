@@ -652,8 +652,8 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ```
 /workspace/
-├── CLAUDE.md    ← @-imports each repo's CLAUDE.md (loaded automatically)
-├── AGENTS.md    ← @-imports each repo's AGENTS.md (same content)
+├── CLAUDE.md    ← @-imports each repo's instructions (loaded automatically)
+├── AGENTS.md    ← the same imports, under the cross-platform name
 ├── artifacts/
 │   ├── input/   ← Previous phase outputs (read-only)
 │   └── output/  ← Write YOUR deliverables here

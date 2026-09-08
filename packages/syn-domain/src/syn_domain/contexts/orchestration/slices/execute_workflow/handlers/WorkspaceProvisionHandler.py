@@ -916,31 +916,30 @@ class WorkspaceProvisionHandler:
             f"done; "
             f"echo {_PROBE_SENTINEL}"
         )
+        # One rule for everything that can go wrong here: anything short of a
+        # complete, correctly-sized answer is "we could not look". Provisioning
+        # must survive an unusable exec backend - raising out of here would fail
+        # the whole phase over an optimisation - so the read and the parse sit
+        # inside the same guard as the call.
         try:
             result = await workspace.execute(
                 ["sh", "-c", script],
                 timeout_seconds=_PROBE_TIMEOUT_SECONDS,
             )
+            # exit_code is deliberately not consulted: a repo carrying only one of
+            # the two conventions makes that `sha256sum` fail, which is the
+            # ordinary case. The per-path answers already say which files exist.
+            answers = result.stdout.splitlines()
+            # `.index` raises when the sentinel is absent, which is the point:
+            # a probe that did not finish has not answered either.
+            answers = answers[: answers.index(_PROBE_SENTINEL)]
+            if len(answers) != len(paths):
+                raise ValueError(f"probe answered {len(answers)} of {len(paths)} paths")
+            return {
+                path: digest
+                for path, digest in zip(paths, answers, strict=True)
+                if digest != _PROBE_ABSENT
+            }
         except Exception:
-            logger.warning("Context-file probe failed; importing every candidate", exc_info=True)
+            logger.warning("Context-file probe gave no usable answer", exc_info=True)
             return None
-        # exit_code is deliberately not consulted: a repo that carries only one of
-        # the two conventions makes the probe's last `sha256sum` fail, and that is
-        # the ordinary case. The per-path answers already say which files exist.
-        answers = result.stdout.splitlines()
-        if _PROBE_SENTINEL not in answers:
-            logger.warning("Context-file probe did not complete; importing every candidate")
-            return None
-        answers = answers[: answers.index(_PROBE_SENTINEL)]
-        if len(answers) != len(paths):
-            logger.warning(
-                "Context-file probe answered %d of %d paths; importing every candidate",
-                len(answers),
-                len(paths),
-            )
-            return None
-        return {
-            path: digest
-            for path, digest in zip(paths, answers, strict=True)
-            if digest != _PROBE_ABSENT
-        }
