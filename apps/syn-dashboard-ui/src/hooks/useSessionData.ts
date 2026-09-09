@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getSession } from '../api/sessions'
-import type { SessionResponse } from '../types'
+import type { SSEEventFrame, SessionResponse } from '../types'
+import { useLiveRecord } from './useLiveRecord'
 import { useLiveTimer } from './useLiveTimer'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 export interface UseSessionDataResult {
   session: SessionResponse | null
   loading: boolean
   error: string | null
+  /** Whether this session's execution stream is delivering. */
+  isConnected: boolean
   now: number
   showConversationLog: boolean
   setShowConversationLog: (show: boolean) => void
 }
 
 const FETCH_TIMEOUT_MS = 15_000
+
+// What moves a session detail view. `OperationRecorded` fires on every message
+// and tool call and carries the token numbers; `SessionCompleted` is the
+// terminal transition. Both ride the execution channel (#1095).
+const REFRESH_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'OperationRecorded',
+  'SessionCompleted',
+])
 
 function isTerminalSession(s: SessionResponse): boolean {
   return isTerminalSessionStatus(s.status)
@@ -68,12 +78,31 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
     return () => abortRef.current?.abort()
   }, [fetchSession])
 
-  // Poll while non-terminal; also pauses while the tab is hidden (#1048).
-  useRefetchWhileRunning({
-    items: session ? [session] : [],
+  // An execution channel carries every session in the run — a delegating agent
+  // spawns siblings — so ignore frames about anyone but this session.
+  const concernsThisSession = useCallback(
+    (frame: SSEEventFrame) => frame.data.session_id === sessionId,
+    [sessionId],
+  )
+
+  // A session with no execution_id was started outside a workflow run and has
+  // no channel to subscribe to; useLiveRecord falls back to polling it.
+  const { connected: isConnected } = useLiveRecord({
+    executionId: session?.execution_id ?? undefined,
+    record: session,
     isTerminal: isTerminalSession,
     refetch: fetchSession,
+    liveEvents: REFRESH_EVENT_TYPES,
+    concerns: concernsThisSession,
   })
 
-  return { session, loading, error, now, showConversationLog, setShowConversationLog }
+  return {
+    session,
+    loading,
+    error,
+    isConnected,
+    now,
+    showConversationLog,
+    setShowConversationLog,
+  }
 }

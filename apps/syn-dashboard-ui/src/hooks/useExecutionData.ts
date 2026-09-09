@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
-import { useExecutionStream } from './useExecutionStream'
+import { useLiveRecord } from './useLiveRecord'
 import { useLiveTimer } from './useLiveTimer'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
 import { isTerminalExecutionStatus } from '../utils/terminalStatus'
@@ -22,20 +21,22 @@ function isTerminalExecution(e: ExecutionDetailResponse): boolean {
   return isTerminalExecutionStatus(e.status)
 }
 
-const REFRESH_EVENT_TYPES = new Set([
+// Everything that moves this view. `OperationRecorded` is what makes the
+// tokens and cost tick, and `ArtifactCreated` is what makes an artifact appear
+// mid-run; both used to arrive only via the 3s poll, the first because it was
+// never routable at all and the second because it was simply missing here
+// (#1095).
+const REFRESH_EVENT_TYPES: ReadonlySet<string> = new Set([
   'PhaseStarted',
   'PhaseCompleted',
   'WorkflowCompleted',
   'WorkflowFailed',
   'OperationRecorded',
+  'ArtifactCreated',
   SSE_EVENTS.WORKSPACE_CREATED,
   SSE_EVENTS.WORKSPACE_DESTROYED,
   SSE_EVENTS.WORKSPACE_ERROR,
 ])
-
-function isRefreshEvent(event: { type: string; event_type?: string }): boolean {
-  return event.type === 'event' && !!event.event_type && REFRESH_EVENT_TYPES.has(event.event_type)
-}
 
 function collectFulfilledArtifacts(results: PromiseSettledResult<ArtifactResponse>[]): Record<string, ArtifactResponse> {
   const map: Record<string, ArtifactResponse> = {}
@@ -75,18 +76,13 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
     refreshExecution()
   }, [refreshExecution])
 
-  const { isConnected } = useExecutionStream(executionId, {
-    onEvent: (event) => {
-      if (isRefreshEvent(event)) refreshExecution()
-    },
-  })
-
-  // SSE only fires on lifecycle transitions; tokens/cost/duration update
-  // continuously, so poll while non-terminal (#1048).
-  useRefetchWhileRunning({
-    items: execution ? [execution] : [],
+  // Every frame on this channel belongs to this execution, so no narrowing.
+  const { connected: isConnected } = useLiveRecord({
+    executionId,
+    record: execution,
     isTerminal: isTerminalExecution,
     refetch: refreshExecution,
+    liveEvents: REFRESH_EVENT_TYPES,
   })
 
   useEffect(() => {

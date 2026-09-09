@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useExecutionData } from '../useExecutionData'
-import type { ExecutionDetailResponse, PhaseExecutionDetail } from '../../types'
+import type { ExecutionDetailResponse, PhaseExecutionDetail, SSEEventFrame } from '../../types'
 
 vi.mock('../../api/executions', () => ({
   getExecution: vi.fn(),
@@ -9,13 +9,32 @@ vi.mock('../../api/executions', () => ({
 vi.mock('../../api/artifacts', () => ({
   getArtifact: vi.fn(),
 }))
+// The stream is controllable rather than always-connected, because the two
+// regimes are now different: connected means the frames carry the changes and
+// nothing polls; disconnected means the fallback poll is the only channel.
+// Every #1048 invariant below is about the poll, so those suites run it down.
+let streamConnected = false
+let streamHandler: ((frame: SSEEventFrame) => void) | undefined
 vi.mock('../useExecutionStream', () => ({
-  useExecutionStream: vi.fn(() => ({ isConnected: true })),
+  useExecutionStream: (
+    _executionId: string | undefined,
+    options?: { onEvent?: (frame: SSEEventFrame) => void },
+  ) => {
+    streamHandler = options?.onEvent
+    return { isConnected: streamConnected }
+  },
 }))
 
 import { getExecution } from '../../api/executions'
 
 const mockGetExecution = vi.mocked(getExecution)
+
+/** `useLiveRecord`'s DISCONNECTED_POLL_MS. */
+const FALLBACK_POLL_MS = 10_000
+
+function frame(event_type: string, data: Record<string, unknown> = {}): SSEEventFrame {
+  return { type: 'event', event_type, execution_id: 'exec-1', data, timestamp: '' }
+}
 
 function makeExecution(overrides: Partial<ExecutionDetailResponse> = {}): ExecutionDetailResponse {
   return {
@@ -67,9 +86,11 @@ function makePhase(overrides: Partial<PhaseExecutionDetail> = {}): PhaseExecutio
   }
 }
 
-describe('useExecutionData live polling (#1048)', () => {
+describe('useExecutionData fallback polling while the stream is down (#1048, #1095)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    streamConnected = false
+    streamHandler = undefined
     vi.useFakeTimers()
     Object.defineProperty(document, 'visibilityState', {
       value: 'visible',
@@ -91,7 +112,7 @@ describe('useExecutionData live polling (#1048)', () => {
 
     mockGetExecution.mockResolvedValue(makeExecution({ total_tokens: 500 }))
 
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
 
     await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(500))
@@ -107,7 +128,7 @@ describe('useExecutionData live polling (#1048)', () => {
     mockGetExecution.mockResolvedValue(
       makeExecution({ status: 'running', phases: [makePhase({ output_tokens: 999 })] }),
     )
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
     await vi.waitFor(() => expect(result.current.execution?.phases[0]?.output_tokens).toBe(999))
   })
@@ -122,13 +143,13 @@ describe('useExecutionData live polling (#1048)', () => {
     // Drive the real running -> terminal transition: the next poll tick
     // resolves with a terminal status while the hook is still mounted.
     mockGetExecution.mockResolvedValue(makeExecution({ status: 'completed' }))
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     await vi.waitFor(() => expect(result.current.execution?.status).toBe('completed'))
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
 
     // Now prove polling actually stopped, rather than merely not having
     // started: further timer advances must not issue another request.
-    await vi.advanceTimersByTimeAsync(9000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 3)
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
   })
 
@@ -140,7 +161,7 @@ describe('useExecutionData live polling (#1048)', () => {
     expect(mockGetExecution).toHaveBeenCalledTimes(1)
 
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
-    await vi.advanceTimersByTimeAsync(9000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 3)
     expect(mockGetExecution).toHaveBeenCalledTimes(1)
 
     // Drive the actual hidden -> visible cycle via the real event the
@@ -151,7 +172,7 @@ describe('useExecutionData live polling (#1048)', () => {
 
     // And prove normal interval polling resumed too, not just the one-off
     // resume fetch.
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     expect(mockGetExecution).toHaveBeenCalledTimes(3)
   })
 
@@ -166,7 +187,7 @@ describe('useExecutionData live polling (#1048)', () => {
     { status: 'not_started', visibility: 'visible', shouldPoll: true },
     { status: 'completed', visibility: 'hidden', shouldPoll: false },
   ])(
-    'invariant: polling occurs iff status is non-terminal and tab is visible ($status/$visibility)',
+    'invariant: the fallback poll runs iff status is non-terminal and tab is visible ($status/$visibility)',
     ({ status, visibility, shouldPoll }) => {
       it(`${shouldPoll ? 'issues' : 'does not issue'} another request after one interval tick`, async () => {
         Object.defineProperty(document, 'visibilityState', { value: visibility, configurable: true })
@@ -176,7 +197,7 @@ describe('useExecutionData live polling (#1048)', () => {
         await vi.waitFor(() => expect(result.current.execution?.status).toBe(status))
         expect(mockGetExecution).toHaveBeenCalledTimes(1)
 
-        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
         expect(mockGetExecution).toHaveBeenCalledTimes(shouldPoll ? 2 : 1)
       })
     },
@@ -186,6 +207,8 @@ describe('useExecutionData live polling (#1048)', () => {
 describe('useExecutionData recovers from a transient poll failure (#1048)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    streamConnected = false
+    streamHandler = undefined
     vi.useFakeTimers()
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   })
@@ -206,13 +229,13 @@ describe('useExecutionData recovers from a transient poll failure (#1048)', () =
     expect(result.current.error).toBeNull()
 
     mockGetExecution.mockRejectedValueOnce(new Error('502 Bad Gateway'))
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     await vi.waitFor(() => expect(result.current.error).toBe('502 Bad Gateway'))
     // The failure says the figures stopped advancing, not that they are gone.
     expect(result.current.execution?.total_tokens).toBe(100)
 
     mockGetExecution.mockResolvedValueOnce(makeExecution({ total_tokens: 900 }))
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(900))
 
     expect(result.current.error).toBeNull()
@@ -222,6 +245,8 @@ describe('useExecutionData recovers from a transient poll failure (#1048)', () =
 describe('useExecutionData stops polling in every terminal status (#1048)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    streamConnected = false
+    streamHandler = undefined
     vi.useFakeTimers()
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   })
@@ -244,12 +269,12 @@ describe('useExecutionData stops polling in every terminal status (#1048)', () =
 
     // Drive the real running -> interrupted transition while mounted.
     mockGetExecution.mockResolvedValue(makeExecution({ status: 'interrupted' }))
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
     await vi.waitFor(() => expect(result.current.execution?.status).toBe('interrupted'))
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
 
     // Polling must have stopped, not merely paused: five more intervals.
-    await vi.advanceTimersByTimeAsync(15000)
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 5)
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
   })
 
@@ -262,8 +287,76 @@ describe('useExecutionData stops polling in every terminal status (#1048)', () =
       await vi.waitFor(() => expect(result.current.execution?.status).toBe(status))
       expect(mockGetExecution).toHaveBeenCalledTimes(1)
 
-      await vi.advanceTimersByTimeAsync(15000)
+      await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 5)
       expect(mockGetExecution).toHaveBeenCalledTimes(1)
     },
   )
+})
+
+describe('useExecutionData subscribes instead of polling while the stream is up (#1095)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    streamConnected = true
+    streamHandler = undefined
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    streamConnected = false
+  })
+
+  it('issues no interval request at all for a running execution', async () => {
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+
+    const { result } = renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(result.current.execution?.status).toBe('running'))
+
+    // The initial fetch, plus one on connect: the EventSource opens after the
+    // first fetch is already in flight, so anything published in that window
+    // was missed and the stream has no replay to recover it.
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
+
+    // Ten fallback intervals with a running execution and a visible tab. The
+    // old hook would have issued ten more requests here.
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS * 10)
+    expect(mockGetExecution).toHaveBeenCalledTimes(2)
+  })
+
+  it('refetches when OperationRecorded arrives, which is what carries the tokens', async () => {
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running', total_tokens: 100 }))
+
+    const { result } = renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
+
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running', total_tokens: 500 }))
+    streamHandler?.(frame('OperationRecorded', { session_id: 'sess-1', total_tokens: 400 }))
+
+    // Throttled by 500ms, so it lands on the trailing edge rather than at once.
+    await vi.advanceTimersByTimeAsync(500)
+    await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(500))
+  })
+
+  it('refetches when ArtifactCreated arrives, which used to reach the page only by poll', async () => {
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+
+    renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
+
+    streamHandler?.(frame('ArtifactCreated', { artifact_id: 'art-1' }))
+    await vi.advanceTimersByTimeAsync(500)
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(3))
+  })
+
+  it('ignores a frame whose event type does not change this view', async () => {
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+
+    renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
+
+    streamHandler?.(frame('git_commit', { sha: 'abc' }))
+    await vi.advanceTimersByTimeAsync(FALLBACK_POLL_MS)
+    expect(mockGetExecution).toHaveBeenCalledTimes(2)
+  })
 })
