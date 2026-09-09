@@ -54,10 +54,18 @@ const REFETCH_THROTTLE_MS = 3000
 /**
  * Fallback poll cadence, used only while the stream is not delivering.
  *
- * 10s clears the measured p99 of both endpoints it backs — `/executions/{id}`
- * and `/sessions/{id}` — with room to spare. The old 3s did not reliably clear
- * `/sessions`, and an interval shorter than the response it waits for is a
- * queue by construction (#1095).
+ * #1095 published latencies for the LIST endpoints, not for these two: the
+ * sessions list at ~2s flat, the executions list at 0.2s since #1087 (12s
+ * before it). No p99 has been published for `/executions/{id}` or
+ * `/sessions/{id}`, so this interval is not tuned to a number measured on
+ * them; it clears the worst latency reported anywhere in that family by 5x,
+ * which is the honest basis available.
+ *
+ * That is deliberately conservative, because the failure mode is asymmetric.
+ * An interval shorter than the response it waits for is a queue by
+ * construction — that is what a 6s poll against a 12s endpoint did — and this
+ * is now only the degraded path, so slower costs little and too fast costs a
+ * lot (#1095).
  */
 const DISCONNECTED_POLL_MS = 10_000
 
