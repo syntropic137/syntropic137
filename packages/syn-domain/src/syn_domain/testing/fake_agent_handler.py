@@ -24,11 +24,11 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
+    AgentVerdict,
     StreamResult,
     SubagentTracker,
     TokenAccumulator,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import AgentVerdict
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
