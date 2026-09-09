@@ -29,18 +29,48 @@ from syn_shared.events import GIT_COMMIT
 #
 # So membership is decided per SESSION, then all of that session's rows are
 # loaded regardless of their own timestamps.
+#
+# MEMBERSHIP IS AN ANTI-JOIN, NOT AN AGGREGATE (#1253). Deciding it as
+# "MIN(time) per session, then keep the sessions whose minimum lands in the
+# window" reads the entire table before it looks at the window at all: the
+# date bound applies to the OUTPUT of the aggregation, so a one-week request
+# costs what a one-year request costs. Measured: 7d 4.89s, 366d 6.54s - a
+# constant floor with the range barely visible in it.
+#
+# The same membership, stated so the window is a predicate on the scan:
+#
+#     a session started inside the window IFF it has an observation inside
+#     the window and none before it.
+#
+# Both halves are cheap. `window_sessions` reads one date range, which is
+# exactly what the hypertable is partitioned on, so chunks outside the
+# window are never opened. The NOT EXISTS is then an index probe per
+# candidate session on idx_events_session (session_id, time DESC) that stops
+# at the first earlier row.
+#
+# This changes cost, not results: the set of sessions whose MIN(time) is in
+# the window is precisely the set that has a row in it and none before, and
+# the true start is still never read off a fragment - `session_start`
+# recomputes it over the whole of `scoped_events`, which carries all of a
+# member session's rows whatever their timestamps.
 _SCOPED_EVENTS = """
-session_bounds AS (
-    SELECT session_id, MIN(time) AS started_at
+window_sessions AS (
+    SELECT DISTINCT session_id
     FROM agent_events
-    WHERE TRUE {execution_filter}
-    GROUP BY session_id
+    WHERE time >= $1::date
+      AND time < ($2::date + interval '1 day')
+      {execution_filter}
 ),
 sessions_in_window AS (
-    SELECT session_id
-    FROM session_bounds
-    WHERE started_at >= $1::date
-      AND started_at < ($2::date + interval '1 day')
+    SELECT w.session_id
+    FROM window_sessions w
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM agent_events e
+        WHERE e.session_id = w.session_id
+          AND e.time < $1::date
+          {execution_filter}
+    )
 ),
 scoped_events AS (
     -- The execution filter is applied AGAIN here, not just when choosing

@@ -4,12 +4,12 @@ Lazy handler: queries workflow executions filtered by system repo
 membership, sorted chronologically (oldest first).
 """
 
-from event_sourcing import ProjectionReadStore
+from event_sourcing import ProjectionStore
 
-from syn_domain.contexts.organization._shared.projection_names import (
-    REPO_CORRELATION,
-    WORKFLOW_EXECUTIONS,
+from syn_domain.contexts.organization._shared.execution_correlation import (
+    executions_by_repo,
 )
+from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.organization.domain.queries.get_system_history import (
     GetSystemHistoryQuery,
 )
@@ -26,7 +26,7 @@ class GetSystemHistoryHandler:
 
     def __init__(
         self,
-        store: ProjectionReadStore,
+        store: ProjectionStore,
         repo_projection: RepoProjection,
     ) -> None:
         self._store = store
@@ -35,10 +35,7 @@ class GetSystemHistoryHandler:
     async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
         """Look up execution IDs for all repos in a system."""
         repos = await self._repo_projection.list_all(system_id=system_id)
-        repo_names = {r.full_name for r in repos}
-
-        correlations = await self._store.get_all(REPO_CORRELATION)
-        return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
+        return set(await executions_by_repo(self._store, {r.full_name for r in repos}))
 
     async def handle(self, query: GetSystemHistoryQuery) -> list[RepoActivityEntry]:
         """Handle GetSystemHistoryQuery."""
