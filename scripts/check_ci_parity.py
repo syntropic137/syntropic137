@@ -5,15 +5,31 @@ answer decays silently: someone adds a job, it runs only on GitHub, and qa-ci
 keeps printing its success line. The mapping below is the contract, and this
 script is what holds it.
 
-Two things this deliberately does NOT claim, because the first version of it
-claimed both and neither was true:
+It checks two things. The job mapping below is the first. The second exists
+because the job mapping alone was not enough: a gate added as a STEP inside an
+already-mapped job was invisible to it (#1124), so `gate_problems()` also walks
+what the workflows actually run. What that walk covers, and what it does not:
 
-- It compares JOBS, not steps. Adding a step to an existing job, widening a
-  matrix, or changing what a reusable workflow does is invisible here. Job-level
-  coverage is the floor, not a proof of equivalence.
-- Running the same command is not running it in the same environment. CI is
-  Ubuntu with pinned toolchains and a clean checkout; a local run is not. See
-  `qa-ci` in the justfile for the wording that is actually true.
+COVERED - a gate here must be reachable from `just qa-ci` or the check fails:
+- a `run:` block naming a `scripts/*.py` or a `just` recipe;
+- in a workflow's own steps, in a local composite action (`uses: ./.github/
+  actions/...`), or in a local reusable workflow (`uses: ./.github/
+  workflows/...`), followed transitively.
+
+NOT COVERED - stated here because an undocumented blind spot is how #1124
+arrived in the first place:
+- A third-party action (`uses: owner/repo@ref`). Its implementation is not in
+  this repository, so nothing here can read what it runs.
+- A `run:` block whose gate is bespoke inline shell rather than a named script
+  or recipe. Proving an arbitrary shell block is "the same check" as some local
+  command needs both executed and their behaviour compared, which is a
+  different and far more expensive kind of check than this one.
+- Whether a matrix is as wide locally as in CI, and whether the environment
+  matches at all. CI is Ubuntu with pinned toolchains and a clean checkout; a
+  local run is not. See `qa-ci` in the justfile for the wording that is true.
+
+The way to keep a gate inside those blind spots visible is to give it a name:
+put it in a `scripts/*.py` or a `just` recipe, and this file will see it.
 
 It discovers the workflows itself rather than reading a hardcoded list, because
 a hardcoded list is the same drift bug one level up.
@@ -28,8 +44,9 @@ from __future__ import annotations
 import platform
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 import yaml
 
@@ -165,52 +182,138 @@ def qa_ci_dependencies(justfile: str) -> set[str]:
     return seen
 
 
-#: Scripts a PR-gating workflow runs directly that deliberately have no `just`
-#: target, with the reason. Empty today, and that is the point: an entry here is
-#: a decision someone wrote down, not a gap nobody noticed.
-SCRIPT_STEPS_WITHOUT_A_TARGET: Final[dict[str, str]] = {
-    "e2e_agent_in_container_test.py": (
-        "e2e-container.yml only, gated on the run_full_e2e workflow_dispatch "
-        "input; it provisions a real container and is already excluded at the "
-        "job level for the same reason"
-    ),
-}
+#: Gates a PR-gating workflow runs that deliberately have no local equivalent,
+#: keyed by the token this file prints ("scripts/x.py" or "just x"). A gate
+#: inside a job that is already excluded above is NOT listed here: it inherits
+#: its job's recorded reason. An entry here is a decision someone wrote down,
+#: not a gap nobody noticed.
+STEPS_WITHOUT_A_LOCAL_TARGET: Final[dict[str, str]] = {}
 
-_SCRIPT_STEP_RE: Final = re.compile(r"scripts/([a-z0-9_]+\.py)")
+_SCRIPT_RE: Final = re.compile(r"scripts/([a-z0-9_]+\.py)")
+#: `just` followed by its recipe words. Flags and shell operators end the run,
+#: and which of the captured words are recipes is decided against the justfile.
+_JUST_RE: Final = re.compile(r"\bjust\s+((?:[a-z0-9][a-z0-9_-]*\s+)*[a-z0-9][a-z0-9_-]*)")
 
 
-def script_steps(document: dict[str, object]) -> set[str]:
-    """Every `scripts/*.py` a workflow invokes from a `run:` block.
+@dataclass(frozen=True)
+class Gate:
+    """One command a PR-gating workflow runs, and the path CI took to reach it."""
 
-    WHY THIS EXISTS (issue #1124). The job mapping above compares JOBS. A gate
-    added as a raw step inside an existing job is invisible to it, and one
-    already was: `scripts/check_openapi_drift.py` runs as a step in `python-qa`,
-    is marked BLOCKING there, and had no `just` target at all - so it was
-    reachable from neither `preflight` nor `preflight-agent` while the parity
-    check reported full coverage.
+    kind: Literal["script", "recipe"]
+    name: str
+    source: str
 
-    Steps are not jobs and this does not pretend otherwise: it answers one
-    narrow question - does every script CI runs have a local way to run it -
-    which is the question the job-level check structurally cannot ask.
+    @property
+    def token(self) -> str:
+        """How a human writes this gate, and how the exception table keys it."""
+        return f"scripts/{self.name}" if self.kind == "script" else f"just {self.name}"
+
+
+def _run_gates(script: str, source: str, recipes: set[str]) -> list[Gate]:
+    """Every gate one `run:` block invokes.
+
+    A `just` word counts only when the justfile defines a recipe by that name,
+    which is what separates a recipe from an argument or from the word "just"
+    in prose. A recipe CI names but the justfile does not define is not a parity
+    risk: that run fails loudly on the runner the first time it happens.
     """
-    found: set[str] = set()
+    gates = [Gate("script", name, source) for name in _SCRIPT_RE.findall(script)]
+    for words in _JUST_RE.findall(script):
+        gates.extend(Gate("recipe", w, source) for w in words.split() if w in recipes)
+    return gates
+
+
+def _steps_of(document: object) -> list[tuple[str, object]]:
+    """The steps a workflow or composite action document runs, with their job id.
+
+    One function for both because the difference between `jobs.<id>.steps` and
+    `runs.steps` is a spelling, and the caller has no use for the distinction.
+    """
+    if not isinstance(document, dict):
+        return []
+    runs = document.get("runs")
+    if isinstance(runs, dict) and isinstance(runs.get("steps"), list):
+        return [("", step) for step in runs["steps"]]
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
-        return found
-    for job in jobs.values():
-        if not isinstance(job, dict):
-            continue
-        steps = job.get("steps")
-        if not isinstance(steps, list):
-            continue
-        for step in steps:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
-                found.update(_SCRIPT_STEP_RE.findall(step["run"]))
+        return []
+    found: list[tuple[str, object]] = []
+    for job_id, job in jobs.items():
+        if isinstance(job, dict):
+            found.extend((str(job_id), step) for step in job.get("steps", []) or [])
+            if isinstance(job.get("uses"), str):
+                found.append((str(job_id), {"uses": job["uses"]}))
     return found
 
 
-def script_step_problems(workflows: dict[str, dict[str, object]], justfile: str) -> list[str]:
-    """Scripts CI runs that no `just` target reachable from `qa-ci` runs."""
+def _resolve_local_uses(reference: str, repo_root: Path) -> Path | None:
+    """The file a `uses: ./...` reference names, or None if it is not ours.
+
+    Third-party actions (`owner/repo@ref`) resolve to None on purpose: their
+    implementation is not in this repository, so nothing here can read it.
+    """
+    if not reference.startswith("./"):
+        return None
+    target = repo_root / reference[2:].split("@")[0]
+    if target.is_dir():
+        for name in ("action.yml", "action.yaml"):
+            if (target / name).is_file():
+                return target / name
+        return None
+    return target if target.is_file() else None
+
+
+def workflow_gates(
+    document: object, source: str, repo_root: Path, recipes: set[str]
+) -> list[Gate]:
+    """Every gate reachable from a workflow document, following what it calls.
+
+    WHY THIS EXISTS (issue #1124). The job mapping compares JOBS, so a gate
+    added as a step inside an existing job is invisible to it, and one already
+    was: `scripts/check_openapi_drift.py` ran as a step in `python-qa` with no
+    `just` target at all while the parity check reported full coverage.
+
+    Closing that for `scripts/*.py` alone would have repeated the same defect
+    one level down - a check that measures one spelling of the thing it claims
+    to measure. So this follows every form a gate can take that is written down
+    in this repository: a `run:` block naming a script or a `just` recipe, in a
+    workflow's own steps, in a local composite action, or in a local reusable
+    workflow, transitively and cycle-safe.
+
+    What it cannot see is stated rather than silently skipped: a third-party
+    action, and a `run:` block whose gate is bespoke inline shell. See the
+    module docstring.
+    """
+    def walk(document: object, source: str, seen: frozenset[Path]) -> list[Gate]:
+        gates: list[Gate] = []
+        for job_id, step in _steps_of(document):
+            if not isinstance(step, dict):
+                continue
+            where = f"{source}:{job_id}" if job_id else source
+            if isinstance(step.get("run"), str):
+                gates.extend(_run_gates(step["run"], where, recipes))
+            uses = step.get("uses")
+            if not isinstance(uses, str):
+                continue
+            called = _resolve_local_uses(uses, repo_root)
+            if called is None or called in seen:
+                continue
+            called_document = yaml.safe_load(called.read_text())
+            gates.extend(walk(called_document, f"{where} -> {uses}", seen | {called}))
+        return gates
+
+    return walk(document, source, frozenset())
+
+
+def gate_problems(
+    workflows: dict[str, dict[str, object]], justfile: str, repo_root: Path = REPO_ROOT
+) -> list[str]:
+    """Gates CI runs that nothing reachable from `just qa-ci` runs.
+
+    Gates inside a job that is already excluded at the job level are skipped:
+    that job's reason is recorded once, and repeating it per step would be the
+    same decision maintained in two places.
+    """
     reachable = qa_ci_dependencies(justfile)
     bodies = "\n".join(
         match.group(0)
@@ -224,18 +327,27 @@ def script_step_problems(workflows: dict[str, dict[str, object]], justfile: str)
         ]
         if match
     )
+    excluded = set(unmapped_reasons())
     problems: list[str] = []
-    for filename, document in workflows.items():
-        for script in sorted(script_steps(document)):
-            if script in SCRIPT_STEPS_WITHOUT_A_TARGET:
+    for filename, document in sorted(workflows.items()):
+        accounted = {job for job in job_ids(document) if f"{filename}:{job}" in excluded}
+        for gate in workflow_gates(document, filename, repo_root, just_targets(justfile)):
+            if gate.source.split(" -> ")[0].removeprefix(f"{filename}:") in accounted:
                 continue
-            if f"scripts/{script}" not in bodies:
+            if gate.token in STEPS_WITHOUT_A_LOCAL_TARGET:
+                continue
+            run_locally = (
+                f"scripts/{gate.name}" in bodies
+                if gate.kind == "script"
+                else gate.name in reachable
+            )
+            if not run_locally:
                 problems.append(
-                    f"{filename} runs scripts/{script} as a step, but no target "
-                    f"reachable from `just {QA_CI_TARGET}` runs it. Add one, or "
-                    f"record it in SCRIPT_STEPS_WITHOUT_A_TARGET with a reason."
+                    f"{gate.source} runs `{gate.token}`, but no target reachable "
+                    f"from `just {QA_CI_TARGET}` runs it. Add one, or record it "
+                    f"in STEPS_WITHOUT_A_LOCAL_TARGET with a reason."
                 )
-    return problems
+    return sorted(set(problems))
 
 
 def ci_python_version(workflow: str) -> str | None:
@@ -301,7 +413,7 @@ def main() -> int:
 
     justfile = JUSTFILE.read_text()
     problems, covered, total = find_problems(workflows, justfile)
-    problems.extend(script_step_problems(workflows, justfile))
+    problems.extend(gate_problems(workflows, justfile))
 
     if problems:
         print("❌ local QA has drifted from CI:")
