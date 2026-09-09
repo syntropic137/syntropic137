@@ -44,6 +44,14 @@ EXCLUDED_PATH_FRAGMENTS: tuple[str, ...] = (
 #: regression-test fixtures and report three xfails that were not real. A gate
 #: that counts its own tests is the same false-positive smell one level down.
 _XFAIL_PATTERN = re.compile(r"^[ \t]*@pytest\.mark\.xfail", re.MULTILINE)
+
+#: The only two pytest exit statuses this gate can read a census from. 0 is a
+#: completed collection; 5 is "no tests collected", which a marker filter
+#: reaches legitimately once nothing is left to select. Every other status
+#: means the run stopped early - notably 2 (Interrupted), which is what a
+#: single import error produces - and its summary line undercounts.
+_EXIT_OK = 0
+_EXIT_NO_TESTS_COLLECTED = 5
 _COLLECTED_PATTERN = re.compile(r"(\d+)\s*/\s*(\d+) tests collected")
 _COLLECTED_FALLBACK = re.compile(r"(\d+) tests collected")
 
@@ -91,7 +99,30 @@ def parse_collected(output: str) -> int:
     raise ValueError(msg)
 
 
-def _collect(*args: str) -> int:
+def _tail(output: str, limit: int = 2000) -> str:
+    """The last of a captured stream, blank when there was nothing to say."""
+    return f"\n{output[-limit:]}" if output.strip() else ""
+
+
+def collect_census(*args: str) -> int:
+    """How many tests pytest can actually collect, or a refusal to guess.
+
+    The exit status decides whether the summary line means anything; the text
+    only supplies the number. That order matters, because a run that dies
+    halfway through collection still prints a summary, and the count in it is
+    short by exactly the tests that failed to import. On a ratchet a smaller
+    number reads as progress, so the gate would announce an improvement caused
+    by tests disappearing - failing in the reassuring direction, which is the
+    one nobody investigates.
+
+    Exit 5 is not a failure here. It is pytest's way of saying a filter matched
+    nothing, which is the goal state of the unmarked ratchet, so it is the one
+    exit status that is itself the answer: a census of zero.
+
+    Raises:
+        SystemExit: pytest did not finish collecting, so there is no census to
+            report. Carries pytest's own output, which is where the reason is.
+    """
     # No -q: the "N/M tests collected" summary is only emitted without it.
     result = subprocess.run(
         ["uv", "run", "pytest", "--collect-only", *args],
@@ -99,6 +130,18 @@ def _collect(*args: str) -> int:
         text=True,
         check=False,
     )
+    if result.returncode == _EXIT_NO_TESTS_COLLECTED:
+        return 0
+    if result.returncode != _EXIT_OK:
+        # stdout, not just stderr: pytest reports collection errors on stdout,
+        # so a stderr-only diagnostic is usually empty at the exact moment the
+        # operator needs to know which module failed to import.
+        raise SystemExit(
+            f"pytest collection failed (exit {result.returncode}); refusing to"
+            " report a census that may be short. A collection break makes the"
+            " count go DOWN, which on a ratchet is indistinguishable from"
+            f" progress.\n{_tail(result.stdout)}{_tail(result.stderr)}"
+        )
     return parse_collected(result.stdout)
 
 
@@ -138,8 +181,8 @@ def main() -> int:
     root = Path.cwd()
     config = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
 
-    total = _collect()
-    unmarked = _collect("-m", "not unit and not integration and not e2e")
+    total = collect_census()
+    unmarked = collect_census("-m", "not unit and not integration and not e2e")
     xfails = count_xfail_markers(root)
 
     budgets = evaluate(config, unmarked, xfails)
