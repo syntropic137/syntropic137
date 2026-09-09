@@ -32,6 +32,9 @@ const mockGetExecution = vi.mocked(getExecution)
 /** `useLiveRecord`'s DISCONNECTED_POLL_MS. */
 const FALLBACK_POLL_MS = 10_000
 
+/** `useLiveRecord`'s REFETCH_THROTTLE_MS. */
+const REFETCH_THROTTLE_MS = 3000
+
 function frame(event_type: string, data: Record<string, unknown> = {}): SSEEventFrame {
   return { type: 'event', event_type, execution_id: 'exec-1', data, timestamp: '' }
 }
@@ -333,8 +336,7 @@ describe('useExecutionData subscribes instead of polling while the stream is up 
     mockGetExecution.mockResolvedValue(makeExecution({ status: 'running', total_tokens: 500 }))
     streamHandler?.(frame('OperationRecorded', { session_id: 'sess-1', total_tokens: 400 }))
 
-    // Throttled by 500ms, so it lands on the trailing edge rather than at once.
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(REFETCH_THROTTLE_MS)
     await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(500))
   })
 
@@ -345,8 +347,31 @@ describe('useExecutionData subscribes instead of polling while the stream is up 
     await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
 
     streamHandler?.(frame('ArtifactCreated', { artifact_id: 'art-1' }))
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(REFETCH_THROTTLE_MS)
     await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(3))
+  })
+
+  it('never refetches faster than the 3s poll it replaced, however dense the frames', async () => {
+    // The point of the change is fewer requests. `OperationRecorded` fires on
+    // every tool call, so without a ceiling at the old poll cadence a busy
+    // agent would make this page cost MORE than polling did (#1095).
+    mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+
+    renderHook(() => useExecutionData('exec-1'))
+    await vi.waitFor(() => expect(mockGetExecution).toHaveBeenCalledTimes(2))
+    mockGetExecution.mockClear()
+
+    // 60 seconds of an agent recording an operation every 100ms: 600 frames.
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 100) {
+      streamHandler?.(frame('OperationRecorded', { session_id: 'sess-1' }))
+      await vi.advanceTimersByTimeAsync(100)
+    }
+
+    // A 3s poll over the same minute would have issued 20. Refetches must not
+    // exceed that, and the throttle's leading edge means at most one extra.
+    const refetches = mockGetExecution.mock.calls.length
+    expect(refetches).toBeGreaterThan(0)
+    expect(refetches).toBeLessThanOrEqual(21)
   })
 
   it('ignores a frame whose event type does not change this view', async () => {

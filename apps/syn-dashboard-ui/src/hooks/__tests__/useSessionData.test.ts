@@ -31,6 +31,9 @@ const mockGetSession = vi.mocked(getSession)
 /** `useLiveRecord`'s DISCONNECTED_POLL_MS. */
 const FALLBACK_POLL_MS = 10_000
 
+/** `useLiveRecord`'s REFETCH_THROTTLE_MS. */
+const REFETCH_THROTTLE_MS = 3000
+
 function frame(event_type: string, data: Record<string, unknown>): SSEEventFrame {
   return { type: 'event', event_type, execution_id: 'exec-1', data, timestamp: '' }
 }
@@ -223,7 +226,7 @@ describe('useSessionData subscribes to its execution instead of polling (#1095)'
     mockGetSession.mockResolvedValue(runningSession({ total_tokens: 900 }) as never)
     streamHandler?.(frame('OperationRecorded', { session_id: 'sess-1', total_tokens: 800 }))
 
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(REFETCH_THROTTLE_MS)
     await vi.waitFor(() => expect(result.current.session?.total_tokens).toBe(900))
   })
 
@@ -250,7 +253,7 @@ describe('useSessionData subscribes to its execution instead of polling (#1095)'
     mockGetSession.mockResolvedValue(makeSession({ execution_id: 'exec-1' }) as never)
     streamHandler?.(frame('SessionCompleted', { session_id: 'sess-1' }))
 
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(REFETCH_THROTTLE_MS)
     await vi.waitFor(() => expect(result.current.session?.status).toBe('completed'))
   })
 

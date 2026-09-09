@@ -32,7 +32,24 @@ import { useExecutionStream } from './useExecutionStream'
 import { useRefetchWhileRunning } from './useRefetchWhileRunning'
 import { useThrottledRefetch } from './useThrottledRefetch'
 
-const REFETCH_THROTTLE_MS = 500
+/**
+ * Ceiling on event-driven refetches.
+ *
+ * This is the number that decides whether subscribing is actually cheaper than
+ * polling, and it is easy to get backwards. `useLiveRefresh` throttles list
+ * refetches at 500ms because activity frames are rare — a run starts, a run
+ * ends. A detail view subscribes to `OperationRecorded`, which fires on every
+ * message and every tool call, so an agent working quickly can produce frames
+ * several times a second. At 500ms that would be up to 120 requests a minute
+ * against an endpoint the page used to ask 20 times a minute: the change would
+ * make the load worse, on exactly the endpoint #1095 is about.
+ *
+ * 3000ms is the cadence the detail views used to poll at, so freshness is
+ * unchanged and the request rate can never exceed what it replaced. What
+ * changes is that requests now happen only when something happened: an agent
+ * thinking for a minute costs nothing, and a finished run costs nothing at all.
+ */
+const REFETCH_THROTTLE_MS = 3000
 
 /**
  * Fallback poll cadence, used only while the stream is not delivering.

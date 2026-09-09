@@ -65,6 +65,13 @@ export function useLiveRefresh<TRow>({
     return () => clearInterval(id)
   }, [connected, refetch])
 
+  // Unlike the detail views, this poll cannot become a subscription (#1095).
+  // A list spans many executions, so it watches the global activity feed, and
+  // that feed carries only the five lifecycle types — no `OperationRecorded`,
+  // so no token or cost updates for the rows on screen. The alternative,
+  // one EventSource per visible row, exceeds the browser's per-origin
+  // connection limit at ~6 rows. What is missing to remove this poll is
+  // row-level totals on the activity feed, batched server-side.
   useRefetchWhileRunning({ items: rows, isTerminal, refetch })
 
   return { connected, lastEventAt }
