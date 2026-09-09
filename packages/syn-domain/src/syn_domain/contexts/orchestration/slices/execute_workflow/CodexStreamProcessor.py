@@ -67,6 +67,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     StreamResult,
     api_error_label,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
@@ -470,7 +473,11 @@ class CodexStreamProcessor:
             line_count=line_count,
             interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
-            agent_task_result=None,
+            # The same reader as the claude path: TASK_RESULT is this
+            # platform's contract with its agents, not a harness format, so a
+            # codex phase that reports failure is failed for the same reason
+            # and by the same code (#1256).
+            verdict=AgentVerdict.from_agent_text(self._last_agent_message),
             conversation_lines=conversation_lines,
             total_cost_usd=total_cost_usd,
             # Present only when codex reached `turn.completed`. A stream that

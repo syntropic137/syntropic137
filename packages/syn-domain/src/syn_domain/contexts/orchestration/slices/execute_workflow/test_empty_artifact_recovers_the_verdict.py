@@ -47,6 +47,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
     PhaseProducedNoDeclaredOutputError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_event_stream_processor import (
     MockWorkspace,
     _lines_to_stream,
@@ -480,6 +483,10 @@ class TestTheVerdictSurvivesEveryHop:
         agent_result = MagicMock()
         agent_result.stream_result.last_agent_message = SAID
         agent_result.stream_result.interrupt_requested = False
+        # A real verdict, not a MagicMock: `_handle_run_agent` refuses to
+        # complete a phase whose verdict refuses completion (#1256), and every
+        # attribute of a MagicMock is truthy.
+        agent_result.stream_result.verdict = AgentVerdict.from_agent_text(SAID)
         agent_result.command.exit_code = 0
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)

@@ -158,6 +158,32 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         self.declared = declared
 
 
+class PhaseReportedFailureError(Exception):
+    """A phase said it had failed, and is failed rather than completed (#1256).
+
+    THE FAILURE THIS EXISTS TO STOP. Every phase prompt ends with a mandatory
+    ``TASK_RESULT`` block, which is how a phase reports that it could not do
+    what it was asked. Nothing read it. The parsed result reached
+    ``StreamResult`` and stopped there, so a phase that had explicitly written
+    ``success: false`` was recorded as completed on its exit status alone -
+    and the block was located by scanning to the first ``}``, so a failure
+    explanation containing a brace was discarded before it even got that far.
+
+    Raised from the RUN_AGENT dispatch, on the same footing as a non-zero exit
+    code and for the same reason: both are the phase telling us it did not
+    succeed, and the only difference is which channel it used to say so.
+
+    ALSO RAISED FOR AN UNREADABLE REPORT. A block that cannot be read as a
+    verdict may be a failure report, and the direction that lets defects
+    through is to complete the phase anyway. `AgentVerdict.refusal` says which
+    of the two happened, in the words an operator needs.
+    """
+
+    def __init__(self, *, phase_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.phase_id = phase_id
+
+
 class EmptyPhaseArtifactError(Exception):
     """A phase wrote its deliverable and the file had no content (#1195).
 
