@@ -1033,14 +1033,20 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 # A gate that genuinely needs host tooling goes in `preflight`'s own list above,
 # where the comment table says why.
 #
-# WHAT THIS DOES NOT GUARANTEE. Composition only helps a gate that someone
-# already added to one of these lists. The mechanical guard meant to catch a
-# gate added to NEITHER - `test_every_declared_check_is_wired_into_preflight` -
-# discovers recipes by NAME (`check-*` / `*-check`), so a gate named anything
-# else escapes it entirely; `lint`, `typecheck` and `validate-domain-events`
-# are real gates that match neither pattern and are wired here by hand. That
-# hole is #1125, and it is stated here rather than left implied, because a
-# poka-yoke believed to be airtight is worse than one known to be partial.
+# THE GATE ADDED TO NEITHER LIST. Composition only helps a gate someone already
+# put in one of them, so a separate guard catches the rest:
+# `test_every_recipe_is_a_gate_or_says_why_not` requires EVERY recipe in this
+# file to be inside `preflight`'s closure or classified with a reason. It used
+# to discover recipes by NAME (`check-*` / `*-check`) and a gate called anything
+# else escaped it entirely - which is not hypothetical, since `lint`, `typecheck`
+# and `validate-domain-events` are real gates matching neither pattern. That was
+# #1125; discovery no longer looks at names.
+#
+# WHAT IT STILL DOES NOT GUARANTEE. Classifying a real gate as "not a gate" goes
+# green. The guard makes that a claim on a diff line instead of a recipe nobody
+# had to mention, which is the most a table of exceptions can do - stated here
+# rather than left implied, because a poka-yoke believed to be airtight is worse
+# than one known to be partial.
 #
 # This is NOT a lighter standard. CI still runs everything; an agent that opens
 # a PR having passed this can still be failed by vsa or fitness on GitHub, and

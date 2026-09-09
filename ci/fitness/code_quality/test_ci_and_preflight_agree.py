@@ -407,9 +407,9 @@ def test_naming_a_recipe_in_prose_does_not_count_as_running_it() -> None:
     call is the direction that loses findings, and the justfile is full of
     `echo "run just dev-logs"`.
     """
-    assert "validate-review-canary" not in Justfile.parse(_ORPHANS).recipes[
-        "mentions-in-prose"
-    ].runs
+    assert (
+        "validate-review-canary" not in Justfile.parse(_ORPHANS).recipes["mentions-in-prose"].runs
+    )
 
 
 def test_a_gate_reached_only_from_a_recipe_body_counts_as_run() -> None:

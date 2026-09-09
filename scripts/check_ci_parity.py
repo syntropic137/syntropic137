@@ -33,6 +33,14 @@ from typing import Final
 
 import yaml
 
+# `scripts/` is not an installed package, and this file is reached two ways:
+# as `python scripts/check_ci_parity.py`, where sys.path[0] is scripts/, and as
+# `scripts.check_ci_parity` under pytest, where it is the repo root. Only the
+# first of those finds a sibling module.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from justfile_model import Justfile, UnknownRecipeError
+
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 WORKFLOW_DIR: Final = REPO_ROOT / ".github" / "workflows"
 JUSTFILE: Final = REPO_ROOT / "justfile"
@@ -139,8 +147,14 @@ def job_ids(document: dict[str, object]) -> list[str]:
 
 
 def just_targets(justfile: str) -> set[str]:
-    """Every recipe name DEFINED in the justfile, not merely mentioned."""
-    return set(re.findall(r"^([a-z0-9][a-z0-9_-]*)\s*:", justfile, re.MULTILINE))
+    """Every recipe name DEFINED in the justfile, not merely mentioned.
+
+    Delegated to the shared model (#1125). The regex this replaced required the
+    name to be followed straight by `:`, so it never saw a recipe that takes a
+    parameter - twenty-nine of them, including every `release-*`. Mapping a CI
+    job to one of those would have been reported as "does not exist".
+    """
+    return set(Justfile.parse(justfile).names)
 
 
 def qa_ci_dependencies(justfile: str) -> set[str]:
@@ -149,20 +163,15 @@ def qa_ci_dependencies(justfile: str) -> set[str]:
     Transitive rather than direct because a check is just as run when it sits
     inside `preflight`; comparing only the header would report a check as
     missing the moment someone moved it one level down.
+
+    "Reaches" includes a `just` call in a recipe body (#1125). `dashboard-ci`
+    does its work by invoking `just dashboard-qa`, so a header-only walk
+    reported six recipes as unreached that qa-ci demonstrably runs.
     """
-    if re.search(rf"^{QA_CI_TARGET}:", justfile, re.MULTILINE) is None:
-        raise SystemExit(f"no `{QA_CI_TARGET}` target found in the justfile")
-    seen: set[str] = set()
-    stack = [QA_CI_TARGET]
-    while stack:
-        current = stack.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        match = re.search(rf"^{re.escape(current)}:([^\n]*)", justfile, re.MULTILINE)
-        if match:
-            stack.extend(match.group(1).split())
-    return seen
+    try:
+        return set(Justfile.parse(justfile).closure(QA_CI_TARGET))
+    except UnknownRecipeError as missing:
+        raise SystemExit(str(missing)) from missing
 
 
 #: Scripts a PR-gating workflow runs directly that deliberately have no `just`
@@ -211,19 +220,8 @@ def script_steps(document: dict[str, object]) -> set[str]:
 
 def script_step_problems(workflows: dict[str, dict[str, object]], justfile: str) -> list[str]:
     """Scripts CI runs that no `just` target reachable from `qa-ci` runs."""
-    reachable = qa_ci_dependencies(justfile)
-    bodies = "\n".join(
-        match.group(0)
-        for target in reachable
-        for match in [
-            re.search(
-                rf"^{re.escape(target)}:.*?(?=\n[a-z0-9_-]+\s*:|\Z)",
-                justfile,
-                re.MULTILINE | re.DOTALL,
-            )
-        ]
-        if match
-    )
+    parsed = Justfile.parse(justfile)
+    bodies = parsed.commands_run_by(frozenset(qa_ci_dependencies(justfile)))
     problems: list[str] = []
     for filename, document in workflows.items():
         for script in sorted(script_steps(document)):

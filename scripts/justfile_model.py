@@ -40,10 +40,12 @@ loses findings.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 JUSTFILE: Final = REPO_ROOT / "justfile"
@@ -134,7 +136,10 @@ class Justfile:
     def commands_run_by(self, targets: frozenset[str]) -> str:
         """Every command line those recipes run, for asking what they invoke."""
         return "\n".join(
-            line for name in sorted(targets) if name in self.recipes for line in self.recipes[name].body
+            line
+            for name in sorted(targets)
+            if name in self.recipes
+            for line in self.recipes[name].body
         )
 
 
