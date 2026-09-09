@@ -105,40 +105,59 @@ install_docker() {
 
 # ---------------------------------------------------------------------------
 # just (command runner)
+#
+# PINNED, and pinned to the SAME version the workspace image and CI install.
+# The gate every contributor and agent is asked to pass is a `just` target, so
+# a machine running a different `just` is not running the same gate: issue
+# #1136 is a rework that passed in the workspace and failed in CI with no
+# change to the code. `scripts/check_toolchain_pins.py` fails if this constant
+# and the workspace image ever disagree, so bumping one bumps both.
 # ---------------------------------------------------------------------------
+JUST_VERSION="1.58.0"
+UV_VERSION="0.11.8"
+
 install_just() {
-    if has just; then
-        ok "just already installed ($(just --version 2>/dev/null))"
+    local current=""
+    has just && current="$(just --version 2>/dev/null | awk '{print $2}')"
+    if [[ "$current" == "$JUST_VERSION" ]]; then
+        ok "just ${JUST_VERSION} already installed"
         return
     fi
+    # Presence is not the question; version is. Skipping on presence alone is
+    # how a machine keeps whatever `just` it happened to have and diverges from
+    # CI for good.
+    [[ -n "$current" ]] && info "Replacing just ${current} with the pinned ${JUST_VERSION}..."
 
-    if [[ "$OS" == "Darwin" ]]; then
-        info "Installing just via Homebrew..."
-        brew install just
-    else
-        info "Installing just via official installer..."
-        local tmpfile
-        tmpfile="$(mktemp)"
-        scurl https://just.systems/install.sh -o "$tmpfile"
-        sh "$tmpfile" --to /usr/local/bin
-        rm -f "$tmpfile"
-    fi
-    ok "just installed"
+    info "Installing just ${JUST_VERSION} via the official installer..."
+    # The installer, on macOS too: Homebrew has no supported way to ask for an
+    # exact version, so `brew install just` would reintroduce the drift this
+    # function exists to close.
+    local tmpfile
+    tmpfile="$(mktemp)"
+    scurl https://just.systems/install.sh -o "$tmpfile"
+    sh "$tmpfile" --tag "$JUST_VERSION" --to /usr/local/bin
+    rm -f "$tmpfile"
+    ok "just ${JUST_VERSION} installed"
 }
 
 # ---------------------------------------------------------------------------
 # uv (Python package manager)
 # ---------------------------------------------------------------------------
 install_uv() {
-    if has uv; then
-        ok "uv already installed ($(uv --version 2>/dev/null))"
+    local current=""
+    has uv && current="$(uv --version 2>/dev/null | awk '{print $2}')"
+    if [[ "$current" == "$UV_VERSION" ]]; then
+        ok "uv ${UV_VERSION} already installed"
         return
     fi
+    # Pinned for the same reason as just above: uv resolves the dependencies
+    # and runs the unit gate, so a different uv is a different gate.
+    [[ -n "$current" ]] && info "Replacing uv ${current} with the pinned ${UV_VERSION}..."
 
-    info "Installing uv..."
+    info "Installing uv ${UV_VERSION}..."
     local tmpfile
     tmpfile="$(mktemp)"
-    scurl https://astral.sh/uv/install.sh -o "$tmpfile"
+    scurl "https://astral.sh/uv/${UV_VERSION}/install.sh" -o "$tmpfile"
     sh "$tmpfile"
     rm -f "$tmpfile"
 
@@ -149,7 +168,7 @@ install_uv() {
     elif [[ -d "$HOME/.local/bin" ]]; then
         export PATH="$HOME/.local/bin:$PATH"
     fi
-    ok "uv installed"
+    ok "uv ${UV_VERSION} installed"
 }
 
 # ---------------------------------------------------------------------------

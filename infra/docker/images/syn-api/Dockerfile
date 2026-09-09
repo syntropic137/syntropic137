@@ -10,7 +10,11 @@
 FROM python:3.12-slim AS builder
 
 # Install uv for fast package management
-COPY --from=ghcr.io/astral-sh/uv:0.10.6 /uv /usr/local/bin/uv
+# Pinned to the same uv the workspace image and CI install; the version is one
+# decision, enforced by scripts/check_toolchain_pins.py (#1136). This read
+# `uv:0.10.6` before that gate existed - pinned, but to a version nothing
+# compared against anything, and it had gone stale.
+COPY --from=ghcr.io/astral-sh/uv:0.11.8 /uv /usr/local/bin/uv
 
 WORKDIR /app
 

@@ -61,10 +61,8 @@ import yaml
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 
-#: The workspace images agents run. These Dockerfiles are the REFERENCE: their
-#: version is the one everything else must match. Read as a glob rather than
-#: one named file so a second workspace image cannot drift from the first.
-REFERENCE_GLOB: Final = "lib/agentic-primitives/providers/workspaces/*/Dockerfile"
+#: Where a provider's image is built from, by provider name.
+REFERENCE_DOCKERFILE: Final = "lib/agentic-primitives/providers/workspaces/{provider}/Dockerfile"
 
 #: Anything else in THIS repo that installs a toolchain. Submodules are excluded
 #: (they are separate repositories with their own gates) apart from the
@@ -311,10 +309,29 @@ def runtime_sightings() -> list[Sighting]:
     return found
 
 
+def reference_dockerfiles(root: Path) -> list[Path]:
+    """The Dockerfile behind every workspace image THIS repo hands to agents.
+
+    Derived from `PINNED_DIGESTS` rather than globbed over the submodule, for
+    two reasons. It covers exactly the images an agent can be given, and it
+    extends itself: pin a third provider and its toolchain joins this gate
+    without anyone remembering to add it. agentic-primitives builds other
+    provider images that this repo does not ship; those are that repo's gate to
+    run, and one of them (`base`) does install uv unpinned - reported upstream
+    rather than enforced from here, where the pointer to it cannot move without
+    an image release.
+    """
+    from syn_shared.settings.workspace_images import PINNED_DIGESTS
+
+    return [
+        root / REFERENCE_DOCKERFILE.format(provider=provider.value) for provider in PINNED_DIGESTS
+    ]
+
+
 def collect(root: Path) -> list[Sighting]:
     """Every sighting in the repo at `root`, plus the binaries on PATH."""
     found: list[Sighting] = []
-    for path in sorted(root.glob(REFERENCE_GLOB)):
+    for path in reference_dockerfiles(root):
         found.extend(text_sightings(path, str(path.relative_to(root)), reference=True))
     for path in installer_files(root):
         found.extend(text_sightings(path, str(path.relative_to(root))))
@@ -343,7 +360,7 @@ def evaluate(sightings: Sequence[Sighting]) -> tuple[int, list[str]]:
         if reference is None:
             failures += 1
             lines.append(f"{tool.name}: the workspace image states no fixed version.")
-            lines.append(f"  Expected a pin in {REFERENCE_GLOB}.")
+            lines.append(f"  Expected a pin in {REFERENCE_DOCKERFILE}.")
             lines.append("  If lib/agentic-primitives is not checked out: just submodules-init")
             lines.append("")
             continue
@@ -370,8 +387,10 @@ def evaluate(sightings: Sequence[Sighting]) -> tuple[int, list[str]]:
 
 
 def main() -> int:
-    if not list(REPO_ROOT.glob(REFERENCE_GLOB)):
-        print(f"no workspace image Dockerfile matched {REFERENCE_GLOB}", file=sys.stderr)
+    missing = [p for p in reference_dockerfiles(REPO_ROOT) if not p.is_file()]
+    if missing:
+        for path in missing:
+            print(f"missing workspace image Dockerfile: {path}", file=sys.stderr)
         print("The reference toolchain is unreadable; run: just submodules-init", file=sys.stderr)
         return 1
     try:
