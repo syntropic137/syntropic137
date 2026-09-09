@@ -515,9 +515,7 @@ class TestNoPromptAsksPastItsGrant:
         """
         assert self._violations(tmp_path, ["Read", "Bash", "Write"], self.POSTING_STEP) == []
 
-    def test_a_scoped_bash_grant_is_not_a_spelling_this_has_to_know(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_scoped_bash_grant_is_not_a_spelling_this_has_to_know(self, tmp_path: Path) -> None:
         """Why the membership test is a plain `in` and needs no prefix match.
 
         The first version of this check accepted `Bash(gh:*)` as a Bash grant,

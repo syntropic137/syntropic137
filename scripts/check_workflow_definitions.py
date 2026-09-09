@@ -91,7 +91,9 @@ def validate_file(path: Path) -> str | None:
 #: interesting binaries is a special case per binary, always one short, and
 #: whichever one it is missing is the one the next prompt uses. A fence says
 #: "run this" in the prompt's own syntax and needs no such list.
-_SHELL_FENCE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*```[ \t]*(?:bash|sh|shell|zsh|console)\b", re.M)
+_SHELL_FENCE = re.compile(
+    r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*```[ \t]*(?:bash|sh|shell|zsh|console)\b", re.M
+)
 
 
 def grant_violations(path: Path) -> list[str]:
