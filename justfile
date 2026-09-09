@@ -1846,12 +1846,22 @@ codex-auth-status:
 codex-auth-clip *flags:
     uv run python scripts/copy_codex_auth.py {{flags}}
 
-# Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
+# Generate the compose forwarding block, then the published compose from it.
+#
+# Order matters: settings_forwarding.py rewrites the api environment in the
+# BASE file, and generate_published_compose.py merges that base with the
+# selfhost overlay. Reversed, the published file would be a release behind
+# every new setting -- which is the #1101 gap with an extra step.
 gen-compose:
+    uv run python scripts/settings_forwarding.py
     uv run python scripts/generate_published_compose.py
 
-# Check published compose is up to date (CI mode -- fails if stale)
+# Check both compose artifacts are up to date (CI mode -- fails if stale).
+# The first check is why a setting added to a Settings class cannot ship
+# documented-but-inert: .env.example gains a line and so must the api
+# environment (#1101).
 check-compose:
+    uv run python scripts/settings_forwarding.py --check
     uv run python scripts/generate_published_compose.py --check
 
 # Plugin JSON schemas must match the Pydantic models. These are what third-party

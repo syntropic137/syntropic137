@@ -249,7 +249,11 @@ def _handwritten_api_keys() -> set[str]:
 def generated_keys() -> list[str]:
     """The settings the block forwards: documented, forwardable, not hand-written."""
     handwritten = _handwritten_api_keys()
-    return [name for name in documented_settings() if name not in NOT_FORWARDED and name not in handwritten]
+    return [
+        name
+        for name in documented_settings()
+        if name not in NOT_FORWARDED and name not in handwritten
+    ]
 
 
 def forwarding_block() -> list[str]:
@@ -286,8 +290,12 @@ def render_base_compose() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Forward every documented setting to the api container.")
-    parser.add_argument("--check", action="store_true", help="fail if the block is stale instead of rewriting it")
+    parser = argparse.ArgumentParser(
+        description="Forward every documented setting to the api container."
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="fail if the block is stale instead of rewriting it"
+    )
     args = parser.parse_args(argv)
 
     rendered = render_base_compose()
