@@ -121,7 +121,7 @@ Legacy: some tests define config inline. Being consolidated into
 
 | Test | What it enforces | Principle |
 |------|------------------|-----------|
-| test_compose_consistency | Docker Compose valid, build args match Dockerfiles | 8 |
+| test_compose_consistency | Docker Compose valid, build args match Dockerfiles, resource-limit fallbacks match InfraSettings defaults | 8 |
 | test_phase_definition_roundtrip | PhaseDefinition serialization is lossless | 8 |
 | test_proxy_hostname_agreement | Envoy/injector/proxy URL configs agree | 8 |
 

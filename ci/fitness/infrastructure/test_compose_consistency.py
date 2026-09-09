@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from syn_shared.settings.infra import InfraSettings
 
 
