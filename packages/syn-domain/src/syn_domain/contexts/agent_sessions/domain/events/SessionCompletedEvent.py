@@ -22,6 +22,12 @@ class SessionCompletedEvent(DomainEvent):
     # Context
     session_id: str
 
+    # The run this session belongs to — see OperationRecordedEvent for why.
+    # SessionCompleted did reach the global activity feed, which is broadcast
+    # unconditionally, so only the per-execution channel was silently missing
+    # it (#1095).
+    execution_id: str | None = None
+
     # Outcome
     status: SessionStatus
     completed_at: datetime

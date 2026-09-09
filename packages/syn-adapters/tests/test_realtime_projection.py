@@ -9,15 +9,30 @@ Tests verify that:
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 import pytest
 
 from syn_adapters.projections.realtime import (
+    JsonValue,
     RealTimeProjection,
     SSEEventFrame,
     SSEQueue,
     get_realtime_projection,
     reset_realtime_projection,
+)
+from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+    AgentSessionAggregate,
+)
+from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
+    CompleteSessionCommand,
+)
+from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
+    RecordOperationCommand,
+)
+from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
+    StartSessionCommand,
 )
 
 
@@ -294,3 +309,121 @@ class TestSingleton:
         reset_realtime_projection()
         p2 = get_realtime_projection()
         assert p1 is not p2
+
+
+@pytest.mark.unit
+class TestAgentSessionEventsAreRoutable:
+    """A session event must carry the key `_forward_event` routes on.
+
+    Every other test in this module hand-writes ``execution_id`` into its
+    payload. That proves the routing works given a routable payload; it says
+    nothing about whether the events the aggregate actually emits are
+    routable. They were not: ``OperationRecorded`` and ``SessionCompleted``
+    had no ``execution_id`` field at all, so ``_forward_event`` dropped every
+    real one and the per-execution SSE channel silently carried neither
+    (#1095).
+
+    So these tests take the payload from a real aggregate's ``model_dump()``
+    rather than composing one, which is the only shape that could have caught
+    it.
+    """
+
+    @staticmethod
+    def _running_session() -> AgentSessionAggregate:
+        session = AgentSessionAggregate()
+        session.start_session(
+            StartSessionCommand(
+                aggregate_id="session-1",
+                workflow_id="wf-1",
+                execution_id="exec-1",
+                phase_id="phase-1",
+                agent_provider="claude",
+            )
+        )
+        return session
+
+    @staticmethod
+    def _dump_last(session: AgentSessionAggregate) -> dict[str, JsonValue]:
+        """Serialise the aggregate's newest event exactly as production does.
+
+        `RealTimeProjectionAdapter.handle_event` dumps `envelope.event`, so
+        this must too — dumping the envelope would hand the handler a payload
+        no subscriber ever sees.
+        """
+        envelope = session.get_uncommitted_events()[-1]
+        return cast("dict[str, JsonValue]", envelope.event.model_dump(mode="json"))
+
+    @pytest.mark.asyncio
+    async def test_operation_recorded_reaches_the_execution_channel(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """The event that fires on every tool call must reach that run's subscribers."""
+        session = self._running_session()
+        session.record_operation(
+            RecordOperationCommand(
+                aggregate_id="session-1",
+                operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+                tool_name="Read",
+                total_tokens=1234,
+            )
+        )
+
+        queue = await projection.connect("exec-1")
+        await projection.on_operation_recorded(self._dump_last(session))
+
+        frame = await asyncio.wait_for(queue.get(), timeout=1)
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "OperationRecorded"
+        assert frame.execution_id == "exec-1"
+        # The token numbers are the reason the dashboard polled at all; if the
+        # frame does not carry them the push is not a substitute for the poll.
+        assert frame.data["total_tokens"] == 1234
+
+    @pytest.mark.asyncio
+    async def test_session_completed_reaches_the_execution_channel(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """SessionCompleted reached the global feed but never the per-execution one."""
+        session = self._running_session()
+        session.complete_session(
+            CompleteSessionCommand(aggregate_id="session-1", success=True)
+        )
+
+        queue = await projection.connect("exec-1")
+        await projection.on_session_completed(self._dump_last(session))
+
+        frame = await asyncio.wait_for(queue.get(), timeout=1)
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "SessionCompleted"
+        assert frame.execution_id == "exec-1"
+
+    @pytest.mark.asyncio
+    async def test_a_session_with_no_execution_still_only_reaches_the_global_feed(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """A session started outside a run has no per-execution channel to reach.
+
+        `execution_id` stays optional for exactly this case, so the routing key
+        being absent must remain a silent no-op rather than an error.
+        """
+        session = AgentSessionAggregate()
+        session.start_session(
+            StartSessionCommand(
+                aggregate_id="session-2",
+                workflow_id="wf-1",
+                phase_id="phase-1",
+                agent_provider="claude",
+            )
+        )
+        session.record_operation(
+            RecordOperationCommand(
+                aggregate_id="session-2",
+                operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+                tool_name="Read",
+            )
+        )
+
+        queue = await projection.connect("exec-1")
+        await projection.on_operation_recorded(self._dump_last(session))
+
+        assert queue.qsize() == 0

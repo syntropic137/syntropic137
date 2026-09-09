@@ -211,6 +211,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         event = OperationRecordedEvent(
             session_id=str(self.id),
             operation_id=operation_id,
+            execution_id=self._execution_id,
             operation_type=command.operation_type,
             timestamp=datetime.now(UTC),
             duration_seconds=command.duration_seconds,
@@ -284,6 +285,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         # Create and apply event
         event = SessionCompletedEvent(
             session_id=str(self.id),
+            execution_id=self._execution_id,
             status=status,
             completed_at=datetime.now(UTC),
             total_input_tokens=self._tokens.input_tokens,

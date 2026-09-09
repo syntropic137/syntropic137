@@ -29,6 +29,17 @@ class OperationRecordedEvent(DomainEvent):
     session_id: str
     operation_id: str
 
+    # The run this operation belongs to, and the key SSE routes on.
+    #
+    # Without it `RealTimeProjection._forward_event` has no channel to publish
+    # to and drops the frame, so the event that fires on every tool call
+    # reached no subscriber at all and the dashboard had to poll for the token
+    # numbers it carries (#1095). Optional because a session can be started
+    # outside a workflow execution, exactly as on SessionStarted; a missing
+    # value means "no per-execution channel", not "unknown". Additive and
+    # optional, so no upcaster and no version bump (ADR-007).
+    execution_id: str | None = None
+
     # Operation details
     operation_type: OperationType
     timestamp: datetime
