@@ -22,6 +22,15 @@ that could not be read resolved to something success-like.
       races two runs at the same phase id and shows the second cannot erase
       the first.
 
+  (3) The fix for (1) located the block with `rfind`, so the TEXTUALLY last
+      marker won. A report whose own `comments` contain `TASK_RESULT:` was
+      therefore read from the mention inside its own string and became
+      UNREADABLE - a reported SUCCESS turned into a refusal. Same shape as (1),
+      opposite direction: the meaning of the report changed with what its
+      strings happened to say. `TestTheMarkerInsideAReportIsNotANewReport`
+      pins both directions together, because a fix for either one alone can
+      be had by giving up the other.
+
 WHY A PARSER TEST WAS NEVER GOING TO BE ENOUGH. Before this change the parsed
 report had NO production consumer: it reached `StreamResult` and stopped there.
 So a phase reporting `success: false` completed whether or not the report
@@ -175,6 +184,123 @@ class TestTheReportIsReadAsJson:
 
         assert "phase-001" in refusal
         assert "the handler returns dict{} not a model" in refusal
+
+
+#: The mirror of `REPORTED_FAILURE`, and just as well-formed: a report whose
+#: own `comments` quote the marker. Not exotic - it is what an agent explaining
+#: result parsing writes, so the runs most likely to hit it are the runs
+#: working on this module.
+REPORTED_SUCCESS_QUOTING_THE_MARKER = (
+    'TASK_RESULT: {"success": true, "comments": "the parser looks for TASK_RESULT: at the start"}'
+)
+
+#: The issue's failure in the spelling the rework asked for. Kept separate from
+#: `REPORTED_FAILURE` so the two directions can be asserted side by side.
+REPORTED_FAILURE_SHORT = 'TASK_RESULT: {"success": false, "comments": "returns dict{} not a model"}'
+
+
+class TestTheMarkerInsideAReportIsNotANewReport:
+    """Reading a result is robust to the result's own vocabulary.
+
+    Both halves, together, because either one is trivially buyable with the
+    other: read the FIRST marker and the success below passes while
+    `test_the_last_report_wins` breaks; take the last readable block whatever
+    follows it and `test_an_unreadable_final_block_...` breaks. Only a reader
+    that knows where each report ENDS satisfies all three.
+    """
+
+    def test_a_success_quoting_the_marker_is_still_a_success(self) -> None:
+        """The defect: `rfind` read from the quotation inside `comments`."""
+        verdict = AgentVerdict.from_agent_text(REPORTED_SUCCESS_QUOTING_THE_MARKER)
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "the marker quoted inside comments was read as the start of a new "
+            "report, so a reported success became a refusal"
+        )
+        assert verdict.comments == "the parser looks for TASK_RESULT: at the start", (
+            "the verdict was read from somewhere other than the whole block"
+        )
+        assert not verdict.refuses_completion
+
+    def test_the_reported_failure_still_reads_as_a_failure(self) -> None:
+        """The original direction, unchanged. A fix that swaps them is not one."""
+        verdict = AgentVerdict.from_agent_text(REPORTED_FAILURE_SHORT)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "returns dict{} not a model"
+        assert verdict.refuses_completion
+
+    def test_a_failure_quoting_the_marker_is_still_a_failure(self) -> None:
+        """Quoting the marker must not change the verdict in EITHER direction.
+
+        This one refused completion before the fix too - as UNREADABLE rather
+        than FAILURE - so it is here for the `comments`, which an operator
+        needs and which the truncated read destroyed.
+        """
+        verdict = AgentVerdict.from_agent_text(
+            'TASK_RESULT: {"success": false, "comments": "the TASK_RESULT: block was dropped"}'
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the TASK_RESULT: block was dropped"
+
+    def test_a_later_real_report_still_outvotes_one_that_quotes_the_marker(self) -> None:
+        """A quotation is skipped; a genuine second block is not."""
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "I wrote TASK_RESULT: too early"}\n'
+            'TASK_RESULT: {"success": false, "comments": "the tests fail"}'
+        )
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the tests fail"
+
+    def test_an_unreadable_final_block_is_not_rescued_by_an_earlier_success(self) -> None:
+        """THE PROPERTY THIS FIX MAY NOT SPEND, pinned against itself.
+
+        Skipping a quotation must not become "take the last block that
+        happened to parse". If the agent's FINAL report is malformed, that is
+        still a report nobody can read, and it refuses - exactly as it did
+        before, and for the same reason absence of a verdict is not a verdict.
+        """
+        text = 'TASK_RESULT: {"success": true, "comments": "green"}\nTASK_RESULT: {"success": fals'
+
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE, (
+            "an earlier readable block was allowed to answer for a later "
+            "unreadable one - the fail-closed half, traded away"
+        )
+        assert verdict.refuses_completion
+
+    def test_a_quoted_marker_in_the_prose_before_the_report_is_skipped(self) -> None:
+        """Prose ahead of the block cannot outvote the block."""
+        text = (
+            "I was asked to explain TASK_RESULT: parsing.\n"
+            'TASK_RESULT: {"success": true, "comments": "explained it"}'
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.SUCCESS
+
+    def test_a_marker_in_prose_AFTER_the_report_still_refuses(self) -> None:
+        """THE DELIBERATE LIMIT of this fix, pinned so it is a decision.
+
+        Unchanged behaviour, and it fails closed. What this fix knows is where
+        a report ENDS, which is what lets a marker INSIDE one be skipped.
+        Text after a block has no such delimiter, so `TASK_RESULT: block as
+        instructed` is indistinguishable from a final report that was
+        truncated mid-value - and the only way to tell them apart is a rule
+        about what "looks like JSON", which would let a bare
+        `TASK_RESULT: failed` complete. Refusing here costs a rerun; the
+        alternative costs the guarantee.
+        """
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "done"}\n\n'
+            "I wrote the TASK_RESULT: block as instructed."
+        )
+
+        assert AgentVerdict.from_agent_text(text).status is VerdictStatus.UNREADABLE
 
 
 class TestTwoExecutionsCannotOverwrite:

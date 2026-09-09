@@ -174,6 +174,42 @@ class TestWhatMustStillComplete:
 
         assert result.status == "completed"
 
+    async def test_a_success_that_quotes_the_marker_completes(self) -> None:
+        """The mirror defect, at the hop that RECORDS the outcome.
+
+        `rfind` read this report from the `TASK_RESULT:` quoted inside its own
+        `comments`, so the block decoded to nothing and the execution was
+        recorded FAILED on a phase that reported success. An agent explaining
+        result parsing writes exactly this sentence, which is why it fired
+        hardest on the runs working on #1256 itself.
+
+        Asserted on `result.status` rather than on the verdict, because a
+        parser that returns SUCCESS while the execution still records `failed`
+        is the shape (2) above already got away with once.
+        """
+        fake = FakeAgentExecutionHandler.success(
+            says=(
+                'TASK_RESULT: {"success": true, "comments": '
+                '"the parser looks for TASK_RESULT: at the start"}'
+            )
+        )
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1256",
+            workflow_name="Reported success quoting the marker",
+            phases=_one_phase_workflow(),
+            inputs={},
+            execution_id="exec-1256-quotes-marker",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}'. A phase that "
+            "reported success was failed because its comments mentioned the "
+            "marker."
+        )
+        assert result.error_message is None
+
     async def test_a_phase_that_reported_nothing_still_completes(self) -> None:
         """THE DELIBERATE LIMIT, pinned so a change to it is a decision.
 
