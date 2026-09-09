@@ -6,15 +6,21 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 import re
 from typing import Any
 
-# Type alias for filter values that can be serialized for JSONB queries
-_FilterValue = str | int | bool | float
 
-
-def _serialize_filter_value(value: _FilterValue) -> str:
+def _serialize_filter_value(value: object) -> str:
     """Serialize a Python value to match PostgreSQL's JSONB ->> text extraction.
 
     JSONB ->> extracts booleans as 'true'/'false' (lowercase JSON literals),
     but Python's str(False) produces 'False'. This helper ensures values match.
+
+    ``object`` rather than a union of the types a filter "should" carry. The
+    union this replaced (`str | int | bool | float`) never described the
+    callers: `_condition` takes ``object`` and passed it straight through, and
+    the members of a collection filter are ``object`` too, which is the
+    pyright error the collection support introduced. It did not even describe
+    the tests, one of which pins ``None``. A name that has to be worked around
+    at every call site is not documenting a restriction, only asserting one -
+    and the body imposes none, because every object has a ``str()``.
     """
     if isinstance(value, bool):
         return "true" if value else "false"
