@@ -16,33 +16,56 @@ be turned into a completed phase two ways at once:
 The second is why the first survived: a value nobody consumes cannot be
 observed to be wrong.
 
-AND THE MIRROR OF IT, in the first fix for the above. Both defects are one
-shape: what the report MEANT changed with what its strings happened to
-contain. The fix reproduced that shape at the other end. It located the block
-with ``rfind``, i.e. the textually LAST marker, so a report whose own
-``comments`` mention ``TASK_RESULT:`` was read starting from the mention
-inside its own string, decoded to nothing, and a reported SUCCESS became a
-refusal. That input is not exotic: it is what any agent explaining result
-parsing writes, and therefore precisely what an agent working on THIS module
-produces - the defect fired hardest on the runs discussing it.
+THEN TWICE MORE, IN THE FIXES. Three defects, one shape: what the report MEANT
+changed with what the surrounding text happened to contain.
 
-So the invariant is symmetric, and neither half may be bought with the other:
-READING A RESULT MUST BE ROBUST TO THE RESULT'S OWN VOCABULARY APPEARING
-INSIDE ITS STRING VALUES. A failure must never become a completed phase, and
-a success must never become a failure because its text mentioned the marker.
-`_last_report` is where that is enforced, and it holds the second half without
-spending the first - an unreadable FINAL block is still unreadable.
+  1. FAILURE became completed - a brace inside ``comments``, above.
+  2. SUCCESS became UNREADABLE - the block was located with ``rfind``, the
+     textually LAST marker, so a report whose own ``comments`` mention
+     ``TASK_RESULT:`` was read from the mention inside its own string.
+  3. SUCCESS became FAILURE - the reader then took the last DECODABLE
+     candidate, so a genuine report followed by anything JSON-shaped lost to
+     it. The literal failure example lives in the prompt every phase is sent,
+     so an agent that reports success and then explains the reporting format
+     reported failure.
+
+Each fix moved the same guess - WHERE IS THE PAYLOAD IN THIS PROSE - rather
+than removing it. First, last and nearest-marker all fail for one reason: the
+text legitimately contains things that look exactly like the payload, and no
+amount of looking can tell a report from a quotation of one.
+
+SO THE PAYLOAD IS DELIMITED, NOT LOCATED. A report is
+``TASK_RESULT:``, one JSON value, and ``TASK_RESULT_END``; anything missing the
+terminator is prose about a report, whatever it looks like. Which text is the
+report therefore has one answer given by structure, and it does not depend on
+what else the message says, in what order, or how JSON-shaped it is. Several
+COMPLETE blocks still means the agent reported more than once and its last
+report stands - that is a fact about the agent, not a guess about the text.
+
+WHAT THE EMITTER MUST GUARANTEE, because a parser contract the producer does
+not honour is not a fix. `render_workspace_prompt` must (a) instruct the
+terminator and (b) contain no complete block of its own, so that quoting the
+instructions can never be mistaken for obeying them. (b) is pinned by test, not
+by care: `test_reported_failure_stays_a_failure.py` reads the rendered prompt
+with this module and requires NOT_REPORTED.
+
+THE PRICE, STATED. A block written without its terminator is UNREADABLE, which
+refuses completion. That is the fail-closed direction and it is the whole cost
+of the scheme: an agent that ignores the contract costs a rerun, and never a
+false completion. What is no longer bought with it is the old blanket refusal
+whenever the marker appeared after a report - that refused real successes,
+which is defect 2 again in a wider spelling.
 
 WHAT IS AND IS NOT A VERDICT. Four states, and the distinction between the last
 two is the whole point:
 
   ``SUCCESS``       the agent reported success
   ``FAILURE``       the agent reported failure - the phase must not complete
-  ``UNREADABLE``    the agent wrote the block and we could not read it. Absence
-                    of a verdict is NOT a verdict: this refuses completion,
-                    because the alternative is discarding what may have been a
-                    failure report
-  ``NOT_REPORTED``  no block was written at all. The agent made no claim about
+  ``UNREADABLE``    the agent wrote the marker and we could not read a
+                    terminated verdict under it. Absence of a verdict is NOT a
+                    verdict: this refuses completion, because the alternative
+                    is discarding what may have been a failure report
+  ``NOT_REPORTED``  no marker was written at all. The agent made no claim about
                     itself, which is a different fact from an unreadable claim
                     and is deliberately NOT fatal here - see the limit below
 
@@ -56,8 +79,8 @@ own change, with its own evidence about how often live phases omit the block.
 
 WHY A MODULE AND NOT A PARSER FUNCTION. The caller asks one question - "may
 this phase complete?" - and never learns how the answer was reached. That is
-what lets the marker, the JSON shape and the strictness about ``success`` all
-change without touching a stream processor or the dispatcher.
+what lets the delimiters, the JSON shape and the strictness about ``success``
+all change without touching a stream processor or the dispatcher.
 """
 
 from __future__ import annotations
@@ -69,6 +92,7 @@ from typing import Final
 
 __all__ = [
     "TASK_RESULT_MARKER",
+    "TASK_RESULT_TERMINATOR",
     "AgentVerdict",
     "VerdictStatus",
 ]
@@ -77,6 +101,12 @@ __all__ = [
 #: OUR convention, not a harness format - which is why every harness's
 #: processor can read it with the same code.
 TASK_RESULT_MARKER: Final[str] = "TASK_RESULT:"
+
+#: The token that CLOSES the block, and the entire reason a report can be told
+#: apart from a quotation of one. It is not decoration on the marker: without
+#: it there is no answer to "which of these is the report" that some legal
+#: message does not contradict - see the three defects in the module docstring.
+TASK_RESULT_TERMINATOR: Final[str] = "TASK_RESULT_END"
 
 
 class VerdictStatus(Enum):
@@ -108,16 +138,16 @@ class AgentVerdict:
 
     @classmethod
     def from_agent_text(cls, text: str | None) -> AgentVerdict:
-        """Read the phase's own verdict out of the last report its agent wrote.
+        """Read the phase's own verdict out of the report its agent wrote.
 
-        WHICH text is the report is `_last_report`'s question; this one
+        WHICH text is the report is `_delimited_report`'s question; this one
         decides only what that report SAYS. A verdict is a JSON object whose
         ``success`` is a JSON boolean, and anything the agent wrote in its
         place is unreadable rather than a pass.
         """
         if not text:
             return cls.not_reported()
-        report = _last_report(text)
+        report = _delimited_report(text)
         if report is None:
             return cls.not_reported()
         reported = report.decoded
@@ -153,65 +183,80 @@ class AgentVerdict:
             )
         if self.status is VerdictStatus.UNREADABLE:
             return (
-                f"Phase '{phase_id}' wrote a TASK_RESULT block that could not be "
-                f'read as a verdict: "{self.comments}". An unreadable report may be '
-                f"a failure report, so the phase fails rather than completing on a "
-                f"verdict nobody could read."
+                f"Phase '{phase_id}' wrote a {TASK_RESULT_MARKER} marker with no "
+                f"verdict under it that is both readable and closed by "
+                f'{TASK_RESULT_TERMINATOR}: "{self.comments}". An unreadable report '
+                f"may be a failure report, so the phase fails rather than completing "
+                f"on a verdict nobody could read."
             )
         return ""
 
 
 @dataclass(frozen=True)
 class _Report:
-    """The text of one report, and the JSON value that text began with.
+    """The text of one report, and the JSON value that text carried.
 
-    ``decoded`` is None when it began with no JSON value at all, which is
-    indistinguishable here from a literal ``null`` and, either way, is not a
-    verdict.
+    ``decoded`` is None when the message held a marker but no complete block
+    under it - the payload is then the text an operator needs to see to work
+    out what the agent wrote instead.
     """
 
     payload: str
     decoded: object | None
 
 
-def _last_report(text: str) -> _Report | None:
-    """The last thing in ``text`` that is a report, not a mention of one.
+def _payload_starts(text: str, after: int) -> int:
+    """Where the value begins, skipping the whitespace a writer put in."""
+    while after < len(text) and text[after].isspace():
+        after += 1
+    return after
 
-    THE DECISION, since two readings of "last" were available. Scanning
-    forward and letting `raw_decode` say where each report ENDS delimits it,
-    and a marker inside the span of a report already read is that report's own
-    string content - never a candidate to be the next report. Taking the
-    textually last marker instead cannot tell a report from a quotation of
-    one, and gets it wrong exactly when an agent writes about result parsing.
-    "Locate the last one" and "delimit the payload" are therefore not
-    alternatives: delimiting is what makes "last" mean anything.
 
-    The last CANDIDATE decides, readable or not. That is the half that must
-    not be traded away to fix the above: an agent that restates its result has
-    stated it last, so a later real block still outvotes an earlier one, and a
-    final block nobody can read stays unreadable rather than quietly resolving
-    to some earlier block's success. Returns None when the marker never
-    appears at all, which is silence and not a verdict.
+def _delimited_report(text: str) -> _Report | None:
+    """The report ``text`` contains, or None when it contains no marker at all.
+
+    A REPORT IS THE THREE PARTS TOGETHER: the marker, one JSON value that
+    `raw_decode` says where to end, and `TASK_RESULT_TERMINATOR` after it
+    separated by nothing but whitespace. Every other marker occurrence is
+    prose - a quotation, an explanation, a half-written block - and prose has
+    no verdict in it, wherever it sits and however much it looks like one.
+    That is what makes this immune to the message containing the marker, a
+    brace, a nested object, or the prompt's own failure example, before or
+    after a genuine report.
+
+    Two blocks correctly written means the agent reported twice; its final
+    report is the one it stands behind, which is ordering used as evidence
+    about the AGENT rather than as a guess about the text.
+
+    A marker with no complete block anywhere returns a `_Report` that cannot
+    decode, so it reads as UNREADABLE and refuses completion. Silence and a
+    botched report are different facts and only the second is fatal.
     """
     decoder = json.JSONDecoder()
-    latest: _Report | None = None
+    report: _Report | None = None
+    unclosed_at: int | None = None
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
-        payload_at = marker_at + len(TASK_RESULT_MARKER)
-        while payload_at < len(text) and text[payload_at].isspace():
-            payload_at += 1
+        payload_at = _payload_starts(text, marker_at + len(TASK_RESULT_MARKER))
         try:
-            decoded, report_ends = decoder.raw_decode(text, payload_at)
+            decoded, payload_ends = decoder.raw_decode(text, payload_at)
         except ValueError:
-            # Nothing delimits a payload that is not a JSON value, so the
-            # excerpt is the rest of the text, and the scan resumes just after
-            # the marker rather than skipping over content it never read.
-            latest = _Report(payload=text[payload_at:], decoded=None)
+            # No value here to delimit, so resume just past the marker rather
+            # than skipping over text this never read.
+            unclosed_at = payload_at
             search_from = payload_at
-        else:
-            latest = _Report(payload=text[payload_at:report_ends], decoded=decoded)
-            search_from = report_ends
-    return latest
+            continue
+        if not text.startswith(TASK_RESULT_TERMINATOR, _payload_starts(text, payload_ends)):
+            unclosed_at = payload_at
+            search_from = payload_ends
+            continue
+        report = _Report(payload=text[payload_at:payload_ends], decoded=decoded)
+        search_from = payload_ends + len(TASK_RESULT_TERMINATOR)
+    if report is not None:
+        return report
+    if unclosed_at is None:
+        return None
+    return _Report(payload=text[unclosed_at:], decoded=None)
 
 
 def _excerpt(raw: str) -> str:
