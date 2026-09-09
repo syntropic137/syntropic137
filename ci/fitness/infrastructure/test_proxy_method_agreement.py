@@ -21,12 +21,14 @@ from __future__ import annotations
 import functools
 import importlib.util
 import sys
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 #: Envoy's ``:method`` pseudo-header, the only way a route can filter on method.
 METHOD_HEADER = ":method"

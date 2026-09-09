@@ -23,12 +23,15 @@ import importlib.util
 import socket
 import sys
 import threading
-from collections.abc import Iterator
 from http.server import HTTPServer
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import ModuleType
 
 API_KEY = "sk-test-not-a-real-key"
 
@@ -129,9 +132,7 @@ def test_disallowed_host_is_still_denied(server: tuple[str, int]) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("method", FORWARDED_METHODS)
-def test_disallowed_host_is_denied_for_every_method(
-    server: tuple[str, int], method: str
-) -> None:
+def test_disallowed_host_is_denied_for_every_method(server: tuple[str, int], method: str) -> None:
     response = _check(server, method, "evil.example.com")
 
     assert response.status == 403
@@ -148,11 +149,7 @@ def test_head_denial_sends_no_body(server: tuple[str, int]) -> None:
     """
     host, port = server
     with socket.create_connection((host, port), timeout=5) as sock:
-        sock.sendall(
-            b"HEAD /api/hello HTTP/1.0\r\n"
-            b"x-forwarded-host: evil.example.com\r\n"
-            b"\r\n"
-        )
+        sock.sendall(b"HEAD /api/hello HTTP/1.0\r\nx-forwarded-host: evil.example.com\r\n\r\n")
         raw = b""
         while chunk := sock.recv(4096):
             raw += chunk
