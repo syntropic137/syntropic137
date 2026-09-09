@@ -46,6 +46,18 @@ build-backend = "uv_build"
 # Security floors for transitive dependencies (ISS-259).
 # These don't add new deps — they force minimum versions when resolved.
 [tool.uv]
+# The one uv this project runs on, enforced BY uv (#1136).
+#
+# `scripts/check_toolchain_pins.py` compares every place uv is installed; this
+# line is what makes the mismatch loud at the point of USE, in environments
+# that gate nothing. That is the case #1136 was actually about: a rework passed
+# in the workspace and failed in CI, and nobody got an error - they got
+# different test results. With this, a uv that is not the pinned one refuses to
+# run and says which version it wanted.
+#
+# Bump this, the workspace image and the CI `with: version:` inputs together;
+# the gate above fails if they ever disagree.
+required-version = "==0.11.8"
 # Supply chain safety: only resolve packages published before this date.
 # Bump intentionally when upgrading dependencies: just bump-exclude-newer
 exclude-newer = "2026-08-20T21:12:36Z"

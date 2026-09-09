@@ -70,6 +70,7 @@ REFERENCE_DOCKERFILE: Final = "lib/agentic-primitives/providers/workspaces/{prov
 #: (they are separate repositories with their own gates) apart from the
 #: reference above.
 INSTALLER_SUFFIXES: Final = (".sh",)
+INSTALLER_NAMES: Final = ("pyproject.toml", "uv.toml")
 INSTALLER_NAME_PREFIX: Final = "Dockerfile"
 _SKIP_DIRS: Final = frozenset({".git", ".venv", "lib", "node_modules", "target", "dist", "build"})
 
@@ -77,6 +78,10 @@ _SKIP_DIRS: Final = frozenset({".git", ".venv", "lib", "node_modules", "target",
 #: stated", because `uv:latest` and a CI step with no version input are the same
 #: sin spelled two ways and deserve the same message.
 _FLOATING: Final = frozenset({"latest", "main", "edge", "stable", "nightly"})
+
+#: What a version specifier contains and a version does not. `>=0.11.8` names a
+#: set, and every member of that set is a different toolchain.
+_RANGE: Final = re.compile(r"[<>=~!*,\s]")
 
 _SEMVER: Final = re.compile(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?[^\s,)]*")
 _PROBE_TIMEOUT_SECONDS: Final = 30
@@ -127,6 +132,10 @@ TOOLS: Final[tuple[Tool, ...]] = (
             re.compile(r"ghcr\.io/astral-sh/uv:(?P<version>[^\s\"'/]+)"),
             re.compile(r"\bUV_VERSION\s*=\s*[\"']?(?P<version>[^\s\"']+)"),
             re.compile(r"astral\.sh/uv/(?P<version>[0-9][^\s\"'/]*)/install\.sh"),
+            # `[tool.uv] required-version`, which uv enforces itself. A range
+            # rather than an exact pin captures its lower bound and fails, and
+            # should: a range is not one version.
+            re.compile(r"required-version\s*=\s*[\"'](?P<version>[^\"']+)"),
         ),
         installs=(
             re.compile(r"astral\.sh/uv/install\.sh"),
@@ -164,7 +173,11 @@ def _line_of(text: str, offset: int) -> int:
 
 
 def _pinned(raw: str) -> str | None:
-    return None if raw.lower() in _FLOATING else raw
+    """The one version this text names, or None when it names a moving target."""
+    candidate = raw.strip().removeprefix("==")
+    if not candidate or candidate.lower() in _FLOATING or _RANGE.search(candidate):
+        return None
+    return candidate
 
 
 def text_sightings(path: Path, display: str, *, reference: bool = False) -> list[Sighting]:
@@ -210,13 +223,22 @@ def text_sightings(path: Path, display: str, *, reference: bool = False) -> list
 
 
 def installer_files(root: Path) -> Iterator[Path]:
-    """Dockerfiles and shell scripts in this repo, submodules excluded."""
+    """Every file in this repo that can decide a tool version, submodules aside.
+
+    Dockerfiles and shell scripts install a tool; `pyproject.toml` states the uv
+    that is allowed to run at all. Both are places the version can drift, so
+    both are read.
+    """
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         if _SKIP_DIRS.intersection(path.relative_to(root).parts[:-1]):
             continue
-        if path.name.startswith(INSTALLER_NAME_PREFIX) or path.suffix in INSTALLER_SUFFIXES:
+        if (
+            path.name.startswith(INSTALLER_NAME_PREFIX)
+            or path.suffix in INSTALLER_SUFFIXES
+            or path.name in INSTALLER_NAMES
+        ):
             yield path
 
 

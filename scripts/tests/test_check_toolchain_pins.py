@@ -93,6 +93,14 @@ class TestTheRepositoryItself:
         assert pinned.keys() == {"just", "uv"}
         assert all(v is not None for v in pinned.values()), f"unpinned: {pinned}"
 
+    def test_uv_itself_refuses_to_run_at_the_wrong_version(self) -> None:
+        """`[tool.uv] required-version` is the enforcement that needs no gate.
+
+        It is also a fourth place the version is written, so the gate reads it.
+        """
+        found = text_sightings(REPO_ROOT / "pyproject.toml", "pyproject.toml")
+        assert [(s.tool, s.version) for s in found] == [("uv", "0.11.8")]
+
     def test_the_gate_finds_the_dockerfiles_and_shell_scripts_but_not_submodules(self) -> None:
         """Discovery, not a list: a new unpinned Dockerfile must be in scope."""
         names = {p.relative_to(REPO_ROOT).as_posix() for p in installer_files(REPO_ROOT)}
@@ -143,6 +151,23 @@ class TestAnInstallWithNoVersion:
             'curl -fsSL https://just.systems/install.sh | sh -s -- --tag "$JUST_VERSION"\n'
         )
         assert [(s.tool, s.version) for s in text_sightings(script, "x")] == [("just", FAKE)]
+
+
+class TestARangeIsNotAPin:
+    def test_a_specifier_range_is_reported_as_floating_rather_than_as_its_bound(
+        self, tmp_path: Path
+    ) -> None:
+        """`>=9.9.9` names a set of toolchains, and reading its lower bound as
+        the pin would report agreement between environments running different
+        versions - the exact claim this gate exists to refuse."""
+        manifest = tmp_path / "pyproject.toml"
+        manifest.write_text(f'[tool.uv]\nrequired-version = ">={FAKE}"\n')
+        assert [s.version for s in text_sightings(manifest, "pyproject.toml")] == [None]
+
+    def test_an_exact_specifier_is_the_version_it_names(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "pyproject.toml"
+        manifest.write_text(f'[tool.uv]\nrequired-version = "=={FAKE}"\n')
+        assert [s.version for s in text_sightings(manifest, "pyproject.toml")] == [FAKE]
 
 
 class TestCiSteps:
