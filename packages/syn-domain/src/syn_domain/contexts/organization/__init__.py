@@ -15,6 +15,7 @@ Usage:
 
 # Aggregates
 # Projections
+from syn_domain.contexts.organization._shared.execution_correlation import executions_by_repo
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_organization import (
@@ -229,6 +230,7 @@ __all__ = [
     "UpdateSystemCommand",
     # Utility
     "compute_repo_claim_id",
+    "executions_by_repo",
     "get_organization_projection",
     "get_repo_projection",
     "get_system_projection",

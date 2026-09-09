@@ -9,7 +9,9 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
+from syn_domain.contexts.organization._shared.execution_correlation import (
+    executions_by_repo,
+)
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     ContributionHeatmapResult,
     HeatmapDayBucket,
@@ -20,7 +22,7 @@ from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatm
 
 if TYPE_CHECKING:
     import asyncpg
-    from event_sourcing import ProjectionReadStore
+    from event_sourcing import ProjectionStore
 
     from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
         GetContributionHeatmapQuery,
@@ -72,7 +74,7 @@ class GetContributionHeatmapHandler:
     def __init__(
         self,
         pool: asyncpg.Pool,
-        store: ProjectionReadStore,
+        store: ProjectionStore,
         repo_projection: RepoProjection,
     ) -> None:
         self._timescale = TimescaleHeatmapQuery(pool)
@@ -92,17 +94,12 @@ class GetContributionHeatmapHandler:
             return {r.full_name for r in repos}
         return None
 
-    async def _get_execution_ids(self, repo_names: set[str]) -> set[str]:
-        """Get execution IDs correlated with the given repo names."""
-        correlations = await self._store.get_all(REPO_CORRELATION)
-        return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
-
     async def handle(self, query: GetContributionHeatmapQuery) -> ContributionHeatmapResult:
         """Handle GetContributionHeatmapQuery."""
         repo_names = await self._resolve_repo_names(query)
         execution_ids: set[str] | None = None
         if repo_names is not None:
-            execution_ids = await self._get_execution_ids(repo_names)
+            execution_ids = set(await executions_by_repo(self._store, repo_names))
 
         if execution_ids is not None and not execution_ids:
             return _empty_result(query, self._build_filter(query))
