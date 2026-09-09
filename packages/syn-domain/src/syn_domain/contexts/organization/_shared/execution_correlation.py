@@ -31,9 +31,7 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 
-async def executions_by_repo(
-    store: ProjectionStore, repo_names: Collection[str]
-) -> dict[str, str]:
+async def executions_by_repo(store: ProjectionStore, repo_names: Collection[str]) -> dict[str, str]:
     """Map each execution correlated with ``repo_names`` to its repo's full name.
 
     Callers wanting only the ids read the keys: ``set(await executions_by_repo(...))``.
@@ -47,9 +45,7 @@ async def executions_by_repo(
     """
     if not repo_names:
         return {}
-    correlations = await store.query(
-        REPO_CORRELATION, filters={"repo_full_name": list(repo_names)}
-    )
+    correlations = await store.query(REPO_CORRELATION, filters={"repo_full_name": list(repo_names)})
     return {
         c["execution_id"]: c["repo_full_name"]
         for c in correlations

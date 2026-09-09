@@ -16,6 +16,7 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
     apply_sorting,
+    filter_values,
 )
 from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
@@ -68,7 +69,14 @@ class InMemoryProjectionStore:
         return list(self._data[projection].values())
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
-        """Count records, with the same equality semantics the Postgres store uses."""
+        """Count records, with the same equality semantics the Postgres store uses.
+
+        Including cardinality: `build_count_query` shares its WHERE builder
+        with `build_query`, so the Postgres count already answers a
+        collection-valued filter as ANY. Counting only scalars here would put
+        the count back out of step with the rows it counts, which is the one
+        thing that shared builder exists to prevent.
+        """
         records = self._data.get(projection)
         if not records:
             return 0
@@ -77,7 +85,10 @@ class InMemoryProjectionStore:
         return sum(
             1
             for record in records.values()
-            if all(str(record.get(key)) == value for key, value in filters.items())
+            if all(
+                str(record.get(key)) in {str(v) for v in filter_values(value)}
+                for key, value in filters.items()
+            )
         )
 
     async def delete(self, projection: str, key: str) -> None:
