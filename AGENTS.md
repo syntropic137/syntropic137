@@ -520,6 +520,25 @@ Submodules (agentic-primitives, event-sourcing-platform) have independent versio
 - **Docker Compose** for local and selfhost deployment
 - QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
 
+### `just` and `uv` are pinned, and the pin is enforced (#1136)
+
+One version of each, everywhere: the workspace image, CI, every Dockerfile,
+the onboarding script and the machine you are on. The gate an agent must pass
+is a `just` target run under `uv`, so two toolchains means "the gate passed"
+is two different claims - which is exactly how a correct rework passed in the
+workspace, failed in CI, and went uncertified.
+
+- `just check-toolchain-pins` compares every place either version is written,
+  including the binaries on PATH, against the version the workspace image
+  ships. It runs inside `preflight-agent`, so it runs in a workspace too.
+- `[tool.uv] required-version` makes uv refuse to run at any other version.
+  That one needs no gate and covers anyone who never runs preflight.
+
+To bump: change the workspace image ARG in agentic-primitives, `pyproject.toml`,
+the `with:` inputs on `setup-just`/`setup-uv`, and `infra/scripts/bootstrap.sh`
+in one change. The gate fails while they disagree, which is the point - it will
+name every file that still has the old number.
+
 ### Configuration (ADR-004)
 
 When working with environment variables or port/URL configuration, review
