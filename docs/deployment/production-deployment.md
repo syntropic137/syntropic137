@@ -514,13 +514,26 @@ export SYN_SECURITY_MAX_MEMORY=256Mi
 
 ### Rolling Updates
 
+Restarting the API orphans every in-flight execution (#1179). Check before you
+restart -- `predeploy_check.py` exits non-zero if anything is running, and exits
+2 rather than claiming "all clear" if it cannot reach the API:
+
 ```bash
+# From a repo checkout
+just predeploy-check
+
+# Or on any host with python3 and no checkout
+SYN_API_URL=https://syn.example.com python3 predeploy_check.py
+
 # Kubernetes
 kubectl rollout restart deployment/syn -n syn
 
 # Docker Compose
 docker compose pull && docker compose up -d --no-deps syn
 ```
+
+Pass `--force` to deploy anyway; it proceeds and says loudly what it is
+orphaning.
 
 ### Scaling
 
