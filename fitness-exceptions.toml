@@ -100,11 +100,17 @@ issue = "#185"
 # and #1248 deliberately did not fix them, so that the change that made them
 # visible stays separable from the changes that remove them. Every value is
 # still the exact measured count, so there is still no headroom anywhere.
+#
+# RATCHETED 2026-09-09 (#1127). syn-domain 440 -> 433. `StreamResult` carried
+# the agent's own TASK_RESULT verdict as a `dict[str, Any]` that was logged and
+# read by nothing; it is now an `AgentSelfReport` frozen dataclass with a
+# consumer on the completion path. Seven fewer erasures because the parse, the
+# field and the call sites it crossed all named their shape instead.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 440
+value = 433
 issue = "#673"
 
 [untyped-dicts.syn-adapters]

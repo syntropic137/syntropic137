@@ -643,6 +643,11 @@ def _run_gh(
 #:   shared template and `implement` hits it too. Confining the fix to the
 #:   no-checkout rendering would have left the same bug in the branch the
 #:   experiment measures, which is a carve-out, not a fix.
+#: * #1127 made `success: false` a stated consequence rather than a form to
+#:   fill in. Also shared, and for the same reason: the block had no consumer
+#:   on either harness, so every phase in the tree was being asked for a
+#:   verdict nothing read. Telling only the no-checkout phases what the block
+#:   now does would leave the branch under experiment believing the old thing.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -754,7 +759,16 @@ Examples of failure reasons:
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
+This is how the orchestrator knows whether to retry, escalate, or mark the task as done.
+
+**`success: false` is enforced, not advisory.** A phase that reports it is
+recorded as FAILED, the phases after it do not run, and its reason above becomes
+the execution's error. Your deliverable is still collected first, so say in it
+what you checked and what stopped you.
+
+So report the outcome you actually had. "I could not do this" and "I did this
+and it passed" are different results, and reporting the second when the first
+happened is the one failure this platform cannot detect for you."""
 
 
 def _the_workspace_tree(prompt: str) -> str:
