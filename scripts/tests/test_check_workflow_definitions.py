@@ -469,7 +469,13 @@ class TestNoPromptAsksPastItsGrant:
     not do the thing - and nothing reports the third.
     """
 
-    def _violations(self, tmp_path: Path, tools: list[str], prompt: str) -> list[str]:
+    def _violations(
+        self,
+        tmp_path: Path,
+        tools: list[str],
+        prompt: str,
+        outputs: list[str] | None = None,
+    ) -> list[str]:
         path = _write(
             tmp_path,
             {
@@ -483,6 +489,7 @@ class TestNoPromptAsksPastItsGrant:
                         "order": 1,
                         "prompt_template": prompt,
                         "allowed_tools": tools,
+                        "output_artifacts": outputs or [],
                     }
                 ],
             },
@@ -504,7 +511,8 @@ class TestNoPromptAsksPastItsGrant:
         )
 
         assert "the-phase" in violation
-        assert "no Bash" in violation
+        assert "run shell" in violation
+        assert "none of [Bash]" in violation
 
     def test_the_same_prompt_is_fine_when_bash_is_granted(self, tmp_path: Path) -> None:
         """Negative control on the GRANT.
@@ -569,3 +577,134 @@ class TestNoPromptAsksPastItsGrant:
             )
 
         assert not offenders, "\n".join(offenders)
+
+
+class TestNoPhaseMustProduceAnArtifactItCannotWrite:
+    """A phase declaring an output must hold a tool that can create a file.
+
+    THE SECOND SPELLING OF #1122. The gate above was written for the shape
+    #1110 shipped - a shell fence in a prompt, no Bash - and that is the only
+    shape it knew. So the fix for #1122 passed its own gate while three phases
+    of `research-experiment-plan` carried the identical defect stated
+    differently: `revise-after-experiment`, `plan` and `final-plan` each
+    declare `output_artifacts: [markdown]` and grant `[Read, Grep, Glob]`.
+
+    No Write and no Bash is not a phase that does its job awkwardly. It is a
+    phase that CANNOT put anything in `artifacts/output/`, so the collector
+    finds an empty directory and the phase after it - `review-plan` reading
+    `plan`, `final-plan` reading `review-plan` - starts from nothing. Silent,
+    because a phase that produces no artifact does not fail.
+
+    WHY THE DECLARATION AND NOT THE PROMPT. Every phase says what it delivers
+    twice, once in prose and once in `output_artifacts`, and only the second is
+    structured. Matching the prose means matching "write to artifacts/output",
+    which the phases that only READ that directory also contain - it is in the
+    boilerplate telling them where their input came from. The declaration says
+    the same thing without the ambiguity, and cannot be dodged by rewording.
+    """
+
+    def _violations(
+        self, tmp_path: Path, tools: list[str], outputs: list[str]
+    ) -> list[str]:
+        return TestNoPromptAsksPastItsGrant()._violations(
+            tmp_path,
+            tools,
+            # No fence: this class must be driven by the DECLARATION alone. A
+            # prompt that also ran shell would let the other demand raise the
+            # violation and these tests would pass without this one existing.
+            "Read the input and deliver the plan.",
+            outputs=outputs,
+        )
+
+    #: The grant the three phases actually shipped with.
+    READ_ONLY: ClassVar[list[str]] = ["Read", "Grep", "Glob"]
+
+    def test_a_declared_output_without_write_or_bash_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The reproduction, with the exact pair the three phases shipped."""
+        (violation,) = self._violations(tmp_path, self.READ_ONLY, ["markdown"])
+
+        assert "the-phase" in violation
+        assert "create a file" in violation
+        assert "Bash, Write" in violation
+
+    def test_write_satisfies_it(self, tmp_path: Path) -> None:
+        """Negative control on the GRANT, and the fix that was applied."""
+        assert self._violations(tmp_path, [*self.READ_ONLY, "Write"], ["markdown"]) == []
+
+    def test_bash_satisfies_it_without_write(self, tmp_path: Path) -> None:
+        """Bash alone is enough, and this is load-bearing, not a technicality.
+
+        `research` and `revise-spec` in the same workflow grant
+        `[Read, Grep, Glob, Bash]` and declare a markdown output. They are NOT
+        the defect - a heredoc creates a file - and the audit for this change
+        left them alone on exactly this reasoning. Pinned so that a later
+        tightening to "Write specifically" has to argue with a test rather than
+        silently reclassify two working phases as broken.
+        """
+        assert self._violations(tmp_path, [*self.READ_ONLY, "Bash"], ["markdown"]) == []
+
+    def test_a_phase_declaring_no_output_is_not_asked_to_write(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control on the DECLARATION: read-only phases are fine.
+
+        Without this the check could report every Write-less phase, which would
+        make `output_artifacts` irrelevant to a check that claims to read it.
+        """
+        assert self._violations(tmp_path, self.READ_ONLY, []) == []
+
+    def test_naming_the_input_directory_in_prose_is_not_a_declaration(
+        self, tmp_path: Path
+    ) -> None:
+        """The false positive this design avoids, quoted from the real prompts.
+
+        Every phase in `research-experiment-plan` carries this paragraph, and a
+        check that matched `artifacts/output` in prose would report all of them
+        - including the read-only ones, where the mention describes where the
+        PREVIOUS phase wrote.
+        """
+        assert (
+            TestNoPromptAsksPastItsGrant()._violations(
+                tmp_path,
+                self.READ_ONLY,
+                "> The durable location is `artifacts/input/<phase-id>/`, holding\n"
+                "> whatever the previous phase wrote under `artifacts/output/`.\n",
+                outputs=[],
+            )
+            == []
+        )
+
+    def test_every_plan_phase_reaches_the_platform_able_to_write(self) -> None:
+        """The three phases, through the conversion the create endpoint runs.
+
+        Not `grant_violations` and not the YAML: those are the two ends, and a
+        grant that is correct in the file but dropped in conversion passes both
+        while the deployed phase still cannot write. `build_command_from_definition`
+        is the hop between them and the last point the value is ours.
+        """
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+        from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+            build_command_from_definition,
+        )
+
+        definition = WorkflowDefinition.from_file(
+            _REPO_ROOT / "workflows/sdlc/research-experiment-plan/workflow.yaml"
+        )
+        phases = {p.phase_id: p for p in build_command_from_definition(definition).phases}
+
+        unable = {
+            phase_id: sorted(phase.allowed_tools)
+            for phase_id, phase in phases.items()
+            if phase.output_artifact_types
+            and phase.allowed_tools
+            and not {"Write", "Bash"} & set(phase.allowed_tools)
+        }
+
+        assert unable == {}, (
+            f"these phases are handed to the platform declaring an output they "
+            f"cannot produce: {unable}"
+        )
