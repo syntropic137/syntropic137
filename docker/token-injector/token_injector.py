@@ -180,9 +180,10 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         # A response to HEAD carries the headers of the equivalent GET and no
-        # body (RFC 9110 s9.3.2). Writing one would leave bytes envoy's HTTP/1
-        # codec is not expecting, which it would read as the start of the next
-        # response on a pooled connection.
+        # body (RFC 9110 s9.3.2). Envoy would discard a stray one today, but
+        # only because this server speaks HTTP/1.0 and closes the connection
+        # after every response; on a kept-alive connection its HTTP/1 codec
+        # reads those bytes as the start of the next response.
         if self.command != "HEAD":
             self.wfile.write(body)
 
