@@ -10,6 +10,9 @@ from typing import Any
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.phase_entry import (
+    PhaseMetricsEntry,
+)
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection import (
     WorkflowPhaseMetricsProjection,
 )
@@ -458,3 +461,71 @@ class TestQueryAndClear:
         await projection.clear_all_data()
         phases = await projection.get_phase_metrics("wf-1")
         assert phases == {}
+
+
+@pytest.mark.unit
+class TestAnUnreportedVerdictIsNotACompletion:
+    """#1256's shape at this hop: absence resolving to the success value.
+
+    A phase's outcome reached this projection through
+    ``event_data.get("success", True)``, so a PhaseCompleted that carried no
+    verdict - or carried one that was not a bool - was written down as
+    ``completed``. An operator reading phase metrics then sees a green phase
+    that nothing ever vouched for, which is the same defect as completing a
+    phase whose report could not be read.
+    """
+
+    async def test_a_completion_with_no_verdict_is_recorded_as_failed(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "failed"
+
+    async def test_a_verdict_that_is_not_a_bool_is_recorded_as_failed(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        """``"false"`` is a truthy string, and used to read as a success."""
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {
+                "workflow_id": "wf-1",
+                "execution_id": "exec-A",
+                "phase_id": "p-1",
+                "success": "false",
+            }
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "failed"
+
+    async def test_a_reported_success_still_completes(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        """The regression guard: healthy phases must be unaffected."""
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1", "success": True}
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "completed"
+
+    async def test_a_stored_entry_with_no_settled_status_reads_back_as_failed(self) -> None:
+        """The same absence, one hop later: reading our own store back."""
+        entry = PhaseMetricsEntry.from_stored("p-1", {"phase_name": "Build"})
+
+        assert entry.status == "failed"

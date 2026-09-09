@@ -965,3 +965,61 @@ class TestProjectionSubagentHandlers:
         assert saved_data["subagents"][0]["tools_used"]["Read"] == 5
         assert "research-agent" in saved_data["tools_by_subagent"]
         assert saved_data["tools_by_subagent"]["research-agent"]["Read"] == 5
+
+
+@pytest.mark.unit
+class TestASessionThatDidNotSayHowItEnded:
+    """#1256's shape at this hop: absence resolving to the success value.
+
+    `completed` is the name of the EVENT, not of every outcome it reports - a
+    failed or cancelled session arrives through the same handler carrying its
+    own status. Reading a missing status as "completed" meant a session whose
+    ending could not be read was listed as a clean one.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_completion_carrying_no_status_is_not_listed_as_completed(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        await projection.on_session_started(
+            {
+                "session_id": "session-silent",
+                "workflow_id": "wf-1",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        await projection.on_session_completed(
+            {"session_id": "session-silent", "completed_at": "2025-12-04T02:00:00.000000Z"}
+        )
+
+        result = await mock_store.get("session_summaries", "session-silent")
+        assert result is not None
+        assert result["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_a_reported_status_is_still_the_one_recorded(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """The regression guard: healthy sessions must be unaffected."""
+        await projection.on_session_started(
+            {
+                "session_id": "session-clean",
+                "workflow_id": "wf-1",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        await projection.on_session_completed(
+            {
+                "session_id": "session-clean",
+                "status": "completed",
+                "completed_at": "2025-12-04T02:00:00.000000Z",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-clean")
+        assert result is not None
+        assert result["status"] == "completed"

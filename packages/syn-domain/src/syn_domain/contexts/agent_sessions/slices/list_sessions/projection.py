@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
-from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
+from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch, SessionStatus
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
@@ -131,7 +131,11 @@ _OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "",
 
 def _apply_session_completed(existing: dict[str, Any], event_data: dict) -> None:
     """Apply SessionCompleted fields to an existing session record."""
-    existing["status"] = event_data.get("status", "completed")
+    # `completed` is the name of the EVENT, not of every outcome it reports:
+    # a session that failed or was cancelled arrives here too, carrying its
+    # status. One that carries none has not said how it ended, and reading
+    # that as the success value is #1256's shape (#1256).
+    existing["status"] = event_data.get("status") or SessionStatus.FAILED.value
     existing["completed_at"] = event_data.get("completed_at")
     existing["input_tokens"] = event_data.get("total_input_tokens", 0)
     existing["output_tokens"] = event_data.get("total_output_tokens", 0)
