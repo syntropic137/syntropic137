@@ -8,10 +8,16 @@ repo's own workflow FILES through it.
 So a workflow could declare a shape the platform rejects and reach the
 dashboard, where the field renders and can never be submitted (#942). The
 schema was right the whole time; nothing pointed it at the workflows.
+
+It also checks something the API does NOT: that a phase's prompt and its tool
+grant agree. That is a coherence property of the pair, not a validity property
+of either half, so no schema can express it and the create endpoint accepts a
+workflow that has it wrong. See `grant_violations`.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -79,6 +85,58 @@ def validate_file(path: Path) -> str | None:
     return None
 
 
+#: A fenced shell block in a prompt is the phase being told to run shell.
+#:
+#: Deliberately the fence and not a vocabulary of commands. A list of
+#: interesting binaries is a special case per binary, always one short, and
+#: whichever one it is missing is the one the next prompt uses. A fence says
+#: "run this" in the prompt's own syntax and needs no such list.
+_SHELL_FENCE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*```[ \t]*(?:bash|sh|shell|zsh|console)\b", re.M)
+
+
+def grant_violations(path: Path) -> list[str]:
+    """Phases in this file whose prompt asks for a tool the phase was not given.
+
+    THE INVARIANT: a phase's instructions and its tool grant must agree. If a
+    phase is told to run a command, it must hold Bash; if it must not, it must
+    not be told to.
+
+    WHY A GATE AND NOT A REVIEW. #1110 added a `gh pr comment` step to the
+    pr-review `report` prompt. `report` grants Read, Grep, Glob, Write - no
+    Bash. The install succeeded, the deployed prompt carried the step, and
+    three reviews (#1113, #1115, #1117) each wrote "this needs a tool this
+    phase does not have" while their verdicts stayed in object storage (#1122).
+    Nothing failed. Both halves were individually valid and only the pair was
+    wrong, which is exactly the shape a human reviewer reads past: the prompt
+    is in one file and the grant is in another.
+
+    An empty allowlist is not a restriction - `_build_agent_command` omits
+    `--tools` entirely - so those phases hold every tool and cannot violate
+    this. Codex phases are in that set by construction; the validator already
+    refuses a tool list on them.
+    """
+    definition = WorkflowDefinition.from_file(path)
+    violations: list[str] = []
+    for phase in definition.phases:
+        # A bare name is the only spelling that exists: `allowed_tools` is
+        # validated against a fixed vocabulary, so `Bash(gh:*)` is refused at
+        # load and never reaches here (#1207).
+        if not phase.allowed_tools or "Bash" in phase.allowed_tools:
+            continue
+        # from_file has already inlined prompt_file into prompt_template, so
+        # this is the prompt the agent is handed however it was written.
+        match = _SHELL_FENCE.search(phase.prompt_template or "")
+        if match is None:
+            continue
+        line = (phase.prompt_template or "").count("\n", 0, match.start()) + 1
+        violations.append(
+            f"phase '{phase.id}' is told to run shell (prompt line {line}) but its "
+            f"allowed_tools are [{', '.join(phase.allowed_tools)}] - no Bash. "
+            f"Either grant Bash or remove the instruction; do not ship the pair."
+        )
+    return violations
+
+
 def main() -> int:
     files = _workflow_files()
     if not files:
@@ -107,6 +165,10 @@ def main() -> int:
         reason = validate_file(path)
         if reason is not None:
             failures.append((path, reason))
+            continue
+        # Only once the file is known to load: `grant_violations` re-reads it
+        # through `from_file`, which is what raised above.
+        failures.extend((path, why) for why in grant_violations(path))
 
     for path, why in failures:
         print(f"  FAIL {path.relative_to(_ROOT)}\n       {why}")

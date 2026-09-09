@@ -19,7 +19,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
-from scripts.check_workflow_definitions import _workflow_files, validate_file
+from scripts.check_workflow_definitions import (
+    _workflow_files,
+    grant_violations,
+    validate_file,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.workflow_definition import (
@@ -443,3 +447,127 @@ class TestNoShippedWorkflowDeclaresToolsItCannotGet:
             "key inherits Read,Write,Bash from phases/delegate.md and the "
             "workflow stops validating"
         )
+
+
+class TestNoPromptAsksPastItsGrant:
+    """A phase's instructions and its tool grant must agree (#1122).
+
+    THE FAILURE. #1110 added a `gh pr comment` step to the pr-review `report`
+    prompt so a review would deliver itself. `report` grants Read, Grep, Glob,
+    Write. The install succeeded and the deployed prompt carried the step, so
+    three reviews (#1113, #1115, #1117) each wrote "this needs a tool this
+    phase does not have" and left their verdicts in object storage.
+
+    WHY NOTHING CAUGHT IT. Each half is valid on its own - a prompt may say
+    anything, and that tool list is a perfectly good tool list. Only the PAIR
+    is wrong, and the two halves live in different files, which is why review
+    read past it three times. A schema cannot express the pair, so the create
+    endpoint accepts it too.
+
+    The three outcomes of shipping the pair are all bad and one is silent: the
+    phase fails, or it finds a way around the restriction, or it quietly does
+    not do the thing - and nothing reports the third.
+    """
+
+    def _violations(self, tmp_path: Path, tools: list[str], prompt: str) -> list[str]:
+        path = _write(
+            tmp_path,
+            {
+                "id": "pair",
+                "name": "Pair",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "the-phase",
+                        "name": "The phase",
+                        "order": 1,
+                        "prompt_template": prompt,
+                        "allowed_tools": tools,
+                    }
+                ],
+            },
+        )
+        return grant_violations(path)
+
+    #: The instruction that actually shipped, quoted from the #1110 prompt.
+    POSTING_STEP: ClassVar[str] = (
+        "After writing your deliverable, post it as a comment on the PR:\n\n"
+        "```bash\n"
+        "gh pr comment <PR-NUMBER> --repo <OWNER>/<REPO> --body-file <your-deliverable>\n"
+        "```\n"
+    )
+
+    def test_a_prompt_that_runs_shell_without_bash_is_reported(self, tmp_path: Path) -> None:
+        """The reproduction. This is the pair that shipped in #1110."""
+        (violation,) = self._violations(
+            tmp_path, ["Read", "Grep", "Glob", "Write"], self.POSTING_STEP
+        )
+
+        assert "the-phase" in violation
+        assert "no Bash" in violation
+
+    def test_the_same_prompt_is_fine_when_bash_is_granted(self, tmp_path: Path) -> None:
+        """Negative control on the GRANT.
+
+        Without it this class passes just as well against a check that reports
+        every fenced prompt, which would fail every phase that legitimately
+        runs commands - `open_pr` and `quickfix` publish exactly this way.
+        """
+        assert self._violations(tmp_path, ["Read", "Bash", "Write"], self.POSTING_STEP) == []
+
+    def test_a_scoped_bash_grant_is_not_a_spelling_this_has_to_know(
+        self, tmp_path: Path
+    ) -> None:
+        """Why the membership test is a plain `in` and needs no prefix match.
+
+        The first version of this check accepted `Bash(gh:*)` as a Bash grant,
+        reasoning that a scoped grant still runs the command. It cannot arise:
+        `allowed_tools` is validated against a fixed vocabulary of bare names
+        (#1207), so the definition never loads. Pinned because the alternative
+        is a prefix match nothing can reach, which reads to the next person as
+        a spelling the gate handles - and invites more of them.
+        """
+        with pytest.raises(ValidationError, match="unknown tool name"):
+            self._violations(tmp_path, ["Read", "Bash(gh:*)"], self.POSTING_STEP)
+
+    def test_the_same_grant_is_fine_without_the_instruction(self, tmp_path: Path) -> None:
+        """Negative control on the PROMPT: a Bash-less phase is not itself a
+        defect. Most phases in this repo are one, deliberately."""
+        assert (
+            self._violations(
+                tmp_path,
+                ["Read", "Grep", "Glob", "Write"],
+                "Compose the verdict from artifacts/input and write it out. You are read-only.",
+            )
+            == []
+        )
+
+    def test_an_empty_allowlist_is_not_a_restriction(self, tmp_path: Path) -> None:
+        """`_build_agent_command` omits `--tools` entirely for an empty list, so
+        the phase holds every tool. Reporting it would fail every codex phase,
+        which cannot carry a tool list at all (#1207)."""
+        assert self._violations(tmp_path, [], self.POSTING_STEP) == []
+
+    def test_no_shipped_workflow_ships_the_pair(self) -> None:
+        """The whole corpus, PACKAGES INCLUDED.
+
+        `main()` skips workflow packages, so the repo's own gate cannot see
+        `examples/research-package` or the starter plugin. Driving
+        `grant_violations` directly covers them, and reuses the exemption list
+        argued in the class above rather than restating it - a second copy
+        would let the two drift, and drift in an exemption list is invisible.
+        """
+        exempt = TestNoShippedWorkflowDeclaresToolsItCannotGet.UNRESOLVABLE_ALONE
+        offenders: list[str] = []
+        for path in _workflow_files():
+            raw = yaml.safe_load(path.read_text())
+            if not isinstance(raw, dict) or "phases" not in raw:
+                continue
+            if path.relative_to(_REPO_ROOT).as_posix() in exempt:
+                continue
+            offenders.extend(
+                f"{path.relative_to(_REPO_ROOT).as_posix()}: {why}"
+                for why in grant_violations(path)
+            )
+
+        assert not offenders, "\n".join(offenders)
