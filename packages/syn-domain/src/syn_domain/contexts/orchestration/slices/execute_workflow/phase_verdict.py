@@ -183,11 +183,11 @@ class AgentVerdict:
             )
         if self.status is VerdictStatus.UNREADABLE:
             return (
-                f"Phase '{phase_id}' wrote a {TASK_RESULT_MARKER} marker with no "
-                f"verdict under it that is both readable and closed by "
-                f'{TASK_RESULT_TERMINATOR}: "{self.comments}". An unreadable report '
-                f"may be a failure report, so the phase fails rather than completing "
-                f"on a verdict nobody could read."
+                f"Phase '{phase_id}' wrote a {TASK_RESULT_MARKER} marker whose block "
+                f"could not be read as a verdict - it is not JSON, or it is not "
+                f'closed by a {TASK_RESULT_TERMINATOR} line: "{self.comments}". An '
+                f"unreadable report may be a failure report, so the phase fails "
+                f"rather than completing on a verdict nobody could read."
             )
         return ""
 

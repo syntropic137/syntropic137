@@ -643,6 +643,12 @@ def _run_gh(
 #:   shared template and `implement` hits it too. Confining the fix to the
 #:   no-checkout rendering would have left the same bug in the branch the
 #:   experiment measures, which is a carve-out, not a fix.
+#: * #1256 gave the result block a `TASK_RESULT_END` terminator and stopped the
+#:   prompt from ever closing one itself. Also shared, also seen by every
+#:   phase, and not optional: the reader can only tell a report from a
+#:   quotation of the template if the template is not a complete report, and
+#:   the template is in these bytes. Leaving the examples closed would have
+#:   left the parser's contract unhonoured by the only thing that produces it.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -736,16 +742,24 @@ the previous phase failed - report this in your output.
 
 ## Task Result (REQUIRED)
 
-**The very last thing in your response must be a `TASK_RESULT` block.**
+**The very last thing in your response must be a `TASK_RESULT` block.** It is
+three parts, and it is read as your result only when all three are there:
 
-If you completed the task successfully:
 ```
-TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+TASK_RESULT: <-- replace this with one of the JSON objects below
+TASK_RESULT_END
+```
+
+If you completed the task successfully, the JSON object is:
+
+```
+{"success": true, "comments": "Brief summary of what was accomplished"}
 ```
 
 If you could NOT complete the task (blocked, missing access, error, etc.):
+
 ```
-TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
+{"success": false, "comments": "Specific reason why — what was missing or what failed"}
 ```
 
 Examples of failure reasons:
@@ -753,6 +767,11 @@ Examples of failure reasons:
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
+
+The `TASK_RESULT_END` line is what marks the block as your result rather than a
+mention of one, so write it. Without it your phase is failed as unreadable
+instead of completed. With it you are free to quote, explain or discuss this
+format anywhere else in your reply - nothing outside a closed block is read.
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 

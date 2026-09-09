@@ -302,7 +302,9 @@ class TestEventStreamProcessor:
         result_line = json.dumps(
             {
                 "type": "result",
-                "result": 'Done. TASK_RESULT: {"success": true, "comments": "All good"}',
+                "result": (
+                    'Done. TASK_RESULT: {"success": true, "comments": "All good"}\nTASK_RESULT_END'
+                ),
                 "usage": {},
             }
         )

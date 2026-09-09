@@ -4,6 +4,11 @@ THE REPRODUCTION, verbatim from the issue::
 
     TASK_RESULT: {"success": false, "comments": "the handler returns dict{} not a model"}
 
+(The blocks below carry the ``TASK_RESULT_END`` line the prompt now asks for.
+A report is delimited rather than located, because three fixes in a row tried
+to work out WHERE in the prose the payload was and each was defeated by text
+that legitimately looks like one - the failure example is in every prompt.)
+
 Run against `main` this whole file is green in the wrong direction: every one
 of these executions came back ``completed``. Two independent defects produced
 that, and the second is why the first was never noticed:
@@ -36,7 +41,8 @@ from .test_processor_smoke import _make_processor, _one_phase_workflow, _two_pha
 #: The issue's own reproduction. The brace inside the string is the point.
 REPORTED_FAILURE = (
     'All done? No. TASK_RESULT: {"success": false, '
-    '"comments": "the handler returns dict{} not a model"}'
+    '"comments": "the handler returns dict{} not a model"}\n'
+    "TASK_RESULT_END"
 )
 
 pytestmark = pytest.mark.unit
@@ -99,7 +105,10 @@ class TestAReportedFailureIsNotACompletion:
         why - which is how the brace path stayed hidden underneath it.
         """
         fake = FakeAgentExecutionHandler.success(
-            says='TASK_RESULT: {"success": false, "comments": "the handler returns no model"}'
+            says=(
+                'TASK_RESULT: {"success": false, "comments": "the handler returns no model"}\n'
+                "TASK_RESULT_END"
+            )
         )
         processor = _make_processor(fake)
 
@@ -160,7 +169,10 @@ class TestWhatMustStillComplete:
 
     async def test_a_reported_success_completes(self) -> None:
         fake = FakeAgentExecutionHandler.success(
-            says='Finished. TASK_RESULT: {"success": true, "comments": "opened PR #1257"}'
+            says=(
+                'Finished. TASK_RESULT: {"success": true, "comments": "opened PR #1257"}\n'
+                "TASK_RESULT_END"
+            )
         )
         processor = _make_processor(fake)
 
@@ -190,7 +202,8 @@ class TestWhatMustStillComplete:
         fake = FakeAgentExecutionHandler.success(
             says=(
                 'TASK_RESULT: {"success": true, "comments": '
-                '"the parser looks for TASK_RESULT: at the start"}'
+                '"the parser looks for TASK_RESULT: at the start"}\n'
+                "TASK_RESULT_END"
             )
         )
         processor = _make_processor(fake)
@@ -207,6 +220,46 @@ class TestWhatMustStillComplete:
             f"Expected 'completed' but got '{result.status}'. A phase that "
             "reported success was failed because its comments mentioned the "
             "marker."
+        )
+        assert result.error_message is None
+
+    async def test_a_success_that_restates_the_format_afterwards_completes(self) -> None:
+        """The variant this rework closes, at the hop that RECORDS the outcome.
+
+        The reader took the last DECODABLE candidate, so this execution was
+        recorded `failed` with an `error_message` quoting the prompt's own
+        example back at the operator - text the agent never claimed as its
+        result. The literal template below is what `render_workspace_prompt`
+        puts in front of every phase, so any agent that reports success and
+        then explains how it reported it lands here.
+
+        Asserted on `result.status` rather than on the verdict: a parser that
+        returns SUCCESS while the execution still records `failed` is exactly
+        the split that let #1256 survive its first fix.
+        """
+        fake = FakeAgentExecutionHandler.success(
+            says=(
+                'TASK_RESULT: {"success": true, "comments": "opened PR #1258"}\n'
+                "TASK_RESULT_END\n\n"
+                "For reference, the block the prompt asks for is:\n"
+                'TASK_RESULT: {"success": false, '
+                '"comments": "Specific reason why — what was missing or what failed"}\n'
+            )
+        )
+        processor = _make_processor(fake)
+
+        result = await processor.run(
+            workflow_id="wf-1256",
+            workflow_name="Reported success then restated the format",
+            phases=_one_phase_workflow(),
+            inputs={},
+            execution_id="exec-1256-restates-format",
+        )
+
+        assert result.status == "completed", (
+            f"Expected 'completed' but got '{result.status}'. A phase that "
+            "reported success was failed by the failure template it quoted "
+            "afterwards."
         )
         assert result.error_message is None
 
