@@ -603,9 +603,7 @@ class TestNoPhaseMustProduceAnArtifactItCannotWrite:
     the same thing without the ambiguity, and cannot be dodged by rewording.
     """
 
-    def _violations(
-        self, tmp_path: Path, tools: list[str], outputs: list[str]
-    ) -> list[str]:
+    def _violations(self, tmp_path: Path, tools: list[str], outputs: list[str]) -> list[str]:
         return TestNoPromptAsksPastItsGrant()._violations(
             tmp_path,
             tools,
@@ -619,9 +617,7 @@ class TestNoPhaseMustProduceAnArtifactItCannotWrite:
     #: The grant the three phases actually shipped with.
     READ_ONLY: ClassVar[list[str]] = ["Read", "Grep", "Glob"]
 
-    def test_a_declared_output_without_write_or_bash_is_reported(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_declared_output_without_write_or_bash_is_reported(self, tmp_path: Path) -> None:
         """The reproduction, with the exact pair the three phases shipped."""
         (violation,) = self._violations(tmp_path, self.READ_ONLY, ["markdown"])
 
@@ -645,9 +641,7 @@ class TestNoPhaseMustProduceAnArtifactItCannotWrite:
         """
         assert self._violations(tmp_path, [*self.READ_ONLY, "Bash"], ["markdown"]) == []
 
-    def test_a_phase_declaring_no_output_is_not_asked_to_write(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_phase_declaring_no_output_is_not_asked_to_write(self, tmp_path: Path) -> None:
         """Negative control on the DECLARATION: read-only phases are fine.
 
         Without this the check could report every Write-less phase, which would
@@ -655,9 +649,7 @@ class TestNoPhaseMustProduceAnArtifactItCannotWrite:
         """
         assert self._violations(tmp_path, self.READ_ONLY, []) == []
 
-    def test_naming_the_input_directory_in_prose_is_not_a_declaration(
-        self, tmp_path: Path
-    ) -> None:
+    def test_naming_the_input_directory_in_prose_is_not_a_declaration(self, tmp_path: Path) -> None:
         """The false positive this design avoids, quoted from the real prompts.
 
         Every phase in `research-experiment-plan` carries this paragraph, and a

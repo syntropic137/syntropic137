@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ValidationError
@@ -31,6 +31,9 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _ROOT = Path(__file__).resolve().parent.parent
 _ROOTS = ("workflows",)
