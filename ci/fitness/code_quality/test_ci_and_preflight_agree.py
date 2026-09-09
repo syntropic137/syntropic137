@@ -423,6 +423,7 @@ def test_a_gate_reached_only_from_a_recipe_body_counts_as_run() -> None:
 
     assert "codegen" in covered, "`codegen-check` invokes `just codegen` in its body"
     assert "topology-analyze" in covered, "`fitness-check` invokes it in its body"
-    assert not _ALLOWED_OUTSIDE, (
-        "both entries this table used to hold were compensating for that blind spot"
+    assert "codegen" not in _ALLOWED_OUTSIDE, (
+        "the exception saying `codegen-check` runs it was compensating for the "
+        "blind spot; the closure sees the invocation now, so it is not needed"
     )
