@@ -183,9 +183,8 @@ def _last_report(text: str) -> _Report | None:
     string content - never a candidate to be the next report. Taking the
     textually last marker instead cannot tell a report from a quotation of
     one, and gets it wrong exactly when an agent writes about result parsing.
-    Delimiting is what makes "last" unambiguous, so this does not choose
-    between the task's two options; the first is only correct because of the
-    second.
+    "Locate the last one" and "delimit the payload" are therefore not
+    alternatives: delimiting is what makes "last" mean anything.
 
     The last CANDIDATE decides, readable or not. That is the half that must
     not be traded away to fix the above: an agent that restates its result has
