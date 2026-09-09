@@ -201,6 +201,8 @@ class Gate:
 
     kind: Literal["script", "recipe"]
     name: str
+    #: The id of the top-level job whose steps led here, however deep the call.
+    job: str
     source: str
 
     @property
@@ -209,7 +211,7 @@ class Gate:
         return f"scripts/{self.name}" if self.kind == "script" else f"just {self.name}"
 
 
-def _run_gates(script: str, source: str, recipes: set[str]) -> list[Gate]:
+def _run_gates(script: str, job: str, source: str, recipes: set[str]) -> list[Gate]:
     """Every gate one `run:` block invokes.
 
     A `just` word counts only when the justfile defines a recipe by that name,
@@ -217,9 +219,9 @@ def _run_gates(script: str, source: str, recipes: set[str]) -> list[Gate]:
     in prose. A recipe CI names but the justfile does not define is not a parity
     risk: that run fails loudly on the runner the first time it happens.
     """
-    gates = [Gate("script", name, source) for name in _SCRIPT_RE.findall(script)]
+    gates = [Gate("script", name, job, source) for name in _SCRIPT_RE.findall(script)]
     for words in _JUST_RE.findall(script):
-        gates.extend(Gate("recipe", w, source) for w in words.split() if w in recipes)
+        gates.extend(Gate("recipe", w, job, source) for w in words.split() if w in recipes)
     return gates
 
 
@@ -283,14 +285,17 @@ def workflow_gates(document: object, source: str, repo_root: Path, recipes: set[
     module docstring.
     """
 
-    def walk(document: object, source: str, seen: frozenset[Path]) -> list[Gate]:
+    def walk(document: object, source: str, job: str, seen: frozenset[Path]) -> list[Gate]:
         gates: list[Gate] = []
         for job_id, step in _steps_of(document):
             if not isinstance(step, dict):
                 continue
+            # Below the top level the originating job is what matters, because
+            # that is the job the mapping tables above have an entry for.
+            origin = job or job_id
             where = f"{source}:{job_id}" if job_id else source
             if isinstance(step.get("run"), str):
-                gates.extend(_run_gates(step["run"], where, recipes))
+                gates.extend(_run_gates(step["run"], origin, where, recipes))
             uses = step.get("uses")
             if not isinstance(uses, str):
                 continue
@@ -298,10 +303,10 @@ def workflow_gates(document: object, source: str, repo_root: Path, recipes: set[
             if called is None or called in seen:
                 continue
             called_document = yaml.safe_load(called.read_text())
-            gates.extend(walk(called_document, f"{where} -> {uses}", seen | {called}))
+            gates.extend(walk(called_document, f"{where} -> {uses}", origin, seen | {called}))
         return gates
 
-    return walk(document, source, frozenset())
+    return walk(document, source, "", frozenset())
 
 
 def gate_problems(
@@ -327,11 +332,12 @@ def gate_problems(
         if match
     )
     excluded = set(unmapped_reasons())
+    recipes = just_targets(justfile)
     problems: list[str] = []
     for filename, document in sorted(workflows.items()):
         accounted = {job for job in job_ids(document) if f"{filename}:{job}" in excluded}
-        for gate in workflow_gates(document, filename, repo_root, just_targets(justfile)):
-            if gate.source.split(" -> ")[0].removeprefix(f"{filename}:") in accounted:
+        for gate in workflow_gates(document, filename, repo_root, recipes):
+            if gate.job in accounted:
                 continue
             if gate.token in STEPS_WITHOUT_A_LOCAL_TARGET:
                 continue

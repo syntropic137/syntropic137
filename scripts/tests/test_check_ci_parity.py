@@ -442,6 +442,49 @@ def test_a_gate_in_an_already_excluded_job_inherits_that_reason(
     assert problems == []
 
 
+@pytest.mark.parametrize(
+    ("step", "callee", "body"),
+    [
+        (
+            {"uses": "./.github/actions/setup"},
+            ".github/actions/setup/action.yml",
+            {"runs": {"using": "composite", "steps": [{"run": "just check-orphan"}]}},
+        ),
+        (
+            {"uses": "./.github/workflows/_check.yml"},
+            ".github/workflows/_check.yml",
+            {"jobs": {"a-differently-named-job": {"steps": [{"run": "just check-orphan"}]}}},
+        ),
+    ],
+    ids=["composite-action", "reusable-workflow"],
+)
+def test_a_nested_gate_inherits_the_calling_jobs_exclusion(
+    step: object,
+    callee: str,
+    body: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    mapping: None,
+    tmp_path: object,
+) -> None:
+    """A gate reached through a call belongs to the job that made the call.
+
+    The callee's own job names are its business: a composite action has none at
+    all, and a reusable workflow's need not match the caller's. Attributing a
+    nested gate to either would look up an exclusion that cannot match, and the
+    excluded job's steps would be reported anyway.
+    """
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {"ci.yml:unit": "release only"})
+    monkeypatch.setattr(check_ci_parity, "LOCAL_EQUIVALENT", {})
+    root = _repo(tmp_path)
+    path = root / callee
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(body))
+
+    problems = check_ci_parity.gate_problems({"ci.yml": _mapped_job_running(step)}, JUSTFILE, root)
+
+    assert problems == []
+
+
 def test_an_explicit_exception_entry_silences_a_gate(
     monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: object
 ) -> None:
