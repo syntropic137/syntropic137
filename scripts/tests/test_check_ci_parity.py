@@ -317,3 +317,290 @@ def test_the_pinned_python_version_is_read_from_the_workflow() -> None:
 
 def test_the_local_python_version_is_a_minor_version() -> None:
     assert local_python_version().count(".") == 1
+
+
+# --- gates inside jobs, which the job mapping structurally cannot see --------
+#
+# The job mapping compares job ids, so a gate added as a STEP inside an
+# already-mapped job was invisible to it (#1124). These drive `gate_problems()`
+# and `main()` with a gate in each form a workflow can express one, because the
+# first fix for #1124 saw only one of those forms.
+
+
+def _repo(tmp_path: object) -> Path:
+    """A repo root with a justfile, so `uses: ./...` has something to resolve."""
+    root = Path(str(tmp_path))
+    (root / "justfile").write_text(JUSTFILE)
+    (root / ".github" / "actions").mkdir(parents=True)
+    (root / ".github" / "workflows").mkdir(parents=True)
+    return root
+
+
+def _mapped_job_running(step: object) -> dict[str, object]:
+    """`ci.yml:unit`, which IS mapped to a local target, plus one extra step.
+
+    The mapped job is the point: the job-level check reports this workflow as
+    fully covered, so anything the step adds is coverage CI has and local does
+    not.
+    """
+    return {"on": {"pull_request": None}, "jobs": {"unit": {"steps": [step]}}}
+
+
+@pytest.mark.parametrize(
+    ("step", "expected"),
+    [
+        ({"run": "uv run python scripts/check_orphaned.py"}, "scripts/check_orphaned.py"),
+        ({"run": "just check-orphan"}, "just check-orphan"),
+    ],
+    ids=["script", "recipe"],
+)
+def test_a_gate_added_as_a_step_in_a_mapped_job_is_reported(
+    step: object, expected: str, mapping: None, tmp_path: object
+) -> None:
+    """The #1124 defect itself, in both spellings a `run:` block can use.
+
+    `just check-orphan` is the spelling the first fix could not see: the
+    justfile defines the recipe, `qa-ci` does not reach it, and CI runs it.
+    """
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running(step)}, JUSTFILE, _repo(tmp_path)
+    )
+
+    assert len(problems) == 1
+    assert expected in problems[0]
+
+
+def test_a_gate_inside_a_local_composite_action_is_reported(
+    mapping: None, tmp_path: object
+) -> None:
+    """`uses: ./.github/actions/x` hides a gate one file away from the workflow."""
+    root = _repo(tmp_path)
+    action = root / ".github" / "actions" / "setup"
+    action.mkdir()
+    (action / "action.yml").write_text(
+        yaml.safe_dump({"runs": {"using": "composite", "steps": [{"run": "just check-orphan"}]}})
+    )
+
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"uses": "./.github/actions/setup"})},
+        JUSTFILE,
+        root,
+    )
+
+    assert len(problems) == 1
+    assert "just check-orphan" in problems[0]
+    assert "./.github/actions/setup" in problems[0]
+
+
+def test_a_gate_inside_a_local_reusable_workflow_is_reported(
+    mapping: None, tmp_path: object
+) -> None:
+    """A job that is only `uses:` has no steps of its own; its callee has them."""
+    root = _repo(tmp_path)
+    (root / ".github" / "workflows" / "_check.yml").write_text(
+        yaml.safe_dump({"jobs": {"check": {"steps": [{"run": "just check-orphan"}]}}})
+    )
+    workflow_document = {
+        "on": {"pull_request": None},
+        "jobs": {"unit": {"uses": "./.github/workflows/_check.yml"}},
+    }
+
+    problems = check_ci_parity.gate_problems({"ci.yml": workflow_document}, JUSTFILE, root)
+
+    assert len(problems) == 1
+    assert "just check-orphan" in problems[0]
+
+
+def test_a_gate_reachable_from_qa_ci_is_not_reported(mapping: None, tmp_path: object) -> None:
+    """The gate must stay quiet when local really does run the step's command."""
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"run": "just check-test-debt"})},
+        JUSTFILE,
+        _repo(tmp_path),
+    )
+
+    assert problems == []
+
+
+def test_a_gate_in_an_already_excluded_job_inherits_that_reason(
+    monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: object
+) -> None:
+    """A job excluded with a reason does not need that reason repeated per step.
+
+    Without this, every step of every release-only job would demand its own
+    entry in a second table saying what the first table already says.
+    """
+    monkeypatch.setattr(check_ci_parity, "NOT_RUN_ON_FEATURE_PR", {"ci.yml:unit": "release only"})
+    monkeypatch.setattr(check_ci_parity, "LOCAL_EQUIVALENT", {})
+
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"run": "just check-orphan"})},
+        JUSTFILE,
+        _repo(tmp_path),
+    )
+
+    assert problems == []
+
+
+def test_an_explicit_exception_entry_silences_a_gate(
+    monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: object
+) -> None:
+    """The escape hatch is a written-down decision, keyed by the printed token."""
+    monkeypatch.setattr(
+        check_ci_parity, "STEPS_WITHOUT_A_LOCAL_TARGET", {"just check-orphan": "a reason"}
+    )
+
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"run": "just check-orphan"})},
+        JUSTFILE,
+        _repo(tmp_path),
+    )
+
+    assert problems == []
+
+
+def _complete_workflow(*extra_steps: object) -> dict[str, object]:
+    """Every job the `mapping` fixture accounts for, so the job check is clean.
+
+    This matters more than it looks. Built with only the one job, the stale
+    entries for `ui` and `scan` make find_problems() fail on their own, and a
+    main() test then returns 1 whatever the steps do - it passes with the step
+    check deleted. That is this issue's defect wearing the test's clothes.
+    """
+    return {
+        "on": {"pull_request": None},
+        "jobs": {"unit": {"steps": list(extra_steps)}, "ui": {}, "scan": {}},
+    }
+
+
+def test_main_is_green_for_a_complete_mapping_with_a_runnable_step(
+    monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: object
+) -> None:
+    """The control for the test below: everything green, so 1 means the step."""
+    root = _repo(tmp_path)
+    monkeypatch.setattr(
+        check_ci_parity, "pr_triggered_workflows", lambda _: {"ci.yml": _complete_workflow()}
+    )
+    monkeypatch.setattr(check_ci_parity, "JUSTFILE", root / "justfile")
+    monkeypatch.setattr(check_ci_parity, "REPO_ROOT", root)
+
+    assert check_ci_parity.main() == 0
+
+
+def test_main_exits_1_for_a_step_shaped_gate(
+    monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: object
+) -> None:
+    """The consumer test: an unrunnable step gate must change the exit code.
+
+    Every other test here calls `gate_problems()` directly, so all of them
+    would still pass if `main()` never called it - which is exactly how the
+    first fix for #1124 shipped untested. The only difference from the green
+    control above is the one step.
+    """
+    root = _repo(tmp_path)
+    monkeypatch.setattr(
+        check_ci_parity,
+        "pr_triggered_workflows",
+        lambda _: {"ci.yml": _complete_workflow({"run": "just check-orphan"})},
+    )
+    monkeypatch.setattr(check_ci_parity, "JUSTFILE", root / "justfile")
+    monkeypatch.setattr(check_ci_parity, "REPO_ROOT", root)
+
+    assert check_ci_parity.main() == 1
+
+
+# --- what the walk deliberately does not see, pinned so it stays deliberate --
+
+
+def test_a_third_party_action_is_a_stated_blind_spot(mapping: None, tmp_path: object) -> None:
+    """Its implementation is not in this repo, so nothing here can read it."""
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"uses": "some-owner/some-action@v4"})},
+        JUSTFILE,
+        _repo(tmp_path),
+    )
+
+    assert problems == []
+
+
+def test_a_word_that_is_not_a_recipe_is_not_a_gate(mapping: None, tmp_path: object) -> None:
+    """`just` in prose, and its arguments, must not read as recipes.
+
+    Otherwise the gate invents failures for text, and the fix for those is to
+    stop writing English in a run block.
+    """
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"run": 'echo "just do it"'})},
+        JUSTFILE,
+        _repo(tmp_path),
+    )
+
+    assert problems == []
+
+
+def test_a_cycle_between_local_workflows_terminates(mapping: None, tmp_path: object) -> None:
+    """A workflow calling itself must not hang the gate that guards every PR."""
+    root = _repo(tmp_path)
+    (root / ".github" / "workflows" / "_loop.yml").write_text(
+        yaml.safe_dump(
+            {
+                "jobs": {
+                    "a": {
+                        "steps": [
+                            {"uses": "./.github/workflows/_loop.yml"},
+                            {"run": "just check-orphan"},
+                        ]
+                    }
+                }
+            }
+        )
+    )
+
+    problems = check_ci_parity.gate_problems(
+        {"ci.yml": _mapped_job_running({"uses": "./.github/workflows/_loop.yml"})},
+        JUSTFILE,
+        root,
+    )
+
+    assert len(problems) == 1
+
+
+def test_the_repos_own_workflows_have_no_unrunnable_gate() -> None:
+    """The gate, run against the real workflows and the real justfile."""
+    workflows = check_ci_parity.pr_triggered_workflows(check_ci_parity.WORKFLOW_DIR)
+
+    assert check_ci_parity.gate_problems(workflows, check_ci_parity.JUSTFILE.read_text()) == []
+
+
+def test_the_walk_follows_a_real_reusable_workflow_call() -> None:
+    """Following `uses:` must be exercised against the real tree, not only fixtures.
+
+    release-gate.yml's codegen-sync job is nothing but a call to
+    _check-codegen-sync.yml, and the `just codegen` it runs lives in the callee.
+    A walk that stopped at the caller would find no gate at all and report
+    exactly what full coverage reports.
+    """
+    document = check_ci_parity.pr_triggered_workflows(check_ci_parity.WORKFLOW_DIR)[
+        "release-gate.yml"
+    ]
+    recipes = check_ci_parity.just_targets(check_ci_parity.JUSTFILE.read_text())
+
+    gates = check_ci_parity.workflow_gates(
+        document, "release-gate.yml", check_ci_parity.REPO_ROOT, recipes
+    )
+
+    through_callee = [g for g in gates if "_check-codegen-sync.yml" in g.source]
+    assert [g.token for g in through_callee] == ["just codegen"]
+
+
+def test_the_repos_real_composite_action_resolves_to_its_action_file() -> None:
+    """setup-vsa runs no script and no recipe, so no assertion about problems can
+    tell whether the walk entered it or silently skipped it - which is this
+    issue's own defect. Assert the resolution step directly instead."""
+    resolved = check_ci_parity._resolve_local_uses(
+        "./.github/actions/setup-vsa", check_ci_parity.REPO_ROOT
+    )
+
+    assert resolved is not None
+    assert resolved.name == "action.yml"
+    assert resolved.is_file()

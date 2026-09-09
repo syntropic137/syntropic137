@@ -263,9 +263,7 @@ def _resolve_local_uses(reference: str, repo_root: Path) -> Path | None:
     return target if target.is_file() else None
 
 
-def workflow_gates(
-    document: object, source: str, repo_root: Path, recipes: set[str]
-) -> list[Gate]:
+def workflow_gates(document: object, source: str, repo_root: Path, recipes: set[str]) -> list[Gate]:
     """Every gate reachable from a workflow document, following what it calls.
 
     WHY THIS EXISTS (issue #1124). The job mapping compares JOBS, so a gate
@@ -284,6 +282,7 @@ def workflow_gates(
     action, and a `run:` block whose gate is bespoke inline shell. See the
     module docstring.
     """
+
     def walk(document: object, source: str, seen: frozenset[Path]) -> list[Gate]:
         gates: list[Gate] = []
         for job_id, step in _steps_of(document):
