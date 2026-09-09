@@ -19,12 +19,17 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
-from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PhaseYamlDefinition,
+    WorkflowDefinition,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -96,12 +101,70 @@ _SHELL_FENCE = re.compile(
 )
 
 
-def grant_violations(path: Path) -> list[str]:
-    """Phases in this file whose prompt asks for a tool the phase was not given.
+def _told_to_run_shell(phase: PhaseYamlDefinition) -> str | None:
+    # from_file has already inlined prompt_file into prompt_template, so this
+    # is the prompt the agent is handed however it was written.
+    prompt = phase.prompt_template or ""
+    match = _SHELL_FENCE.search(prompt)
+    if match is None:
+        return None
+    return f"prompt line {prompt.count('\n', 0, match.start()) + 1}"
 
-    THE INVARIANT: a phase's instructions and its tool grant must agree. If a
-    phase is told to run a command, it must hold Bash; if it must not, it must
-    not be told to.
+
+def _required_to_produce_an_artifact(phase: PhaseYamlDefinition) -> str | None:
+    # `output_artifacts` and not a phrase in the prompt. Every phase states its
+    # deliverable twice - once in prose and once in this field - and only the
+    # field is structured. Reading the prose instead would mean matching "write
+    # to artifacts/output", which the phases that only READ that directory also
+    # say, in the boilerplate that tells them where their input came from.
+    if not phase.output_artifacts:
+        return None
+    return f"it declares output_artifacts {phase.output_artifacts}"
+
+
+@dataclass(frozen=True)
+class _Demand:
+    """Something a phase is REQUIRED to be able to do, and what would let it.
+
+    Each demand knows how to find itself in a phase, so a new capability is one
+    entry in `_DEMANDS` rather than another branch in the loop below. Where the
+    requirement is stated differs - the shell one is in the prompt, the artifact
+    one is in the phase's own declarations - and that difference is this type's
+    whole job to absorb: the caller asks "is this phase able to do what it must"
+    and never learns which half of the file the answer came from.
+    """
+
+    #: Completes "phase X must ...", so phrase it as a verb.
+    must: str
+    #: Holding ANY of these satisfies the demand. More than one because there
+    #: is usually more than one honest way: a phase with Bash can create a file
+    #: with a heredoc and needs no Write to do it.
+    satisfied_by: frozenset[str]
+    #: Where the requirement is stated, or None when this phase has no such
+    #: requirement.
+    locate: Callable[[PhaseYamlDefinition], str | None]
+
+
+_DEMANDS: tuple[_Demand, ...] = (
+    _Demand(
+        must="run shell",
+        satisfied_by=frozenset({"Bash"}),
+        locate=_told_to_run_shell,
+    ),
+    _Demand(
+        must="create a file",
+        satisfied_by=frozenset({"Bash", "Write"}),
+        locate=_required_to_produce_an_artifact,
+    ),
+)
+
+
+def grant_violations(path: Path) -> list[str]:
+    """Phases in this file that must do something their tool grant forbids.
+
+    THE INVARIANT: a phase's instructions and its tool grant must agree. Every
+    phase told to do something must be able to do it; every phase that must not
+    do something must not be told to.
 
     WHY A GATE AND NOT A REVIEW. #1110 added a `gh pr comment` step to the
     pr-review `report` prompt. `report` grants Read, Grep, Glob, Write - no
@@ -111,6 +174,14 @@ def grant_violations(path: Path) -> list[str]:
     Nothing failed. Both halves were individually valid and only the pair was
     wrong, which is exactly the shape a human reviewer reads past: the prompt
     is in one file and the grant is in another.
+
+    WHY IT CHECKS MORE THAN THE PROMPT. The first version of this gate knew
+    only the shell fence, and #1122's own fix then missed three phases of
+    `research-experiment-plan` that declare a markdown output while granting
+    [Read, Grep, Glob] - no Write, no Bash, so nothing they produced could
+    reach `artifacts/output/` and the phase after each of them reads an empty
+    directory. Same defect, stated in the declaration rather than in a fence.
+    A gate that knows one spelling of a defect certifies the others.
 
     An empty allowlist is not a restriction - `_build_agent_command` omits
     `--tools` entirely - so those phases hold every tool and cannot violate
@@ -123,19 +194,22 @@ def grant_violations(path: Path) -> list[str]:
         # A bare name is the only spelling that exists: `allowed_tools` is
         # validated against a fixed vocabulary, so `Bash(gh:*)` is refused at
         # load and never reaches here (#1207).
-        if not phase.allowed_tools or "Bash" in phase.allowed_tools:
+        granted = set(phase.allowed_tools)
+        if not granted:
             continue
-        # from_file has already inlined prompt_file into prompt_template, so
-        # this is the prompt the agent is handed however it was written.
-        match = _SHELL_FENCE.search(phase.prompt_template or "")
-        if match is None:
-            continue
-        line = (phase.prompt_template or "").count("\n", 0, match.start()) + 1
-        violations.append(
-            f"phase '{phase.id}' is told to run shell (prompt line {line}) but its "
-            f"allowed_tools are [{', '.join(phase.allowed_tools)}] - no Bash. "
-            f"Either grant Bash or remove the instruction; do not ship the pair."
-        )
+        for demand in _DEMANDS:
+            if granted & demand.satisfied_by:
+                continue
+            where = demand.locate(phase)
+            if where is None:
+                continue
+            missing = ", ".join(sorted(demand.satisfied_by))
+            violations.append(
+                f"phase '{phase.id}' must {demand.must} ({where}) but its "
+                f"allowed_tools are [{', '.join(phase.allowed_tools)}] - none of "
+                f"[{missing}]. Either grant one or drop the requirement; do not "
+                f"ship the pair."
+            )
     return violations
 
 
