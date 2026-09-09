@@ -121,10 +121,14 @@ services:
     deploy:
       resources:
         limits:
-          # Post-tuning target. Pre-tuning collector peaked at 143MB; with
-          # MALLOC_ARENA_MAX=2 + PYTHONMALLOC=malloc + dedup defaults this
-          # drops to 95-110MB under load. 96M leaves slack for OTLP bursts.
-          memory: ${COLLECTOR_MEMORY_LIMIT:-96m}
+          # Measured (#1093), with MALLOC_ARENA_MAX=2 + PYTHONMALLOC=malloc set
+          # above: 56MB at idle, 77MB once the 100k-entry dedup cache saturates
+          # with no traffic at all, and 132MB peak ingesting 32KB payloads at 8
+          # concurrent senders. The old 96m sat below the range its own comment
+          # claimed ("95-110MB under load") and below every value the project
+          # declares for this var. 256m is ~2x the measured peak and is what
+          # InfraSettings.collector_memory_limit already defaults to.
+          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
           cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
     logging:
       driver: "json-file"
