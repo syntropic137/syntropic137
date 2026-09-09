@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_self_report import (
+    refuse_to_complete_declared_failure,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
@@ -676,17 +679,29 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COMPLETE_PHASE.
 
-        THE ORDER OF THE FOUR STEPS BELOW IS THE GUARANTEE (#1184). The guard
-        runs before the phase gives anything up, before the aggregate is told
-        it succeeded, before that is persisted, and before the runtime tears
-        the workspace down. Every one of those is a point of no return, and the
-        guard is only a guard on the near side of all four.
+        THE ORDER OF THE FOUR STEPS BELOW IS THE GUARANTEE (#1184). The guards
+        run before the phase gives anything up, before the aggregate is told it
+        succeeded, before that is persisted, and before the runtime tears the
+        workspace down. Every one of those is a point of no return, and a guard
+        is only a guard on the near side of all four.
+
+        THE TWO GUARDS ARE ORDERED, and the order is load-bearing. The
+        unsaved-work guard PUSHES what it finds before it refuses, so it must
+        go first: refusing ahead of it would strand the very commits it exists
+        to rescue. The declared-failure guard only reads a verdict the agent
+        already gave, so it costs nothing to run second and must not run first.
         """
         assert todo.phase_id is not None
         # FIRST, and on the real path rather than inside a try: nothing has
         # been popped, the workspace is still alive and the aggregate has not
         # been told this phase succeeded, so the raise IS the outcome (#1184).
         await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
+        # SECOND, and here rather than at the agent-exit hop deliberately: by
+        # now this phase's artifacts have been collected and journalled, so the
+        # write-up explaining why the agent could not do the job survives the
+        # failure it causes. A phase that says "I could not verify" must not
+        # report the same outcome as one that verified and passed (#1127).
+        refuse_to_complete_declared_failure(self._runtime.self_reports, todo)
 
         harvest = self._runtime.harvest(todo.phase_id)
         outcome = completed_phase(

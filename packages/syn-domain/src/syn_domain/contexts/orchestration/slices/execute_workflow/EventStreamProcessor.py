@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_self_report import (
+    AgentSelfReport,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -261,7 +264,10 @@ class StreamResult:
     line_count: int
     interrupt_requested: bool
     interrupt_reason: str | None
-    agent_task_result: dict[str, Any] | None
+    #: The agent's own verdict on this phase, or None when it declared
+    #: nothing. Read by `refuse_to_complete_declared_failure` on the
+    #: completion path - it is a decision, not a log line (#1127).
+    agent_self_report: AgentSelfReport | None
     conversation_lines: list[str] = field(default_factory=list)
     # Authoritative totals from the CLI result event (ISS-217).
     #
@@ -328,7 +334,6 @@ class _LineOutcome:
     #: still a cancel (#918).
     interrupt_requested: bool = False
     interrupt_reason: str | None = None
-    task_result: dict[str, Any] | None = None
 
 
 class EventStreamProcessor:
@@ -433,15 +438,12 @@ class EventStreamProcessor:
         line_count = 0
         interrupt_requested = False
         interrupt_reason: str | None = None
-        agent_task_result: dict[str, Any] | None = None
 
         async for line in stream:
             line_count += 1
             outcome = await self._process_line(line, line_count, workspace)
             if line.strip():
                 conversation_lines.append(line)
-            if outcome.task_result is not None:
-                agent_task_result = outcome.task_result
             if outcome.action is _LineAction.BREAK:
                 interrupt_requested = outcome.interrupt_requested
                 interrupt_reason = outcome.interrupt_reason
@@ -460,7 +462,13 @@ class EventStreamProcessor:
             line_count=line_count,
             interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
-            agent_task_result=agent_task_result,
+            # Parsed HERE rather than accumulated line by line: the block is
+            # by contract the last thing the agent says, and
+            # `_last_agent_message` is already the one place that knows what
+            # that was on either path - the terminal `result` line normally,
+            # the last assistant turn for a run that was killed before it
+            # (#1195). One source, so the two cannot disagree.
+            agent_self_report=AgentSelfReport.parse(self._last_agent_message),
             conversation_lines=conversation_lines,
             total_cost_usd=self._result_cost_usd,
             reported_usage=self._reported_usage,
@@ -497,8 +505,8 @@ class EventStreamProcessor:
                 await self._process_hook_event(hook_event)
             return _LineOutcome(action=_LineAction.CONTINUE)
 
-        task_result = await self._process_cli_event(line)
-        return _LineOutcome(action=_LineAction.CONTINUE, task_result=task_result)
+        await self._process_cli_event(line)
+        return _LineOutcome(action=_LineAction.CONTINUE)
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
@@ -566,13 +574,13 @@ class EventStreamProcessor:
                 tools_used=stopped_event.tools_used,
             )
 
-    async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
-        """Process a Claude CLI native event. Returns task result if found."""
+    async def _process_cli_event(self, line: str) -> None:
+        """Process a Claude CLI native event."""
         try:
             cli_event = json.loads(line)
         except json.JSONDecodeError:
             logger.debug("Non-JSON line: %s", line[:50])
-            return None
+            return
 
         cli_type = cli_event.get("type", "")
         logger.debug("CLI event type: %s", cli_type)
@@ -587,10 +595,8 @@ class EventStreamProcessor:
             if isinstance(announced, str) and announced.strip():
                 self._leader_native_session_id = announced
 
-        task_result: dict[str, Any] | None = None
-
         if cli_type == "result":
-            task_result = await self._handle_result_event(cli_event)
+            await self._handle_result_event(cli_event)
 
         if cli_type == "assistant":
             await self._handle_assistant_event(cli_event)
@@ -600,24 +606,6 @@ class EventStreamProcessor:
 
         if cli_type == "system":
             logger.debug("CLI message: %s", cli_type)
-
-        return task_result
-
-    @staticmethod
-    def _parse_task_result(result_text: str) -> dict[str, Any] | None:
-        """Extract the structured TASK_RESULT JSON block from a result string."""
-        if "TASK_RESULT:" not in result_text:
-            return None
-        try:
-            marker = "TASK_RESULT:"
-            raw = result_text[result_text.rfind(marker) + len(marker) :].strip()
-            brace_end = raw.find("}")
-            if brace_end >= 0:
-                raw = raw[: brace_end + 1]
-            return json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            logger.debug("Could not parse TASK_RESULT block")
-            return None
 
     def _capture_result_tokens(self, cli_event: ClaudeResultLine) -> None:
         """Store authoritative cumulative token counts from a result event.
@@ -641,16 +629,9 @@ class EventStreamProcessor:
             self._reported_usage.cache_creation,
         )
 
-    async def _handle_result_event(self, cli_event: ClaudeResultLine) -> dict[str, Any] | None:
-        """Handle a result event — extract task result and token usage."""
+    async def _handle_result_event(self, cli_event: ClaudeResultLine) -> None:
+        """Handle a result event — record token usage and keep the final message."""
         result_text = cli_event.get("result", "")
-        task_result = self._parse_task_result(result_text) if result_text else None
-        if task_result:
-            logger.info(
-                "Agent task result: success=%s comments=%s",
-                task_result.get("success"),
-                str(task_result.get("comments", ""))[:100],
-            )
         if cli_event.get("is_error") and result_text:
             self._error_reason = _extract_error_reason(result_text)
         elif result_text.strip():
@@ -661,7 +642,6 @@ class EventStreamProcessor:
             # trace as a verdict (#1195).
             self._last_agent_message = result_text
         self._capture_result_tokens(cli_event)
-        return task_result
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
         """Handle assistant event — extract per-turn tokens and tool_use.

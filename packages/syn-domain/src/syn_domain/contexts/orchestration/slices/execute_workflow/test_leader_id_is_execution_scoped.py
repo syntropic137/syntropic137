@@ -27,7 +27,7 @@ def _result(native: str | None) -> StreamResult:
         line_count=1,
         interrupt_requested=False,
         interrupt_reason=None,
-        agent_task_result=None,
+        agent_self_report=None,
         leader_native_session_id=native,
     )
 

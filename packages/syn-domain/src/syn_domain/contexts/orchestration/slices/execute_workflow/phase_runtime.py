@@ -55,6 +55,9 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.orchestration.slices.execute_workflow.agent_self_report import (
+        AgentSelfReport,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
@@ -162,6 +165,11 @@ class PhaseRuntime:
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
         self._said: dict[str, str] = {}  # last agent message, for #1195 recovery
+        #: What each phase's agent declared about its OWN outcome. Held for
+        #: the same window as the tallies above because the completion path
+        #: is what consults it: a phase that said it failed is refused
+        #: completion rather than reported as one (#1127).
+        self._self_reports: dict[str, AgentSelfReport] = {}
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -233,6 +241,9 @@ class PhaseRuntime:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
         self._said[phase_id] = result.stream_result.last_agent_message or ""
+        report = result.stream_result.agent_self_report
+        if report is not None:
+            self._self_reports[phase_id] = report
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
         self._auth_tokens[phase_id] = (
@@ -249,6 +260,16 @@ class PhaseRuntime:
     def take_last_message(self, phase_id: str) -> str | None:
         """What the agent said last, read once and forgotten (#1195)."""
         return self._said.pop(phase_id, None)
+
+    @property
+    def self_reports(self) -> Mapping[str, AgentSelfReport]:
+        """What each running phase's agent said about its own outcome (#1127).
+
+        Read-only and deliberately narrow, exactly as `live_workspaces` is: the
+        completion guard is handed this and the to-do item and needs nothing
+        else. A phase absent from the map declared nothing.
+        """
+        return self._self_reports
 
     def record_artifacts(self, phase_id: str, artifact_ids: list[str]) -> None:
         """Hold what this phase collected until it reports."""
@@ -268,6 +289,7 @@ class PhaseRuntime:
     def harvest(self, phase_id: str) -> PhaseHarvest:
         """Take everything a completing phase accumulated, and stop holding it."""
         self._tokens.pop(phase_id, None)
+        self._self_reports.pop(phase_id, None)
         return PhaseHarvest(
             started_at=self._started_at.pop(phase_id, datetime.now(UTC)),
             artifact_ids=self._artifact_ids.pop(phase_id, []),

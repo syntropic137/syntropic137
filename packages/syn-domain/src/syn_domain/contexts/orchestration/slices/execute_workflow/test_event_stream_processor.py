@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_self_report import (
+    AgentSelfReport,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
     _extract_error_reason,
@@ -86,7 +89,7 @@ class TestEventStreamProcessor:
         result = await proc.process_stream(_lines_to_stream(), MockWorkspace())
         assert result.line_count == 0
         assert not result.interrupt_requested
-        assert result.agent_task_result is None
+        assert result.agent_self_report is None
         assert result.conversation_lines == []
 
     @pytest.mark.asyncio
@@ -304,9 +307,7 @@ class TestEventStreamProcessor:
             }
         )
         result = await proc.process_stream(_lines_to_stream(result_line), MockWorkspace())
-        assert result.agent_task_result is not None
-        assert result.agent_task_result["success"] is True
-        assert result.agent_task_result["comments"] == "All good"
+        assert result.agent_self_report == AgentSelfReport(succeeded=True, comments="All good")
 
     @pytest.mark.asyncio
     async def test_conversation_lines_collected(self) -> None:

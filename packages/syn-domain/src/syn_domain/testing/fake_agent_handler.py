@@ -115,7 +115,7 @@ class FakeAgentExecutionHandler:
             line_count=0,
             interrupt_requested=self._interrupt,
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
-            agent_task_result=None,
+            agent_self_report=None,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,

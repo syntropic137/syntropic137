@@ -57,6 +57,9 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_self_report import (
+    AgentSelfReport,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -470,7 +473,12 @@ class CodexStreamProcessor:
             line_count=line_count,
             interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
-            agent_task_result=None,
+            # Codex states its conclusion in `agent_message` items, so the
+            # TASK_RESULT block lands in `_last_agent_message` - the same
+            # place the claude path reads it from. Until #1127 this was a
+            # hard None: the contract is printed into every codex phase's
+            # prompt and no codex phase's answer to it was ever read.
+            agent_self_report=AgentSelfReport.parse(self._last_agent_message),
             conversation_lines=conversation_lines,
             total_cost_usd=total_cost_usd,
             # Present only when codex reached `turn.completed`. A stream that
