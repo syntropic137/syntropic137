@@ -385,9 +385,7 @@ class TestAgentSessionEventsAreRoutable:
     ) -> None:
         """SessionCompleted reached the global feed but never the per-execution one."""
         session = self._running_session()
-        session.complete_session(
-            CompleteSessionCommand(aggregate_id="session-1", success=True)
-        )
+        session.complete_session(CompleteSessionCommand(aggregate_id="session-1", success=True))
 
         queue = await projection.connect("exec-1")
         await projection.on_session_completed(self._dump_last(session))
