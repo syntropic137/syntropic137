@@ -49,6 +49,29 @@ def json_serializer(obj: object) -> str:
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
+# Which JSON fields a projection is FILTERED on, and therefore indexed on.
+#
+# Every projection table is created with the same two indexes, on `id` and on
+# `updated_at` - which answer "give me this record" and "give me the newest",
+# and nothing else. A filter on a JSON field (`data->>'x' = $1`) has no index
+# to use and reads the whole table, so pushing a filter down to the store buys
+# nothing on its own: the scan just moves from Python into Postgres (#1253).
+#
+# An expression index is what makes the predicate cheap, and it must match the
+# predicate exactly - `(data->>'field')`, the same expression the query builder
+# writes. The GIN index some deployments carry on `data` does NOT serve this:
+# GIN answers containment and key existence, not a text comparison on an
+# extracted value.
+#
+# Add a field here when a query filters on it, not speculatively: an index is
+# paid for on every write.
+_FILTERED_FIELDS: dict[str, tuple[str, ...]] = {
+    # repo_correlation is read on every insights request, by repo
+    # (executions_by_repo) and by execution (repo_health).
+    "repo_correlation": ("repo_full_name", "execution_id"),
+}
+
+
 async def ensure_projection_table(
     pool: asyncpg.Pool,
     projection: str,
@@ -75,6 +98,12 @@ async def ensure_projection_table(
                 CREATE INDEX IF NOT EXISTS idx_{table_name}_updated_at
                 ON {table_name}(updated_at DESC)
             """)
+
+            for field in _FILTERED_FIELDS.get(projection, ()):
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_{field}
+                    ON {table_name} ((data->>'{field}'))
+                """)
         except asyncpg.exceptions.UniqueViolationError:
             # PostgreSQL creates a composite row type with the same name as
             # each table. Under asyncio concurrency, two coroutines can both

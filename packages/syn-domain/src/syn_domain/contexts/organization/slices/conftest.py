@@ -15,6 +15,19 @@ from syn_domain.contexts.organization.slices.list_systems.projection import (
 )
 
 
+def _matches(field: object, wanted: object) -> bool:
+    """One filter value matches; several mean ANY of them.
+
+    Mirrors `_condition` in syn_adapters.projection_stores.postgres_query_builder,
+    which renders a collection as `= ANY($n)`. A fake that compared the list
+    itself would answer [] to a query the real store answers, and every handler
+    test filtering by more than one repo would pass for the wrong reason.
+    """
+    if isinstance(wanted, (list, tuple, set, frozenset)):
+        return field in wanted
+    return field == wanted
+
+
 class FakeProjectionStore:
     """In-memory projection store for testing."""
 
@@ -44,7 +57,7 @@ class FakeProjectionStore:
     ) -> list[dict[str, Any]]:
         records = list(self._data.get(projection, {}).values())
         if filters:
-            records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
+            records = [r for r in records if all(_matches(r.get(k), v) for k, v in filters.items())]
         if order_by:
             reverse = order_by.startswith("-")
             field = order_by.lstrip("-")
