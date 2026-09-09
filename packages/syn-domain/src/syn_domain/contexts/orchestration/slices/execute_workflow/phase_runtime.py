@@ -161,7 +161,18 @@ class PhaseRuntime:
         self._tokens: dict[str, TokenAccumulator] = {}
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
-        self._said: dict[str, str] = {}  # last agent message, for #1195 recovery
+        #: The last thing each phase's agent said, which is where its
+        #: conclusion is recovered from when the file it wrote came back empty
+        #: (#1195).
+        #:
+        #: Keyed by (execution_id, phase_id) for the same reason as
+        #: `_leader_native_ids` above, and this one decides an OUTCOME: two
+        #: concurrent runs of a workflow share a phase id, so a phase-only key
+        #: let the second run's message overwrite the first's, and the first
+        #: then recovered its deliverable from a report that was not its own -
+        #: including, when the second said it had succeeded, in place of its
+        #: own failure report (#1256).
+        self._said: dict[tuple[str, str], str] = {}
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -229,10 +240,12 @@ class PhaseRuntime:
         """Note the id this phase's own harness announced, for the delegate sweep."""
         remember_leader_native_id(self._leader_native_ids, (execution_id, phase_id), stream_result)
 
-    def record_agent_run(self, phase_id: str, result: AgentExecutionResult) -> None:
+    def record_agent_run(
+        self, phase_id: str, *, execution_id: str, result: AgentExecutionResult
+    ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
-        self._said[phase_id] = result.stream_result.last_agent_message or ""
+        self._said[execution_id, phase_id] = result.stream_result.last_agent_message or ""
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
         self._auth_tokens[phase_id] = (
@@ -246,9 +259,14 @@ class PhaseRuntime:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
 
-    def take_last_message(self, phase_id: str) -> str | None:
-        """What the agent said last, read once and forgotten (#1195)."""
-        return self._said.pop(phase_id, None)
+    def take_last_message(self, phase_id: str, *, execution_id: str) -> str | None:
+        """What THIS execution's agent said last, read once and forgotten (#1195).
+
+        `execution_id` is not optional and has no default: a caller that could
+        omit it would be back to reading whichever run wrote last, which is
+        the defect (#1256).
+        """
+        return self._said.pop((execution_id, phase_id), None)
 
     def record_artifacts(self, phase_id: str, artifact_ids: list[str]) -> None:
         """Hold what this phase collected until it reports."""

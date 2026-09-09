@@ -28,6 +28,7 @@ from syn_domain.contexts.orchestration import (
     SubagentTracker,
     TokenAccumulator,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import AgentVerdict
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
@@ -68,6 +69,7 @@ class FakeAgentExecutionHandler:
         interrupt_reason: str | None = "Cancelled by user",
         launches: bool = True,
         produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -81,6 +83,13 @@ class FakeAgentExecutionHandler:
         #: is what lets a test drive the collection step for real instead of
         #: mocking out the very hop under test.
         self._produces = tuple(produces)
+        #: The last thing this double's agent SAYS, verbatim - including its
+        #: ``TASK_RESULT`` block if it writes one. Passed through the REAL
+        #: `AgentVerdict.from_agent_text` below rather than setting a verdict
+        #: directly, so a test that drives a reported failure exercises the
+        #: production reader of that report and not a fixture's idea of it
+        #: (#1256).
+        self._says = says
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -115,7 +124,8 @@ class FakeAgentExecutionHandler:
             line_count=0,
             interrupt_requested=self._interrupt,
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
-            agent_task_result=None,
+            verdict=AgentVerdict.from_agent_text(self._says),
+            last_agent_message=self._says,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -156,15 +166,21 @@ class FakeAgentExecutionHandler:
         return cls(interrupt=True, interrupt_reason=reason)
 
     @classmethod
-    def success(cls, produces: Sequence[tuple[str, bytes]] = ()) -> FakeAgentExecutionHandler:
+    def success(
+        cls, produces: Sequence[tuple[str, bytes]] = (), says: str | None = None
+    ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
         ``produces`` are the files the agent leaves in the workspace, normally
         under ``artifacts/output/``. The default writes none: exit code 0 and
         an empty output tree is a real and previously undetected combination,
         so the double must be able to express it.
+
+        ``says`` is the agent's last message. Exit code 0 with a ``says`` that
+        reports ``success: false`` is not a contradiction but the defect
+        #1256 is about: the harness ran fine and the AGENT said it had failed.
         """
-        return cls(interrupt=False, exit_code=0, produces=produces)
+        return cls(interrupt=False, exit_code=0, produces=produces, says=says)
 
     @classmethod
     def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:

@@ -27,6 +27,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    PhaseReportedFailureError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -586,11 +589,24 @@ class WorkflowExecutionProcessor:
             model=phase.agent_config.model,
             started_at=launch.started_at,
         )
-        self._runtime.record_agent_run(todo.phase_id, result)
+        self._runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
 
         if result.stream_result.interrupt_requested:
             await self._handle_cancel_signal(todo, result, aggregate)
             return
+
+        # THE PHASE'S OWN REPORT, on the same footing as its exit status and
+        # checked before the aggregate is told the run completed (#1256). A
+        # phase that wrote `TASK_RESULT: {"success": false, ...}` said it did
+        # not do what it was asked; completing it anyway converts a DETECTED
+        # failure into a pass, which is the one direction that lets defects
+        # through every gate downstream. An unreadable report refuses for the
+        # same reason - see `AgentVerdict`.
+        verdict = result.stream_result.verdict
+        if verdict.refuses_completion:
+            refusal = verdict.refusal(phase_id=todo.phase_id)
+            logger.error(refusal)
+            raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
 
         if result.command.exit_code != 0:
             reason = result.stream_result.error_reason
@@ -659,7 +675,9 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
-            last_agent_message=self._runtime.take_last_message(todo.phase_id),
+            last_agent_message=self._runtime.take_last_message(
+                todo.phase_id, execution_id=todo.execution_id
+            ),
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
