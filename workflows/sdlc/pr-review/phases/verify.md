@@ -11,19 +11,59 @@ and take the base and head SHAs from it.
 > today, but `ArtifactCollector` marks it "kept for one release (issue #988)", so
 > a prompt that reads only the flat path will silently receive nothing once it
 > goes. Look in the directory first and fall back to the flat file. If neither
-> exists, stop and say so rather than proceeding on no input.
+> exists, stop and say so rather than proceeding on no input - by the route in
+> "If you cannot verify" below, so that stopping is recorded as stopping.
 
 **You are in a fresh workspace on the default branch** - the PR's code is not
-checked out here. Fetch and use the exact SHAs the previous phase recorded, and
-confirm what you are looking at:
+checked out here. Fetch, then check out the exact HEAD the previous phase
+recorded, by SHA:
 
 ```
 git fetch origin
-git rev-parse origin/main origin/<pr-branch>    # must match the recorded SHAs
+git checkout <recorded-head-sha>
+git rev-parse HEAD                 # must equal the recorded head SHA
 ```
 
-If they differ, the branch moved since the previous phase; say so rather than
-reviewing a different commit than the one that was mapped.
+**A moved base is not a reason to stop.** `origin/main` advances constantly on
+this repository - during most reviews - and the commit you were told to review
+is unaffected by that. Reviewing the recorded head is still reviewing the right
+code; all that changed is the merge base. So: note in your deliverable that the
+base moved, from which SHA to which, review the recorded head anyway, and flag
+any finding that depends on the base if you have one. Aborting here made the
+gate flakier the more active the repository was, which is backwards (#1127).
+
+**A head you cannot check out IS a reason to stop.** If `git checkout
+<recorded-head-sha>` fails, the commit you were told to review is not there -
+force-pushed away, or the branch was deleted - and there is nothing to review.
+Reviewing whatever `origin/<pr-branch>` points at instead would certify a
+different commit than the one that was mapped, which is the one outcome worse
+than not reviewing. Take the stopping path below.
+
+### If you cannot verify, stop AND SAY SO IN YOUR RESULT
+
+This applies to every reason this phase can be unable to do its job, not only
+a vanished head: no input from the previous phase, a map with no SHAs in it, a
+repository you cannot fetch.
+
+In all of them, do three things, in this order:
+
+1. Write `artifacts/output/deliverable.md` saying **what you could not verify
+   and what stopped you**, with the commands you ran and their real output. It
+   is collected before anything else happens, so this is what the next reader
+   gets.
+2. State, as the first line of that file, that **this phase performed no
+   verification** - so a reader who stops after one line is not left thinking
+   the gate ran.
+3. End your response with `TASK_RESULT: {"success": false, "comments": "..."}`,
+   naming the reason.
+
+Step 3 is the one that is load-bearing, and it is not a formality: it is what
+records the phase as FAILED instead of completed. Without it the run is green,
+the verdict is composed from the investigate phase alone, and nothing anywhere
+says the cross-model half of the gate did not run. That is exactly what
+happened in exec-3afef2976abe (#1127): a review that reviewed nothing, reported
+as a success. **"I could not verify" must never leave the same trace as
+"I verified and it passed."**
 
 Your job is to try to make the PR's central claim FALSE, and to report honestly
 whether you succeeded. A review that sets out to confirm a change finds it

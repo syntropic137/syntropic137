@@ -210,7 +210,16 @@ Examples of failure reasons:
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
+This is how the orchestrator knows whether to retry, escalate, or mark the task as done.
+
+**`success: false` is enforced, not advisory.** A phase that reports it is
+recorded as FAILED, the phases after it do not run, and its reason above becomes
+the execution's error. Your deliverable is still collected first, so say in it
+what you checked and what stopped you.
+
+So report the outcome you actually had. "I could not do this" and "I did this
+and it passed" are different results, and reporting the second when the first
+happened is the one failure this platform cannot detect for you."""
 
 
 def render_workspace_prompt(*, clone_repos: bool) -> str:
