@@ -1056,7 +1056,7 @@ preflight: preflight-agent check-submodules vsa-validate fitness codegen-check c
 check-openapi-drift:
     @uv run python scripts/check_openapi_drift.py
 
-preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports
+preflight-agent: check-agent-docs lint format-check typecheck validate-domain-events check-ci-parity check-test-debt check-docs-content check-compose check-env-example check-plugin-schemas check-workflows check-openapi-drift check-no-public-ports check-toolchain-pins
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
@@ -1879,6 +1879,14 @@ check-env-example:
 # Validate all Docker Compose overlay combinations parse correctly
 check-compose-overlays:
     bash scripts/check_compose_overlays.sh
+
+# Every installer of `just` and `uv` must name the version the workspace image
+# ships, and so must the binary on PATH right now (#1136). CI installed
+# whatever release was newest at job-run time while the image pinned 1.58.0, so
+# "the gate passed here" and "the gate passed in CI" were different claims.
+# See scripts/check_toolchain_pins.py for every place a version can be stated.
+check-toolchain-pins:
+    @uv run python scripts/check_toolchain_pins.py
 
 # Every published container port must name its host interface (#1146).
 # A bare `- "5432:5432"` binds 0.0.0.0, and a host firewall does not stop it:

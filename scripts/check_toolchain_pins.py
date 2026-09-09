@@ -52,12 +52,14 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 REPO_ROOT: Final = Path(__file__).resolve().parent.parent
 
@@ -368,14 +370,18 @@ def evaluate(sightings: Sequence[Sighting]) -> tuple[int, list[str]]:
         bad = [s for s in mine if s.version != reference]
         lines.append(f"{tool.name} {reference} (workspace image), {len(mine)} installer(s):")
         for s in mine:
-            lines.append(f"  [{'BAD' if s.version != reference else 'OK '}] {s.stated:<10} {s.where}")
+            lines.append(
+                f"  [{'BAD' if s.version != reference else 'OK '}] {s.stated:<10} {s.where}"
+            )
         if bad:
             failures += 1
             lines.append("")
             lines.append(f"  {len(bad)} of these do not install {tool.name} {reference}.")
             lines.append("  A gate is only one claim if every environment runs one toolchain.")
             lines.append(f"  Fix: {tool.hint.format(version=reference)}")
-            lines.append(f"  In CI: pass `with: {tool.action_input}: \"{reference}\"` to {tool.action}.")
+            lines.append(
+                f'  In CI: pass `with: {tool.action_input}: "{reference}"` to {tool.action}.'
+            )
         lines.append("")
 
     if failures:
@@ -397,7 +403,10 @@ def main() -> int:
         sightings = collect(REPO_ROOT)
     except ToolchainProbeError as exc:
         print(f"{exc}", file=sys.stderr)
-        print("This gate compares the binary you are running, so it must be runnable.", file=sys.stderr)
+        print(
+            "This gate compares the binary you are running, so it must be runnable.",
+            file=sys.stderr,
+        )
         return 1
     code, lines = evaluate(sightings)
     for line in lines:
