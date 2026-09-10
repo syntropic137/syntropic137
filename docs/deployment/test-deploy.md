@@ -559,6 +559,20 @@ concluding anything.
 
 Only after a phase reaches `running` is the deploy good.
 
+### Attribution
+
+Operator co-authorship on agent commits needs both `SYN_OPERATOR_NAME` and
+`SYN_OPERATOR_EMAIL` set on the deployment - in `/root/.syntropic137/.env`,
+alongside the other settings from step 2. **Both, or neither.** The
+`prepare-commit-msg` hook exits without writing a trailer if either one is
+missing, so setting a single variable is a configuration that looks done and
+does nothing.
+
+The email must be an address attached to the GitHub account that should receive
+the credit. GitHub silently ignores a co-author it cannot resolve, so a typo
+costs the attribution and reports nothing - read the trailer off a real commit
+the deploy made rather than concluding the setting took (#1265).
+
 ---
 
 ## 6. The projection rebuild window
