@@ -125,13 +125,13 @@ export default function Hero() {
           </p>
 
           <p className="hero-description" style={hero.getStyle(2)}>
-            Scale coding agents past what a terminal can hold.{" "}
-            <span className="syntropic-brand">Syntropic137</span> is{" "}
+            Running 10 coding agents in a terminal is about as far as you can
+            go. <span className="syntropic-brand">Syntropic137</span> is{" "}
             <strong>multi-harness orchestration</strong>: run{" "}
             {HARNESSES.map((h, i) => (
               <span key={h.id}>
                 {i > 0 && (i === HARNESSES.length - 1 ? " and " : ", ")}
-                <span className="harness">{h.name}</span>
+                <span className={`harness ${h.accentClass}`}>{h.name}</span>
               </span>
             ))}{" "}
             across workflows, with every tool call and conversation captured.

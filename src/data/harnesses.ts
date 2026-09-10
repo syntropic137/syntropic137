@@ -25,6 +25,12 @@ export interface Harness {
   vendor: string;
   /** True when the harness can also drive the platform, not just execute phases. */
   controlPlane: boolean;
+  /**
+   * Modifier class for the name's gradient, defined in globals.css.
+   * Each harness wears its own vendor colour so the two read as distinct
+   * products rather than one branded pair.
+   */
+  accentClass: string;
 }
 
 export const HARNESSES: readonly Harness[] = [
@@ -33,12 +39,14 @@ export const HARNESSES: readonly Harness[] = [
     name: "Claude Code",
     vendor: "Anthropic",
     controlPlane: true,
+    accentClass: "harness--claude",
   },
   {
     id: "codex",
     name: "Codex",
     vendor: "OpenAI",
     controlPlane: false,
+    accentClass: "harness--codex",
   },
 ] as const;
 
