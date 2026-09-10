@@ -500,7 +500,19 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 
 - **`main`** - development trunk. All PRs target `main`.
 - **`release`** - deployment branch. PRs from `main` only. Merge triggers the full release pipeline.
-- **Beta releases** bypass `release`: `gh release create v0.20.0-beta.1 --prerelease --target main`
+- **Deploying a build to look at it is NOT a release.** Two different things are
+  called "beta" and only one of them creates a GitHub Release:
+  - **Test deploy** - you want to see current code running on a host. Build
+    images, move them, recreate containers. **No tag, no `gh release create`, no
+    npm publish.** Follow [docs/deployment/test-deploy.md](docs/deployment/test-deploy.md).
+    This is the common case; reach for it by default.
+  - **Published beta** - someone else is meant to install it. Bypasses the
+    `release` branch: `gh release create vX.Y.Z-beta.N --prerelease --target main`.
+    Only when the build has an audience.
+
+  A release entry should mark something worth marking, not every image move.
+  Seven `v0.28.0-beta.*` prereleases were created in 48 hours because this
+  distinction lived only in the detailed doc.
 - **Version management:** `just bump-version 0.20.0` writes every version-carrying file, regenerates `uv.lock`, and re-runs the check. `just check-version` validates consistency on demand.
 - **Docs:** `release` → Vercel production, `main` → preview only.
 - **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules - wrong entry points are blocked by design.
