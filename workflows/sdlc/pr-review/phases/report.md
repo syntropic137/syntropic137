@@ -87,7 +87,7 @@ These belong in the artifact whatever eventually delivers it.
 reviewer ends up acting on findings that are already fixed - that happened here
 and cost a full run. State it explicitly:
 
-```
+```text
 Reviewed at head `<sha>`.
 ```
 
@@ -96,7 +96,7 @@ Reviewed at head `<sha>`.
 drifted to all-sonnet once (#1107), and the resulting same-model verdict was
 indistinguishable from a real gate until someone checked. State it plainly:
 
-```
+```text
 Gate: investigate <provider>/<model>, verify <provider>/<model>, report <provider>/<model>.
 ```
 

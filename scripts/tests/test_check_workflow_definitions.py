@@ -748,7 +748,9 @@ class TestEveryFenceSpellingIsShellUnlessItSaysOtherwise:
     def test_a_bare_fence_is_shell(self, tmp_path: Path) -> None:
         """The spelling that outnumbers every other in this repo's prompts, and
         the one the old regex could not see at all."""
-        self._assert_reported(self._violations_for(tmp_path, f"Post it:\n\n```\n{self.RUNS}\n```\n"))
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n```\n{self.RUNS}\n```\n")
+        )
 
     def test_a_capitalised_tag_is_shell(self, tmp_path: Path) -> None:
         """The old pattern carried no `re.I`, so `Bash` and `BASH` both missed

@@ -93,25 +93,89 @@ def validate_file(path: Path) -> str | None:
     return None
 
 
-#: A fenced shell block in a prompt is the phase being told to run shell.
+#: Info strings that mean a fenced block is data being SHOWN, not run.
 #:
-#: Deliberately the fence and not a vocabulary of commands. A list of
-#: interesting binaries is a special case per binary, always one short, and
-#: whichever one it is missing is the one the next prompt uses. A fence says
-#: "run this" in the prompt's own syntax and needs no such list.
-_SHELL_FENCE = re.compile(
-    r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*```[ \t]*(?:bash|sh|shell|zsh|console)\b", re.M
-)
+#: This list is inverted on purpose, and the inversion is the whole design.
+#: The first version listed the SHELL tags - `bash|sh|shell|zsh|console`,
+#: three backticks, case-sensitive - so every other spelling CommonMark
+#: allows silently missed: a bare fence, `Bash`, four backticks, a tilde
+#: fence. A miss produced no violation, and no violation reads as a pass, so
+#: the gate could not distinguish "runs no shell" from "runs shell in a
+#: spelling I cannot read" (#1261). Bare fences outnumber tagged ones in this
+#: repo's own prompts, which made the common spelling the invisible one.
+#:
+#: Listing the exemptions instead moves the cost of an unanticipated spelling
+#: from a false negative nobody observes to a false positive someone tags.
+#:
+#: THE BAR FOR ADDING ONE: the tag must denote content that cannot be a shell
+#: instruction under any reading - a data or markup format, shown rather than
+#: run. These five meet it and are what this repo's prompts already use to
+#: display structure. A programming language does NOT meet it: a prompt
+#: fencing a `python` block is usually telling the phase to run that script,
+#: and exempting it would reopen exactly this defect for that spelling. When
+#: in doubt leave it out; the failure is visible and the fix is one word.
+_NON_SHELL_INFO = frozenset({"text", "yaml", "json", "markdown", "diff"})
+
+#: A fence line: CommonMark's two characters, three or more of them, with the
+#: list marker this repo's prompts indent behind. Capturing the run and the
+#: info string separately is what lets the walk below pair openers with
+#: closers instead of scanning lines - a closer, alone on its line, is
+#: indistinguishable from a bare opener, so a line scanner treating bare as
+#: shell would report every exempt block via its own closing fence.
+_FENCE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
+
+
+def _language(info: str) -> str:
+    """The language an info string names, or "" when it names none.
+
+    CommonMark takes the language to be the info string's first word, so
+    `bash title="x"` is bash. Lowercased because `Bash` names the same thing
+    and case-sensitivity was the second of the four misses.
+    """
+    words = info.split()
+    return words[0].lower() if words else ""
+
+
+def _first_shell_fence(prompt: str) -> int | None:
+    """Offset of the first fenced block this prompt tells the phase to RUN.
+
+    Deliberately the fence and not a vocabulary of commands. A list of
+    interesting binaries is a special case per binary, always one short, and
+    whichever one it is missing is the one the next prompt uses. A fence says
+    "run this" in the prompt's own syntax and needs no such list.
+
+    Returns None only when every fenced block carried an exempt info string -
+    never merely because a fence was written in an unfamiliar way.
+    """
+    opener: str | None = None
+    for match in _FENCE.finditer(prompt):
+        marker, info = match.group(1), match.group(2).strip()
+        if opener is None:
+            if _language(info) not in _NON_SHELL_INFO:
+                return match.start()
+            opener = marker
+        elif marker[0] == opener[0] and len(marker) >= len(opener) and not info:
+            # Closes only on the same character, at least as long, and bare -
+            # CommonMark's rule. Anything else between the pair is content: a
+            # `text` block quoting a ```bash fence is showing it, not running
+            # it, and the report template does exactly that.
+            opener = None
+    return None
 
 
 def _told_to_run_shell(phase: PhaseYamlDefinition) -> str | None:
     # from_file has already inlined prompt_file into prompt_template, so this
-    # is the prompt the agent is handed however it was written.
+    # is the phase's own instructions however they were written - one file or
+    # two. It is NOT the whole prompt the agent receives: `_build_prompt` in
+    # the API prepends the platform preamble, which carries its own ```bash
+    # block to every phase regardless of grant. Checking the rendered prompt
+    # would therefore report every phase in the repo, so the phase's own text
+    # is both what this can see and what it should be judging.
     prompt = phase.prompt_template or ""
-    match = _SHELL_FENCE.search(prompt)
-    if match is None:
+    start = _first_shell_fence(prompt)
+    if start is None:
         return None
-    return f"prompt line {prompt.count('\n', 0, match.start()) + 1}"
+    return f"prompt line {prompt.count('\n', 0, start) + 1}"
 
 
 def _required_to_produce_an_artifact(phase: PhaseYamlDefinition) -> str | None:
