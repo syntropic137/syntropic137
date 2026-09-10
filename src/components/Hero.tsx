@@ -125,18 +125,16 @@ export default function Hero() {
           </p>
 
           <p className="hero-description" style={hero.getStyle(2)}>
-            Running 10 parallel <span className="harness">Claude Code</span>{" "}
-            agents in a terminal is about as far as you can go before it becomes
-            unmanageable. <span className="syntropic-brand">Syntropic137</span> scales that to 100+ with{" "}
-            <strong>workflow orchestration</strong>, full observability on every
-            tool call and conversation, per-phase routing across{" "}
+            Running 10 coding agents in a terminal is about as far as you can
+            go. <span className="syntropic-brand">Syntropic137</span> is{" "}
+            <strong>multi-harness orchestration</strong>: run{" "}
             {HARNESSES.map((h, i) => (
               <span key={h.id}>
                 {i > 0 && (i === HARNESSES.length - 1 ? " and " : ", ")}
-                <span className="harness">{h.name}</span>
+                <span className={`harness ${h.accentClass}`}>{h.name}</span>
               </span>
-            ))}
-            , and a self-hosted <strong>workflow marketplace</strong>.
+            ))}{" "}
+            across workflows, with every tool call and conversation captured.
           </p>
 
           <InstallTerminal className="hero-install" style={hero.getStyle(3)} />
