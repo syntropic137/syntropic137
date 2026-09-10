@@ -68,17 +68,39 @@ def _unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SYN_OPERATOR_EMAIL", raising=False)
 
 
-async def test_the_hook_lands_on_the_path_git_is_told_to_read(_configured: None) -> None:
-    """The image sets core.hooksPath to this directory; anywhere else is inert."""
+async def test_the_hook_is_staged_then_moved_onto_the_hooks_path(
+    _configured: None,
+) -> None:
+    """base_path does not reach the container, so the move is what places it.
+
+    ``copy_to_workspace`` writes relative to the workspace root and takes no
+    base_path at all (adapter_copy.py:118-133) - passing one is accepted and
+    discarded. Injecting straight to the hooks directory silently put the file
+    at /workspace/prepare-commit-msg instead, where git never looks.
+    """
     ws = _FakeWorkspace()
 
     await WorkspaceProvisionHandler._install_attribution_hook(ws)  # type: ignore[arg-type]
 
     assert ws.injected, "hook was never injected"
-    base, files = ws.injected[0]
-    assert base == str(WORKSPACE_HOOKS_DIR)
-    assert files[0][0] == HOOK_FILENAME
+    _base, files = ws.injected[0]
     assert files[0][1] == attribution_hook_source()
+
+    shell = " ".join(c[2] for c in ws.commands if c[:2] == ["sh", "-c"])
+    assert f"mv /workspace/{files[0][0]} {WORKSPACE_HOOKS_DIR}/{HOOK_FILENAME}" in shell
+
+
+async def test_the_staging_file_does_not_survive(_configured: None) -> None:
+    """A stray file in /workspace is something an agent can commit by accident."""
+    ws = _FakeWorkspace()
+
+    await WorkspaceProvisionHandler._install_attribution_hook(ws)  # type: ignore[arg-type]
+
+    _base, files = ws.injected[0]
+    staged = files[0][0]
+    assert staged.startswith("."), "staging name should be dotted"
+    shell = " ".join(c[2] for c in ws.commands if c[:2] == ["sh", "-c"])
+    assert f"mv /workspace/{staged}" in shell, "staged file must be moved, not copied"
 
 
 async def test_the_executable_bit_is_set(_configured: None) -> None:
@@ -87,7 +109,18 @@ async def test_the_executable_bit_is_set(_configured: None) -> None:
 
     await WorkspaceProvisionHandler._install_attribution_hook(ws)  # type: ignore[arg-type]
 
-    assert ["chmod", "+x", f"{WORKSPACE_HOOKS_DIR}/{HOOK_FILENAME}"] in ws.commands
+    shell = " ".join(c[2] for c in ws.commands if c[:2] == ["sh", "-c"])
+    assert f"chmod +x {WORKSPACE_HOOKS_DIR}/{HOOK_FILENAME}" in shell
+
+
+async def test_the_hooks_directory_is_created_if_absent(_configured: None) -> None:
+    """It does not exist at provision time on every image."""
+    ws = _FakeWorkspace()
+
+    await WorkspaceProvisionHandler._install_attribution_hook(ws)  # type: ignore[arg-type]
+
+    shell = " ".join(c[2] for c in ws.commands if c[:2] == ["sh", "-c"])
+    assert f"mkdir -p {WORKSPACE_HOOKS_DIR}" in shell
 
 
 async def test_the_install_is_verified_not_assumed(_configured: None) -> None:
@@ -121,7 +154,7 @@ async def test_a_failed_install_does_not_kill_the_phase(_configured: None) -> No
     Safe only because the install is verified - a silent failure is logged, not
     mistaken for success.
     """
-    ws = _FakeWorkspace(exit_codes={"chmod": 1})
+    ws = _FakeWorkspace(exit_codes={"sh": 1})
 
     await WorkspaceProvisionHandler._install_attribution_hook(ws)  # type: ignore[arg-type]
 
