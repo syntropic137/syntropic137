@@ -700,3 +700,122 @@ class TestNoPhaseMustProduceAnArtifactItCannotWrite:
             f"these phases are handed to the platform declaring an output they "
             f"cannot produce: {unable}"
         )
+
+
+class TestEveryFenceSpellingIsShellUnlessItSaysOtherwise:
+    """A fence the matcher cannot read must fail CLOSED (#1261 review).
+
+    THE DEFECT. The first version of this matched one spelling: three
+    backticks, an optional space, then one of `bash|sh|shell|zsh|console`,
+    case-sensitively. Every other fence CommonMark allows missed - a bare
+    fence with no info string, `Bash` with a capital B, a four-backtick fence,
+    a tilde fence. On a miss `_told_to_run_shell` returned None,
+    `grant_violations` hit `continue`, and no violation was recorded.
+
+    A miss was silence and silence was a pass. That is the whole defect: the
+    gate could not distinguish "this prompt runs no shell" from "this prompt
+    runs shell in a spelling I do not know", and reported both as fine. It was
+    reproduced end to end against #1110 itself - retyped with an ordinary bare
+    fence, the gate reported zero violations for the exact pair it exists to
+    catch. Bare fences outnumber tagged ones in this repo's own prompts, so
+    the common spelling was the invisible one.
+
+    THE FIX IS THE INVERSION. The vocabulary is now an allowlist of NON-shell
+    info strings, and an unknown or absent one is shell. A spelling nobody
+    anticipated therefore produces a false POSITIVE, which someone sees and
+    tags, rather than a false negative, which nobody sees at all. That
+    asymmetry is the point and the reason the list is short: every entry is a
+    deliberate exemption, and the cost of a missing one is a visible failure.
+
+    Each case below is the #1110 instruction verbatim, retyped in one more
+    spelling of a fence. All four failed against the old regex.
+    """
+
+    def _violations_for(self, tmp_path: Path, prompt: str) -> list[str]:
+        """The #1110 grant, so the ONLY variable across these cases is the fence."""
+        return TestNoPromptAsksPastItsGrant()._violations(
+            tmp_path, ["Read", "Grep", "Glob", "Write"], prompt
+        )
+
+    def _assert_reported(self, violations: list[str]) -> None:
+        assert len(violations) == 1, f"expected the pair to be reported, got {violations!r}"
+        assert "run shell" in violations[0]
+        assert "none of [Bash]" in violations[0]
+
+    #: The body of the block, identical in every case below.
+    RUNS: ClassVar[str] = "gh pr comment 42 --repo o/r --body-file out.md"
+
+    def test_a_bare_fence_is_shell(self, tmp_path: Path) -> None:
+        """The spelling that outnumbers every other in this repo's prompts, and
+        the one the old regex could not see at all."""
+        self._assert_reported(self._violations_for(tmp_path, f"Post it:\n\n```\n{self.RUNS}\n```\n"))
+
+    def test_a_capitalised_tag_is_shell(self, tmp_path: Path) -> None:
+        """The old pattern carried no `re.I`, so `Bash` and `BASH` both missed
+        while `bash` matched - a defect no reader of the prompt could observe."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n```Bash\n{self.RUNS}\n```\n")
+        )
+
+    def test_a_tilde_fence_is_shell(self, tmp_path: Path) -> None:
+        """CommonMark's other fence character. The old pattern hard-coded the
+        backtick, so a tilde fence was not a fence to it."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n~~~bash\n{self.RUNS}\n~~~\n")
+        )
+
+    def test_a_four_backtick_fence_is_shell(self, tmp_path: Path) -> None:
+        """Four backticks is the ordinary way to fence a block that itself
+        contains a fence, so it appears exactly where prompts quote prompts."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n````bash\n{self.RUNS}\n````\n")
+        )
+
+    def test_a_tagged_non_shell_block_is_not_shell(self, tmp_path: Path) -> None:
+        """The negative control on the INVERSION.
+
+        Without this, every test above passes against a matcher that calls
+        every fence shell - which would fail every read-only phase that shows
+        the shape of its own output, and there are many. The exemption has to
+        be real, and this is the tag the one affected block in the corpus was
+        given.
+        """
+        assert (
+            self._violations_for(
+                tmp_path, "Open with this line:\n\n```text\nReviewed at head `<sha>`.\n```\n"
+            )
+            == []
+        )
+
+    def test_a_closing_fence_is_not_a_bare_opener(self, tmp_path: Path) -> None:
+        """Why this walks fence PAIRS and does not scan lines.
+
+        The closing fence of any tagged block is, on its own line, exactly a
+        bare fence. A line scanner that treats bare as shell would therefore
+        report every exempt block in the corpus via its own closer - the
+        inversion would be unusable and the pressure would be to revert it.
+        Tracking the open/close state is what makes failing closed affordable.
+        """
+        assert (
+            self._violations_for(
+                tmp_path,
+                "Two exempt blocks:\n\n```text\nfirst\n```\n\nand\n\n```yaml\nid: x\n```\n",
+            )
+            == []
+        )
+
+    def test_a_fence_inside_an_exempt_block_is_not_an_opener(self, tmp_path: Path) -> None:
+        """Content between a pair is content, not markup.
+
+        A `text` block quoting a bash fence is showing it, not running it - the
+        report template does exactly this. Reading the inner fence as an opener
+        would make quoting a command indistinguishable from being told to run
+        one.
+        """
+        assert (
+            self._violations_for(
+                tmp_path,
+                f"Your report should look like:\n\n````text\n```bash\n{self.RUNS}\n```\n````\n",
+            )
+            == []
+        )
