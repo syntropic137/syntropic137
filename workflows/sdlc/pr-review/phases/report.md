@@ -48,34 +48,46 @@ misleads whoever merges it.
 Mark confidence where it is not total. A finding you are 60% sure of is worth
 reporting AS a 60% finding.
 
-You are read-only. Do not edit files, do not commit, do not push.
+You are read-only. Do not edit files, do not commit, do not push, and do not
+post to the pull request. This phase is granted `Read`, `Grep`, `Glob` and
+`Write` - no `Bash` - and that grant is the boundary, not this sentence.
 
-## Post the verdict to the pull request
+## Your deliverable is the verdict, not its delivery
 
-Writing the verdict to an artifact is not delivering it. A review nobody reads
-is indistinguishable from no review, and costs the same. Until this step
-existed, every verdict this workflow produced had to be copied to the PR by
-hand, and several were nearly missed (#1097).
+Write the verdict to `artifacts/output/deliverable.md` and stop there. Posting
+it to the pull request is not this phase's job and is not something this phase
+can do.
 
-After writing your deliverable, post it as a comment on the PR you reviewed:
+That is a deliberate decision, recorded here because it is the exact place
+someone will next be tempted to reverse it. #1110 added a `gh pr comment` step
+to this prompt; the phase had no `Bash`, so three reviews (#1113, #1115, #1117)
+each wrote "this needs a tool this phase does not have" and no verdict reached
+a PR (#1122). The obvious repair - grant `Bash` - was written, reviewed and
+closed unmerged (#1123): `Bash` arrives under `--dangerously-skip-permissions`
+with no per-command filter, so granting it at the publication boundary, to a
+phase composing text derived from a PR-controlled repository while
+write-capable credentials sit in the workspace, buys delivery with an injection
+surface.
 
-```bash
-gh pr comment <PR-NUMBER> --repo <OWNER>/<REPO> --body-file <your-deliverable>
-```
+So the instruction was removed rather than the restriction relaxed. Delivering
+the verdict belongs to the platform, after artifact collection, with repository,
+PR number and head SHA taken from trusted workflow metadata instead of from an
+agent-composed shell command. Until that exists, a human or a later phase
+carries the artifact across.
 
-The GitHub App credential in this workspace can comment on pull requests -
-verified, `syntropic137-swe-mini` has existing PR comments. If the command
-fails, report the exact error and the fact that the verdict was not delivered.
-Do NOT treat a failed post as a completed phase: the artifact existing is not
-delivery.
+**Do not work around this.** If you find yourself reaching for a tool you were
+not granted, the answer is that the phase is scoped correctly and the delivery
+step is missing from the platform - say so in your deliverable.
 
-### Two things the comment must carry
+### Two things the verdict must carry
+
+These belong in the artifact whatever eventually delivers it.
 
 **1. The head SHA you reviewed.** A verdict against an old head is how a
 reviewer ends up acting on findings that are already fixed - that happened here
 and cost a full run. State it explicitly:
 
-```
+```text
 Reviewed at head `<sha>`.
 ```
 
@@ -84,15 +96,11 @@ Reviewed at head `<sha>`.
 drifted to all-sonnet once (#1107), and the resulting same-model verdict was
 indistinguishable from a real gate until someone checked. State it plainly:
 
-```
+```text
 Gate: investigate <provider>/<model>, verify <provider>/<model>, report <provider>/<model>.
 ```
 
-If you cannot determine the models, say so rather than omitting the line -
-absence reads as "nobody checked", which is the correct impression in that case.
-
-### Do not duplicate
-
-If a comment from a previous run of this workflow already stands on this PR for
-the SAME head SHA, do not post a second one. Say so in your deliverable instead.
-Repeated identical verdicts train a reader to skip them.
+Nothing injects per-phase models into this workspace, so you may only be able to
+determine them from what the earlier phases wrote in their own artifacts. If you
+cannot, say so rather than omitting the line - absence reads as "nobody
+checked", which is the correct impression in that case.

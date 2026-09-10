@@ -19,7 +19,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
-from scripts.check_workflow_definitions import _workflow_files, validate_file
+from scripts.check_workflow_definitions import (
+    _workflow_files,
+    grant_violations,
+    validate_file,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.workflow_definition import (
@@ -442,4 +446,378 @@ class TestNoShippedWorkflowDeclaresToolsItCannotGet:
             "the YAML must override the frontmatter's allowed-tools; an absent "
             "key inherits Read,Write,Bash from phases/delegate.md and the "
             "workflow stops validating"
+        )
+
+
+class TestNoPromptAsksPastItsGrant:
+    """A phase's instructions and its tool grant must agree (#1122).
+
+    THE FAILURE. #1110 added a `gh pr comment` step to the pr-review `report`
+    prompt so a review would deliver itself. `report` grants Read, Grep, Glob,
+    Write. The install succeeded and the deployed prompt carried the step, so
+    three reviews (#1113, #1115, #1117) each wrote "this needs a tool this
+    phase does not have" and left their verdicts in object storage.
+
+    WHY NOTHING CAUGHT IT. Each half is valid on its own - a prompt may say
+    anything, and that tool list is a perfectly good tool list. Only the PAIR
+    is wrong, and the two halves live in different files, which is why review
+    read past it three times. A schema cannot express the pair, so the create
+    endpoint accepts it too.
+
+    The three outcomes of shipping the pair are all bad and one is silent: the
+    phase fails, or it finds a way around the restriction, or it quietly does
+    not do the thing - and nothing reports the third.
+    """
+
+    def _violations(
+        self,
+        tmp_path: Path,
+        tools: list[str],
+        prompt: str,
+        outputs: list[str] | None = None,
+    ) -> list[str]:
+        path = _write(
+            tmp_path,
+            {
+                "id": "pair",
+                "name": "Pair",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "the-phase",
+                        "name": "The phase",
+                        "order": 1,
+                        "prompt_template": prompt,
+                        "allowed_tools": tools,
+                        "output_artifacts": outputs or [],
+                    }
+                ],
+            },
+        )
+        return grant_violations(path)
+
+    #: The instruction that actually shipped, quoted from the #1110 prompt.
+    POSTING_STEP: ClassVar[str] = (
+        "After writing your deliverable, post it as a comment on the PR:\n\n"
+        "```bash\n"
+        "gh pr comment <PR-NUMBER> --repo <OWNER>/<REPO> --body-file <your-deliverable>\n"
+        "```\n"
+    )
+
+    def test_a_prompt_that_runs_shell_without_bash_is_reported(self, tmp_path: Path) -> None:
+        """The reproduction. This is the pair that shipped in #1110."""
+        (violation,) = self._violations(
+            tmp_path, ["Read", "Grep", "Glob", "Write"], self.POSTING_STEP
+        )
+
+        assert "the-phase" in violation
+        assert "run shell" in violation
+        assert "none of [Bash]" in violation
+
+    def test_the_same_prompt_is_fine_when_bash_is_granted(self, tmp_path: Path) -> None:
+        """Negative control on the GRANT.
+
+        Without it this class passes just as well against a check that reports
+        every fenced prompt, which would fail every phase that legitimately
+        runs commands - `open_pr` and `quickfix` publish exactly this way.
+        """
+        assert self._violations(tmp_path, ["Read", "Bash", "Write"], self.POSTING_STEP) == []
+
+    def test_a_scoped_bash_grant_is_not_a_spelling_this_has_to_know(self, tmp_path: Path) -> None:
+        """Why the membership test is a plain `in` and needs no prefix match.
+
+        The first version of this check accepted `Bash(gh:*)` as a Bash grant,
+        reasoning that a scoped grant still runs the command. It cannot arise:
+        `allowed_tools` is validated against a fixed vocabulary of bare names
+        (#1207), so the definition never loads. Pinned because the alternative
+        is a prefix match nothing can reach, which reads to the next person as
+        a spelling the gate handles - and invites more of them.
+        """
+        with pytest.raises(ValidationError, match="unknown tool name"):
+            self._violations(tmp_path, ["Read", "Bash(gh:*)"], self.POSTING_STEP)
+
+    def test_the_same_grant_is_fine_without_the_instruction(self, tmp_path: Path) -> None:
+        """Negative control on the PROMPT: a Bash-less phase is not itself a
+        defect. Most phases in this repo are one, deliberately."""
+        assert (
+            self._violations(
+                tmp_path,
+                ["Read", "Grep", "Glob", "Write"],
+                "Compose the verdict from artifacts/input and write it out. You are read-only.",
+            )
+            == []
+        )
+
+    def test_an_empty_allowlist_is_not_a_restriction(self, tmp_path: Path) -> None:
+        """`_build_agent_command` omits `--tools` entirely for an empty list, so
+        the phase holds every tool. Reporting it would fail every codex phase,
+        which cannot carry a tool list at all (#1207)."""
+        assert self._violations(tmp_path, [], self.POSTING_STEP) == []
+
+    def test_no_shipped_workflow_ships_the_pair(self) -> None:
+        """The whole corpus, PACKAGES INCLUDED.
+
+        `main()` skips workflow packages, so the repo's own gate cannot see
+        `examples/research-package` or the starter plugin. Driving
+        `grant_violations` directly covers them, and reuses the exemption list
+        argued in the class above rather than restating it - a second copy
+        would let the two drift, and drift in an exemption list is invisible.
+        """
+        exempt = TestNoShippedWorkflowDeclaresToolsItCannotGet.UNRESOLVABLE_ALONE
+        offenders: list[str] = []
+        for path in _workflow_files():
+            raw = yaml.safe_load(path.read_text())
+            if not isinstance(raw, dict) or "phases" not in raw:
+                continue
+            if path.relative_to(_REPO_ROOT).as_posix() in exempt:
+                continue
+            offenders.extend(
+                f"{path.relative_to(_REPO_ROOT).as_posix()}: {why}"
+                for why in grant_violations(path)
+            )
+
+        assert not offenders, "\n".join(offenders)
+
+
+class TestNoPhaseMustProduceAnArtifactItCannotWrite:
+    """A phase declaring an output must hold a tool that can create a file.
+
+    THE SECOND SPELLING OF #1122. The gate above was written for the shape
+    #1110 shipped - a shell fence in a prompt, no Bash - and that is the only
+    shape it knew. So the fix for #1122 passed its own gate while three phases
+    of `research-experiment-plan` carried the identical defect stated
+    differently: `revise-after-experiment`, `plan` and `final-plan` each
+    declare `output_artifacts: [markdown]` and grant `[Read, Grep, Glob]`.
+
+    No Write and no Bash is not a phase that does its job awkwardly. It is a
+    phase that CANNOT put anything in `artifacts/output/`, so the collector
+    finds an empty directory and the phase after it - `review-plan` reading
+    `plan`, `final-plan` reading `review-plan` - starts from nothing. Silent,
+    because a phase that produces no artifact does not fail.
+
+    WHY THE DECLARATION AND NOT THE PROMPT. Every phase says what it delivers
+    twice, once in prose and once in `output_artifacts`, and only the second is
+    structured. Matching the prose means matching "write to artifacts/output",
+    which the phases that only READ that directory also contain - it is in the
+    boilerplate telling them where their input came from. The declaration says
+    the same thing without the ambiguity, and cannot be dodged by rewording.
+    """
+
+    def _violations(self, tmp_path: Path, tools: list[str], outputs: list[str]) -> list[str]:
+        return TestNoPromptAsksPastItsGrant()._violations(
+            tmp_path,
+            tools,
+            # No fence: this class must be driven by the DECLARATION alone. A
+            # prompt that also ran shell would let the other demand raise the
+            # violation and these tests would pass without this one existing.
+            "Read the input and deliver the plan.",
+            outputs=outputs,
+        )
+
+    #: The grant the three phases actually shipped with.
+    READ_ONLY: ClassVar[list[str]] = ["Read", "Grep", "Glob"]
+
+    def test_a_declared_output_without_write_or_bash_is_reported(self, tmp_path: Path) -> None:
+        """The reproduction, with the exact pair the three phases shipped."""
+        (violation,) = self._violations(tmp_path, self.READ_ONLY, ["markdown"])
+
+        assert "the-phase" in violation
+        assert "create a file" in violation
+        assert "Bash, Write" in violation
+
+    def test_write_satisfies_it(self, tmp_path: Path) -> None:
+        """Negative control on the GRANT, and the fix that was applied."""
+        assert self._violations(tmp_path, [*self.READ_ONLY, "Write"], ["markdown"]) == []
+
+    def test_bash_satisfies_it_without_write(self, tmp_path: Path) -> None:
+        """Bash alone is enough, and this is load-bearing, not a technicality.
+
+        `research` and `revise-spec` in the same workflow grant
+        `[Read, Grep, Glob, Bash]` and declare a markdown output. They are NOT
+        the defect - a heredoc creates a file - and the audit for this change
+        left them alone on exactly this reasoning. Pinned so that a later
+        tightening to "Write specifically" has to argue with a test rather than
+        silently reclassify two working phases as broken.
+        """
+        assert self._violations(tmp_path, [*self.READ_ONLY, "Bash"], ["markdown"]) == []
+
+    def test_a_phase_declaring_no_output_is_not_asked_to_write(self, tmp_path: Path) -> None:
+        """Negative control on the DECLARATION: read-only phases are fine.
+
+        Without this the check could report every Write-less phase, which would
+        make `output_artifacts` irrelevant to a check that claims to read it.
+        """
+        assert self._violations(tmp_path, self.READ_ONLY, []) == []
+
+    def test_naming_the_input_directory_in_prose_is_not_a_declaration(self, tmp_path: Path) -> None:
+        """The false positive this design avoids, quoted from the real prompts.
+
+        Every phase in `research-experiment-plan` carries this paragraph, and a
+        check that matched `artifacts/output` in prose would report all of them
+        - including the read-only ones, where the mention describes where the
+        PREVIOUS phase wrote.
+        """
+        assert (
+            TestNoPromptAsksPastItsGrant()._violations(
+                tmp_path,
+                self.READ_ONLY,
+                "> The durable location is `artifacts/input/<phase-id>/`, holding\n"
+                "> whatever the previous phase wrote under `artifacts/output/`.\n",
+                outputs=[],
+            )
+            == []
+        )
+
+    def test_every_plan_phase_reaches_the_platform_able_to_write(self) -> None:
+        """The three phases, through the conversion the create endpoint runs.
+
+        Not `grant_violations` and not the YAML: those are the two ends, and a
+        grant that is correct in the file but dropped in conversion passes both
+        while the deployed phase still cannot write. `build_command_from_definition`
+        is the hop between them and the last point the value is ours.
+        """
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+        from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+            build_command_from_definition,
+        )
+
+        definition = WorkflowDefinition.from_file(
+            _REPO_ROOT / "workflows/sdlc/research-experiment-plan/workflow.yaml"
+        )
+        phases = {p.phase_id: p for p in build_command_from_definition(definition).phases}
+
+        unable = {
+            phase_id: sorted(phase.allowed_tools)
+            for phase_id, phase in phases.items()
+            if phase.output_artifact_types
+            and phase.allowed_tools
+            and not {"Write", "Bash"} & set(phase.allowed_tools)
+        }
+
+        assert unable == {}, (
+            f"these phases are handed to the platform declaring an output they "
+            f"cannot produce: {unable}"
+        )
+
+
+class TestEveryFenceSpellingIsShellUnlessItSaysOtherwise:
+    """A fence the matcher cannot read must fail CLOSED (#1261 review).
+
+    THE DEFECT. The first version of this matched one spelling: three
+    backticks, an optional space, then one of `bash|sh|shell|zsh|console`,
+    case-sensitively. Every other fence CommonMark allows missed - a bare
+    fence with no info string, `Bash` with a capital B, a four-backtick fence,
+    a tilde fence. On a miss `_told_to_run_shell` returned None,
+    `grant_violations` hit `continue`, and no violation was recorded.
+
+    A miss was silence and silence was a pass. That is the whole defect: the
+    gate could not distinguish "this prompt runs no shell" from "this prompt
+    runs shell in a spelling I do not know", and reported both as fine. It was
+    reproduced end to end against #1110 itself - retyped with an ordinary bare
+    fence, the gate reported zero violations for the exact pair it exists to
+    catch. Bare fences outnumber tagged ones in this repo's own prompts, so
+    the common spelling was the invisible one.
+
+    THE FIX IS THE INVERSION. The vocabulary is now an allowlist of NON-shell
+    info strings, and an unknown or absent one is shell. A spelling nobody
+    anticipated therefore produces a false POSITIVE, which someone sees and
+    tags, rather than a false negative, which nobody sees at all. That
+    asymmetry is the point and the reason the list is short: every entry is a
+    deliberate exemption, and the cost of a missing one is a visible failure.
+
+    Each case below is the #1110 instruction verbatim, retyped in one more
+    spelling of a fence. All four failed against the old regex.
+    """
+
+    def _violations_for(self, tmp_path: Path, prompt: str) -> list[str]:
+        """The #1110 grant, so the ONLY variable across these cases is the fence."""
+        return TestNoPromptAsksPastItsGrant()._violations(
+            tmp_path, ["Read", "Grep", "Glob", "Write"], prompt
+        )
+
+    def _assert_reported(self, violations: list[str]) -> None:
+        assert len(violations) == 1, f"expected the pair to be reported, got {violations!r}"
+        assert "run shell" in violations[0]
+        assert "none of [Bash]" in violations[0]
+
+    #: The body of the block, identical in every case below.
+    RUNS: ClassVar[str] = "gh pr comment 42 --repo o/r --body-file out.md"
+
+    def test_a_bare_fence_is_shell(self, tmp_path: Path) -> None:
+        """The spelling that outnumbers every other in this repo's prompts, and
+        the one the old regex could not see at all."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n```\n{self.RUNS}\n```\n")
+        )
+
+    def test_a_capitalised_tag_is_shell(self, tmp_path: Path) -> None:
+        """The old pattern carried no `re.I`, so `Bash` and `BASH` both missed
+        while `bash` matched - a defect no reader of the prompt could observe."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n```Bash\n{self.RUNS}\n```\n")
+        )
+
+    def test_a_tilde_fence_is_shell(self, tmp_path: Path) -> None:
+        """CommonMark's other fence character. The old pattern hard-coded the
+        backtick, so a tilde fence was not a fence to it."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n~~~bash\n{self.RUNS}\n~~~\n")
+        )
+
+    def test_a_four_backtick_fence_is_shell(self, tmp_path: Path) -> None:
+        """Four backticks is the ordinary way to fence a block that itself
+        contains a fence, so it appears exactly where prompts quote prompts."""
+        self._assert_reported(
+            self._violations_for(tmp_path, f"Post it:\n\n````bash\n{self.RUNS}\n````\n")
+        )
+
+    def test_a_tagged_non_shell_block_is_not_shell(self, tmp_path: Path) -> None:
+        """The negative control on the INVERSION.
+
+        Without this, every test above passes against a matcher that calls
+        every fence shell - which would fail every read-only phase that shows
+        the shape of its own output, and there are many. The exemption has to
+        be real, and this is the tag the one affected block in the corpus was
+        given.
+        """
+        assert (
+            self._violations_for(
+                tmp_path, "Open with this line:\n\n```text\nReviewed at head `<sha>`.\n```\n"
+            )
+            == []
+        )
+
+    def test_a_closing_fence_is_not_a_bare_opener(self, tmp_path: Path) -> None:
+        """Why this walks fence PAIRS and does not scan lines.
+
+        The closing fence of any tagged block is, on its own line, exactly a
+        bare fence. A line scanner that treats bare as shell would therefore
+        report every exempt block in the corpus via its own closer - the
+        inversion would be unusable and the pressure would be to revert it.
+        Tracking the open/close state is what makes failing closed affordable.
+        """
+        assert (
+            self._violations_for(
+                tmp_path,
+                "Two exempt blocks:\n\n```text\nfirst\n```\n\nand\n\n```yaml\nid: x\n```\n",
+            )
+            == []
+        )
+
+    def test_a_fence_inside_an_exempt_block_is_not_an_opener(self, tmp_path: Path) -> None:
+        """Content between a pair is content, not markup.
+
+        A `text` block quoting a bash fence is showing it, not running it - the
+        report template does exactly this. Reading the inner fence as an opener
+        would make quoting a command indistinguishable from being told to run
+        one.
+        """
+        assert (
+            self._violations_for(
+                tmp_path,
+                f"Your report should look like:\n\n````text\n```bash\n{self.RUNS}\n```\n````\n",
+            )
+            == []
         )
