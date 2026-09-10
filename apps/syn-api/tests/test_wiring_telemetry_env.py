@@ -16,6 +16,11 @@ from syn_shared.env_constants import (
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
 )
 
+# CI runs `pytest -m unit`; this module was unmarked, so all 7 of its tests were
+# deselected and the gate went green having run none of them. Same shape as the
+# fail-open gates in #1239: a check that reports success without checking.
+pytestmark = pytest.mark.unit
+
 
 def _mock_settings(collector_url: str | None) -> MagicMock:
     settings = MagicMock()

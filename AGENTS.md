@@ -500,7 +500,7 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 
 - **`main`** - development trunk. All PRs target `main`.
 - **`release`** - deployment branch. PRs from `main` only. Merge triggers the full release pipeline.
-- **Beta releases** bypass `release`: `gh release create v0.20.0-beta.1 --prerelease --target main`
+- **Betas:** a test deploy creates NO GitHub release. Read [Beta Release](docs/release-process.md#beta-release) before cutting one.
 - **Version management:** `just bump-version 0.20.0` writes every version-carrying file, regenerates `uv.lock`, and re-runs the check. `just check-version` validates consistency on demand.
 - **Docs:** `release` → Vercel production, `main` → preview only.
 - **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules - wrong entry points are blocked by design.

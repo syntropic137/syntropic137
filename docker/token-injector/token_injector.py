@@ -28,6 +28,10 @@ import logging
 import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -114,11 +118,32 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
         # Route access logs through Python logger
         logger.debug(fmt, *args)
 
-    def do_GET(self) -> None:
-        self._handle_check()
+    def __getattr__(self, name: str) -> Callable[[], None]:
+        """Answer an ext_authz check for any HTTP method.
 
-    def do_POST(self) -> None:
-        self._handle_check()
+        ``http.server`` dispatches a request by looking up ``do_<METHOD>`` and
+        replies 501 when it finds nothing. Envoy maps a 5xx from the check
+        server to ``CheckStatus::Error``, which with ``failure_mode_allow:
+        false`` becomes a bodyless 403 for the agent — and envoy forwards the
+        DOWNSTREAM method on the check request, so the method the agent used is
+        the method that has to be found here.
+
+        Naming methods here would make this class a second method allowlist,
+        invisible from envoy.yaml and needing to be kept in step with it. It
+        drifted exactly that way (#1080): the virtual hosts match ``prefix:
+        "/"`` with no method condition while only GET and POST could be
+        answered, so the Claude CLI's ``HEAD /api/hello`` preflight killed
+        phases that had run for minutes. The check reads the Host header and
+        nothing else, so it is method-agnostic by construction; this makes the
+        dispatch method-agnostic too, and there is no list left to drift.
+
+        ``ci/fitness/infrastructure/test_proxy_method_agreement.py`` fails if
+        envoy.yaml ever does start restricting methods, at which point this
+        blanket answer would no longer be the matching contract.
+        """
+        if name.startswith("do_"):
+            return self._handle_check
+        raise AttributeError(name)
 
     def _handle_check(self) -> None:
         # Envoy forwards the original request's Host header
@@ -154,7 +179,13 @@ class TokenInjectorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # A response to HEAD carries the headers of the equivalent GET and no
+        # body (RFC 9110 s9.3.2). Envoy would discard a stray one today, but
+        # only because this server speaks HTTP/1.0 and closes the connection
+        # after every response; on a kept-alive connection its HTTP/1 codec
+        # reads those bytes as the start of the next response.
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
 
 # ---------------------------------------------------------------------------
