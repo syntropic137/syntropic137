@@ -283,3 +283,17 @@ itself - and each needs the check for a different reason. The trigger path is
 the one that bites: it acknowledges a dispatch before any validation, so a
 refusal inside the async task leaves a record claiming a run that has no
 execution and never will.
+
+### `mcpc` was evaluated for per-phase tool scoping and rejected
+
+Its configuration unit is a SERVER, not a tool, so it offers no tool-level
+policy primitive to scope a phase with. Adopting it would require granting
+every phase `Bash`, surrendering `allowed_tools` - the one tool-level control
+enforced today, and on section 3's measurement the only axis Claude gives us at
+all.
+
+Negative result from `exec-99d8c34c1be0`, whose own plan recommended recording
+it here rather than spending an ADR number on it. It rules out one candidate
+answer to #1052, which proposes a per-phase `mcpServers` field as the shape for
+this work; nothing decided above changes. A separate finding from the same
+research is filed as #1254.
