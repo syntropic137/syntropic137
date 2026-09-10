@@ -599,3 +599,15 @@ Note what a test deploy does **not** need from that runbook: sections that
 validate published release artifacts (GHCR release digests, the npm package, the
 GitHub Release itself) have no subject here, because a test deploy publishes
 none of them.
+
+### Attribution
+
+Operator co-authorship on agent commits requires `SYN_OPERATOR_NAME` and
+`SYN_OPERATOR_EMAIL` to be set on the deployment. **Both are required** - the
+`prepare-commit-msg` hook exits without writing a trailer if either is missing,
+so setting one looks configured and does nothing.
+
+The email must belong to the GitHub account that should receive the credit, and
+GitHub silently ignores a co-author it cannot resolve. Verify against a real
+commit that a workspace pushed rather than assuming the setting took
+([#1265](https://github.com/syntropic137/syntropic137/issues/1265)).
