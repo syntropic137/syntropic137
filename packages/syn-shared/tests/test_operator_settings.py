@@ -20,6 +20,25 @@ NAME = "Neural Empowerment"
 EMAIL = "129192050+NeuralEmpowerment@users.noreply.github.com"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_operator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove the real variables from the process environment.
+
+    `_env_file=None` stops pydantic-settings reading a .env file. It does NOT
+    stop it reading the PROCESS ENVIRONMENT, which sits above the file and below
+    init kwargs in precedence. So on any machine where attribution is actually
+    configured - every workspace container, and any developer who set it up -
+    a test that passes only `name` still received `email` from the environment,
+    and the half-configuration cases silently became full ones.
+
+    That is a test which passes everywhere EXCEPT where the feature is switched
+    on, which is the worst possible place to be wrong. Found by a real workspace
+    run on 2026-09-10, not by CI, because CI has no reason to set these.
+    """
+    monkeypatch.delenv("SYN_OPERATOR_NAME", raising=False)
+    monkeypatch.delenv("SYN_OPERATOR_EMAIL", raising=False)
+
+
 def _settings(**kw: str) -> OperatorSettings:
     """Build settings without reading the developer's own .env."""
     return OperatorSettings(_env_file=None, **kw)  # type: ignore[call-arg]
