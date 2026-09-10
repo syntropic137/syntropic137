@@ -795,27 +795,43 @@ class WorkspaceProvisionHandler:
             return
 
         target = WORKSPACE_HOOKS_DIR / HOOK_FILENAME
+        # inject_files' base_path never reaches the container: copy_to_workspace
+        # writes relative to the workspace root and takes no base_path at all
+        # (adapter_copy.py:118-133). Passing one is accepted and discarded, which
+        # put the hook at /workspace/prepare-commit-msg and left chmod reporting
+        # "No such file or directory". So stage inside the workspace, then MOVE
+        # it into place with a shell that can create the directory.
+        #
+        # The staging name is dotted and the move is a `mv`, so nothing is left
+        # behind for an agent to notice or accidentally commit.
+        staged = ".syn-attribution-hook"
         try:
-            await workspace.inject_files(
-                [(HOOK_FILENAME, attribution_hook_source())],
-                base_path=str(WORKSPACE_HOOKS_DIR),
+            await workspace.inject_files([(staged, attribution_hook_source())])
+            install = await workspace.execute(
+                [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {WORKSPACE_HOOKS_DIR} "
+                    f"&& mv /workspace/{staged} {target} "
+                    f"&& chmod +x {target}",
+                ],
+                timeout_seconds=30,
             )
-            # copy_to does not promise the executable bit, and git silently
-            # ignores a hook it cannot execute - the exact failure this method
-            # exists to end.
-            chmod = await workspace.execute(["chmod", "+x", str(target)], timeout_seconds=30)
-            if chmod.exit_code != 0:
+            if install.exit_code != 0:
                 logger.warning(
-                    "attribution hook could not be made executable at %s: %s",
+                    "attribution hook could not be installed at %s: %s",
                     target,
-                    chmod.stderr,
+                    install.stderr,
                 )
                 return
             # Assert the effect, not the call. Writing a file and reporting
-            # success is how this feature stayed broken for four months.
+            # success is how this feature stayed broken for four months, and a
+            # hook git cannot execute is ignored in silence.
             check = await workspace.execute(["test", "-x", str(target)], timeout_seconds=30)
             if check.exit_code != 0:
                 logger.warning("attribution hook is not present after install at %s", target)
+            else:
+                logger.info("attribution hook installed at %s", target)
         except Exception as exc:
             logger.warning("attribution hook install failed at %s: %s", target, exc)
 
