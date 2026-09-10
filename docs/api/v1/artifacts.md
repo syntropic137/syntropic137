@@ -6,7 +6,7 @@ Artifact storage and retrieval.
 
 ## list_artifacts()
 
-List artifacts, optionally filtered by workflow or session.
+List artifacts, optionally filtered, as one page of a known collection.
 
 **Signature:**
 
@@ -14,11 +14,19 @@ List artifacts, optionally filtered by workflow or session.
 async def list_artifacts(
     workflow_id: str | None = None,
     session_id: str | None = None,
-    limit: int = 100,
+    phase_id: str | None = None,
+    artifact_type: str | None = None,
+    created_after: datetime | None = None,
+    created_before: datetime | None = None,
+    search: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
-    auth: AuthContext | None = None,
-) -> Result[list[ArtifactSummary], ArtifactError]
+) -> Result[Page[ArtifactSummary], ArtifactError]
 ```
+
+Returns a `Page` - rows plus the `total` and the per-type facet counts, each
+counted over every filter - rather than a bare list (#1204). `DEFAULT_PAGE_SIZE`
+is 50.
 
 ---
 

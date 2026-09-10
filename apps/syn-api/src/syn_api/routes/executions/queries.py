@@ -758,6 +758,8 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
+            total_phases=detail.total_phases,
+            completed_phases=detail.completed_phases,
             total_tokens=enriched.total_tokens,
             total_cost_usd=enriched.total_cost_usd,
             unpriced_observation_count=enriched.unpriced_observation_count,
@@ -866,6 +868,7 @@ async def list_executions_endpoint(
         total=execution_page.total,
         page=page,
         page_size=page_size,
+        excluded_undated=execution_page.excluded_undated,
         status_counts=execution_page.status_counts,
     )
 
@@ -898,6 +901,8 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         phases=phases,
+        total_phases=detail.total_phases,
+        completed_phases=detail.completed_phases,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         total_cache_creation_tokens=total_cache_creation,

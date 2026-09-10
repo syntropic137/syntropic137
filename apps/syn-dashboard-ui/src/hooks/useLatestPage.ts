@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
 
-const EMPTY_PAGE: ListPage<never> = { rows: [], total: 0, statusCounts: {} }
+const EMPTY_PAGE: ListPage<never> = { rows: [], total: 0, statusCounts: {}, excludedUndated: 0 }
 
 export interface LatestPageState<TRow> {
   /** The newest page received. `EMPTY_PAGE` until the first one lands. */

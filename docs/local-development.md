@@ -3,7 +3,7 @@
 This guide explains how to set up and run the Syntropic137 locally.
 
 > **📦 For Production/Self-Host**: If you're deploying to a self-hosted or production environment, see:
-> - [Self-Host Deployment Guide](infra/docs/selfhost-deployment.md) - Docker Compose + Cloudflare Tunnel
+> - [Self-Host Deployment Guide](../infra/docs/selfhost-deployment.md) - Docker Compose + Cloudflare Tunnel
 > - [Production Deployment Guide](deployment/production-deployment.md) - Workspace isolation options
 
 ## Quick Start
@@ -202,7 +202,7 @@ uv pip list | grep syn
 ## Making Changes
 
 1. Create a feature branch
-2. Make changes following [RIPER-5 guidelines](.cursor/rules/riper-5.md)
+2. Make changes following the conventions in [AGENTS.md](../AGENTS.md)
 3. Run `just qa` to validate
 4. Commit with conventional commits
 5. Create a PR

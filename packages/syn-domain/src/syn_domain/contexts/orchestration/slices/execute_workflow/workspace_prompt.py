@@ -12,14 +12,47 @@ WHY THIS RENDERS RATHER THAN EXPORTING A CONSTANT (#1187). A phase can declare
 a phase this prompt used to state two things that are false: that `repos/` holds
 pre-cloned repositories, and that the way to start work is to navigate into
 `/workspace/repos/<name>`. Both were unconditional, so the merged `clone_repos`
-gate could not actually be switched on - turning it on told the agent to enter a
-directory that does not exist, and the synthetic `CLAUDE.md`/`AGENTS.md` the tree
-also advertised are not injected for such a phase either
-(`WorkspaceProvisionHandler._hydrate_workspace`).
+gate could not actually be switched on - turning it on sent the agent looking
+for a checkout that was never made.
+
+WHAT WAS NEVER THE PROBLEM: a missing directory. `/workspace/repos` always
+exists. Both workspace images pre-create it and the entrypoint creates it again
+unconditionally, and `unpushed_work_guard._repositories` depends on exactly that
+to read an empty result as "this phase cloned nothing" rather than "the
+workspace did not answer". So the no-checkout tree below shows the directory,
+empty - describing it as absent would put the prompt in contradiction with an
+invariant production relies on. The synthetic `CLAUDE.md`/`AGENTS.md` the tree
+also advertised ARE absent for such a phase
+(`WorkspaceProvisionHandler._hydrate_workspace`). Empty and missing are
+different claims and the tree has to keep them apart.
 
 The claims are now made per phase, by the one caller that knows the answer. A
 phase that DOES clone gets exactly the bytes it got before - see
 ``test_open_pr_needs_no_working_tree`` for the frozen baseline that pins this.
+
+WHY "Completing Your Task" STATES THE DELIVERABLE UNCONDITIONALLY (#1221). The
+instruction to write ``artifacts/output/deliverable.md`` used to be step 4 of a
+four-step action sequence, and every field it asked for presupposed that the
+first three steps had happened: "what you actually changed", "your actual
+commit hashes", "the actual PR URL you created". A phase whose honest answer is
+"nothing needed doing" could satisfy none of them, and the sequence gave it no
+instruction at all for that case - so it reported nothing. `open_pr` did
+exactly this on 6 of 100 executions: it investigated, found the PR already
+open at the verified head, correctly declined to open a second one, and exited
+without writing. The execution then failed on `PhaseProducedNoDeclaredOutputError`
+(#1167) with the work intact and verification already passed.
+
+The requirement therefore comes BEFORE the coding/non-coding split, applies to
+both, and names the no-action outcome as one of four reportable ones. This is
+the phase's contract rather than its prompt, which is the half of #1221's
+"decide which" that does not have to wait on the frozen `workflows/` baseline -
+and being here it covers every phase of every workflow, not just the four
+copies of ``open_pr.md``.
+
+NOT a relaxation of #1167. That check still fails a phase that writes nothing,
+and must: it is what catches a phase that silently did nothing. This removes
+the reason a correct phase had to trip it, rather than teaching the check to
+look away.
 """
 
 from __future__ import annotations
@@ -44,13 +77,15 @@ _TREE_WITH_CHECKOUT: Final[str] = """\
 └── repos/       ← Pre-cloned repositories (ready to use)
     └── {repo-name}/"""
 
-#: No `repos/`, and no synthetic CLAUDE.md/AGENTS.md either - both are derived
-#: from what was actually cloned, so neither exists for this phase.
+#: `repos/` is present and EMPTY - the directory is always created, only the
+#: checkout beneath it is conditional. No synthetic CLAUDE.md/AGENTS.md though:
+#: both are derived from what was actually cloned, so neither exists here.
 _TREE_WITHOUT_CHECKOUT: Final[str] = """\
 /workspace/
-└── artifacts/
-    ├── input/   ← Previous phase outputs (read-only)
-    └── output/  ← Write YOUR deliverables here"""
+├── artifacts/
+│   ├── input/   ← Previous phase outputs (read-only)
+│   └── output/  ← Write YOUR deliverables here
+└── repos/       ← Exists but EMPTY - nothing is checked out for this phase"""
 
 _STARTING_POINT_WITH_CHECKOUT: Final[str] = (
     "1. Navigate to `/workspace/repos/{repo-name}` (repositories are "
@@ -95,6 +130,20 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ## Completing Your Task
 
+**The deliverable is not conditional on having acted.** `artifacts/output/` is
+how a phase reports, so it is written for every outcome:
+
+- **you did the work** - describe what you changed and where it is
+- **it was already done, or turned out not to be needed** - say so, and show
+  what you checked that established it
+- **you declined to act**, because acting would have been wrong - say why
+- **you could not act** - say what stopped you
+
+"Nothing needed doing" is a conclusion, and the evidence behind it is the
+deliverable. Reaching it and writing no file reports nothing at all: from
+outside it is indistinguishable from a phase that ran and produced nothing,
+and that fails the execution.
+
 ### For coding tasks (commits, PRs, code changes):
 
 Your primary deliverable is **code on GitHub**. The artifact is your summary.
@@ -103,9 +152,9 @@ Your primary deliverable is **code on GitHub**. The artifact is your summary.
 2. Make changes, commit with clear messages
 3. Push to GitHub, create PR if needed
 4. Write summary to `artifacts/output/deliverable.md` with:
-   - What you actually changed
-   - Your actual commit hashes
-   - The actual PR URL you created
+   - What you actually changed, or what you found already correct
+   - Your actual commit hashes, if you made any
+   - The actual PR URL - the one you opened, or the one that was already there
    - Brief executive summary
 
 ### For non-coding tasks (research, analysis, design, planning):

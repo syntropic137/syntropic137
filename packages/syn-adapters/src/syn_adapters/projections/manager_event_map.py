@@ -205,6 +205,14 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("dashboard_metrics", "on_artifact_created"),
         ("realtime", "on_artifact_created"),
     ],
+    # A backfilled date is only worth writing if a reader can see it. Without
+    # this line the recovery event reached the store and no projection at all,
+    # so the migration reported "274 recorded" while every list surface still
+    # answered null -- a write into a void that looks exactly like success
+    # (#1215).
+    "ArtifactCreationTimeRecovered": [
+        ("artifact_list", "on_artifact_creation_time_recovered"),
+    ],
     "ArtifactUpdated": [("artifact_list", "on_artifact_updated")],
     "ArtifactDeleted": [("artifact_list", "on_artifact_deleted")],
     TOOL_EXECUTION_STARTED: [("tool_timeline", "on_tool_execution_started")],

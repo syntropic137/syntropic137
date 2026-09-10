@@ -58,7 +58,7 @@ class FakeExecutionRepository:
     """Minimal in-memory execution repository for smoke tests.
 
     Clears ``_uncommitted_events`` after save, mirroring what the real SDK
-    repository does — required for ``_save_and_sync`` to not re-process events
+    repository does — required for ``ExecutionJournal.append`` to not re-process events
     on subsequent saves.
     """
 

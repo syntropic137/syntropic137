@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -63,9 +64,32 @@ class Page[T]:
     every unselected chip reading zero.
     """
 
+    excluded_undated: int = 0
+    """Rows dropped because their timestamp could not be read, not because it
+    was out of range.
+
+    ``total`` alone cannot distinguish "older than the window" from "carries no
+    date at all", and a quarter of the artifact corpus is the second (#1215).
+    A reader narrowing a window saw an unexplained gap and no way to tell which
+    of the two it was; this is the number that tells them.
+
+    Counted over the same filters as ``total``, so the two are directly
+    comparable: these are rows that matched everything the query asked for and
+    were dropped ONLY because the window could not be evaluated against them.
+    Zero whenever the query gave no bounds -- an unbounded window evaluates
+    every row, including the undated ones, which it returns.
+
+    This is deliberately NOT "include the undated rows anyway". A 24-hour query
+    that returns rows of unknown age is a different lie, not a fix.
+    """
+
     @classmethod
     def unpaged(cls, rows: Sequence[T], *, status_of: Callable[[T], str]) -> Page[T]:
-        """A page that is the whole collection: nothing was filtered or sliced."""
+        """A page that is the whole collection: nothing was filtered or sliced.
+
+        ``excluded_undated`` is 0 because nothing was excluded: with no window
+        there is no row this page could not place in time.
+        """
         counts: dict[str, int] = {}
         for row in rows:
             status = status_of(row)
@@ -79,41 +103,79 @@ def paginate[R, T](
     base_predicate: Callable[[R], bool],
     status_of: Callable[[R], str],
     statuses: Collection[str] | None,
-    sort_key: Callable[[R], str],
+    timestamp_of: Callable[[R], object],
+    after: datetime | None = None,
+    before: datetime | None = None,
     to_row: Callable[[R], T],
     offset: int = 0,
     limit: int | None = None,
 ) -> Page[T]:
     """Filter, tally, sort and slice in one pass over ``records``.
 
-    ``base_predicate`` covers every filter EXCEPT status. Status is expressed as
-    ``statuses`` (a set of allowed values) rather than a second predicate so it
-    cannot disagree with ``status_of``: the facet tally and the row filter read
-    the same field by construction.
+    ``base_predicate`` covers every filter EXCEPT status and the time window.
+    Both of those are dimensions of this function rather than conjuncts the
+    caller folds into its predicate, and for the same reason: a boolean tells
+    ``paginate`` only THAT a row was dropped, so anything it must report about
+    WHY has to be decided here.
 
-    Rows are ordered by ``sort_key`` descending. The key is a string because
-    both list surfaces order by an ISO 8601 timestamp, and newest-first is
-    the only order either offers -- so neither the key type nor the
-    direction is a knob.
+    Status is expressed as ``statuses`` (a set of allowed values) so it cannot
+    disagree with ``status_of``: the facet tally and the row filter read the
+    same field by construction.
+
+    The window is expressed as ``timestamp_of`` plus the bounds so the two
+    reasons a row can fail it stay distinguishable. Folded into
+    ``base_predicate``, "outside the window" and "carries no date the window
+    could be evaluated against" arrive as the same ``False``, and a quarter of
+    the artifact corpus vanished into that gap with nothing in the response
+    saying so (#1215). Here they are told apart and the second is counted into
+    ``Page.excluded_undated``.
+
+    Rows are ordered by ``timestamp_of`` descending -- the same field the window
+    is applied to, which is what makes it impossible to bound one field while
+    sorting by another. It is compared as a string because every list surface
+    stores an ISO 8601 timestamp, and newest-first is the only order any of
+    them offers, so neither the key nor the direction is a knob.
 
     ``limit=None`` means no cap.
     """
     allowed = set(statuses) if statuses else None
     counts: dict[str, int] = {}
     matched: list[R] = []
+    undated = 0
 
     for record in records:
         if not base_predicate(record):
             continue
+        verdict = _window_verdict(timestamp_of(record), after, before)
+        if verdict is _WindowVerdict.OUTSIDE:
+            continue
         status = status_of(record)
+        selected = _status_is_selected(status, allowed)
+        if verdict is _WindowVerdict.UNDATED:
+            # Not tallied into the facets: a facet says what selecting that
+            # option WOULD return, and selecting it would not return this row.
+            # Counted against the same filters as ``total``, status included,
+            # so the two numbers describe the same query.
+            undated += selected
+            continue
         counts[status] = counts.get(status, 0) + 1
-        if allowed is not None and status not in allowed:
+        if not selected:
             continue
         matched.append(record)
 
-    matched.sort(key=sort_key, reverse=True)
+    matched.sort(key=lambda r: str(timestamp_of(r) or ""), reverse=True)
     window = matched[offset : offset + limit] if limit is not None else matched[offset:]
-    return Page(rows=[to_row(r) for r in window], total=len(matched), status_counts=counts)
+    return Page(
+        rows=[to_row(r) for r in window],
+        total=len(matched),
+        status_counts=counts,
+        excluded_undated=undated,
+    )
+
+
+def _status_is_selected(status: str, allowed: set[str] | None) -> bool:
+    """Whether the optional status facet admits one row."""
+    return allowed is None or status in allowed
 
 
 def coerce_datetime(value: object) -> datetime | None:
@@ -153,6 +215,55 @@ def coerce_datetime(value: object) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+class _WindowVerdict(Enum):
+    """Why a row is or is not in the window -- the distinction ``bool`` loses.
+
+    Private because it is an answer :func:`paginate` needs and no caller does:
+    a list surface reports the undated rows as a COUNT, not per row. Exposing
+    it would invite each surface to re-decide what an unreadable timestamp
+    means, which is the divergence this module exists to prevent.
+    """
+
+    INSIDE = "inside"
+    OUTSIDE = "outside"
+    UNDATED = "undated"
+    """Bounded window, and the row carries no timestamp it could be judged by.
+
+    Not a third kind of "outside". The row may well belong in the window; the
+    query simply cannot be answered for it, and saying so is the difference
+    between a filtered count and an honest one (#1215).
+    """
+
+
+def _window_verdict(
+    value: object,
+    after: datetime | None,
+    before: datetime | None,
+) -> _WindowVerdict:
+    """Place ``value`` against the inclusive ``[after, before]``.
+
+    An unbounded window admits everything, undated rows included: with no
+    bound there is nothing a missing timestamp could fail.
+
+    Bounds and rows are compared as UTC instants, so this never raises on a
+    timezone-less value on either side and no caller has to normalise before
+    calling; :func:`coerce_datetime` owns that reading and explains why the
+    API's answer for a bound is a stricter one.
+    """
+    if after is None and before is None:
+        return _WindowVerdict.INSIDE
+    started = coerce_datetime(value)
+    if started is None:
+        return _WindowVerdict.UNDATED
+    lower = coerce_datetime(after)
+    upper = coerce_datetime(before)
+    if lower is not None and started < lower:
+        return _WindowVerdict.OUTSIDE
+    if upper is not None and started > upper:
+        return _WindowVerdict.OUTSIDE
+    return _WindowVerdict.INSIDE
+
+
 def within_window(
     value: object,
     after: datetime | None,
@@ -166,21 +277,14 @@ def within_window(
     must agree about it or the count describes rows the query does not return
     (#920).
 
-    Bounds and rows are compared as UTC instants, so this never raises on a
-    timezone-less value on either side and no caller has to normalise before
-    calling; :func:`coerce_datetime` owns that reading and explains why the
-    API's answer for a bound is a stricter one.
+    That exclusion is right and stays. What was missing is that it was also
+    SILENT: this returns the same ``False`` for "older than the bound" and for
+    "no date at all", so a caller filtering on it cannot report the second
+    (#1215). :func:`paginate` therefore does not use this - it asks
+    :func:`_window_verdict` and counts the undated rows it dropped. Reach for
+    this one only where a bare predicate is genuinely all that is wanted.
     """
-    if after is None and before is None:
-        return True
-    started = coerce_datetime(value)
-    if started is None:
-        return False
-    lower = coerce_datetime(after)
-    upper = coerce_datetime(before)
-    if lower is not None and started < lower:
-        return False
-    return not (upper is not None and started > upper)
+    return _window_verdict(value, after, before) is _WindowVerdict.INSIDE
 
 
 def matches_search(term: str | None, *fields: object) -> bool:

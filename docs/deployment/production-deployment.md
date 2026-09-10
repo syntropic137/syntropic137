@@ -536,7 +536,6 @@ kubectl autoscale deployment/syn --min=3 --max=20 --cpu-percent=70 -n syn
 
 ## Related Documentation
 
-- [Workspace Architecture README](../../packages/syn-adapters/src/syn_adapters/workspaces/README.md)
 - [ADR-021: Isolated Workspace Architecture](../adrs/ADR-021-isolated-workspace-architecture.md)
 - [Firecracker Setup](../../docker/firecracker/README.md)
 - [Environment Configuration](../env-configuration.md)

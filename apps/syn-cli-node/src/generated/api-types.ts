@@ -1859,6 +1859,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Type Counts */
             type_counts?: {
                 [key: string]: number;
@@ -2635,6 +2640,16 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -2701,6 +2716,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;
@@ -4213,6 +4233,11 @@ export interface components {
              * @default 50
              */
             page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;

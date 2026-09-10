@@ -32,8 +32,14 @@ from syn_domain.contexts.artifacts._shared import (
 from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
     DeleteArtifactCommand,
 )
+from syn_domain.contexts.artifacts.domain.commands.RecoverArtifactCreationTimeCommand import (
+    RecoverArtifactCreationTimeCommand,
+)
 from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
     UpdateArtifactCommand,
+)
+from syn_domain.contexts.artifacts.domain.events.ArtifactCreationTimeRecoveredEvent import (
+    ArtifactCreationTimeRecoveredEvent,
 )
 from syn_domain.contexts.artifacts.domain.services import (
     ArtifactQueryService,
@@ -63,6 +69,7 @@ __all__ = [
     "ArtifactAggregate",
     "ArtifactContentStoragePort",
     "ArtifactCreatedEvent",
+    "ArtifactCreationTimeRecoveredEvent",
     "ArtifactQueryService",
     "ArtifactQueryServiceProtocol",
     "ArtifactType",
@@ -73,6 +80,7 @@ __all__ = [
     "DeleteArtifactCommand",
     "ManageArtifactHandler",
     "PhaseOutputFile",
+    "RecoverArtifactCreationTimeCommand",
     "UpdateArtifactCommand",
     "UploadArtifactCommand",
     "compute_content_hash",

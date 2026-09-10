@@ -71,6 +71,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
     _BRANCH,
     _REPO,
@@ -193,12 +196,13 @@ async def _fail_after(start: PhaseStartingPoints | None) -> WorkflowFailedEvent:
     nothing an operator can query.
     """
     processor = _make_processor()
-    processor._execution_repo.save = AsyncMock()  # keep the events inspectable
+    # keep the events inspectable
+    processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     if start is not None:
-        processor._phase_starting_points = start
+        processor._runtime._starting_points = start  # pyright: ignore[reportPrivateUsage]
 
     started_at = datetime.now(UTC) - timedelta(seconds=1671.8)
-    processor._phase_started_at[_PHASE_ID] = started_at
+    processor._runtime._started_at[_PHASE_ID] = started_at  # pyright: ignore[reportPrivateUsage]
     aggregate = _running_aggregate()
 
     await processor._fail_execution(
@@ -247,7 +251,7 @@ async def _read_back(event: WorkflowFailedEvent) -> PhaseExecutionDetail:
     )
     # Serialized exactly as production serializes it, so a field that survives
     # the event object but not `model_dump` is caught here.
-    await detail.on_workflow_failed(WorkflowExecutionProcessor._serialize_event(event))
+    await detail.on_workflow_failed(ExecutionJournal._serialize_event(event))
 
     execution = await detail.get_by_id(_EXECUTION_ID)
     assert execution is not None
@@ -935,7 +939,7 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         "each phase must record its starting point once, before its own agent "
         f"runs and after the previous one finished; got {agent_runs_before}"
     )
-    assert not processor._phase_starting_points._by_phase, (
+    assert not processor._runtime._starting_points._by_phase, (  # pyright: ignore[reportPrivateUsage]
         "starting points outlived their phases - a later failure would compare "
         "against a workspace that no longer exists"
     )

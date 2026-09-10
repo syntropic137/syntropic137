@@ -1,0 +1,49 @@
+#!/bin/sh
+# prepare-commit-msg — append operator Co-authored-by trailer.
+#
+# When the workspace is run by an operator (e.g. via Syntropic137 selfhost),
+# SYN_OPERATOR_NAME and SYN_OPERATOR_EMAIL identify the human who sponsored
+# the workspace. This hook adds them as a co-author on every agent commit so
+# the operator gets attribution on PRs the workspace opens.
+#
+# This hook is shipped as part of the claude-cli workspace provider (it is
+# NOT a Claude Code plugin). The entrypoint installs it into the runtime
+# git hooks directory at container start.
+#
+# Behavior:
+#   - No-op when either env var is unset (backward compatible).
+#   - Skipped on auto-generated message sources (merge / squash / template)
+#     so we don't pollute them. NOT skipped on `commit` source so
+#     `--amend`, cherry-pick, and rebase commits also get the trailer if
+#     they're missing it; idempotency below handles re-adds.
+#   - Idempotent — won't append if the same trailer already exists.
+#   - Always exits 0 — never blocks a commit on attribution failure.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+case "$COMMIT_SOURCE" in
+    merge|squash|template) exit 0 ;;
+esac
+
+if [ -z "$SYN_OPERATOR_NAME" ] || [ -z "$SYN_OPERATOR_EMAIL" ]; then
+    exit 0
+fi
+
+# Strip CR/LF from operator inputs — env vars are normally well-formed but we
+# don't want a stray newline in either to inject additional trailers.
+NAME=$(printf '%s' "$SYN_OPERATOR_NAME" | tr -d '\r\n')
+EMAIL=$(printf '%s' "$SYN_OPERATOR_EMAIL" | tr -d '\r\n')
+
+if [ -z "$NAME" ] || [ -z "$EMAIL" ]; then
+    exit 0
+fi
+
+TRAILER="Co-authored-by: ${NAME} <${EMAIL}>"
+
+if grep -qF "$TRAILER" "$COMMIT_MSG_FILE" 2>/dev/null; then
+    exit 0
+fi
+
+printf '\n%s\n' "$TRAILER" >> "$COMMIT_MSG_FILE"
+exit 0

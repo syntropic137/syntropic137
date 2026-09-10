@@ -15,6 +15,7 @@ import pytest
 
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
+    RepoNameCollisionError,
     SetupPhaseSecrets,
     _repo_full_name,
     _repo_name,
@@ -234,6 +235,224 @@ class TestBuildSetupScript:
 
 
 @pytest.mark.unit
+class TestRepoNameCollision:
+    """Two repositories claiming one /workspace/repos directory (#1223).
+
+    Driven through build_setup_script(), not _clone_destinations directly:
+    the script is what provisioning actually consumes, and the defect was a
+    clone line silently missing from it.
+    """
+
+    def test_same_name_different_orgs_is_refused(self) -> None:
+        """(a) Different orgs, same repo name -> refuse, naming both URLs."""
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/other-org/api-service",
+            ],
+            repo_tokens={
+                "https://github.com/acme/api-service": "tok-acme",
+                "https://github.com/other-org/api-service": "tok-other",
+            },
+        )
+
+        with pytest.raises(RepoNameCollisionError) as exc_info:
+            secrets.build_setup_script()
+
+        message = str(exc_info.value)
+        # An operator must be able to act on this without reading the source:
+        # both offending repos, and the directory they fight over.
+        assert "https://github.com/acme/api-service" in message
+        assert "https://github.com/other-org/api-service" in message
+        assert "/workspace/repos/api-service" in message
+
+    def test_collision_carries_both_urls_as_attributes(self) -> None:
+        """The refusal is inspectable, not only printable."""
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/other-org/api-service",
+            ],
+        )
+
+        with pytest.raises(RepoNameCollisionError) as exc_info:
+            secrets.build_setup_script()
+
+        error = exc_info.value
+        assert error.destination == "/workspace/repos/api-service"
+        assert error.first_url == "https://github.com/acme/api-service"
+        assert error.second_url == "https://github.com/other-org/api-service"
+
+    def test_collision_detected_beyond_the_first_pair(self) -> None:
+        """A collision later in the list is caught, not just repos[0] vs [1]."""
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/repo-a",
+                "https://github.com/acme/repo-b",
+                "https://github.com/other-org/repo-a",
+            ],
+        )
+
+        with pytest.raises(RepoNameCollisionError) as exc_info:
+            secrets.build_setup_script()
+
+        assert exc_info.value.destination == "/workspace/repos/repo-a"
+        assert exc_info.value.second_url == "https://github.com/other-org/repo-a"
+
+    def test_different_names_still_clone_both(self) -> None:
+        """(b) REGRESSION GUARD: multi-repo is a normal operation here.
+
+        A check that refused legitimate multi-repo executions would be worse
+        than the bug it fixes.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/other-org/web-service",
+            ],
+            repo_tokens={
+                "https://github.com/acme/api-service": "tok-acme",
+                "https://github.com/other-org/web-service": "tok-other",
+            },
+        )
+
+        script = secrets.build_setup_script()
+
+        assert script.count("git clone") == 2
+        assert "[ -d /workspace/repos/api-service ] ||" in script
+        assert "[ -d /workspace/repos/web-service ] ||" in script
+        assert "https://github.com/acme/api-service" in script
+        assert "https://github.com/other-org/web-service" in script
+
+    def test_same_repo_listed_twice_is_deduplicated(self) -> None:
+        """(c) Identical URL twice -> de-duplicate, do not refuse.
+
+        Documented decision: the destination is unambiguous and the source is
+        the same repository, so there is nothing to get wrong. Re-cloning it
+        is exactly the no-op the [ -d ... ] guard exists to make safe, and a
+        repos list concatenated from two overlapping sources is a harmless
+        configuration that should not fail an execution.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/acme/api-service",
+            ],
+            repo_tokens={"https://github.com/acme/api-service": "tok-acme"},
+        )
+
+        script = secrets.build_setup_script()
+
+        # One clone, not two: the repeat is collapsed rather than emitted and
+        # then defeated by the guard at runtime.
+        assert script.count("git clone") == 1
+        assert "[ -d /workspace/repos/api-service ] ||" in script
+
+    def test_spelling_variants_of_one_repo_are_deduplicated(self) -> None:
+        """(c, cont.) .git and trailing-slash spellings name the same repo.
+
+        These reach _repo_full_name identically, so they de-duplicate rather
+        than colliding - the same normalisation the per-repo credential
+        entries already rely on.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/acme/api-service.git",
+                "https://github.com/acme/api-service/",
+            ],
+        )
+
+        script = secrets.build_setup_script()
+
+        assert script.count("git clone") == 1
+
+    def test_single_repo_unaffected(self) -> None:
+        """(d) One repo -> no new failure path, script unchanged in shape."""
+        secrets = SetupPhaseSecrets(
+            repositories=["https://github.com/acme/api-service"],
+            repo_tokens={"https://github.com/acme/api-service": "tok-acme"},
+        )
+
+        script = secrets.build_setup_script()
+
+        assert script.count("git clone") == 1
+        assert "[ -d /workspace/repos/api-service ] ||" in script
+        assert "git -C /workspace/repos/api-service submodule update --init --recursive" in script
+
+    def test_case_differing_names_do_not_collide(self) -> None:
+        """(e) Case-SENSITIVE comparison, matching the target filesystem.
+
+        /workspace is ext4 in the workspace image; API-Service and
+        api-service are two distinct directories there (verified by creating
+        both). Both clone and both are reachable at the paths a prompt would
+        name, so refusing this pair would refuse a configuration that works.
+
+        If the workspace image ever mounted /workspace from a
+        case-INSENSITIVE filesystem, these two would collide and
+        _clone_destinations would have to case-fold its comparison to stay
+        correct. This test pins the current decision so that change is a
+        deliberate one.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/API-Service",
+                "https://github.com/other-org/api-service",
+            ],
+            repo_tokens={
+                "https://github.com/acme/API-Service": "tok-acme",
+                "https://github.com/other-org/api-service": "tok-other",
+            },
+        )
+
+        script = secrets.build_setup_script()
+
+        assert script.count("git clone") == 2
+        assert "[ -d /workspace/repos/API-Service ] ||" in script
+        assert "[ -d /workspace/repos/api-service ] ||" in script
+
+    def test_clone_order_follows_configured_order(self) -> None:
+        """De-duplication preserves configured order, first spelling wins."""
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/repo-b",
+                "https://github.com/acme/repo-a",
+                "https://github.com/acme/repo-b",
+            ],
+        )
+
+        script = secrets.build_setup_script()
+
+        assert script.count("git clone") == 2
+        assert script.index("/workspace/repos/repo-b") < script.index("/workspace/repos/repo-a")
+
+    def test_collision_is_not_checked_when_repos_are_not_cloned(self) -> None:
+        """clone_repos=False creates no directories, so there is no collision.
+
+        Such a phase is credentialed but never checked out (#1187), and
+        credentials are keyed by owner/repo, which does not collide. Refusing
+        here would reject a configuration that cannot go wrong.
+        """
+        secrets = SetupPhaseSecrets(
+            repositories=[
+                "https://github.com/acme/api-service",
+                "https://github.com/other-org/api-service",
+            ],
+            repo_tokens={
+                "https://github.com/acme/api-service": "tok-acme",
+                "https://github.com/other-org/api-service": "tok-other",
+            },
+            clone_repos=False,
+        )
+
+        script = secrets.build_setup_script()
+
+        assert "git clone" not in script
+        assert "x-access-token:tok-acme@github.com/acme/api-service" in script
+        assert "x-access-token:tok-other@github.com/other-org/api-service" in script
+
+
+@pytest.mark.unit
 class TestSetupPhaseSecretsCreate:
     """Tests for SetupPhaseSecrets.create() multi-installation resolution."""
 
@@ -251,10 +470,10 @@ class TestSetupPhaseSecretsCreate:
 
     @pytest.mark.anyio
     async def test_single_installation_single_token_call(self) -> None:
-        """Two repos from same installation → one get_installation_token call."""
+        """Two repos from same installation → one mint_agent_token call."""
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.return_value = "inst-1"
-        mock_client.get_installation_token.return_value = "tok-inst1"
+        mock_client.mint_agent_token.return_value = "tok-inst1"
 
         repos = [
             "https://github.com/org/repo-a",
@@ -278,7 +497,7 @@ class TestSetupPhaseSecretsCreate:
             secrets = await SetupPhaseSecrets.create(repositories=repos, require_github=True)
 
         # One token minted despite two repos
-        mock_client.get_installation_token.assert_called_once_with("inst-1")
+        mock_client.mint_agent_token.assert_called_once_with("inst-1", can_open_pr=False)
         assert secrets.repo_tokens[repos[0]] == "tok-inst1"
         assert secrets.repo_tokens[repos[1]] == "tok-inst1"
 
@@ -293,7 +512,7 @@ class TestSetupPhaseSecretsCreate:
 
         mock_client = AsyncMock()
         mock_client.get_installation_for_repo.side_effect = fake_get_installation
-        mock_client.get_installation_token.side_effect = lambda inst_id: (
+        mock_client.mint_agent_token.side_effect = lambda inst_id, **_: (
             "tok-a" if inst_id == "inst-a" else "tok-b"
         )
 
@@ -315,7 +534,7 @@ class TestSetupPhaseSecretsCreate:
                 repositories=[repo_a, repo_b], require_github=True
             )
 
-        assert mock_client.get_installation_token.call_count == 2
+        assert mock_client.mint_agent_token.call_count == 2
         assert secrets.repo_tokens[repo_a] == "tok-a"
         assert secrets.repo_tokens[repo_b] == "tok-b"
 
@@ -347,7 +566,7 @@ class TestSetupPhaseSecretsCreate:
                     require_github=True,
                 )
 
-        mock_client.get_installation_token.assert_not_called()
+        mock_client.mint_agent_token.assert_not_called()
 
     @pytest.mark.anyio
     async def test_require_github_false_swallows_lookup_error(self) -> None:

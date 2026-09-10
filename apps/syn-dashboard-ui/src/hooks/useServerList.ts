@@ -65,6 +65,8 @@ export interface UseServerListResult<TRow> {
   setPage: (page: number) => void
   /** Server-side facet counts, over the collection rather than the page. */
   statusCounts: Record<string, number>
+  /** Matching rows the window could not judge for want of a timestamp (#1215). */
+  excludedUndated: number
   searchQuery: string
   setSearchQuery: (query: string) => void
   selectedStatuses: Set<string>
@@ -101,6 +103,7 @@ export function useServerList<TRow>({
     loading,
     total: result.total,
     statusCounts: result.statusCounts,
+    excludedUndated: result.excludedUndated,
     page: query.page,
     pageSize: query.page_size,
     totalPages: Math.max(1, Math.ceil(result.total / query.page_size)),

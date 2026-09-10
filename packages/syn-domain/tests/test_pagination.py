@@ -79,13 +79,11 @@ def _page(
 ) -> Page[_Rec]:
     return paginate(
         _RECORDS,
-        base_predicate=lambda r: (
-            within_window(r.started_at, started_after, None)
-            and matches_search(search, r.id, r.name)
-        ),
+        base_predicate=lambda r: matches_search(search, r.id, r.name),
         status_of=lambda r: r.status,
         statuses=statuses,
-        sort_key=lambda r: r.started_at or "",
+        timestamp_of=lambda r: r.started_at,
+        after=started_after,
         to_row=lambda r: r,
         offset=offset,
         limit=limit,
@@ -174,10 +172,11 @@ def test_a_record_with_no_timestamp_is_out_of_a_bounded_window_and_in_an_unbound
     def run(after: datetime | None) -> Page[_Rec]:
         return paginate(
             records,
-            base_predicate=lambda r: within_window(r.started_at, after, None),
+            base_predicate=lambda _r: True,
             status_of=lambda r: r.status,
             statuses=None,
-            sort_key=lambda r: r.started_at or "",
+            timestamp_of=lambda r: r.started_at,
+            after=after,
             to_row=lambda r: r,
             limit=_LARGE,
         )
@@ -191,6 +190,131 @@ def test_a_record_with_no_timestamp_is_out_of_a_bounded_window_and_in_an_unbound
     assert {r.id for r in unbounded.rows} == {"dated", "undated"}
     assert unbounded.total == 2
     assert unbounded.status_counts == {"completed": 1, "pending": 1}
+
+
+# -- The exclusion is right; being SILENT about it was not (#1215) -------------
+#
+# 274 of 1037 artifacts carry no `created_at`, so `?created_after=7d` reported
+# 755 and the reader had no way to tell that 274 of the missing 282 were
+# dropped for being unjudgeable rather than for being old. Excluding them stays
+# - a 24h window that returns rows of unknown age answers a different question
+# - but the count of what could not be judged has to come back with the page.
+
+#: 10 records: 6 dated inside the window, 1 dated outside it, 3 undated. The
+#: undated ones do not share a status, so a tally that collapsed onto one
+#: status, or onto "everything that is not in `rows`", gets a different number
+#: from the right one.
+_MIXED = [
+    _Rec(id="in-a", status="completed", started_at=_hours_ago(1), name="Nightly Audit"),
+    _Rec(id="in-b", status="completed", started_at=_hours_ago(2), name="Other"),
+    _Rec(id="in-c", status="failed", started_at=_hours_ago(3), name="Other"),
+    _Rec(id="in-d", status="failed", started_at=_hours_ago(4), name="Other"),
+    _Rec(id="in-e", status="running", started_at=_hours_ago(5), name="Other"),
+    _Rec(id="in-f", status="running", started_at=_hours_ago(6), name="Other"),
+    _Rec(id="old", status="completed", started_at=_hours_ago(400), name="Other"),
+    _Rec(id="undated-a", status="completed", started_at=None, name="Nightly Audit"),
+    _Rec(id="undated-b", status="failed", started_at=None, name="Other"),
+    _Rec(id="undated-c", status="failed", started_at=None, name="Other"),
+]
+
+
+def _mixed_page(
+    *,
+    statuses: list[str] | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    search: str | None = None,
+) -> Page[_Rec]:
+    return paginate(
+        _MIXED,
+        base_predicate=lambda r: matches_search(search, r.id, r.name),
+        status_of=lambda r: r.status,
+        statuses=statuses,
+        timestamp_of=lambda r: r.started_at,
+        after=started_after,
+        before=started_before,
+        to_row=lambda r: r,
+        limit=_LARGE,
+    )
+
+
+def test_a_window_reports_how_many_rows_it_could_not_judge() -> None:
+    """The number the response was missing: excluded because undated (#1215).
+
+    Asserted as a value, not as `total`-minus-something, because the whole
+    defect was that the two exclusions were indistinguishable by arithmetic.
+    `old` is dropped as well and must NOT be in this count.
+    """
+    page = _mixed_page(started_after=_WINDOW_START)
+
+    assert page.total == 6
+    assert page.excluded_undated == 3
+    assert {r.id for r in page.rows} == {"in-a", "in-b", "in-c", "in-d", "in-e", "in-f"}
+
+
+def test_an_upper_bound_alone_also_reports_them() -> None:
+    """Either bound makes the window judgeable-or-not; it is not an `after` quirk."""
+    assert _mixed_page(started_before=_BASE).excluded_undated == 3
+
+
+def test_an_unbounded_query_excludes_nothing_and_returns_the_undated_rows() -> None:
+    """Current behaviour, kept: with no window there is nothing to fail.
+
+    This is the half that already worked - the undated rows were never lost
+    from the unfiltered list, only from the filtered one - so it is pinned
+    rather than changed.
+    """
+    page = _mixed_page()
+
+    assert page.total == len(_MIXED)
+    assert page.excluded_undated == 0
+    assert {r.id for r in page.rows} == {r.id for r in _MIXED}
+
+
+def test_the_undated_rows_stay_out_of_the_rows_the_total_and_the_facets() -> None:
+    """Reporting them is not including them: a bounded window still excludes.
+
+    Returning a row of unknown age from a 24-hour query would be a different
+    untruth, so the three outputs must still agree about it (#920).
+    """
+    page = _mixed_page(started_after=_WINDOW_START)
+
+    assert "undated-a" not in {r.id for r in page.rows}
+    assert page.total == len(page.rows)
+    assert sum(page.status_counts.values()) == page.total, (
+        "an undated row was tallied into the facets - the chip would promise a "
+        "row that selecting that status does not return"
+    )
+
+
+def test_the_count_is_narrowed_by_the_other_filters_just_as_the_total_is() -> None:
+    """`excluded_undated` answers for THIS query, not for the whole store.
+
+    It sits next to `total` and is read against it, so it has to be counted
+    over the same filters. A tally taken before them would report 3 here and
+    invite the reader to add it to a total that was counted over 1.
+    """
+    searched = _mixed_page(started_after=_WINDOW_START, search="nightly")
+    assert searched.total == 1, "guard: the search has to actually narrow"
+    assert searched.excluded_undated == 1
+
+    by_status = _mixed_page(started_after=_WINDOW_START, statuses=["failed"])
+    assert by_status.total == 2, "guard: the status filter has to actually narrow"
+    assert by_status.excluded_undated == 2
+
+
+def test_the_count_is_not_the_gap_between_two_totals() -> None:
+    """The gap conflates "too old" with "undated" - that gap IS the bug.
+
+    1037 - 755 = 282 was the only number available and it was 274 undated rows
+    plus 8 genuinely older ones. Here the same arithmetic gives 4 and the
+    honest answer is 3, so a `total`-difference implementation fails.
+    """
+    windowed = _mixed_page(started_after=_WINDOW_START)
+    all_time = _mixed_page()
+
+    assert all_time.total - windowed.total == 4
+    assert windowed.excluded_undated == 3
 
 
 def test_unpaged_is_the_whole_collection() -> None:

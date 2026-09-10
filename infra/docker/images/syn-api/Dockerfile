@@ -66,8 +66,15 @@ RUN uv pip install ./apps/syn-api
 # =============================================================================
 FROM python:3.12-slim AS runtime
 
-# Optional: Docker CLI for workspace container management (dev only)
-ARG INCLUDE_DOCKER_CLI=0
+# NOT optional by default: the Docker CLI. syn_adapters' image_verification
+# resolves every workspace image with shutil.which("docker") and raises
+# ImageVerificationError when it is absent, so an image built without this
+# answers /health, serves every read endpoint and fails EVERY execution at
+# bootstrap having spent $0.00 (#1216). Defaulting it to 0 meant the only
+# correct value had to be remembered by each caller, and one of them - the
+# recipe named `release-local` - did not. Pass 0 deliberately to exclude the
+# CLI from an image that provisions no workspaces.
+ARG INCLUDE_DOCKER_CLI=1
 # Optional: 1Password CLI for secret resolution at startup (op_resolver.py)
 ARG INCLUDE_OP_CLI=0
 # NOT optional: cosign. Workspace image signature verification defaults to ON

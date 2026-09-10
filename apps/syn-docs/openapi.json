@@ -5535,6 +5535,11 @@
             "title": "Page Size",
             "default": 50
           },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
+          },
           "type_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -7254,6 +7259,16 @@
             "type": "array",
             "title": "Phases"
           },
+          "total_phases": {
+            "type": "integer",
+            "title": "Total Phases",
+            "default": 0
+          },
+          "completed_phases": {
+            "type": "integer",
+            "title": "Completed Phases",
+            "default": 0
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -7394,6 +7409,11 @@
             "type": "integer",
             "title": "Page Size",
             "default": 50
+          },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
           },
           "status_counts": {
             "additionalProperties": {
@@ -10404,6 +10424,11 @@
             "type": "integer",
             "title": "Page Size",
             "default": 50
+          },
+          "excluded_undated": {
+            "type": "integer",
+            "title": "Excluded Undated",
+            "default": 0
           },
           "status_counts": {
             "additionalProperties": {

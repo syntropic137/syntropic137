@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -101,16 +104,17 @@ async def _run_fail_execution_and_serialize(processor: WorkflowExecutionProcesso
     """Drive the real failure path and return the serialized WorkflowFailedEvent.
 
     Mirrors what a timed-out phase looks like in production: the phase was
-    dispatched (so ``_phase_started_at`` holds its start time) and then the
+    dispatched (so the runtime holds its start time) and then the
     run raised, with the elapsed time fixed to FIXTURE_DURATION_SECONDS
     rather than depending on real wall-clock sleeps (no freezegun available
     in this repo).
     """
     aggregate = _make_running_aggregate("exec-1")
-    processor._execution_repo.save = AsyncMock()  # no-op: keep uncommitted events for inspection
+    # no-op: keep uncommitted events for inspection
+    processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
     fixed_started_at = datetime.now(UTC) - timedelta(seconds=FIXTURE_DURATION_SECONDS)
-    processor._phase_started_at["p-1"] = fixed_started_at
+    processor._runtime._started_at["p-1"] = fixed_started_at  # pyright: ignore[reportPrivateUsage]
 
     phases = [ExecutablePhase(phase_id="p-1", name="Phase 1", order=1)]
 
@@ -135,7 +139,7 @@ async def _run_fail_execution_and_serialize(processor: WorkflowExecutionProcesso
     assert len(failed_events) == 1, (
         "expected _fail_execution to emit exactly one WorkflowFailedEvent"
     )
-    return WorkflowExecutionProcessor._serialize_event(failed_events[0])
+    return ExecutionJournal._serialize_event(failed_events[0])
 
 
 @pytest.mark.unit

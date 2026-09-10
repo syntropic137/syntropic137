@@ -5,11 +5,11 @@ description: "How to configure workspace images: custom images, environment vari
 
 ## Choosing a Workspace Image
 
-The default workspace image is configured in `syn-shared`:
+The default workspace image is `omni-agent-workspace`, pinned by digest in `syn-shared`. It hosts both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change.
 
 ```bash
 # Override via environment variable
-SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-claude-cli:2.1.76
+SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/omni-agent-workspace@sha256:<digest>
 ```
 
 To use a custom or locally-built image:
@@ -17,7 +17,7 @@ To use a custom or locally-built image:
 ```bash
 # Build locally
 cd lib/agentic-primitives
-uv run scripts/build-provider.py claude-cli --tag my-workspace:latest
+uv run scripts/build-provider.py omni-agent --tag my-workspace:latest
 
 # Point syn137 at it
 SYN_WORKSPACE_DOCKER_IMAGE=my-workspace:latest
@@ -45,19 +45,31 @@ These are injected automatically by syn137 when creating workspaces:
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key (injected via sidecar) |
+| `ANTHROPIC_API_KEY` | Claude API key, for claude phases (injected via sidecar) |
+| `CODEX_AUTH_JSON` | Deployment variable, not injected into the workspace. Provisioning stages its contents to `~/.codex/auth.json` at mode 0600 and deletes the staged copy. A codex phase runs with an empty agent environment |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
-| `SYN_ALL_REPOS` | Colon-separated list of pre-cloned repo paths (e.g. `/workspace/repos/acme__api:/workspace/repos/acme__web`). Empty string when no repos are configured. See [Workspace Hydration](/docs/workspaces/hydration). |
+| `GH_REPO` | The primary repo as `owner/repo`, so `gh` resolves a repository without a working tree to infer one from. Absent when the workflow configures no repo, or when the primary one does not parse. See [Workspace Hydration](/docs/workspaces/hydration). |
+| `CLAUDE_SESSION_ID` | The session this phase's events are keyed by |
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
+
+<Callout type="info">
+**Container environment is not the agent environment.** The table above is what
+the workspace *container* receives. The environment handed to the *agent
+process* is built separately and is narrower. A claude phase gets its Anthropic
+credential there. A codex phase gets an empty agent environment, which is
+precisely what keeps `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` out of
+reach of a codex run, and its own credential arrives as the staged
+`~/.codex/auth.json` file rather than as a variable.
+</Callout>
 
 ## OTel Configuration
 
 ### How OTel connects to syn-collector
 
-`CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops, no crash, no side effects.
+OTel export is a claude harness feature. Codex phases emit no OTel metrics or logs. `CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops, no crash, no side effects.
 
 syn-collector's internal port is **8080** (service name `collector` inside Docker). The dev stack maps it to `localhost:8080`.
 
@@ -99,9 +111,9 @@ Plugins can declare required environment variables in their `plugin.json`. The o
   artifacts/
     input/               # Previous phase outputs (read-only)
     output/              # Current phase deliverables
-  repos/
-    owner__reponame/     # Pattern: org + double-underscore + repo name
-    owner__other-repo/   # e.g. acme__api-service, acme__web-app
+  repos/                 # Always present; empty when the phase set clone_repos: false
+    api-service/         # The bare repo name - the owner is not in the path
+    web-app/
 /opt/agentic/
   plugins/               # Pre-bundled plugins
   config/                # Runtime configuration

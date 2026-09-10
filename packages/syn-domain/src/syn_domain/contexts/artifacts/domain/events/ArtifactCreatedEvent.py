@@ -59,7 +59,13 @@ class ArtifactCreatedEvent(DomainEvent):
     of the rebuild.
 
     Recovering the real times therefore needs the decoder fixed as well as the
-    dispatcher (#924), not just the dispatcher.
+    dispatcher (#924), not just the dispatcher -- or a path that does not go
+    through the decoder at all. ``scripts/backfill/backfill_artifact_created_at.py``
+    takes the second: it reads ``events.timestamp_unix_ms`` directly in SQL and
+    replays it back as ``ArtifactCreationTimeRecovered``, which is a separate
+    fact with its own provenance rather than a rewrite of this one (#1215).
+    Until that is run, these rows stay null, and the list surfaces now report
+    how many they dropped for it instead of leaving an unexplained gap.
     """
 
     # Identity

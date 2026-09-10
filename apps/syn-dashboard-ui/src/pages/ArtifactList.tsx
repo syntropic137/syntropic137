@@ -99,6 +99,7 @@ export function ArtifactList() {
     page,
     pageSize,
     total,
+    excludedUndated,
     setPage,
     connected,
     lastEventAt,
@@ -164,6 +165,7 @@ export function ArtifactList() {
         page={page}
         pageSize={pageSize}
         total={total}
+        excludedUndated={excludedUndated}
         onPageChange={setPage}
         itemLabel="artifact"
       />

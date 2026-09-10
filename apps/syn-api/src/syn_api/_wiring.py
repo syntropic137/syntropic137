@@ -79,6 +79,13 @@ if TYPE_CHECKING:
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+
+# Re-exported, not defined here: joining the event publisher to the projection
+# manager needs neither half of this app, and the artifact backfill migration
+# calls it too (#1215). Routes keep importing it from the composition root.
+from syn_adapters.projections.sync import (
+    sync_published_events_to_projections as sync_published_events_to_projections,
+)
 from syn_adapters.session_store import HttpSessionStore
 from syn_adapters.storage import (
     connect_event_store,
@@ -166,6 +173,34 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
     }
 
 
+def _build_workspace_operator_env() -> dict[str, str]:
+    """Build the operator co-authorship env for workspace containers.
+
+    agentic-primitives ships a ``prepare-commit-msg`` hook and installs it into
+    every workspace at container start, but the hook reads SYN_OPERATOR_NAME and
+    SYN_OPERATOR_EMAIL and exits immediately when either is missing. Nothing
+    here set them, so the hook has been shipping and no-opping: every agent
+    commit was authored by the bot alone and the sponsoring human got no GitHub
+    contribution for it.
+
+    Kept separate from the telemetry env rather than folded into it. They answer
+    different questions and are configured independently; a single builder would
+    make a telemetry misconfiguration able to drop attribution, and vice versa.
+
+    Returns an empty dict when attribution is not fully configured.
+    """
+    from syn_shared.settings.git_identity import OperatorSettings
+
+    return OperatorSettings().attribution_env
+
+
+def _build_workspace_env() -> dict[str, str]:
+    """Compose the full non-secret environment for workspace containers."""
+    env = _build_workspace_telemetry_env()
+    env.update(_build_workspace_operator_env())
+    return env
+
+
 async def get_execution_processor() -> WorkflowExecutionProcessor:
     """Wire up WorkflowExecutionProcessor with all dependencies (ISS-196).
 
@@ -229,7 +264,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         session_repository=get_session_repository(),
         workspace_service=WorkspaceService.create(
             config=ws_config,
-            environment=_build_workspace_telemetry_env(),
+            environment=_build_workspace_env(),
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
@@ -610,11 +645,10 @@ def _create_dedup_adapter() -> DedupPort:
             )
 
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
+        from syn_adapters.redis_client import resilient_redis_client
 
-        redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        redis_client = resilient_redis_client(settings.redis_url)
         logger.info("EventPipeline using Redis dedup")
         return RedisDedupAdapter(
             redis_client,
@@ -761,30 +795,6 @@ def get_pending_sha_store() -> PendingSHAStore:
     raise RuntimeError(msg)
 
 
-async def sync_published_events_to_projections() -> None:
-    """Dispatch published events from InMemoryEventPublisher to projections.
-
-    In test mode (APP_ENVIRONMENT=test), events are stored by the
-    InMemoryEventPublisher but NOT automatically dispatched to projections
-    (there's no subscription service running). This helper bridges the gap
-    so that API-level integration tests can verify create→list round-trips.
-
-    No-op in production (NoOpEventPublisher has no stored events).
-    """
-    from syn_adapters.storage.in_memory import InMemoryEventPublisher
-
-    publisher = get_event_publisher()
-    if not isinstance(publisher, InMemoryEventPublisher):
-        return
-
-    manager = get_projection_manager()
-    for envelope in publisher.get_published_events():
-        await manager.process_event_envelope(envelope)
-
-    # Clear processed events to avoid re-processing
-    publisher._published_events.clear()
-
-
 # ---------------------------------------------------------------------------
 # Phase 3 additions - execution control, events, conversations, etc.
 # ---------------------------------------------------------------------------
@@ -820,11 +830,10 @@ def get_controller() -> ExecutionController:
 
     redis_url = get_settings().redis_url
     try:
-        import redis.asyncio as aioredis
-
         from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
+        from syn_adapters.redis_client import resilient_redis_client
 
-        redis_client = aioredis.from_url(redis_url, decode_responses=True)
+        redis_client = resilient_redis_client(redis_url)
         signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
         logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
     except Exception:

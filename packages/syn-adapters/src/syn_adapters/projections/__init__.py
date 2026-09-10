@@ -23,6 +23,7 @@ from .realtime import (
     reset_realtime_projection,
 )
 from .session_tools import SessionToolsProjection, ToolOperation
+from .sync import sync_published_events_to_projections
 
 __all__ = [
     "EventProvenance",
@@ -34,4 +35,5 @@ __all__ = [
     "get_realtime_projection",
     "reset_projection_manager",
     "reset_realtime_projection",
+    "sync_published_events_to_projections",
 ]

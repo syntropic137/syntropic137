@@ -21,11 +21,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
         DeleteArtifactCommand,
     )
+    from syn_domain.contexts.artifacts.domain.commands.RecoverArtifactCreationTimeCommand import (
+        RecoverArtifactCreationTimeCommand,
+    )
     from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
         UpdateArtifactCommand,
     )
     from syn_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
         ArtifactCreatedEvent,
+    )
+    from syn_domain.contexts.artifacts.domain.events.ArtifactCreationTimeRecoveredEvent import (
+        ArtifactCreationTimeRecoveredEvent,
     )
     from syn_domain.contexts.artifacts.domain.events.ArtifactDeletedEvent import (
         ArtifactDeletedEvent,
@@ -63,6 +69,11 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._size_bytes: int = 0
         self._title: str | None = None
         self._source_path: str | None = None  # #988: path under artifacts/output/
+        # None only for artifacts written before ArtifactCreated v4 (#920).
+        # The aggregate holds it so it can answer the one question the backfill
+        # asks -- "is this row still undated?" -- from the event stream rather
+        # than from the projection it is about to write to (#1215).
+        self._created_at: datetime | None = None
         self._storage_uri: str | None = None  # Object storage reference (ADR-012)
         self._is_primary_deliverable: bool = True
         self._is_deleted: bool = False
@@ -134,6 +145,17 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         None for artifacts created before ArtifactCreated v5 (issue #988).
         """
         return self._source_path
+
+    @property
+    def created_at(self) -> datetime | None:
+        """When this artifact was created, or None if its event never said.
+
+        Null for the artifacts written before ArtifactCreated v4 and not since
+        recovered. Null is the honest answer for those and stays available; the
+        list surfaces report how many rows they dropped for it (#1215) rather
+        than papering over it with a plausible time.
+        """
+        return self._created_at
 
     @property
     def is_primary_deliverable(self) -> bool:
@@ -214,6 +236,40 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
 
         self._apply(event)
 
+    @command_handler("RecoverArtifactCreationTimeCommand")
+    def recover_creation_time(self, command: RecoverArtifactCreationTimeCommand) -> None:
+        """Record a creation time recovered for an artifact whose event lacked one.
+
+        Emits nothing when the artifact already has one. That is what makes the
+        backfill idempotent, and it is enforced here rather than in the script
+        because "an artifact's creation time is written once" is a rule about
+        artifacts, not about one script's ``WHERE`` clause. A second run, a
+        concurrent run, or a hand-issued command all hit the same guard, and no
+        recovered value can ever displace a real one.
+
+        Silent rather than raising, because "already dated" is the expected
+        outcome for most of the corpus and the normal end state of a re-run --
+        not a failure. The caller learns which it was from
+        ``uncommitted_events``.
+        """
+        from syn_domain.contexts.artifacts.domain.events.ArtifactCreationTimeRecoveredEvent import (
+            ArtifactCreationTimeRecoveredEvent,
+        )
+
+        if self.id is None:
+            msg = "Artifact does not exist"
+            raise ValueError(msg)
+        if self._created_at is not None:
+            return
+
+        self._apply(
+            ArtifactCreationTimeRecoveredEvent(
+                artifact_id=str(self.id),
+                created_at=command.created_at,
+                recovered_from=command.recovered_from,
+            )
+        )
+
     @command_handler("UpdateArtifactCommand")
     def update_artifact(self, command: UpdateArtifactCommand) -> None:
         """Handle UpdateArtifactCommand.
@@ -280,10 +336,18 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._size_bytes = event.size_bytes
         self._title = event.title
         self._source_path = event.source_path
+        self._created_at = event.created_at
         self._storage_uri = event.storage_uri  # Object storage reference (ADR-012)
         self._is_primary_deliverable = event.is_primary_deliverable
         self._derived_from = list(event.derived_from)
         self._metadata = dict(event.metadata)
+
+    @event_sourcing_handler("ArtifactCreationTimeRecovered")
+    def on_artifact_creation_time_recovered(
+        self, event: ArtifactCreationTimeRecoveredEvent
+    ) -> None:
+        """Apply ArtifactCreationTimeRecoveredEvent."""
+        self._created_at = event.created_at
 
     @event_sourcing_handler("ArtifactUpdated")
     def on_artifact_updated(self, event: ArtifactUpdatedEvent) -> None:

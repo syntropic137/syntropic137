@@ -92,6 +92,7 @@ export function useSessionList(): UseSessionListResult {
         rows: (response.sessions ?? []).map(toSessionSummary),
         total: response.total,
         statusCounts: response.status_counts ?? {},
+        excludedUndated: response.excluded_undated,
       }
     },
     [workflowIdFilter],

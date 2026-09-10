@@ -111,6 +111,16 @@ class ExecutionDetailResponse(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     phases: list[PhaseExecutionInfo] = Field(default_factory=list)
+    total_phases: int = 0
+    """Phases this run set out to do, from its WorkflowExecutionStarted event.
+
+    ``len(phases)`` is not this number and never was: it counts the phases that
+    have started, so a three-phase run that died in phase one renders as a
+    one-phase execution to any client that measures the list (#1147). The two
+    phases that never ran are only visible as the gap between these.
+    """
+    completed_phases: int = 0
+    """Phases that finished. Same field, same meaning, as on the list view."""
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -182,6 +192,18 @@ class ExecutionListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 50
+    excluded_undated: int = 0
+    """Executions dropped from this window because they carry no date at all.
+
+    ``total`` cannot say why a row is missing: "older than the bound" and
+    "undated" leave it looking identical, so narrowing a window showed an
+    unexplained gap (#1215). With this the reader gets "755 of 1037, 274
+    undated" instead.
+
+    Zero when the request gave no window - an unbounded query evaluates every
+    row and returns the undated ones. Non-zero means rows exist that this
+    filter could not judge, NOT that they failed it.
+    """
     status_counts: dict[str, int] = Field(default_factory=dict)
     """Matching executions tallied by status, ignoring the status filter itself.
 

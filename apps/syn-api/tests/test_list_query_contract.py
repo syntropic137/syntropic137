@@ -248,6 +248,7 @@ class _ArtifactPage(NamedTuple):
     page: int
     page_size: int
     type_counts: Mapping[str, int]
+    excluded_undated: int
 
 
 async def _artifacts(**params: QueryValue) -> _ArtifactPage:
@@ -258,6 +259,9 @@ async def _artifacts(**params: QueryValue) -> _ArtifactPage:
         page=body["page"],
         page_size=body["page_size"],
         type_counts=body["type_counts"],
+        # Read by key, so a field the response model declares but the endpoint
+        # forgets to pass fails here rather than defaulting quietly to 0.
+        excluded_undated=body["excluded_undated"],
     )
 
 
@@ -668,6 +672,41 @@ async def test_d_a_row_with_no_start_time_is_still_outside_a_bounded_window(name
 
 
 @pytest.mark.parametrize("name", list(_SURFACES))
+async def test_the_window_says_how_many_rows_it_could_not_place_in_time(name: str):
+    """(#1215) Excluding them is right; not saying so is the defect.
+
+    The response above is indistinguishable from one where `no-start` simply
+    fell outside the bound, and on `/artifacts` that ambiguity hid a quarter of
+    the corpus. `excluded_undated` is the field that separates the two, and it
+    is on every surface that takes a window because every one of them can be
+    handed a row with no timestamp.
+
+    Two undated rows against five dated ones: the count is not the page size,
+    not the total, and not the number of rows the bound rejected (which is 2 as
+    well for `started_after`, hence the `started_before` half - there it is 3).
+    """
+    surface = _SURFACES[name]
+    await _seed_across_the_bound(surface)
+    await surface.seed("no-start-a", status="pending", started_at=None)
+    await surface.seed("no-start-b", status="pending", started_at=None)
+
+    lower = await surface.get(started_after=_AWARE_BOUND)
+    assert lower["total"] == 3
+    assert lower["excluded_undated"] == 2
+
+    upper = await surface.get(started_before=_AWARE_BOUND)
+    assert upper["total"] == 2
+    assert upper["excluded_undated"] == 2
+
+    unbounded = await surface.get()
+    assert unbounded["total"] == 7
+    assert unbounded["excluded_undated"] == 0, (
+        "with no bound nothing is unjudgeable - the undated rows are returned, "
+        "so reporting them as excluded would be the opposite lie"
+    )
+
+
+@pytest.mark.parametrize("name", list(_SURFACES))
 async def test_an_aware_bound_against_a_row_that_carries_no_offset(name: str):
     """The half of the mismatch that no query parameter can guard.
 
@@ -1051,3 +1090,127 @@ async def test_artifacts_written_by_the_real_producer_page_the_same_way():
         "arrived at the comparator"
     )
     assert len(windowed.ids) == 25
+
+
+# -- V10: /artifacts says how many rows the window could not judge (#1215) -----
+#
+# 274 of 1037 artifacts carry `created_at: null` - every one written before
+# ArtifactCreated v4 (#920) gave the event a timestamp of its own. They are
+# returned by an unfiltered list and cannot satisfy any bound, so
+# `?created_after=7d` answered 755 and the reader had no way to learn that 274
+# of the 282 missing rows were dropped for being unjudgeable rather than old.
+#
+# The write path is already closed - the aggregate stamps `datetime.now(UTC)`
+# unconditionally - so these rows are a fixed historical set, not a growing
+# one. What was still open is the reporting.
+
+
+async def _seed_undated_artifact_via_the_real_producer(row_id: str) -> None:
+    """One undated row, written by the handler that wrote the real 274.
+
+    Not the seeding helper: that writes the store directly and would agree
+    with the endpoint while disagreeing with production. This is a pre-v4
+    ``ArtifactCreated`` payload - the key is ABSENT, exactly as it is in the
+    events already in the store - fed to the projection handler that reads it.
+    A `created_at` defaulted anywhere on that hop makes the row datable and
+    this fixture stops being undated at all.
+    """
+    from syn_api._wiring import ensure_connected, get_projection_mgr
+
+    await ensure_connected()
+    await get_projection_mgr().artifact_list.on_artifact_created(
+        {
+            "artifact_id": row_id,
+            "workflow_id": "wf-live",
+            "execution_id": "ex-live",
+            "phase_id": "implement",
+            "artifact_type": "deliverable",
+            "title": f"Deliverable {row_id}",
+            "content": "x",
+        }
+    )
+
+
+async def test_artifacts_undated_rows_are_counted_where_the_reader_can_see_them():
+    """The issue's own numbers, in miniature: 6 dated, 3 undated, 1 too old.
+
+    A window returning 5 of 10 could mean five things; `excluded_undated` says
+    which. The three numbers are deliberately distinct - total 5, excluded 3,
+    gap 5 - so an implementation that returned the gap, the count of rows the
+    bound rejected, or a constant fails.
+    """
+    for i in range(5):
+        await _seed_artifact(f"recent-{i}", created_at=_at(1 + i))
+    await _seed_artifact("ancient", created_at=_at(400))
+    for i in range(3):
+        await _seed_undated_artifact_via_the_real_producer(f"undated-{i}")
+
+    windowed = await _artifacts(created_after=_AWARE_BOUND)
+
+    assert windowed.total == 5
+    assert windowed.excluded_undated == 3, (
+        "the endpoint must report the rows it could not place in time. 0 means "
+        "the count never left the domain page - the response is rebuilt field "
+        "by field on the way out and a new one is dropped unless it is named"
+    )
+    assert windowed.total - len(windowed.ids) == 0
+
+
+async def test_artifacts_an_undated_row_is_still_absent_from_a_window():
+    """(b) Current behaviour, kept. Reporting them is not admitting them.
+
+    A 24-hour query that returns rows of unknown age answers a question nobody
+    asked. The rows, the total and the type facets must still agree about them.
+    """
+    await _seed_artifact("dated", created_at=_at(1), artifact_type="deliverable")
+    await _seed_undated_artifact_via_the_real_producer("undated")
+
+    windowed = await _artifacts(created_after=_AWARE_BOUND)
+
+    assert windowed.ids == ["dated"]
+    assert windowed.total == 1
+    assert windowed.type_counts == {"deliverable": 1}, (
+        "an undated row tallied into the facets would promise a row that "
+        "selecting that type does not return"
+    )
+
+
+async def test_artifacts_an_undated_row_is_still_returned_unfiltered():
+    """(c) Current behaviour, kept - and the reason the gap was invisible.
+
+    The unfiltered list was always honest; only the filtered one lost rows. So
+    an unbounded query returns the undated row AND reports nothing excluded,
+    because with no bound there is nothing it failed to judge.
+    """
+    await _seed_artifact("dated", created_at=_at(1))
+    await _seed_undated_artifact_via_the_real_producer("undated")
+
+    unfiltered = await _artifacts()
+
+    assert set(unfiltered.ids) == {"dated", "undated"}
+    assert unfiltered.total == 2
+    assert unfiltered.excluded_undated == 0
+
+
+async def test_artifacts_the_excluded_count_survives_paging():
+    """It describes the query, so it must not move with `page_size` or `page`.
+
+    Same rule `total` lives under (#1204, #1159): a number that changes with
+    the slice is a page length wearing a collection's name. Checked on a page
+    that holds none of the rows in question, since that is where a count
+    derived from `rows` would collapse.
+    """
+    for i in range(30):
+        await _seed_artifact(f"recent-{i:02d}", created_at=_at(1 + i * 0.1))
+    for i in range(7):
+        await _seed_undated_artifact_via_the_real_producer(f"undated-{i}")
+
+    for page_size in (5, 30, 100):
+        body = await _artifacts(page_size=page_size, created_after=_AWARE_BOUND)
+        assert body.total == 30, page_size
+        assert body.excluded_undated == 7, page_size
+
+    last = await _artifacts(page_size=25, page=2, created_after=_AWARE_BOUND)
+    assert len(last.ids) == 5
+    assert last.total == 30
+    assert last.excluded_undated == 7

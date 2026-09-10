@@ -79,7 +79,12 @@ describe('useLatestPage', () => {
     const { result } = renderHook(() => useLatestPage(fetchPage, FIRST_PAGE))
 
     expect(result.current.loading).toBe(true)
-    expect(result.current.result).toEqual({ rows: [], total: 0, statusCounts: {} })
+    expect(result.current.result).toEqual({
+      rows: [],
+      total: 0,
+      statusCounts: {},
+      excludedUndated: 0,
+    })
 
     pending.resolve(page(['a'], 1))
 

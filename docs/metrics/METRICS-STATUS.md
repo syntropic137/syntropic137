@@ -162,4 +162,4 @@ To fully implement all metrics, we need these events:
 
 - [Agentic Analytics KPIs](./agentic-analytics-kpis.md) - Full metric definitions
 - [Analytics Event Reference](../../lib/agentic-primitives/docs/analytics-event-reference.md) - Event types
-- [ADR-026: TimescaleDB for Observability](../adrs/ADR-026-timescaledb-observability.md)
+- [ADR-026: TimescaleDB for Observability](../adrs/ADR-026-timescaledb-observability-storage.md)

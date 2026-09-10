@@ -66,6 +66,7 @@ export function SessionList() {
     page,
     pageSize,
     total,
+    excludedUndated,
     setPage,
   } = useSessionList()
 
@@ -133,6 +134,7 @@ export function SessionList() {
         page={page}
         pageSize={pageSize}
         total={total}
+        excludedUndated={excludedUndated}
         onPageChange={setPage}
         itemLabel="session"
       />

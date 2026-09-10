@@ -145,6 +145,152 @@ Multi-workflow plugins use `syntropic137-plugin.json` for metadata:
 }
 ```
 
+## Choosing an Agent Harness
+
+Syntropic137 runs phases on two agent harnesses: **Claude Code** (`claude -p`) and
+**OpenAI Codex** (`codex exec`). Selection is per phase, declared in `workflow.yaml`
+under the phase's `agent` block. There is no CLI flag and no environment variable
+for it. A single workflow can mix both.
+
+```yaml title="workflow.yaml"
+id: implement-and-review-v1
+name: Implement and Review
+phases:
+  - id: implement
+    name: Implement
+    order: 1
+    prompt_file: phases/implement.md
+    agent:
+      provider: claude
+      model: sonnet
+      allow_delegation: true
+
+  - id: review
+    name: Independent Review
+    order: 2
+    prompt_file: phases/review.md
+    agent:
+      provider: codex
+      model: gpt-5.6-sol      # name a concrete model id, not an alias
+      sandbox: read-only      # codex enforces this, claude does not
+```
+
+Running the same work through two vendors is the main reason to mix them. A codex
+review phase has no memory of the claude implementation phase beyond the artifacts
+it is handed, so it is a genuinely independent read of the work.
+
+### The `agent` block
+
+| Field | Values | Default | Notes |
+|-------|--------|---------|-------|
+| `provider` | `claude`, `codex` | `claude` | The harness that drives the phase. The schema rejects any other value. |
+| `model` | provider model id | harness default | On codex, always name a concrete model id. See [Codex model ids and cost](#codex-model-ids-and-cost). |
+| `sandbox` | `read-only`, `workspace-write`, `full-access` | `full-access` | Enforced on codex phases only. See [What `sandbox` actually does](#what-sandbox-actually-does). |
+| `allow_delegation` | `true`, `false` | `false` | Lets the phase's agent hand work to the other harness. Works in both directions. |
+
+A phase-level `model:` key, sitting outside the `agent` block, takes precedence
+over `agent.model`. If you set both, the outer one wins.
+
+### What `sandbox` actually does
+
+`sandbox` is named provider-neutrally, but today it steers `codex exec --sandbox`
+and nothing else.
+
+<Callout type="warn">
+**Declaring `sandbox: read-only` on a claude phase does not restrict it.** The field
+is accepted and recorded, and the claude harness ignores it. Do not read a sandbox
+level on a claude phase as a security guarantee. Only codex phases are constrained
+at the kernel level.
+</Callout>
+
+The two harnesses restrict along different axes and neither guarantee can be
+expressed in the other's vocabulary:
+
+| Harness | What it could restrict in principle | What it cannot restrict | Enforced today |
+|---------|-------------------------------------|-------------------------|----------------|
+| `claude` | Which tools exist | Where the process may write | No. See the `allowed_tools` section below. |
+| `codex` | Where the process may write, enforced by the kernel | Which tools exist. Codex has no tool vocabulary at all. | Yes, via `sandbox`. |
+
+Read that last column carefully. Codex is the only harness enforcing anything at
+the process level today.
+
+Sandbox levels, least to most authority:
+
+| Level | Grants | Use for |
+|-------|--------|---------|
+| `read-only` | Read and search | Review, verify, and audit phases. A phase that cannot write cannot invent the work it was asked to check. It also cannot write its own deliverable, so pair it with another way to publish. |
+| `workspace-write` | Read, write, and run commands inside the workspace | Work that stays inside the container. This level is **not** network-free: egress is available at every level. It also cannot write under `artifacts/output/`, so a phase that publishes an artifact needs `full-access`. |
+| `full-access` | Unrestricted filesystem access | Phases that publish an artifact, because `workspace-write` cannot write under `artifacts/output/`. Never appropriate for a phase whose job is checking other work. Note this is not the level you need for network access, which every level already has. |
+
+### `allowed_tools` and the two harnesses
+
+**`allowed_tools` restricts nothing today, on either harness.** Treat it as
+documentation of intent, not as a control.
+
+Per [ADR-069](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-069-harness-neutral-phase-definition.md),
+`_build_agent_config_from_phase` builds `AgentConfiguration` from `provider`,
+`model` and `allow_delegation` only. `allowed_tools` keeps its default of `()`,
+so the guard that would emit `--tools` never fires and every phase inherits the
+full toolset. A closed-vocabulary validator still rejects `bash` for `Bash` at
+authoring time, which enforces a restriction that is never applied.
+
+The codex path additionally carries an `UnsupportedToolPolicyError` guard,
+because codex exposes no tool flag and translating an allowlist into a sandbox
+mode would be a category error. That guard is currently unreachable for the same
+reason: `allowed_tools` never arrives populated.
+
+If you need to bound what a phase can do, use `sandbox` on a codex phase. That
+is the only enforced control available today.
+
+### Codex authentication
+
+Codex phases need `CODEX_AUTH_JSON` set on the deployment, holding the full
+contents of a Codex `~/.codex/auth.json`. Without it, a phase with
+`agent.provider: codex` fails to provision. Claude phases are unaffected.
+
+The agent process itself never receives that environment variable. Provisioning
+stages the value to a file, relocates it to `~/.codex/auth.json` inside the
+workspace at mode 0600, and deletes the staged copy. A codex phase runs with an
+empty agent environment, which is also what keeps `ANTHROPIC_API_KEY` and
+`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run.
+
+For a durable deployment credential that a developer running `codex login` on a
+laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
+[Codex access tokens: setup and validation](https://github.com/syntropic137/syntropic137/blob/main/docs/testing/codex-access-token-setup.md).
+
+### Codex model ids and cost
+
+Name a **concrete** model id on codex phases, such as `gpt-5.6-sol` rather than the
+`gpt-5.6` alias. Codex does not report its model on the wire, so the platform has
+nothing to price the run against if you leave `model` unset. The run then lands
+**unpriced** rather than wrongly priced, and no cost for it appears in your reports.
+
+`vendor_cost_usd` is always null for codex phases. Token counts are still recorded
+for both harnesses.
+
+### What each harness gives you
+
+| | `claude` | `codex` |
+|---|---|---|
+| Docker workspace isolation | Yes | Yes |
+| Tool-call timeline | Yes | Yes, mapped from codex events (`command_execution` becomes `Bash`, `file_change` becomes `Edit`) |
+| Token accounting | Yes | Yes |
+| Vendor cost (`vendor_cost_usd`) | Yes | No, always null |
+| Delegation to the other harness | Yes | Yes |
+| Filesystem sandbox enforcement | No | Yes |
+| Hook events (`PreToolUse`, `PostToolUse`) | Yes | No |
+| Subagent tracking | Yes | No |
+| TodoWrite and the todo projection | Yes | No |
+| [Claude plugins](/docs/guide/claude-plugins) (`--plugin-dir`) | Yes | No |
+
+Claude is the richer harness for observability. Codex is the only one that can
+enforce a filesystem boundary. Pick per phase accordingly: a codex phase will
+simply produce no hook, subagent, or todo data, and your dashboards for that phase
+will be correspondingly thinner.
+
+[Skills](/docs/guide/skills) work on both harnesses, because the pinned `skills`
+CLI inside the workspace is harness-neutral.
+
 ## Exporting Workflows
 
 Export a running workflow from Syntropic137 as a distributable plugin. Exported

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.28.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.29.0/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -277,6 +277,11 @@
         "clone_repos": {
           "default": true,
           "title": "Clone Repos",
+          "type": "boolean"
+        },
+        "can_open_pr": {
+          "default": false,
+          "title": "Can Open Pr",
           "type": "boolean"
         },
         "argument_hint": {

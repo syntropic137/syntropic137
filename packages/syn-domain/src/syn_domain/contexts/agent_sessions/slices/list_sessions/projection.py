@@ -430,9 +430,7 @@ class SessionListProjection(AutoDispatchProjection):
         filters = _build_query_filters(workflow_id, None, None, parent_session_id)
 
         def base(record: ProjectionRecord) -> bool:
-            return within_window(
-                record.get("started_at"), started_after, started_before
-            ) and matches_search(search, record.get("id"), record.get("workflow_id"))
+            return matches_search(search, record.get("id"), record.get("workflow_id"))
 
         return paginate(
             await self._store.query(
@@ -445,7 +443,9 @@ class SessionListProjection(AutoDispatchProjection):
             base_predicate=base,
             status_of=lambda r: str(r.get("status") or ""),
             statuses=statuses,
-            sort_key=lambda r: str(r.get("started_at") or ""),
+            timestamp_of=lambda r: r.get("started_at"),
+            after=started_after,
+            before=started_before,
             to_row=SessionSummary.from_dict,
             offset=offset,
             limit=limit,

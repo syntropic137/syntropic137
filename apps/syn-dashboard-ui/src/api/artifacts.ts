@@ -9,13 +9,22 @@ export interface ArtifactScope {
   artifact_type?: string
 }
 
-/** One page of artifacts, and the numbers describing what it is a page of. */
-export interface ArtifactPage {
+/**
+ * One page of artifacts, and the numbers describing what it is a page of.
+ *
+ * Derived from the generated envelope rather than restated beside it. Restated,
+ * this interface listed four fields and every later one - `excluded_undated`
+ * among them (#1215) - was not merely unread but unreachable, and reading it
+ * gave `undefined` rather than a type error. No drift gate sees a hand-written
+ * type: `check:api-drift` compares the SPEC to the GENERATED types and never
+ * looks at what someone wrote next to them. `sessions.ts` already carries this
+ * scar (#1176); this is the same one.
+ *
+ * Only `artifacts` differs, because the UI type requires the nullable row
+ * fields the generated one leaves optional.
+ */
+export interface ArtifactPage extends Omit<ArtifactListResponse, 'artifacts' | 'type_counts'> {
   artifacts: ArtifactSummary[]
-  /** Artifacts matching the query across every page - never `artifacts.length`. */
-  total: number
-  page: number
-  page_size: number
   /** Matching artifacts tallied by type, over the collection, not the page. */
   type_counts: Record<string, number>
 }
@@ -44,11 +53,11 @@ export async function listArtifactPage(
   if (scope.phase_id) params.set('phase_id', scope.phase_id)
   if (scope.artifact_type) params.set('artifact_type', scope.artifact_type)
   const response = await fetchJSON<ArtifactListResponse>(`${API_BASE}/artifacts?${params}`)
+  // Spread, so a field added to the envelope arrives here without an edit. The
+  // two named below are the only ones this layer changes the shape of.
   return {
+    ...response,
     artifacts: (response.artifacts ?? []).map(toArtifactSummary),
-    total: response.total,
-    page: response.page,
-    page_size: response.page_size,
     type_counts: response.type_counts ?? {},
   }
 }

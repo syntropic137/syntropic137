@@ -46,6 +46,7 @@ from syn_adapters.workspace_backends.service.managed_workspace import ManagedWor
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     GitHubAppNotConfiguredError,
+    RepoNameCollisionError,
     SetupPhaseSecrets,
 )
 from syn_adapters.workspace_backends.service.workspace_service import (
@@ -58,6 +59,7 @@ __all__ = [
     "DEFAULT_SETUP_SCRIPT",
     "GitHubAppNotConfiguredError",
     "ManagedWorkspace",
+    "RepoNameCollisionError",
     "SetupPhaseSecrets",
     "WorkspaceBackend",
     "WorkspaceService",

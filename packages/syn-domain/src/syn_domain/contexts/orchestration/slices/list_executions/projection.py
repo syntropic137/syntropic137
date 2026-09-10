@@ -22,7 +22,7 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
-from syn_domain.pagination import Page, matches_search, paginate, within_window
+from syn_domain.pagination import Page, matches_search, paginate
 
 
 class WorkflowExecutionListProjection(AutoDispatchProjection):
@@ -280,9 +280,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
         """
 
         def base(record: Mapping[str, object]) -> bool:
-            return within_window(
-                record.get("started_at"), started_after, started_before
-            ) and matches_search(
+            return matches_search(
                 search,
                 record.get("workflow_execution_id"),
                 record.get("workflow_id"),
@@ -294,7 +292,9 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             base_predicate=base,
             status_of=lambda r: str(r.get("status") or ""),
             statuses=statuses,
-            sort_key=lambda r: str(r.get("started_at") or ""),
+            timestamp_of=lambda r: r.get("started_at"),
+            after=started_after,
+            before=started_before,
             to_row=WorkflowExecutionSummary.from_dict,
             offset=offset,
             limit=limit,

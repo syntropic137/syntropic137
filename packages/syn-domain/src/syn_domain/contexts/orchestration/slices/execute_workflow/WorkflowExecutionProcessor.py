@@ -11,14 +11,12 @@ from uuid import uuid4
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
-    ExecutionMetrics,
     ExecutionStatus,
     PhaseDefinition,
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
-    CompleteExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
@@ -28,6 +26,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -46,14 +47,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
-    capture_and_import_phase,
-    close_phase_workspaces,
-    remember_leader_native_id,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+    cancelled_execution,
+    completed_execution,
     completed_phase,
     failed_phase_outcome,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
+    PhaseRuntime,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     AgentHandlerProtocol,
@@ -71,21 +72,17 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
     SessionLifecycleManager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    PhaseStartingPoints,
     refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
-    from contextlib import AbstractAsyncContextManager
-
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
         SessionCapturePort,
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
-    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -101,9 +98,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         ClaudePluginMaterializerProtocol,
         SkillMaterializerProtocol,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
-        TokenAccumulator,
     )
 
 logger = logging.getLogger(__name__)
@@ -150,7 +144,6 @@ class WorkflowExecutionProcessor:
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
     ) -> None:
-        self._execution_repo = execution_repository
         self._session_repo = session_repository
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
@@ -163,6 +156,7 @@ class WorkflowExecutionProcessor:
         self._command_builder = command_builder
         assert todo_projection is not None, "todo_projection is required"
         self._todo_projection: TodoProjection = todo_projection
+        self._journal = ExecutionJournal(execution_repository, todo_projection)
         self._agent_handler = agent_handler  # None → create fresh AgentExecutionHandler per call
         # WHY (issue #726, PR2): the materializer is the optional collaborator
         # that turns ResolvedClaudePlugin entries on the phase into workspace
@@ -170,41 +164,15 @@ class WorkflowExecutionProcessor:
         self._claude_plugin_materializer = claude_plugin_materializer
         # WHY (#772): mirrors claude_plugin_materializer above but for skills; handler hard-fails (no silent skip) on unmatched skills
         self._skill_materializer = skill_materializer
-        # None means capture is OFF, not broken: a deployment with no store
-        # configured must behave identically to one from before this existed.
-        self._session_capture = session_capture
-        # Where a delegate's transcript is read back from. Optional because a
-        # deployment without a session store simply imports no delegates; it
-        # must never be a reason a phase fails.
-        self._session_store = session_store
-        self._import_ledger = import_ledger
-        # Infrastructure state (not domain state — ephemeral)
-        self._active_workspaces: dict[str, ManagedWorkspace] = {}
-        self._phase_starting_points = PhaseStartingPoints()
-        self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
-        self._active_envs: dict[str, dict[str, str]] = {}
-        self._active_cmds: dict[str, list[str]] = {}
-        self._session_managers: dict[str, SessionLifecycleManager] = {}
-        # Per-phase so _finalize_phase can attribute the capture.
-        self._phase_session_ids: dict[str, str] = {}
-        #: The id each phase's own harness announced on its stream, which is
-        #: what the delegate import subtracts from the sweep.
-        #:
-        #: Keyed by (execution_id, phase_id), NOT phase_id alone. This
-        #: processor is shared across concurrent dispatches - see
-        #: _DispatchContext above - so two runs of the same workflow share a
-        #: phase id. A phase-only key lets one run read the OTHER run's leader,
-        #: and a leader id absent from this run's sweep takes the refusal path:
-        #: no delegate imported, only a log line. Popped on success so a
-        #: completed phase leaves nothing behind.
-        self._phase_leader_native_ids: dict[tuple[str, str], str] = {}
-        self._phase_tokens: dict[str, TokenAccumulator] = {}
-        self._phase_auth_tokens: dict[
-            str, tuple[int, int, int, int]
-        ] = {}  # (input, output, cache_creation, cache_read)
-        self._phase_artifact_ids: dict[str, list[str]] = {}
-        self._phase_said: dict[str, str] = {}  # last agent message, for #1195 recovery
-        self._phase_started_at: dict[str, datetime] = {}
+        # Infrastructure state (not domain state — ephemeral). One object, not
+        # thirteen maps: see `phase_runtime` for why they are only ever correct
+        # together, and why this processor should not know they are maps at all.
+        self._runtime = PhaseRuntime(
+            capture_port=session_capture,
+            session_store=session_store,
+            writer=observability_writer,
+            ledger=import_ledger,
+        )
 
     async def run(
         self,
@@ -248,7 +216,7 @@ class WorkflowExecutionProcessor:
             phase_definitions=phase_definitions,
         )
         aggregate.start_execution(start_cmd)
-        await self._save_new_and_sync(aggregate)
+        await self._journal.open(aggregate)
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
@@ -394,21 +362,10 @@ class WorkflowExecutionProcessor:
         Called when the to-do list empties due to ExecutionCancelledEvent.
         The aggregate is already in CANCELLED status - no new command needed.
         """
-        reason = cancel_reason or "Cancelled by user"
-        for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_cancelled(reason=reason)
-        await self._close_phase_workspace_cms(context="cancel")
-        return WorkflowExecutionResult(
-            workflow_id=workflow_id,
-            execution_id=execution_id,
-            status="cancelled",
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            phase_results=phase_results,
-            artifact_ids=all_artifact_ids,
-            metrics=ExecutionMetrics.from_results(phase_results),
-            error_message=reason,
-        )
+        cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
+        await self._runtime.report_cancelled(cancellation.reason)
+        await self._runtime.abandon_all("cancel")
+        return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _complete_execution(
         self,
@@ -421,30 +378,10 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Build completion command, save, and return success result."""
-        metrics = ExecutionMetrics.from_results(phase_results)
-        complete_cmd = CompleteExecutionCommand(
-            execution_id=execution_id,
-            completed_phases=metrics.completed_phases,
-            total_phases=len(phases),
-            total_input_tokens=metrics.total_input_tokens,
-            total_output_tokens=metrics.total_output_tokens,
-            total_cache_creation_tokens=metrics.total_cache_creation_tokens,
-            total_cache_read_tokens=metrics.total_cache_read_tokens,
-            duration_seconds=metrics.total_duration_seconds,
-            artifact_ids=all_artifact_ids,
-        )
-        aggregate.complete_execution(complete_cmd)
-        await self._save_and_sync(aggregate)
-        return WorkflowExecutionResult(
-            workflow_id=workflow_id,
-            execution_id=execution_id,
-            status="completed",
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            phase_results=phase_results,
-            artifact_ids=all_artifact_ids,
-            metrics=metrics,
-        )
+        completion = completed_execution(phase_results, all_artifact_ids)
+        aggregate.complete_execution(completion.as_command(execution_id, total_phases=len(phases)))
+        await self._journal.append(aggregate)
+        return completion.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _fail_execution(
         self,
@@ -465,30 +402,27 @@ class WorkflowExecutionProcessor:
         it always belongs to THIS execution, even with concurrent runs
         sharing the processor instance.
         """
-        # BEFORE any await: teardown clears the session-id map, so reading it
+        # BEFORE any await: teardown clears both maps, so reading them
         # afterwards timed the phase to the end of cleanup and lost the
-        # session_id entirely (#1036). Copied, not merely read early, because
-        # the observation below awaits and concurrent dispatches share the maps.
-        started_at_by_phase = dict(self._phase_started_at)
-        session_id_by_phase = dict(self._phase_session_ids)
+        # session_id entirely (#1036).
+        timings = self._runtime.timings()
         # Before the teardown below, the only window in which it is askable (#1200).
-        observed = await self._phase_starting_points.observe(failed_phase_id)
+        observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
-            error, failed_phase_id, started_at_by_phase, session_id_by_phase, observed=observed
+            error, failed_phase_id, timings.started_at, timings.session_ids, observed=observed
         )
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        for _pid, mgr in list(self._session_managers.items()):
-            await mgr.complete_failure(error_message=failure.reason)
-        await self._close_phase_workspace_cms(context="failure")
+        await self._runtime.report_failed(failure.reason)
+        await self._runtime.abandon_all("failure")
 
         fail_cmd = failure.as_command(
             execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
         )
         try:
             aggregate.fail_execution(fail_cmd)
-            await self._save_and_sync(aggregate)
+            await self._journal.append(aggregate)
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
         return failure.execution_result(
@@ -498,27 +432,6 @@ class WorkflowExecutionProcessor:
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
         )
-
-    async def _close_phase_workspace_cms(self, context: str) -> None:
-        """Close per-phase workspace context managers and clear per-phase state."""
-        await close_phase_workspaces(
-            context,
-            workspace_cms=self._active_workspace_cms,
-            workspaces=self._active_workspaces,
-            session_ids=self._phase_session_ids,
-            leader_native_ids=self._phase_leader_native_ids,
-            capture_port=self._session_capture,
-            session_store=self._session_store,
-            writer=self._observability_writer,
-            ledger=self._import_ledger,
-        )
-        # Both terminal paths (cancel, failure) cleared exactly this set after
-        # closing workspaces; they differ only in how they complete sessions.
-        self._session_managers.clear()
-        self._active_workspaces.clear()
-        self._phase_starting_points.forget_all()
-        self._active_envs.clear()
-        self._active_cmds.clear()
 
     async def _handle_provision(
         self,
@@ -554,8 +467,9 @@ class WorkflowExecutionProcessor:
             observability=self._observability_writer,
         )
         await session_mgr.start()
-        self._session_managers[todo.phase_id] = session_mgr
-        self._phase_started_at[todo.phase_id] = datetime.now(UTC)
+        self._runtime.begin(
+            todo.phase_id, session_manager=session_mgr, started_at=datetime.now(UTC)
+        )
 
         # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
         repo_urls = [r.https_url for r in (repos or [])]
@@ -568,13 +482,16 @@ class WorkflowExecutionProcessor:
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
         )
-        self._active_workspaces[todo.phase_id] = result.workspace
-        await self._phase_starting_points.record(todo.phase_id, result.workspace)
-        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
-        self._active_envs[todo.phase_id] = result.agent_env
-        self._active_cmds[todo.phase_id] = result.claude_cmd
+        self._runtime.attach_workspace(
+            todo.phase_id,
+            workspace=result.workspace,
+            workspace_cm=result.workspace_cm,
+            agent_env=result.agent_env,
+            claude_cmd=result.claude_cmd,
+        )
+        await self._runtime.record_starting_point(todo.phase_id)
         aggregate.provision_workspace_completed(result.command)
-        await self._save_and_sync(aggregate)
+        await self._journal.append(aggregate)
 
     async def _provision_workspace(
         self,
@@ -624,11 +541,8 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch RUN_AGENT."""
         assert todo.phase_id is not None
-        workspace = self._active_workspaces[todo.phase_id]
-        agent_env = self._active_envs[todo.phase_id]
-        claude_cmd = self._active_cmds[todo.phase_id]
         session_id = todo.session_id or ""
-        self._phase_session_ids[todo.phase_id] = session_id
+        launch = self._runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
         timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
         # Raises on an unknown or removed provider instead of defaulting to
@@ -642,26 +556,24 @@ class WorkflowExecutionProcessor:
             session_id=session_id,
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
-            workspace_id=getattr(workspace, "workspace_id", None),
+            workspace_id=getattr(launch.workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
         result = await self._get_agent_handler().handle(
             todo=todo,
-            workspace=workspace,
-            agent_env=agent_env,
-            claude_cmd=claude_cmd,
+            workspace=launch.workspace,
+            agent_env=launch.agent_env,
+            claude_cmd=launch.claude_cmd,
             session_id=session_id,
             agent_model=phase.agent_config.model,
             timeout_seconds=timeout,
             collector=collector,
             runner=runner,
-            on_launch=observer_for(self._session_managers.get(todo.phase_id)),
+            on_launch=observer_for(launch.session_manager),
         )
 
-        remember_leader_native_id(
-            self._phase_leader_native_ids,
-            (todo.execution_id, todo.phase_id),
-            result.stream_result,
+        self._runtime.remember_leader(
+            todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
         )
 
         await record_phase_conversation(
@@ -672,17 +584,9 @@ class WorkflowExecutionProcessor:
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
             model=phase.agent_config.model,
-            started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
+            started_at=launch.started_at,
         )
-        self._phase_tokens[todo.phase_id] = result.tokens
-        self._phase_said[todo.phase_id] = result.stream_result.last_agent_message or ""
-        # Store authoritative totals from CLI result event (includes cache tokens)
-        self._phase_auth_tokens[todo.phase_id] = (
-            result.command.input_tokens,
-            result.command.output_tokens,
-            result.command.cache_creation_tokens,
-            result.command.cache_read_tokens,
-        )
+        self._runtime.record_agent_run(todo.phase_id, result)
 
         if result.stream_result.interrupt_requested:
             await self._handle_cancel_signal(todo, result, aggregate)
@@ -700,7 +604,7 @@ class WorkflowExecutionProcessor:
             raise RuntimeError(msg)
 
         aggregate.agent_execution_completed(result.command)
-        await self._save_and_sync(aggregate)
+        await self._journal.append(aggregate)
 
     async def _handle_cancel_signal(
         self,
@@ -716,7 +620,7 @@ class WorkflowExecutionProcessor:
             reason=result.stream_result.interrupt_reason or "Cancelled by user",
         )
         aggregate.cancel_execution(cancel_cmd)
-        await self._save_and_sync(aggregate)
+        await self._journal.append(aggregate)
 
     async def _handle_collect_artifacts(
         self,
@@ -728,10 +632,10 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
-        workspace = self._active_workspaces.get(todo.phase_id)
+        workspace = self._runtime.workspace_for(todo.phase_id)
         if workspace is None:
             # Defense in depth: in-process this branch is unreachable
-            # (_finalize_phase pops _active_workspaces only after
+            # (the runtime gives up a phase's workspace only after
             # on_phase_completed locks the phase at rank 99, and
             # get_pending filters stale items), but a lock-bypassing
             # projection writer (e.g. a future out-of-process consumer on
@@ -755,13 +659,13 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
-            last_agent_message=self._phase_said.pop(todo.phase_id, None),
+            last_agent_message=self._runtime.take_last_message(todo.phase_id),
         )
         all_artifact_ids.extend(result.artifact_ids)
-        self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
+        self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
         phase_outputs.record(todo.phase_id, result.first_content, result.files)
         aggregate.artifacts_collected(result.command)
-        await self._save_and_sync(aggregate)
+        await self._journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,
@@ -770,132 +674,42 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
     ) -> None:
-        """Dispatch COMPLETE_PHASE."""
+        """Dispatch COMPLETE_PHASE.
+
+        THE ORDER OF THE FOUR STEPS BELOW IS THE GUARANTEE (#1184). The guard
+        runs before the phase gives anything up, before the aggregate is told
+        it succeeded, before that is persisted, and before the runtime tears
+        the workspace down. Every one of those is a point of no return, and the
+        guard is only a guard on the near side of all four.
+        """
         assert todo.phase_id is not None
         # FIRST, and on the real path rather than inside a try: nothing has
         # been popped, the workspace is still alive and the aggregate has not
         # been told this phase succeeded, so the raise IS the outcome (#1184).
-        await refuse_to_complete_unsaved_phase(self._active_workspaces, todo)
+        await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
 
-        self._phase_tokens.pop(todo.phase_id, None)
-        auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
-        artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
-        started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
-
+        harvest = self._runtime.harvest(todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             session_id=todo.session_id,
-            started_at=started_at,
-            artifact_ids=artifact_ids,
-            auth_tokens=auth_tokens,
+            started_at=harvest.started_at,
+            artifact_ids=harvest.artifact_ids,
+            auth_tokens=harvest.auth_tokens,
         )
         phase_results.append(outcome.result)
         completed_phase_ids.append(todo.phase_id)
 
         aggregate.complete_phase(outcome.command)
-        await self._save_and_sync(aggregate)
+        await self._journal.append(aggregate)
 
-        await self._finalize_phase(
+        await self._runtime.finalize(
             todo.phase_id,
-            outcome.input_tokens,
-            outcome.output_tokens,
-            outcome.cache_creation_tokens,
-            outcome.cache_read_tokens,
-            outcome.total_tokens,
-            outcome.duration_seconds,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            cache_creation_tokens=outcome.cache_creation_tokens,
+            cache_read_tokens=outcome.cache_read_tokens,
+            total_tokens=outcome.total_tokens,
+            duration_seconds=outcome.duration_seconds,
         )
-
-    async def _finalize_phase(
-        self,
-        phase_id: str,
-        input_tokens: int,
-        output_tokens: int,
-        cache_creation_tokens: int,
-        cache_read_tokens: int,
-        total_tokens: int,
-        duration: float,
-    ) -> None:
-        """Complete session and clean up phase-local state."""
-        session_mgr = self._session_managers.pop(phase_id, None)
-        if session_mgr is not None:
-            await session_mgr.complete_success(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_creation_tokens=cache_creation_tokens,
-                cache_read_tokens=cache_read_tokens,
-                total_tokens=total_tokens,
-                duration_seconds=duration,
-                source="processor",
-            )
-
-        workspace = self._active_workspaces.pop(phase_id, None)
-        self._phase_starting_points.forget(phase_id)
-        session_id = self._phase_session_ids.pop(phase_id, "")
-        self._active_envs.pop(phase_id, None)
-        self._active_cmds.pop(phase_id, None)
-        workspace_cm = self._active_workspace_cms.pop(phase_id, None)
-
-        # BEFORE teardown: once the container is gone so is the spool, and a
-        # later probe cannot tell "stored" from "lost forever".
-        await capture_and_import_phase(
-            self._session_capture,
-            workspace,
-            session_store=self._session_store,
-            writer=self._observability_writer,
-            leader_native_ids=self._phase_leader_native_ids,
-            session_id=session_id,
-            phase_id=phase_id,
-            ledger=self._import_ledger,
-        )
-
-        if workspace_cm is not None:
-            await workspace_cm.__aexit__(None, None, None)
-
-    async def _save_new_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
-        """Save a NEW aggregate (fails if stream exists) and sync events.
-
-        Uses save_new() with ExpectedVersion.NoStream to prevent duplicate
-        execution streams. Raises StreamAlreadyExistsError on conflict.
-        """
-        uncommitted = list(aggregate._uncommitted_events)
-        await self._execution_repo.save_new(aggregate)
-        for envelope in uncommitted:
-            event = envelope.event
-            event_type = getattr(event, "event_type", type(event).__name__)
-            event_data = self._serialize_event(event)
-            handler_name = self._event_type_to_handler(event_type)
-            handler = getattr(self._todo_projection, handler_name, None)
-            if handler:
-                await handler(event_data)
-
-    async def _save_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
-        """Save aggregate and sync uncommitted events to local projection."""
-        uncommitted = list(aggregate._uncommitted_events)
-        await self._execution_repo.save(aggregate)
-        for envelope in uncommitted:
-            event = envelope.event
-            event_type = getattr(event, "event_type", type(event).__name__)
-            event_data = self._serialize_event(event)
-            handler_name = self._event_type_to_handler(event_type)
-            handler = getattr(self._todo_projection, handler_name, None)
-            if handler:
-                await handler(event_data)
-
-    @staticmethod
-    def _serialize_event(event: object) -> dict[str, Any]:
-        """Serialize a domain event to a dict for projection handlers."""
-        if hasattr(event, "model_dump"):
-            return event.model_dump()  # type: ignore[union-attr]
-        if hasattr(event, "to_dict"):
-            return event.to_dict()  # type: ignore[union-attr]
-        return vars(event)
-
-    @staticmethod
-    def _event_type_to_handler(event_type: str) -> str:
-        """Convert CamelCase event type to on_snake_case handler name."""
-        import re
-
-        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event_type).lower()
-        return f"on_{snake}"

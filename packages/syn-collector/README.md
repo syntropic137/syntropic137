@@ -86,7 +86,7 @@ EVENT_BATCH_INTERVAL_MS=1000
 
 ## Architecture
 
-See [ADR-026: Simplified Observability Events](../../docs/adrs/ADR-026-simplified-observability-events.md) for the current storage architecture (TimescaleDB via `AgentEventStore`). [ADR-017](../../docs/adrs/ADR-017-scalable-event-collection-architecture.md) covers the original collection architecture (partially superseded).
+See [ADR-026: TimescaleDB for Observability Event Storage](../../docs/adrs/ADR-026-timescaledb-observability-storage.md) for the current storage architecture (TimescaleDB via `AgentEventStore`). [ADR-017](../../docs/adrs/ADR-017-scalable-event-collection-architecture.md) covers the original collection architecture (partially superseded).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

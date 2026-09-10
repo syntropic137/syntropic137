@@ -78,6 +78,18 @@ class ArtifactListResponse(BaseModel):
     """
     page: int = 1
     page_size: int = DEFAULT_PAGE_SIZE
+    excluded_undated: int = 0
+    """Artifacts dropped from this window because they carry no date at all.
+
+    ``total`` cannot say why a row is missing: "older than the bound" and
+    "undated" leave it looking identical, so narrowing a window showed an
+    unexplained gap (#1215). With this the reader gets "755 of 1037, 274
+    undated" instead.
+
+    Zero when the request gave no window - an unbounded query evaluates every
+    row and returns the undated ones. Non-zero means rows exist that this
+    filter could not judge, NOT that they failed it.
+    """
     type_counts: dict[str, int] = Field(default_factory=dict)
     """Matching artifacts tallied by type, ignoring the type filter itself.
 
@@ -187,6 +199,10 @@ async def list_artifacts(
                 ],
                 total=domain_page.total,
                 status_counts=domain_page.status_counts,
+                # Rebuilding the page here re-states every field, so a new one
+                # is silently dropped unless it is named. That hop is what the
+                # endpoint reads from.
+                excluded_undated=domain_page.excluded_undated,
             )
         )
     except Exception as e:
@@ -562,6 +578,7 @@ async def list_artifacts_endpoint(
         total=artifact_page.total,
         page=page,
         page_size=effective_page_size,
+        excluded_undated=artifact_page.excluded_undated,
         type_counts=artifact_page.status_counts,
     )
 

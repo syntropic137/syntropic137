@@ -214,3 +214,44 @@ describe('useArtifactList', () => {
     expect(result.current.artifacts.map((a) => a.id)).toEqual([ARTIFACTS[TOTAL - 1].id])
   })
 })
+
+/**
+ * A quarter of the real corpus carries `created_at: null` (#1215), so a window
+ * silently dropped 274 of 1037 artifacts and the count said only "755". The
+ * server now reports how many it could not judge; this covers the hop that
+ * carries the number from the response into the hook, which is exactly where a
+ * value gets written correctly and then dropped.
+ *
+ * Its own fixture: the shared 120 are all dated on purpose, and the counts
+ * every other test asserts are derived from them.
+ */
+describe('useArtifactList with undated rows', () => {
+  const DATED = ARTIFACTS.slice(0, 4)
+  const UNDATED = [0, 1, 2].map((i) => ({ ...ARTIFACTS[10 + i], created_at: '' }))
+
+  const mixedServer = serveListEndpoint({
+    path: '/api/v1/artifacts',
+    collection: [...DATED, ...UNDATED],
+    matchesSearch: matchesArtifactSearch,
+    dialect: ARTIFACT_DIALECT,
+  })
+
+  it('carries the count of rows the window could not judge', async () => {
+    const { result } = renderList('/artifacts?timeWindow=7d')
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(mixedServer.lastRequest.params.has('created_after')).toBe(true)
+    expect(result.current.total).toBe(DATED.length)
+    expect(result.current.excludedUndated).toBe(UNDATED.length)
+  })
+
+  it('excludes nothing, and returns the undated rows, when no window is set', async () => {
+    const { result } = renderList('/artifacts?timeWindow=all')
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.total).toBe(DATED.length + UNDATED.length)
+    expect(result.current.excludedUndated).toBe(0)
+  })
+})

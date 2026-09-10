@@ -4,8 +4,17 @@ WHAT WAS WRONG. Provisioning was phase-blind. `WorkflowExecutionProcessor`
 built one repo list from the workflow and handed it to every phase, and
 `SetupPhaseSecrets` cloned whatever it was handed, so `open_pr` -- which reads
 one artifact, checks a remote ref and calls `gh pr create` -- paid the same
-clone plus recursive submodule init as `implement`, under the shortest budget
-in the workflow. It timed out in roughly a third of runs.
+clone plus recursive submodule init as `implement`, and then never read the
+tree it had just cloned. That waste is what this change removes.
+
+NOT "under the shortest budget in the workflow": this docstring used to say
+so, and it was wrong. The clone runs in the setup phase under its own
+`SYN_SETUP_PHASE_TIMEOUT_SECONDS`; a phase's `timeout_seconds` is handed only
+to the agent process, after the workspace exists
+(`WorkflowExecutionProcessor.py:633,655`). #1187's ~one-in-three timeouts were
+real, but the clone was not what exhausted the 600s, so removing it is not
+guaranteed to have fixed them. See `workflows/sdlc/README.md`, "What
+`timeout_seconds` actually bounds".
 
 WHY THIS FILE DRIVES THE WHOLE CHAIN. The value starts in `workflow.yaml` and
 is only useful at the far end, in the bash the workspace actually executes.
@@ -615,13 +624,26 @@ def _run_gh(
     )
 
 
-#: The preamble EXACTLY as it read before #1187 made it conditional, copied in
-#: rather than imported. A golden re-derived from the code it guards guards
-#: nothing: `render_workspace_prompt(clone_repos=True)` would agree with any
-#: edit to the cloning branch, which is the one thing this must catch. The
-#: pending experiment's baseline is these bytes, so changing them is a decision
-#: to invalidate that baseline, and should cost a deliberate edit here.
-_THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD = """\
+#: The preamble a cloning phase gets, copied in rather than imported. A golden
+#: re-derived from the code it guards guards nothing:
+#: `render_workspace_prompt(clone_repos=True)` would agree with any edit to the
+#: cloning branch, which is the one thing this must catch. The pending
+#: experiment's baseline is these bytes, so changing them is a decision to
+#: invalidate that baseline, and should cost a deliberate edit here.
+#:
+#: THESE BYTES HAVE MOVED ONCE, deliberately, and the log belongs here so the
+#: next reader can tell a decision from a drift:
+#:
+#: * #1187 made the tree and the starting point conditional on `clone_repos`.
+#:   A cloning phase kept exactly the bytes it had; only the no-checkout
+#:   rendering was new.
+#: * #1221 rewrote "Completing Your Task" so the deliverable is required for
+#:   every outcome rather than being step 4 of an action sequence. This one
+#:   DOES change what a cloning phase receives, because the defect was in the
+#:   shared template and `implement` hits it too. Confining the fix to the
+#:   no-checkout rendering would have left the same bug in the branch the
+#:   experiment measures, which is a carve-out, not a fix.
+_THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
 You are an agent running in an ephemeral Docker workspace managed by Syntropic137.
@@ -652,6 +674,20 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ## Completing Your Task
 
+**The deliverable is not conditional on having acted.** `artifacts/output/` is
+how a phase reports, so it is written for every outcome:
+
+- **you did the work** - describe what you changed and where it is
+- **it was already done, or turned out not to be needed** - say so, and show
+  what you checked that established it
+- **you declined to act**, because acting would have been wrong - say why
+- **you could not act** - say what stopped you
+
+"Nothing needed doing" is a conclusion, and the evidence behind it is the
+deliverable. Reaching it and writing no file reports nothing at all: from
+outside it is indistinguishable from a phase that ran and produced nothing,
+and that fails the execution.
+
 ### For coding tasks (commits, PRs, code changes):
 
 Your primary deliverable is **code on GitHub**. The artifact is your summary.
@@ -660,9 +696,9 @@ Your primary deliverable is **code on GitHub**. The artifact is your summary.
 2. Make changes, commit with clear messages
 3. Push to GitHub, create PR if needed
 4. Write summary to `artifacts/output/deliverable.md` with:
-   - What you actually changed
-   - Your actual commit hashes
-   - The actual PR URL you created
+   - What you actually changed, or what you found already correct
+   - Your actual commit hashes, if you made any
+   - The actual PR URL - the one you opened, or the one that was already there
    - Brief executive summary
 
 ### For non-coding tasks (research, analysis, design, planning):
@@ -721,6 +757,22 @@ Examples of failure reasons:
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
 
+def _the_workspace_tree(prompt: str) -> str:
+    """The fenced directory tree out of a rendered prompt, fence excluded.
+
+    The tree is the only part of the prompt that makes a positional claim about
+    what is on disk, so assertions about the workspace layout belong on it
+    alone: matched against the whole prompt they would also be satisfied by the
+    phase's own task text, which no agent reads as a description of the
+    filesystem.
+    """
+    _, heading, rest = prompt.partition("### Workspace Structure\n\n```\n")
+    assert heading, "the prompt no longer has a fenced `### Workspace Structure` tree"
+    tree, fence, _ = rest.partition("\n```")
+    assert fence, "the workspace tree fence is unterminated"
+    return tree
+
+
 class TestThePromptTellsTheTruthAboutCloning:
     """The shared preamble describes the workspace, so it must describe THIS one.
 
@@ -744,13 +796,16 @@ class TestThePromptTellsTheTruthAboutCloning:
         It sets no `clone_repos`, so it still clones and must still be told the
         repository is pre-cloned. Equality, not a substring check: a baseline
         that tolerates additions is not a baseline.
+
+        When this fails, the question is not "what is the new text" but "was
+        moving the baseline the intended change". See the log above the golden.
         """
         phases = await _executable_phases()
         provisioned = await _provision(phases["verify"], completed={})
 
         preamble, separator, _ = provisioned.prompt.partition("\n\n## Task\n")
         assert separator, "the prompt no longer has a `## Task` section to split on"
-        assert preamble == _THE_PREAMBLE_A_CLONING_PHASE_HAS_ALWAYS_HAD
+        assert preamble == _THE_PREAMBLE_A_CLONING_PHASE_GETS
 
     async def test_a_no_checkout_phase_is_not_told_the_repository_is_on_disk(self) -> None:
         """The whole prompt, not the preamble: `open_pr.md` made the claim too.
@@ -768,6 +823,35 @@ class TestThePromptTellsTheTruthAboutCloning:
         assert "pre-cloned" not in provisioned.prompt.lower()
         assert "fresh clone" not in provisioned.prompt.lower()
         assert "/workspace/repos" not in provisioned.prompt
+
+    async def test_a_no_checkout_phase_is_shown_repos_as_an_empty_directory(self) -> None:
+        """`/workspace/repos` always exists; only the checkout inside it is conditional.
+
+        Both workspace images pre-create the directory and the entrypoint
+        creates it again unconditionally, and `unpushed_work_guard`
+        `._repositories` leans on precisely that: an empty `find` there means
+        "this phase cloned nothing", while a failing one means "the workspace
+        did not answer". The prompt used to omit the directory entirely, which
+        taught the agent the opposite of the invariant the teardown guard
+        depends on - and left the hydration docs describing the prompt as
+        correct while it contradicted them.
+
+        Asserted on the TREE BLOCK rather than the whole prompt. `repos/`
+        occurs in prose elsewhere in the phase's own instructions, so a
+        substring search over the whole string would pass on a prompt whose
+        tree never showed the agent the directory at all - which is the exact
+        defect this pins.
+        """
+        phases = await _executable_phases()
+        provisioned = await _provision(phases["open_pr"], completed={})
+
+        tree = _the_workspace_tree(provisioned.prompt)
+        assert "repos/" in tree, f"the no-checkout tree does not show `repos/`:\n{tree}"
+        # Present AND empty. Naming the directory while hanging a repository
+        # under it would be the original false claim in a new spelling, so the
+        # cloning tree's `{repo-name}` child must NOT have come along.
+        assert "{repo-name}" not in tree, f"the no-checkout tree claims a checkout:\n{tree}"
+        assert "EMPTY" in tree, f"the no-checkout tree does not say `repos/` is empty:\n{tree}"
 
     async def test_a_no_checkout_phase_is_told_how_to_work_without_one(self) -> None:
         """Deleting the paragraph would satisfy the test above and help nobody.

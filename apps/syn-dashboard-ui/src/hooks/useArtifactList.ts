@@ -61,6 +61,7 @@ export function useArtifactList(): UseArtifactListResult {
         rows: response.artifacts,
         total: response.total,
         statusCounts: response.type_counts,
+        excludedUndated: response.excluded_undated,
       }
     },
     [workflowIdFilter, phaseIdFilter, typeFilter],
