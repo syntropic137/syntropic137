@@ -225,33 +225,54 @@ img, video {
 /* Harness names carry their vendor's colour. The shared class holds the
    mechanics, the modifier holds the palette, so a new harness ships a
    modifier and nothing else. Keep the modifiers in sync with `accentClass`
-   in src/data/harnesses.ts. */
+   in src/data/harnesses.ts.
+
+   Modifiers set `background-image`, never the `background` shorthand. The
+   shorthand resets `background-clip` to `border-box`, which would undo the
+   clip-to-text below and, with a transparent text fill, render the name
+   invisible. Every gradient stop clears 4.5:1 against --color-bg. */
 .harness {
-  /* Fallback gradient. The clip-to-text trick makes the glyphs transparent,
-     so a `.harness` used without a modifier would render invisible. This
-     keeps it legible instead of silently disappearing. */
-  background: linear-gradient(
-    120deg,
-    var(--color-harness) 0%,
-    var(--color-text-accent) 100%
-  );
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
   font-weight: var(--weight-semibold);
+  /* Fallback colour for anything that never reaches the gradient branch. */
+  color: var(--color-harness);
 }
 
-/* Anthropic: warm clay into amber */
-.harness--claude {
-  background: linear-gradient(120deg, #E08A5F 0%, #f97316 55%, #f59e0b 100%);
-  filter: drop-shadow(0 0 10px rgba(224, 138, 95, 0.4));
+/* Gradient text only where the clip is actually supported. Outside this
+   block the names stay opaque and legible rather than transparent. */
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .harness {
+    background-image: linear-gradient(
+      120deg,
+      var(--color-harness) 0%,
+      var(--color-text-accent) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Anthropic: warm clay into amber */
+  .harness--claude {
+    background-image: linear-gradient(120deg, #E08A5F 0%, #f97316 55%, #f59e0b 100%);
+    filter: drop-shadow(0 0 10px rgba(224, 138, 95, 0.4));
+  }
+
+  /* OpenAI: cool blue, deliberately off the site's own accent blue
+     (#4D80FF) so the harness name does not read as brand chrome. */
+  .harness--codex {
+    background-image: linear-gradient(120deg, #38bdf8 0%, #3b82f6 55%, #818cf8 100%);
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.4));
+  }
 }
 
-/* OpenAI: cool blue, deliberately off the site's own accent blue (#4D80FF)
-   so the harness name does not read as brand chrome. */
-.harness--codex {
-  background: linear-gradient(120deg, #38bdf8 0%, #3b82f6 55%, #6366f1 100%);
-  filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.4));
+/* Forced colours: drop the gradient entirely and let the OS palette win. */
+@media (forced-colors: active) {
+  .harness {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    color: CanvasText;
+    filter: none;
+  }
 }
 
 .syntropic-brand--link {

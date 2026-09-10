@@ -16,6 +16,13 @@
  * and one we cannot.
  */
 
+/**
+ * Every value here must have a matching `.harness--*` rule in globals.css.
+ * Keeping it a union rather than `string` means a typo fails the build
+ * instead of silently falling back to the generic gradient.
+ */
+export type HarnessAccentClass = "harness--claude" | "harness--codex";
+
 export interface Harness {
   /** Value used by `agent.provider` in workflow YAML. */
   id: "claude" | "codex";
@@ -30,7 +37,7 @@ export interface Harness {
    * Each harness wears its own vendor colour so the two read as distinct
    * products rather than one branded pair.
    */
-  accentClass: string;
+  accentClass: HarnessAccentClass;
 }
 
 export const HARNESSES: readonly Harness[] = [
