@@ -876,3 +876,44 @@ class TestModuleAwareShapes:
         tree, annotation = self._annotation("def f(e: SessionCompletedEvent) -> None: ...")
 
         assert not module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ["dict[str, Event]", "Mapping[str, Event]", "list[dict[str, Event]]", "d.Dict[str, Event]"],
+    )
+    def test_a_parameterised_mapping_is_not_a_bare_one(self, annotation: str) -> None:
+        """The constructor of a parameterised type is not an unparameterised one.
+
+        `dict` in `dict[str, Event]` is reached by the recursive descent, and
+        without suppression it reports every properly typed mapping in the
+        codebase. That is not a cosmetic false positive: a gate built on this
+        would fire on correct code, which is how a gate gets turned off.
+        """
+        tree, node = self._annotation(f"import d\ndef f(x: {annotation}) -> None: ...")
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    @pytest.mark.parametrize("annotation", ['"dict"', '"D"'])
+    def test_a_quoted_bare_mapping_is_still_a_bare_mapping(self, annotation: str) -> None:
+        """A quoted type is still a type, and the root can be the quote.
+
+        The collector descends into strings found in type POSITIONS, but the
+        whole annotation is not one of those until asked - so `x: "dict"`
+        answered False while `x: dict` answered True. A spelling the checker
+        cannot read is the defect this module exists to prevent.
+        """
+        tree, node = self._annotation(f"D = dict\ndef f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_quoted_parameterised_mapping_is_still_not_bare(self) -> None:
+        """Both fixes at once: the quote is followed, and what is inside is typed."""
+        tree, node = self._annotation('def f(x: "dict[str, Event]") -> None: ...')
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_quoted_erased_mapping_is_still_seen_by_default(self) -> None:
+        """Following the quote must not depend on the new axis being on."""
+        tree, node = self._annotation('def f(x: "dict[str, Any]") -> None: ...')
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)

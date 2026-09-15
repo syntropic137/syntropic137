@@ -323,6 +323,9 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         # Off by default so the ratchet's number does not move; the caller that
         # wants the other question asks for it, the same way `values` works.
         self.bare_mapping = bare_mapping
+        #: Nodes seen as the constructor of a parameterised type, by identity.
+        #: `dict[str, Event]` declares its values; only a naked `dict` does not.
+        self._parameterised: set[int] = set()
         self.found: list[Occurrence] = []
 
     def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
@@ -353,11 +356,19 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         """An unparameterised mapping name, when the caller asked for them."""
         if not self.bare_mapping:
             return
+        if id(node) in self._parameterised:
+            return
         if not self._resolves_to(node, MAPPING_NAMES):
             return
         self.found.append(Occurrence(line=node.lineno, text=ast.unparse(node)))
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
+        # `dict` in `dict[str, Event]` is the CONSTRUCTOR of a parameterised
+        # type, not an unparameterised one. Without this the recursive descent
+        # reaches it through `generic_visit` and `_note_bare_mapping` reports
+        # every properly typed mapping in the codebase - the exact false
+        # positive that would make a gate built on this unusable.
+        self._parameterised.add(id(node.value))
         if self._is_untyped_str_mapping(node):
             self.found.append(Occurrence(line=node.lineno, text=ast.unparse(node)))
         # Type parameters are a type position: ``list["dict[str, Any]"]`` hides
@@ -458,7 +469,9 @@ class _DictShapedStateCollector(ast.NodeVisitor):
             inner = ast.parse(node.value, mode="eval")
         except SyntaxError:
             return
-        nested = _DictShapedStateCollector(self.values, self.renames)
+        nested = _DictShapedStateCollector(
+            self.values, self.renames, bare_mapping=self.bare_mapping
+        )
         nested.visit(inner)
         self.found.extend(Occurrence(line=node.lineno, text=hit.text) for hit in nested.found)
 
@@ -531,6 +544,11 @@ class ModuleShapes:
         what the ratchet answers unless asked otherwise.
         """
         collector = _DictShapedStateCollector(values, self.renames, bare_mapping=bare_mapping)
+        # A whole annotation can itself be a forward reference - `x: "dict"` -
+        # in which case the node handed over is a string and every visitor
+        # below would skip it. The collector descends into strings it finds in
+        # type POSITIONS, but the root is not one of those until asked.
+        collector._descend_into_string(node)
         collector.visit(node)
         return bool(collector.found)
 
