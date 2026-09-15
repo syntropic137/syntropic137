@@ -562,6 +562,44 @@ class TestNoPromptAsksPastItsGrant:
         )
         assert self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt) == []
 
+    def test_a_quoted_exempt_opener_does_not_absorb_an_unquoted_shell_fence(
+        self, tmp_path: Path
+    ) -> None:
+        """A fence closes one opened at the SAME quote depth, or it closes nothing.
+
+        Teaching the PATTERN about block-quote containers without teaching the
+        WALK about them created a new fail-open: a quoted `text` opener never
+        meets its quoted closer if the walk ignores depth, so it stays open
+        across the end of its own block quote and swallows the unquoted
+        ```bash fence that follows. A CommonMark parser renders that last block
+        as bash; the gate saw content inside an exempt block and reported
+        nothing.
+
+        Found by cross-model review of the container-prefix fix, which is to
+        say: introduced by the previous commit in this PR.
+        """
+        prompt = (
+            "Here is what the report looked like:\n\n"
+            "> ```text\n"
+            "> shown\n\n"
+            "Now run it:\n\n"
+            "```bash\n"
+            "gh pr comment 42 --repo o/r --body-file out.md\n"
+            "```\n"
+        )
+        (violation,) = self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt)
+        assert "Bash" in violation
+
+    def test_a_quoted_exempt_block_still_closes_at_its_own_depth(self, tmp_path: Path) -> None:
+        """The guard must not make every quoted exempt block unclosable."""
+        prompt = (
+            "The report looked like this:\n\n"
+            "> ```text\n"
+            "> gh pr comment 42 --repo o/r --body-file out.md\n"
+            "> ```\n"
+        )
+        assert self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt) == []
+
     def test_the_same_prompt_is_fine_when_bash_is_granted(self, tmp_path: Path) -> None:
         """Negative control on the GRANT.
 

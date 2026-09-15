@@ -134,7 +134,20 @@ _NON_SHELL_INFO = frozenset({"text", "yaml", "json", "markdown", "diff"})
 #: `(?:>[ \t]*)*` takes any depth of block-quote marker, because CommonMark
 #: lets the container nest and one level is not the rule. The list marker
 #: follows the quote markers, matching CommonMark's own nesting order.
-_FENCE = re.compile(r"^[ \t]*(?:>[ \t]*)*(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
+_FENCE = re.compile(r"^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
+
+
+def _quote_depth(prefix: str) -> int:
+    """How many block-quote containers a fence line sits inside.
+
+    The pairing walk needs this because a block quote ENDS when its prefix
+    stops. An exempt opener inside a quote does not get to swallow the rest of
+    the document: once a fence appears at a shallower depth, the container that
+    held the opener is over, and the opener is over with it. Without that the
+    widening below would have been a fail-open, since a quoted ```text could
+    absorb an unquoted ```bash that follows it.
+    """
+    return prefix.count(">")
 
 
 def _language(info: str) -> str:
@@ -160,17 +173,33 @@ def _first_shell_fence(prompt: str) -> int | None:
     never merely because a fence was written in an unfamiliar way.
     """
     opener: str | None = None
+    opener_depth = 0
     for match in _FENCE.finditer(prompt):
-        marker, info = match.group(1), match.group(2).strip()
+        prefix, marker, info = match.group(1), match.group(2), match.group(3).strip()
+        depth = _quote_depth(prefix)
+        if opener is not None and depth < opener_depth:
+            # The opener's block quote ENDED. CommonMark closes a container
+            # when its prefix stops, and an unterminated fence inside it closes
+            # with the container. Without this the exempt opener stays open
+            # forever and absorbs every fence that follows, which is how a
+            # quoted `text` block came to swallow a real ```bash instruction.
+            opener = None
+            opener_depth = 0
+
         if opener is None:
             if _language(info) not in _NON_SHELL_INFO:
                 return match.start()
             opener = marker
+            opener_depth = depth
         elif marker[0] == opener[0] and len(marker) >= len(opener) and not info:
-            # Closes only on the same character, at least as long, and bare -
-            # CommonMark's rule. Anything else between the pair is content: a
-            # `text` block quoting a ```bash fence is showing it, not running
-            # it, and the report template does exactly that.
+            # CommonMark's closing rule: same character, at least as long,
+            # and no info string. A deeper fence is left to close it too -
+            # that direction can only end the block EARLY, which is the
+            # fail-closed direction, and the container-end check above already
+            # handles the direction that could fail open. Anything between the
+            # pair is content: a `text` block quoting a ```bash fence is
+            # showing it, not running it, and the report template does exactly
+            # that.
             opener = None
     return None
 
