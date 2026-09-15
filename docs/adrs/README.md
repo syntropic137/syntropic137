@@ -109,3 +109,4 @@
 |-----|-------|--------|
 | [ADR-046](ADR-046-organization-query-insight-layer.md) | Organization Query & Insight Layer | Accepted |
 | [ADR-047](ADR-047-repo-execution-correlation-pattern.md) | Repo-Execution Correlation Pattern | Accepted |
+
