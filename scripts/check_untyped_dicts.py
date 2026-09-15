@@ -391,13 +391,27 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         # occurrence. The existing docstring half-saw this - it notes
         # ``Literal["not python"]`` as the reason an unparsable string is left
         # alone - but a parsable one was still followed.
-        for index, argument in enumerate(_subscript_arguments(node)):
-            if self._resolves_to(node.value, LITERAL_NAMES):
-                continue
-            if index > 0 and self._resolves_to(node.value, ANNOTATED_NAMES):
+        is_literal = self._resolves_to(node.value, LITERAL_NAMES)
+        is_annotated = self._resolves_to(node.value, ANNOTATED_NAMES)
+        arguments = _subscript_arguments(node)
+        for index, argument in enumerate(arguments):
+            if is_literal or (is_annotated and index > 0):
                 continue
             self._descend_into_string(argument)
-        self.generic_visit(node)
+
+        # Visit the constructor and the TYPE arguments, rather than
+        # `generic_visit(node)`, which walks every argument regardless.
+        #
+        # Skipping only the string parsing above was a half fix: the structural
+        # walk still reached `Literal[Choice.Mapping]` and
+        # `Annotated[str, Mapping]` and reported them. The rule is that those
+        # positions are not types, so nothing in them is read as one - by
+        # parsing or by traversal.
+        self.visit(node.value)
+        for index, argument in enumerate(arguments):
+            if is_literal or (is_annotated and index > 0):
+                continue
+            self.visit(argument)
 
     def visit_Call(self, node: ast.Call) -> None:
         # ``cast`` is the one place the language expects a type as a value, so

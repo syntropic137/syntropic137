@@ -970,3 +970,68 @@ class TestModuleAwareShapes:
         tree, node = self._annotation('def f(x: list["dict[str, Any]"]) -> None: ...')
 
         assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ["Literal[Choice.Mapping]", "Annotated[str, Mapping]", "Annotated[str, dict]"],
+    )
+    def test_a_non_type_position_is_exempt_structurally_not_just_textually(
+        self, annotation: str
+    ) -> None:
+        """The exemption must hold for the WALK, not only for string parsing.
+
+        The first attempt suppressed only `_descend_into_string`, while
+        `generic_visit` still walked every argument - so a quoted mapping was
+        exempt and an unquoted one, in the same position, was not. That is a
+        rule stated and half implemented, which is worse than not stating it:
+        it reads as covered.
+        """
+        tree, node = self._annotation(
+            "from typing import Annotated, Literal, Mapping\n"
+            "import Choice\n"
+            f"def f(x: {annotation}) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_mapping_in_annotated_metadata_is_not_erased_state(self) -> None:
+        """Metadata is not a type position for the default question either."""
+        tree, node = self._annotation(
+            "from typing import Annotated, Any\n"
+            "def f(x: Annotated[str, dict[str, Any]]) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_the_type_argument_of_annotated_is_still_read(self) -> None:
+        """Unquoted this time, so the structural path is the one under test."""
+        tree, node = self._annotation(
+            "from typing import Annotated, Any\n"
+            'def f(x: Annotated[dict[str, Any], "meta"]) -> None: ...'
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_subscript_whose_constructor_is_itself_a_subscript_is_read(self) -> None:
+        """`self.visit(node.value)` exists for this, and was otherwise untested.
+
+        Replacing `generic_visit` with a selective walk meant naming every
+        branch that still had to be taken. The constructor is one: when it is
+        itself a subscript, the shape lives inside it and nothing else visits
+        it. Mutation showed the line was inert against this repository, so the
+        case is pinned here rather than left as an unexercised branch.
+        """
+        tree, node = self._annotation(
+            "from typing import Any, Mapping\nimport Alias\n"
+            "def f(x: Alias[dict[str, Any]][int]) -> None: ..."
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_bare_mapping_in_a_nested_constructor_is_read(self) -> None:
+        """Same branch, for the axis this API added."""
+        tree, node = self._annotation(
+            "from typing import Mapping\nimport Outer\ndef f(x: Outer[Mapping][int]) -> None: ..."
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
