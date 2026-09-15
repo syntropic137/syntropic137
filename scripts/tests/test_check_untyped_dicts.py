@@ -38,6 +38,7 @@ from check_untyped_dicts import (
     contains_dict_shaped_state,
     find_dict_shaped_state,
     main,
+    module_shapes,
     scan_package,
 )
 
@@ -797,3 +798,81 @@ class TestASecondBindingDoesNotUnbindTheFirst:
             object = object.func
         """
         assert count(source) == 1
+
+
+@pytest.mark.unit
+class TestModuleAwareShapes:
+    """A shape question answered WITH the module that made the renames (#1268).
+
+    The free ``contains_dict_shaped_state`` builds its collector with an empty
+    rename table and says so: a rename cannot be undone without the module that
+    made it. So ``D = dict`` followed by ``event_data: D`` is invisible to it.
+
+    A gate that parses whole files already holds the module, so that limit is
+    gratuitous for it. ``module_shapes`` carries the rename table forward.
+    """
+
+    @staticmethod
+    def _annotation(source: str) -> tuple[ast.Module, ast.expr]:
+        """Parse a module and hand back its last annotation."""
+        tree = ast.parse(source)
+        annotations = [
+            node.annotation
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign | ast.arg) and node.annotation is not None
+        ]
+        return tree, annotations[-1]
+
+    def test_a_renamed_bare_dict_is_seen_through_the_module(self) -> None:
+        """The case the expression-only entry point cannot answer.
+
+        This is the whole reason the API is module-aware. Centralising a type
+        behind an alias is good practice, and a gate that cannot follow the
+        alias would reward exactly the codebases that did it.
+        """
+        tree, annotation = self._annotation("D = dict\ndef f(event_data: D) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_the_free_function_still_cannot_and_that_is_documented(self) -> None:
+        """Not a regression: the free entry point has no module to consult.
+
+        Pinned so the two answers stay deliberately different rather than
+        drifting into one that silently loses rename resolution.
+        """
+        _tree, annotation = self._annotation("D = dict\ndef f(event_data: D) -> None: ...")
+
+        assert not contains_dict_shaped_state(annotation)
+
+    def test_a_bare_dict_is_only_counted_when_asked_for(self) -> None:
+        """The default must not move the ratchet's number.
+
+        An unparameterised ``dict`` is a different fault from ``dict[str, Any]``
+        - it declares nothing rather than erasing its values - and the ratchet
+        counts only the second. Counting bare dicts by default would change
+        every budget in fitness-exceptions.toml at once.
+        """
+        tree, annotation = self._annotation("def f(event_data: dict) -> None: ...")
+        shapes = module_shapes(tree)
+
+        assert not shapes.contains_dict_shaped_state(annotation)
+        assert shapes.contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_the_erasing_shape_is_still_seen_by_default(self) -> None:
+        """Turning the new axis off must not turn the old answer off too."""
+        tree, annotation = self._annotation("def f(d: dict[str, Any]) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation)
+
+    @pytest.mark.parametrize("spelling", ["dict", "Dict", "Mapping", "MutableMapping"])
+    def test_every_mapping_spelling_counts_as_bare(self, spelling: str) -> None:
+        """A vocabulary that knows one spelling is a vocabulary with a hole."""
+        tree, annotation = self._annotation(f"def f(d: {spelling}) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_a_typed_name_is_not_a_bare_mapping(self) -> None:
+        """The false-positive direction: a real type must not be reported."""
+        tree, annotation = self._annotation("def f(e: SessionCompletedEvent) -> None: ...")
+
+        assert not module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)

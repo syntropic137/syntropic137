@@ -307,9 +307,22 @@ class _DictShapedStateCollector(ast.NodeVisitor):
     not a second definition of the shape.
     """
 
-    def __init__(self, values: frozenset[str], renames: Mapping[str, frozenset[str]]) -> None:
+    def __init__(
+        self,
+        values: frozenset[str],
+        renames: Mapping[str, frozenset[str]],
+        *,
+        bare_mapping: bool = False,
+    ) -> None:
         self.values = values
         self.renames = renames
+        # An unparameterised `dict` is a DIFFERENT fault from `dict[str, Any]`:
+        # the second erases its values, the first declares nothing at all. The
+        # ratchet counts only the second, which is why 70 bare-dict projection
+        # handlers sat inside a budget of 391 and the gate stayed green (#1268).
+        # Off by default so the ratchet's number does not move; the caller that
+        # wants the other question asks for it, the same way `values` works.
+        self.bare_mapping = bare_mapping
         self.found: list[Occurrence] = []
 
     def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
@@ -335,6 +348,14 @@ class _DictShapedStateCollector(ast.NodeVisitor):
             return False
         key, value = arguments
         return self._resolves_to(key, {"str"}) and self._resolves_to(value, self.values)
+
+    def _note_bare_mapping(self, node: ast.expr) -> None:
+        """An unparameterised mapping name, when the caller asked for them."""
+        if not self.bare_mapping:
+            return
+        if not self._resolves_to(node, MAPPING_NAMES):
+            return
+        self.found.append(Occurrence(line=node.lineno, text=ast.unparse(node)))
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         if self._is_untyped_str_mapping(node):
@@ -379,10 +400,12 @@ class _DictShapedStateCollector(ast.NodeVisitor):
 
     def visit_Name(self, node: ast.Name) -> None:
         self._note_namespace(node)
+        self._note_bare_mapping(node)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         self._note_namespace(node)
+        self._note_bare_mapping(node)
         self.generic_visit(node)
 
     def _note_namespace(self, node: ast.Name | ast.Attribute) -> None:
@@ -474,6 +497,47 @@ def find_dict_shaped_state(
     collector = _DictShapedStateCollector(values, _renames(tree))
     collector.visit(tree)
     return collector.found
+
+
+@dataclass(frozen=True)
+class ModuleShapes:
+    """Answers shape questions for annotations in ONE parsed module.
+
+    The free ``contains_dict_shaped_state`` below builds its collector with an
+    empty rename table, and says so: a rename cannot be undone without the
+    module that made it. So ``D = dict`` followed by ``event_data: D`` is
+    invisible to an expression-only caller, and any gate built on that seam
+    would miss exactly the aliasing a codebase uses to centralise a type.
+
+    A caller that parsed a whole file already HOLDS the module, so the
+    limitation is gratuitous for it. This carries the rename table forward and
+    answers the same question with it.
+    """
+
+    renames: Mapping[str, frozenset[str]]
+
+    def contains_dict_shaped_state(
+        self,
+        node: ast.expr,
+        *,
+        values: frozenset[str] = UNCONSTRAINED_VALUES,
+        bare_mapping: bool = False,
+    ) -> bool:
+        """Whether a type expression declares dict-shaped structured state.
+
+        ``bare_mapping=True`` additionally counts an unparameterised mapping
+        name - ``dict``, ``Mapping`` - which declares nothing at all rather
+        than erasing its values. The default is False so this answers exactly
+        what the ratchet answers unless asked otherwise.
+        """
+        collector = _DictShapedStateCollector(values, self.renames, bare_mapping=bare_mapping)
+        collector.visit(node)
+        return bool(collector.found)
+
+
+def module_shapes(tree: ast.Module) -> ModuleShapes:
+    """Shape questions answerable in the context of ``tree``."""
+    return ModuleShapes(renames=_renames(tree))
 
 
 def contains_dict_shaped_state(
