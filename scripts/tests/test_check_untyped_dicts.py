@@ -917,3 +917,19 @@ class TestModuleAwareShapes:
         tree, node = self._annotation('def f(x: "dict[str, Any]") -> None: ...')
 
         assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_the_free_function_follows_a_root_quote_as_documented(self) -> None:
+        """Its docstring promises quoted spellings are followed. They were not.
+
+        A whole annotation that IS a forward reference handed the function a
+        string, and every visitor skipped it - so `x: "dict[str, Any]"`
+        answered False. ADR-063's boundary gate calls this function directly,
+        which meant a quoted erased mapping crossing a context boundary was
+        invisible to that gate.
+
+        Pre-existing, not introduced here; fixed because the free function is
+        the seam a production gate already depends on.
+        """
+        quoted = ast.parse('"dict[str, Any]"', mode="eval").body
+
+        assert contains_dict_shaped_state(quoted)

@@ -575,6 +575,13 @@ def contains_dict_shaped_state(
     ``find_dict_shaped_state`` gives for that line.
     """
     collector = _DictShapedStateCollector(values, {})
+    # The docstring above promises quoted spellings are followed. They were
+    # not: a whole annotation that IS a forward reference - `x: "dict[str,
+    # Any]"` - handed this function a string, and every visitor skipped it.
+    # ADR-063's boundary gate calls this directly
+    # (ci/fitness/code_quality/test_typed_cross_context_boundaries.py:104), so
+    # a quoted erased mapping crossing a context boundary was invisible to it.
+    collector._descend_into_string(node)
     collector.visit(node)
     return bool(collector.found)
 
