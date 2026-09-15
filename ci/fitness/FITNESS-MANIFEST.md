@@ -26,6 +26,32 @@ Run both: `just fitness`
 | 8 | Boundary Clarity | test_layer_separation, test_dependency_direction | fitness_exceptions.toml `[layer_separation]` | Enforced |
 | 9 | Scalability | test_in_memory_state_audit | fitness_exceptions.toml `[in_memory_state]` | Enforced |
 | 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
+| 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
+
+### 11. Typed Boundaries (#1268, ADR-063)
+
+A boundary that carries domain meaning must declare its structure. Two gates,
+two boundaries: `test_typed_cross_context_boundaries` covers Protocol/ABC
+signatures crossing a context line, `test_typed_projection_handlers` covers the
+event handlers a projection dispatches by name.
+
+#1268 was 110 handler parameters annotated `dict` or `dict[str, Any]`, reading
+by string key from events that type every field. **62 of the 110 were bare
+`dict`, which the per-package ratchet in `fitness-exceptions.toml` scores as
+zero by design** - so they were not budgeted debt, they were unmeasured, and
+`syn-domain` could have doubled its untyped handlers without moving 440.
+
+The gate grandfathers the 110 and refuses the 111th. It is a table rather than
+a number, and `test_no_stale_grandfathered_handlers` is what makes that table
+ratchet: typing a handler requires deleting its key in the same diff, so a
+fixed site cannot leave standing permission to break again. Three waivers in
+`fitness-exceptions.toml` had gone stale exactly that way before anything
+reported it.
+
+Scope is "is a projection module", not the slice path the reproduction sits on.
+Nine of the 110 live one directory outside `contexts/*/slices/*/projection.py`
+and are the same handlers; a scope named after a path excuses code for where it
+is filed.
 
 ### 10. Declaration Integrity (ADR-069 D5)
 
