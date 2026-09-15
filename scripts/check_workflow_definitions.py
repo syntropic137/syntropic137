@@ -131,10 +131,15 @@ _NON_SHELL_INFO = frozenset({"text", "yaml", "json", "markdown", "diff"})
 #: quoted command is not an unusual way to write a prompt; it is how a prompt
 #: shows the step it wants run.
 #:
-#: `(?:>[ \t]*)*` takes any depth of block-quote marker, because CommonMark
-#: lets the container nest and one level is not the rule. The list marker
-#: follows the quote markers, matching CommonMark's own nesting order.
-_FENCE = re.compile(r"^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
+#: The prefix takes ANY sequence of container markers, in any order and to any
+#: depth. An earlier version allowed quote markers followed by at most one list
+#: marker, which encoded one fixed nesting order as if it were the rule.
+#: CommonMark imposes no such order, so `- > ```bash` and `- - ```bash` -
+#: both valid, both instructions to run something - matched nothing and passed.
+#: An unterminated fence makes that miss silent, since there is no later
+#: closing line whose mismatch might expose it.
+_CONTAINER = r"(?:[ \t]*(?:>|[-*+][ \t]|\d+\.[ \t]))*"
+_FENCE = re.compile(rf"^({_CONTAINER}[ \t]*)(`{{3,}}|~{{3,}})(.*)", re.M)
 
 
 def _quote_depth(prefix: str) -> int:
@@ -191,15 +196,29 @@ def _first_shell_fence(prompt: str) -> int | None:
                 return match.start()
             opener = marker
             opener_depth = depth
-        elif marker[0] == opener[0] and len(marker) >= len(opener) and not info:
-            # CommonMark's closing rule: same character, at least as long,
-            # and no info string. A deeper fence is left to close it too -
-            # that direction can only end the block EARLY, which is the
-            # fail-closed direction, and the container-end check above already
-            # handles the direction that could fail open. Anything between the
-            # pair is content: a `text` block quoting a ```bash fence is
-            # showing it, not running it, and the report template does exactly
-            # that.
+        elif (
+            depth == opener_depth
+            and marker[0] == opener[0]
+            and len(marker) >= len(opener)
+            and not info
+        ):
+            # CommonMark's closing rule: same container depth, same character,
+            # at least as long, and no info string.
+            #
+            # The depth term is load bearing, and the argument that it was not
+            # ("a deeper fence can only end a block EARLY, which fails closed")
+            # is wrong: it stops at the one fence and ignores that the walk
+            # DESYNCS afterwards. Given a ```text block displaying a `> ```
+            # line, a depth-blind closer ends the exempt block there, reads the
+            # displayed `~~~text` line after it as a new exempt opener, and
+            # then cannot close that phantom with backticks - so a real ```bash
+            # fence further down is absorbed as content and the phase passes.
+            # It is also a false positive in its own right: the real closing
+            # fence of such a block gets reported as a shell instruction.
+            #
+            # Anything between a matched pair is content: a `text` block
+            # quoting a ```bash fence is showing it, not running it, and the
+            # report template does exactly that.
             opener = None
     return None
 

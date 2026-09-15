@@ -907,3 +907,97 @@ class TestEveryFenceSpellingIsShellUnlessItSaysOtherwise:
             )
             == []
         )
+
+
+class TestContainerNestingIsNotOneFixedShape:
+    """Fences the walk used to miss, each found by a cross-model review.
+
+    Every case here reaches `grant_violations` rather than the fence helper,
+    because the helper returning an offset is not the claim the gate makes. The
+    claim is that a phase told to run shell without a Bash grant is reported,
+    and only the end-to-end call can be wrong about that.
+
+    What these have in common is that the earlier walk was right about the
+    inputs it had been shown and wrong about the shape of the space. It knew
+    one nesting order, and it reasoned about a single fence at a time when the
+    damage from mispairing one fence is that every fence AFTER it is read in
+    the wrong state.
+    """
+
+    TOOLS: ClassVar[list[str]] = ["Read", "Grep", "Glob", "Write"]
+
+    def _violations(self, tmp_path: Path, prompt: str) -> list[str]:
+        return grant_violations(
+            _write(
+                tmp_path,
+                {
+                    "id": "nest",
+                    "name": "Nest",
+                    "requires_repos": False,
+                    "phases": [
+                        {
+                            "id": "the-phase",
+                            "name": "The phase",
+                            "order": 1,
+                            "prompt_template": prompt,
+                            "allowed_tools": self.TOOLS,
+                            "output_artifacts": [],
+                        }
+                    ],
+                },
+            )
+        )
+
+    def test_a_mispaired_closer_desyncs_the_walk_onto_a_phantom_opener(
+        self, tmp_path: Path
+    ) -> None:
+        """Why the closing rule has to compare container depth.
+
+        The argument for dropping that comparison was that a DEEPER fence
+        closing a shallower opener can only end a block early, which fails
+        closed. That is true of the one fence and false of the document: the
+        walk carries its state forward. Here the deeper `> ``` ` ends the
+        exempt block early, the displayed `~~~text` line is then read as a real
+        opener, backticks cannot close a tilde fence, and the genuine ```bash
+        instruction below is swallowed as that phantom's content.
+        """
+        prompt = "```text\n> ```\n~~~text\n```\nNow run this:\n```bash\necho RUN\n```\n"
+        (violation,) = self._violations(tmp_path, prompt)
+        assert "must run shell" in violation
+
+    def test_the_closing_fence_of_a_quoting_block_is_not_an_instruction(
+        self, tmp_path: Path
+    ) -> None:
+        """The same missing comparison, costing a false positive.
+
+        A `text` block that displays a quoted fence is one block: CommonMark
+        does not let the deeper line close it. Reading that line as the closer
+        leaves the block's REAL closing fence looking like a bare opener, and a
+        bare fence names no exempt language, so the gate reported a prompt that
+        runs nothing. This gate blocks merges; a false positive is not a safe
+        direction to be wrong in.
+        """
+        assert self._violations(tmp_path, "```text\n> ```\n```\n") == []
+
+    @pytest.mark.parametrize(
+        ("label", "prompt"),
+        [
+            ("list containing a quote", "- > ```bash\n  > echo RUN\n"),
+            ("list containing a list", "- - ```bash\n    echo RUN\n"),
+            ("quote containing a list", "> - ```bash\n>   echo RUN\n"),
+            ("two quotes then a list", "> > - ```bash\n> >   echo RUN\n"),
+        ],
+    )
+    def test_containers_nest_in_any_order(self, tmp_path: Path, label: str, prompt: str) -> None:
+        """CommonMark imposes no order on container markers, so neither can we.
+
+        The previous pattern read quote markers followed by at most ONE list
+        marker. That is a description of the examples it was written against,
+        not of the grammar. Each prompt here is valid CommonMark containing a
+        real bash block, and each matched nothing at all.
+
+        These are deliberately UNTERMINATED, which is the silent half: a fence
+        with no closing line gives the walk no later mismatch that might expose
+        the miss.
+        """
+        assert self._violations(tmp_path, prompt), label
