@@ -15,10 +15,21 @@ import { CLIError } from "../framework/errors.js";
 import { getApiUrl, getAuthHeaders } from "../config.js";
 import { API_PREFIX } from "./constants.js";
 
+/**
+ * The deployment this CLI talks to: the resolved API base URL, without the
+ * `/api/v1` prefix.
+ *
+ * WHY a module constant rather than a second `getApiUrl()` call at the point of
+ * use: a command that reports where it dispatched has to report where the
+ * request actually went. The client below is built from this exact string, so
+ * the two cannot disagree — whereas re-reading the environment later can, and
+ * a report that can disagree with the request is the bug (issue #1264).
+ */
+export const apiBaseUrl: string = getApiUrl().replace(/\/+$/, "");
+
 export function createTypedClient() {
-  const baseUrl = getApiUrl().replace(/\/+$/, "");
   return createClient<paths>({
-    baseUrl: `${baseUrl}${API_PREFIX}`,
+    baseUrl: `${apiBaseUrl}${API_PREFIX}`,
     headers: getAuthHeaders(),
     // Resolve fetch at call time, not at client creation time.
     // This allows tests to stub globalThis.fetch after module import.

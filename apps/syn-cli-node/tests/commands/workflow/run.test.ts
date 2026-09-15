@@ -15,6 +15,7 @@ describe("workflow run commands", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   function jsonResponse(data: unknown, status = 200): Response {
@@ -75,6 +76,87 @@ describe("workflow run commands", () => {
       expect(out).toContain("Build Pipeline");
       expect(out).toContain("execution started");
       expect(out).toContain("exec-001");
+    });
+
+    it("names the deployment it dispatched to, taken from the request and not from the environment (issue #1264)", async () => {
+      // The client resolved its base URL when this file imported it. Pointing
+      // SYN_API_URL somewhere else now is the lived failure in #1264 in
+      // miniature: a handler that re-read the environment here would name the
+      // VPS while the execution is running on localhost.
+      vi.stubEnv("SYN_API_URL", "http://100.114.86.77:8137");
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-host-123456789", name: "Review", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-host-123456789",
+            name: "Review",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-host-1" }),
+        );
+
+      await runCommand.handler({ positionals: ["wf-host"], values: {} });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const dispatchedTo = new URL(executeReq.url).origin;
+
+      const out = stdout();
+      expect(out).toContain(dispatchedTo);
+      expect(out).toContain("exec-host-1");
+      expect(out).not.toContain("100.114.86.77");
+    });
+
+    it("reports the configured deployment, not a default (issue #1264)", async () => {
+      // Same assertion from the other side: with the environment set BEFORE the
+      // client is built, the reported host must move with it. Guards against a
+      // hardcoded or stale value that happens to match the default.
+      vi.stubEnv("SYN_API_URL", "http://100.112.178.5:8137");
+      vi.resetModules();
+      const { runCommand: freshRunCommand } = await import(
+        "../../../src/commands/workflow/run.js"
+      );
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-mini-123456789", name: "Review", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-mini-123456789",
+            name: "Review",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-mini-1" }),
+        );
+
+      await freshRunCommand.handler({ positionals: ["wf-mini"], values: {} });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      expect(executeReq.url).toContain("100.112.178.5:8137");
+      expect(stdout()).toContain("http://100.112.178.5:8137");
     });
 
     it("supports dry-run mode", async () => {
