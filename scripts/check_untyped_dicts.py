@@ -85,6 +85,15 @@ if TYPE_CHECKING:
 #: nobody uses is a branch the next reader has to rule out for nothing.
 MAPPING_NAMES: frozenset[str] = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
 
+#: Subscripts whose arguments are NOT all type expressions.
+#:
+#: `Literal["dict"]` holds a value; `Annotated[str, "dict"]` holds metadata
+#: after its first argument. Descending into those strings reads a value as a
+#: declaration - which counted `Literal["dict[str, Any]"]` as erased state, and
+#: then, once `bare_mapping` existed, `Literal["dict"]` as a bare mapping.
+LITERAL_NAMES: frozenset[str] = frozenset({"Literal"})
+ANNOTATED_NAMES: frozenset[str] = frozenset({"Annotated"})
+
 #: A ``TypedDict`` declaration. Counted whatever its fields are annotated with,
 #: which is the one place this gate is not about erasure: ``contents: str``
 #: constrains the value perfectly and the object is still read as
@@ -372,8 +381,21 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         if self._is_untyped_str_mapping(node):
             self.found.append(Occurrence(line=node.lineno, text=ast.unparse(node)))
         # Type parameters are a type position: ``list["dict[str, Any]"]`` hides
-        # a match that only exists once the string is parsed.
-        for argument in _subscript_arguments(node):
+        # a match that only exists once the string is parsed. Two constructs
+        # are exceptions, because their arguments are not all types:
+        #
+        #   Literal["dict"]        every argument is a VALUE
+        #   Annotated[str, "dict"] only the first argument is a type
+        #
+        # Reading those strings as declarations is how a literal became an
+        # occurrence. The existing docstring half-saw this - it notes
+        # ``Literal["not python"]`` as the reason an unparsable string is left
+        # alone - but a parsable one was still followed.
+        for index, argument in enumerate(_subscript_arguments(node)):
+            if self._resolves_to(node.value, LITERAL_NAMES):
+                continue
+            if index > 0 and self._resolves_to(node.value, ANNOTATED_NAMES):
+                continue
             self._descend_into_string(argument)
         self.generic_visit(node)
 

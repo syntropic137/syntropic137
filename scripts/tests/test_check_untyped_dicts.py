@@ -933,3 +933,40 @@ class TestModuleAwareShapes:
         quoted = ast.parse('"dict[str, Any]"', mode="eval").body
 
         assert contains_dict_shaped_state(quoted)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ['Literal["dict"]', 'Literal["Mapping"]', 'Annotated[str, "dict"]'],
+    )
+    def test_a_string_that_is_a_value_is_not_a_declaration(self, annotation: str) -> None:
+        """`Literal` holds values; `Annotated` holds metadata after its first argument.
+
+        Descending into those strings reads a value as a type. It counted
+        `Literal["dict[str, Any]"]` as erased state on main, and once
+        `bare_mapping` existed it counted `Literal["dict"]` as a bare mapping -
+        a false positive this API introduced.
+
+        It was nearly deferred on the argument that fixing it would lower the
+        ratchet counts. That argument was asserted rather than measured, and it
+        is false: none of these forms occur in the budgeted packages, so the
+        counts are unchanged.
+        """
+        tree, node = self._annotation(
+            f"from typing import Annotated, Literal\ndef f(x: {annotation}) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_annotated_still_reads_its_first_argument(self) -> None:
+        """Only the METADATA is exempt. The first argument is a real type."""
+        tree, node = self._annotation(
+            'from typing import Annotated\ndef f(x: Annotated["dict[str, Any]", "meta"]) -> None: ...'
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_quoted_type_elsewhere_is_still_followed(self) -> None:
+        """The exemption is two constructs, not a retreat from following quotes."""
+        tree, node = self._annotation('def f(x: list["dict[str, Any]"]) -> None: ...')
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
