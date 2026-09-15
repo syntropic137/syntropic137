@@ -6221,6 +6221,8 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
+                /** @description Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263). */
+                execution_id?: string | null;
                 /** @description Filter by single status (legacy) */
                 status?: string | null;
                 /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
