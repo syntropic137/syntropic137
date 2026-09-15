@@ -77,6 +77,7 @@ export async function synExecuteWorkflow(
     content: [
       `## Workflow Execution Started`,
       "",
+      `- **Deployment:** ${client.baseUrl}`,
       `- **Execution ID:** ${execution_id}`,
       `- **Workflow:** ${workflow_id}`,
       `- **Status:** ${status}`,
