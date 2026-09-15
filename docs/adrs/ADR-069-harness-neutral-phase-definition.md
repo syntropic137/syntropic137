@@ -283,3 +283,18 @@ itself - and each needs the check for a different reason. The trigger path is
 the one that bites: it acknowledges a dispatch before any validation, so a
 refusal inside the async task leaves a record claiming a run that has no
 execution and never will.
+
+## Implementation notes (2026-09-15, #1275)
+
+### `--tools` does not gate MCP tools
+
+Section 3 says claude "enforces WHICH TOOLS EXIST (`--tools`, availability)".
+That is true only of the built-in set. Measured in exec-f844c202b77c: with the
+same MCP config, adding `--tools Bash,Read` to a claude invocation reduced
+built-in tools from 27 to 2 and left MCP tools at 23, unchanged. The help text
+is explicit that the flag selects "from the built-in set".
+
+So `allowed_tools` is not a containment boundary for MCP tools. Any per-phase
+MCP scoping has to come from the server list instead, whose granularity is a
+server rather than a tool - a coarser boundary than the one `allowed_tools`
+implies. Tracked as #1275.
