@@ -116,13 +116,25 @@ def validate_file(path: Path) -> str | None:
 #: in doubt leave it out; the failure is visible and the fix is one word.
 _NON_SHELL_INFO = frozenset({"text", "yaml", "json", "markdown", "diff"})
 
-#: A fence line: CommonMark's two characters, three or more of them, with the
-#: list marker this repo's prompts indent behind. Capturing the run and the
+#: A fence line: CommonMark's two characters, three or more of them, behind
+#: whatever CONTAINERS the prompt indents it inside. Capturing the run and the
 #: info string separately is what lets the walk below pair openers with
 #: closers instead of scanning lines - a closer, alone on its line, is
 #: indistinguishable from a bare opener, so a line scanner treating bare as
 #: shell would report every exempt block via its own closing fence.
-_FENCE = re.compile(r"^[ \t]*(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
+#:
+#: The container prefix is the second place a fence can be missed, and it was
+#: missed the same way as the first. The info-string layer was fixed to read
+#: every SPELLING - bare, capitalised, tilde, four-backtick - while this
+#: pattern still admitted only whitespace and one list marker. A fence inside
+#: a block quote therefore matched nothing, and a miss reads as a pass. A
+#: quoted command is not an unusual way to write a prompt; it is how a prompt
+#: shows the step it wants run.
+#:
+#: `(?:>[ \t]*)*` takes any depth of block-quote marker, because CommonMark
+#: lets the container nest and one level is not the rule. The list marker
+#: follows the quote markers, matching CommonMark's own nesting order.
+_FENCE = re.compile(r"^[ \t]*(?:>[ \t]*)*(?:[-*+]|\d+\.)?[ \t]*(`{3,}|~{3,})(.*)", re.M)
 
 
 def _language(info: str) -> str:

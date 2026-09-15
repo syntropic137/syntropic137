@@ -514,6 +514,54 @@ class TestNoPromptAsksPastItsGrant:
         assert "run shell" in violation
         assert "none of [Bash]" in violation
 
+    def test_a_blockquoted_shell_fence_fails_closed(self, tmp_path: Path) -> None:
+        """A fence inside a CommonMark block quote is still an instruction.
+
+        The info-string layer was fixed first: bare, capitalised, tilde and
+        four-backtick fences all read correctly. The CONTAINER layer was not.
+        `_FENCE` allowed leading whitespace and one list marker, so a fence
+        nested in a block quote - a quoted command, which is exactly how a
+        prompt shows the step it wants run - matched nothing, and a miss reads
+        as a pass.
+
+        Same defect class as the four already fixed, one layer up: a fence the
+        matcher cannot see, in a position nobody enumerated.
+        """
+        prompt = (
+            "Post your deliverable. Run the quoted command:\n\n"
+            "> ```bash\n"
+            "> gh pr comment 42 --repo o/r --body-file out.md\n"
+            "> ```\n"
+        )
+        (violation,) = self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt)
+        assert "Bash" in violation
+
+    def test_a_nested_blockquoted_shell_fence_fails_closed(self, tmp_path: Path) -> None:
+        """CommonMark allows the container to nest, so one level is not the rule."""
+        prompt = (
+            "Quoting a review that quoted the step:\n\n"
+            "> > ```bash\n"
+            "> > gh pr comment 42 --repo o/r --body-file out.md\n"
+            "> > ```\n"
+        )
+        (violation,) = self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt)
+        assert "Bash" in violation
+
+    def test_a_blockquoted_exempt_fence_is_still_exempt(self, tmp_path: Path) -> None:
+        """Reading the container must not make every quoted block look like shell.
+
+        The pairing walk has to close a block quoted opener with its block
+        quoted closer, or an exempt block's own closing fence reads as a bare
+        opener - which would report every prompt that quotes a table.
+        """
+        prompt = (
+            "The report looked like this:\n\n"
+            "> ```text\n"
+            "> gh pr comment 42 --repo o/r --body-file out.md\n"
+            "> ```\n"
+        )
+        assert self._violations(tmp_path, ["Read", "Grep", "Glob", "Write"], prompt) == []
+
     def test_the_same_prompt_is_fine_when_bash_is_granted(self, tmp_path: Path) -> None:
         """Negative control on the GRANT.
 
