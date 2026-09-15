@@ -85,6 +85,13 @@ phases:
     # Shorter deliberately: this phase composes findings that already exist. If
     # it needs longer, the verify phase did not finish its job.
     timeout_seconds: 900
+    # No Bash, deliberately, and the prompt agrees with this list rather than
+    # asking past it. #1110 told this phase to `gh pr comment` its verdict; the
+    # grant below stayed as it is, so three reviews reported the missing tool
+    # instead of delivering (#1122). Granting Bash here was tried and closed
+    # unmerged (#1123): it arrives unfiltered under skip-permissions, at the
+    # publication boundary, in a phase composing PR-controlled text next to
+    # write-capable credentials. Delivering the verdict is a platform job.
     allowed_tools:
       - Read
       - Grep
