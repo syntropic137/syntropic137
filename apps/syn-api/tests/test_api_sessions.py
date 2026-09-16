@@ -251,3 +251,116 @@ async def test_get_session_running_duration_advances_between_reads():
     second_duration = second.value.duration_seconds
     assert second_duration is not None
     assert second_duration > first_duration
+
+
+async def test_session_detail_operations_come_only_from_the_lane2_timeline():
+    """``operations`` has exactly one source, and it is the Lane 2 timeline (#1034).
+
+    SessionSummary used to carry an operations list of its own that nothing
+    read. Recording a Lane 1 operation here and standing in for Lane 2 with a
+    single known row is what tells the two apart: if any Lane 1 copy were
+    still merged in, this session would report two operations, and the extra
+    one would be the totals roll-up the issue calls synthetic.
+    """
+    from datetime import UTC, datetime
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.projections.session_tools import ToolOperation
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.agent_sessions import (
+        RecordOperationCommand,
+        RecordOperationHandler,
+    )
+    from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+
+    start_result = await start_session(workflow_id="wf-one-lane", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    await RecordOperationHandler(repository=get_session_repo()).handle(
+        RecordOperationCommand(
+            aggregate_id=session_id,
+            operation_type=OperationType.MESSAGE_RESPONSE,
+            input_tokens=4000,
+            output_tokens=321,
+            total_tokens=4321,
+        )
+    )
+    await sync_published_events_to_projections()
+
+    class _StandInLane2:
+        async def get(self, _session_id: str) -> list[ToolOperation]:
+            return [
+                ToolOperation(
+                    observation_id="obs-lane2-1034",
+                    tool_name="Bash",
+                    tool_use_id="toolu_lane2_1034",
+                    operation_type="tool_execution_completed",
+                    timestamp=datetime.now(UTC),
+                    success=True,
+                    input_preview="echo lane2",
+                    output_preview="lane2",
+                    duration_ms=12,
+                )
+            ]
+
+    manager = get_projection_manager()
+    manager._ensure_initialized()
+    manager._projections["session_tools"] = _StandInLane2()
+
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    assert [op.tool_use_id for op in detail.value.operations] == ["toolu_lane2_1034"]
+    # The Lane 1 operation is still real - it is where the tokens came from.
+    assert detail.value.total_tokens == 4321
+
+
+async def test_the_production_completion_path_reaches_the_session_read_path():
+    """The caller a real phase execution uses, end to end (#1034).
+
+    ``RecordOperationHandler`` was reachable only from tests. This drives
+    ``SessionLifecycleManager.complete_success`` - what WorkflowExecution
+    actually calls when a phase finishes - and asserts at the endpoint that
+    serves session detail. 4321/4000/321 is a split no default or sum of
+    defaults produces.
+    """
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
+    )
+
+    start_result = await start_session(workflow_id="wf-prod-path", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    repo = get_session_repo()
+    manager = SessionLifecycleManager(
+        repository=repo,
+        session_id=session_id,
+        workflow_id="wf-prod-path",
+        execution_id="exec-prod-path",
+        phase_id="phase-1",
+        agent_provider="claude",
+        agent_model="claude-sonnet-4-20250514",
+    )
+    manager._session = await repo.get_by_id(session_id)
+
+    await manager.complete_success(
+        input_tokens=4000,
+        output_tokens=321,
+        cache_creation_tokens=0,
+        cache_read_tokens=0,
+        total_tokens=4321,
+        duration_seconds=1.5,
+        source="test-1034",
+    )
+    await sync_published_events_to_projections()
+
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    assert detail.value.status == "completed"
+    assert detail.value.total_tokens == 4321
+    assert detail.value.input_tokens == 4000
+    assert detail.value.output_tokens == 321

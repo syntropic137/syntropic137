@@ -19,12 +19,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.events import SESSION_ERROR, SESSION_SUMMARY
-
-
-class _FakeRepo:
-    async def save(self, _aggregate: object) -> None:
-        return None
 
 
 @dataclass(frozen=True)
@@ -68,7 +64,7 @@ def _manager(writer: _RecordingWriter | None):
     )
 
     return SessionLifecycleManager(
-        repository=_FakeRepo(),
+        repository=FakeSessionRepository(),
         session_id="sess-1",
         workflow_id="wf-1",
         execution_id="exec-1",

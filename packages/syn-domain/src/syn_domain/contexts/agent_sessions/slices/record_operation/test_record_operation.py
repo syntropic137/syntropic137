@@ -8,7 +8,6 @@ PERSISTED, never against the command that went in.
 from __future__ import annotations
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope  # noqa: TC002
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
 from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
@@ -20,44 +19,9 @@ from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand i
 from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 from .RecordOperationHandler import RecordOperationHandler
-
-
-class FakeSessionRepository:
-    """An event-sourced repository double: a stream per aggregate.
-
-    ``get_by_id`` rehydrates a FRESH aggregate from the saved stream rather
-    than handing back the object it was given. That is what makes these
-    tests able to fail: a handler that loads and mutates but never saves
-    leaves the stream untouched, so the next read shows no operation at all
-    - which is exactly the shape of the no-op this replaced.
-    """
-
-    def __init__(self) -> None:
-        self.streams: dict[str, list[EventEnvelope[DomainEvent]]] = {}
-
-    async def get_by_id(self, aggregate_id: str) -> AgentSessionAggregate | None:
-        stream = self.streams.get(aggregate_id)
-        if not stream:
-            return None
-        session = AgentSessionAggregate()
-        session.rehydrate(stream)
-        return session
-
-    async def save(self, aggregate: AgentSessionAggregate) -> None:
-        self.streams.setdefault(str(aggregate.id), []).extend(aggregate.get_uncommitted_events())
-        aggregate.mark_events_as_committed()
-
-    async def save_new(self, aggregate: AgentSessionAggregate) -> None:
-        await self.save(aggregate)
-
-    async def exists(self, aggregate_id: str) -> bool:
-        return aggregate_id in self.streams
-
-    def recorded_events(self, aggregate_id: str) -> list[DomainEvent]:
-        """The domain events on the stream, as downstream readers see them."""
-        return [envelope.event for envelope in self.streams.get(aggregate_id, [])]
 
 
 async def _running_session(repo: FakeSessionRepository, session_id: str) -> None:

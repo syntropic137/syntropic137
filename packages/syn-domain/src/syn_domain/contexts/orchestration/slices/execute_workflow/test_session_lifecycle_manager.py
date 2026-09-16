@@ -5,12 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope  # noqa: TC002
 
 from syn_domain.contexts.agent_sessions import AgentLaunch, SessionStatus
-from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-    AgentSessionAggregate,
-)
 from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
     OperationRecordedEvent,
 )
@@ -20,43 +16,7 @@ from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent impo
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
-
-
-class FakeSessionRepository:
-    """An event-sourced repository double: a stream per aggregate.
-
-    ``get_by_id`` rehydrates a FRESH aggregate from the saved stream rather
-    than returning the object it was handed. ``complete_success`` now writes
-    through the agent_sessions slice handlers, which load by id (#1034), so
-    an AsyncMock cannot show whether anything was actually persisted - it
-    hands the handler a mock session that accepts every call and records
-    nothing.
-    """
-
-    def __init__(self) -> None:
-        self.streams: dict[str, list[EventEnvelope[DomainEvent]]] = {}
-
-    async def get_by_id(self, aggregate_id: str) -> AgentSessionAggregate | None:
-        stream = self.streams.get(aggregate_id)
-        if not stream:
-            return None
-        session = AgentSessionAggregate()
-        session.rehydrate(stream)
-        return session
-
-    async def save(self, aggregate: AgentSessionAggregate) -> None:
-        self.streams.setdefault(str(aggregate.id), []).extend(aggregate.get_uncommitted_events())
-        aggregate.mark_events_as_committed()
-
-    async def save_new(self, aggregate: AgentSessionAggregate) -> None:
-        await self.save(aggregate)
-
-    async def exists(self, aggregate_id: str) -> bool:
-        return aggregate_id in self.streams
-
-    def recorded_events(self, aggregate_id: str) -> list[DomainEvent]:
-        """The domain events on the stream, as downstream readers see them."""
-        return [envelope.event for envelope in self.streams.get(aggregate_id, [])]
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 
 def _make_manager(
