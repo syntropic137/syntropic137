@@ -93,6 +93,10 @@ class FakeConn:
         self._calls.append((query, args))
         return None
 
+    async def fetch(self, query: str, *args: object) -> list[object]:
+        self._calls.append((query, args))
+        return []
+
     async def copy_to_table(self, table: str, **kwargs: object) -> str:
         self._calls.append((table, (kwargs.get("source"),)))
         return "COPY 1"
@@ -508,3 +512,38 @@ def test_the_copy_path_answers_both_questions_at_once() -> None:
     assert payload is not None
     assert_postgres_would_accept(payload)
     assert json.loads(payload)["output_preview"] == CLEANED + BACKSLASH + NEWLINE
+
+
+@pytest.mark.asyncio
+async def test_projection_read_asks_for_the_key_the_write_stored() -> None:
+    """Sanitising only the write side loses the row (#1241).
+
+    ``save`` normalised the key and ``get``/``delete``/``get_by_prefix`` did
+    not, so a projection written under a hostile session id was stored under one
+    name and looked up under another. This is the failure the import ledger is
+    already guarded against, one store over - and ``delete`` is the worst of the
+    three, because matching no rows is indistinguishable from having deleted
+    them.
+    """
+    from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
+
+    store = PostgresProjectionStore()
+    pool = FakePool()
+    store._pool = pool  # type: ignore[assignment]  # see above
+    store._initialized_tables.add("session_detail")
+    hostile_key = "sess" + NUL + "-1"
+
+    await store.save("session_detail", hostile_key, {"error_message": HOSTILE})
+    written = pool.args[0]
+    await store.get("session_detail", hostile_key)
+    read = pool.args[0]
+    await store.delete("session_detail", hostile_key)
+    deleted = pool.args[0]
+    await store.get_by_prefix("session_detail", hostile_key)
+    scanned = pool.args[0]
+
+    for value in (written, read, deleted, scanned):
+        assert_postgres_would_accept(value)
+    assert read == written, "the row was written under a key the read cannot find"
+    assert deleted == written, "the delete matched nothing and said nothing"
+    assert scanned == written, "the prefix scan cannot see what was written"

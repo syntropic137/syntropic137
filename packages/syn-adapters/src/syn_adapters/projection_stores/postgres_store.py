@@ -94,9 +94,16 @@ class PostgresProjectionStore:
 
         return json_serializer(obj)
 
+    # A projection key is a session or execution id, and a harness supplies its
+    # own, so it is untrusted text in a TEXT primary key. Every method below
+    # normalises it through ``pg_safe`` before using it as a key OR as a lookup,
+    # together: sanitising only the write stores the row under a name the read
+    # cannot ask for, and a delete that matches nothing reports success (#1241).
+
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -109,13 +116,14 @@ class PostgresProjectionStore:
                     data = EXCLUDED.data,
                     updated_at = NOW()
             """,
-                pg_safe(key),
+                key,
                 self._serialize(data),
             )
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -147,6 +155,7 @@ class PostgresProjectionStore:
     async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
         """Get all records whose key starts with the given prefix."""
         await self._ensure_table(projection)
+        prefix = pg_safe(prefix)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
@@ -163,6 +172,7 @@ class PostgresProjectionStore:
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
         await self._ensure_table(projection)
+        key = pg_safe(key)
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
