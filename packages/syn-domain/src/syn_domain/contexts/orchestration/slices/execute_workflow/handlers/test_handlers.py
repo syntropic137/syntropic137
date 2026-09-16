@@ -1637,7 +1637,13 @@ class TestWorkspaceProvisionSkills:
             )
 
         materializer.fetch_for_workspace.assert_awaited_once_with((skill,))
-        workspace.execute.assert_awaited_with(
+        # assert_any_await, not assert_awaited_with: provisioning keeps running
+        # after the skills install (the operator-attribution hook appends further
+        # execute() calls when SYN_OPERATOR_* is configured), so "was the last
+        # await" is not a property of the skills install and asserting it made
+        # these tests pass or fail on an unrelated variable (#1282). The argv,
+        # timeout and working directory stay exact - that is what is being tested.
+        workspace.execute.assert_any_await(
             ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
             timeout_seconds=120,
             working_directory="/workspace",
