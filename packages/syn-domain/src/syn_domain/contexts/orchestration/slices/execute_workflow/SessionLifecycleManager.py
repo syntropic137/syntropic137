@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     CompleteSessionCommand,
+    CompleteSessionHandler,
     MarkAgentLaunchedCommand,
     OperationType,
     RecordOperationCommand,
+    RecordOperationHandler,
     SessionStatus,
     StartSessionCommand,
 )
@@ -25,7 +27,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
+
+    # WorkflowExecutionEngine no longer exists; the protocol lives here. The
+    # dangling import made `SessionRepository` Unknown, so pyright checked
+    # nothing this manager did with its repository (#1034).
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         SessionRepository,
     )
 
@@ -193,9 +199,27 @@ class SessionLifecycleManager:
         duration_seconds: float,
         source: str,
     ) -> None:
-        """Record token usage and complete session as successful."""
+        """Record token usage and complete session as successful.
+
+        Both writes go through their slice handlers rather than this
+        manager's own aggregate. Two entry points for one command is what let
+        ``RecordOperationHandler`` sit unimplemented and unnoticed (#1034);
+        the handler is now the only way a session records an operation.
+
+        The handlers load their own copy of the session, so they must run
+        against a stored aggregate that is up to date, and they must run in
+        sequence - a second write against the pre-record version would be a
+        concurrency conflict.
+        """
         if self._session is None or self._repo is None:
             return
+
+        # Flush first: mark_launched swallows its save failure by design, so
+        # this manager's aggregate may still be holding an AgentLaunched the
+        # store has never seen. The handlers would load without it and the
+        # fact would be lost for good (#1047, #1065). A save with nothing
+        # uncommitted does no I/O, so this costs nothing in the normal case.
+        await self._repo.save(self._session)
 
         if total_tokens > 0:
             record_cmd = RecordOperationCommand(
@@ -210,14 +234,17 @@ class SessionLifecycleManager:
                 duration_seconds=duration_seconds,
                 metadata={"phase_id": self._phase_id, "source": source},
             )
-            self._session.record_operation(record_cmd)
+            await RecordOperationHandler(repository=self._repo).handle(record_cmd)
 
         complete_cmd = CompleteSessionCommand(
             aggregate_id=self._session_id,
             success=True,
         )
-        self._session.complete_session(complete_cmd)
-        await self._repo.save(self._session)
+        await CompleteSessionHandler(repository=self._repo).handle(complete_cmd)
+
+        # The handlers advanced the stream; the copy held here is now behind
+        # it. Re-read so `session` never hands a caller a stale aggregate.
+        self._session = await self._repo.get_by_id(self._session_id)
         logger.debug("Session completed: %s (success, tokens: %d)", self._session_id, total_tokens)
 
     async def complete_failure(self, *, error_message: str) -> None:

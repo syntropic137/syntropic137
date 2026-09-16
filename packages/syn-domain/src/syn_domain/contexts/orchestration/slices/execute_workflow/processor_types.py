@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionMetrics,
     PhaseResult,
 )
+from syn_domain.repository import Repository
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:
@@ -87,10 +88,12 @@ class ExecutionRepository(Protocol):
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None: ...
 
 
-class SessionRepository(Protocol):
-    """Repository for AgentSession aggregates."""
-
-    async def save(self, aggregate: AgentSessionAggregate) -> None: ...
+# SessionLifecycleManager hands this repository to the agent_sessions slice
+# handlers, which take `Repository[AgentSessionAggregate]` (#1034). A second
+# protocol declaring a subset of the same four methods for the same aggregate
+# only re-opens the gap it closed, so this is that protocol, named for the
+# role it plays here.
+type SessionRepository = Repository[AgentSessionAggregate]
 
 
 class ArtifactRepository(Protocol):
