@@ -48,10 +48,16 @@ so a fixed site cannot leave standing permission to break again. Three waivers
 in `fitness-exceptions.toml` had gone stale exactly that way before anything
 reported it.
 
-Scope is "is a projection module", not the slice path the reproduction sits on.
-Nine sites live one directory outside `contexts/*/slices/*/projection.py` and
-are the same handlers; a scope named after a path excuses code for where it is
-filed.
+Scope is **every production file**, with no filename filter at all. The gate
+first scoped itself to `contexts/*/slices/*/projection.py`, then widened to
+"is a projection module" when nine sites turned out to sit one directory
+outside - and review then found `projection_adapters.py`, which the gate's own
+docstring names as where the dispatch flattens the event and which no spelling
+of a filename filter had ever opened. A scope named after a path excuses code
+for where it is filed; a scope named after a filename excuses it for what it is
+called. What a file is named says nothing, so it is not asked: the population
+of files is wide and uninteresting, and the population of *functions* inside
+them - decided by the dispatch mechanism - is what the rule is about.
 
 **A gate can be narrower than the claim it makes, and #1281 was both halves of
 that at once.** Independent review refused the first head on two findings, and
@@ -62,9 +68,9 @@ the lesson generalises past this gate:
   its five live handlers. Adding `_on_` closes one spelling; the defect is that
   a population decided by what handlers are *called* is evaded by any other
   valid convention, silently. It is now derived from the dispatch mechanisms:
-  the protocol entry point, `AutoDispatchProjection`'s `on_*` lookup, names
-  reached through `getattr` from a string literal, and the closure over
-  anything a handler hands a piece of its own payload to.
+  the protocol entry point, `AutoDispatchProjection`'s `on_*` lookup, any
+  function the module names somewhere other than a call site, and the closure
+  over anything a handler hands a piece of its own payload to.
 - **The rule was a list of rejected spellings, and it contradicted its own
   failure message.** The message says a `TypedDict` is not an acceptable fix;
   converting a parameter to one made the gate green, and three `TypedDict`
@@ -77,6 +83,26 @@ the lesson generalises past this gate:
 That re-baselined the table from 110 to 171. Every one of the 61 was always
 this defect; the gate could not see it. Same rule as #1188 and #1248: measured
 correctly, never relaxed, down only from here.
+
+**A third finding said the remaining defect was the population, not the
+count.** A gate that reports zero over code it never read is worse than no
+gate, and cannot be checked by its number. Six more dispatch shapes were
+constructed against the head; five are now closed - the filename scope above,
+a table holding the function instead of its name (live: nine `_dedup_*`
+extractors on the GitHub event pipeline), that table inlined as a local, a
+name built from a literal prefix, and `__getattribute__`. That took the table
+from 171 to 211, and retyping the two `TriggerHistoryAdapter` payloads rather
+than grandfathering them took `untyped-dicts` `syn-adapters` from 208 to 206.
+
+Three shapes stay open and are now **stated in the gate's docstring with a
+test each pinning that it does not see them**: a handler registered by a
+decorator, a dispatch table in another module, and anything under `lib/`
+(`checkpoint.py`, which defines the `on_*` contract, is in the
+event-sourcing-platform submodule and is out of `_PRODUCTION_DIRS` by
+construction). The claim the gate makes was narrowed to match: not that the
+population is complete, but that *within one production module*, a function
+reached by the four mechanisms has every annotated parameter checked. A
+documented hole gets fixed; a hole certified as closed does not.
 
 ### 10. Declaration Integrity (ADR-069 D5)
 
