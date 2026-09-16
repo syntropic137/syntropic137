@@ -88,8 +88,15 @@ async def test_start_and_list_sessions():
 
 
 async def test_complete_session():
-    """Start then complete a session."""
-    from syn_api.routes.sessions import complete_session, start_session
+    """Start then complete a session, and read the completion back (#1034).
+
+    ``complete_session()`` returned Ok while CompleteSessionHandler's body
+    was ``pass``, so asserting Ok alone passed against a handler that wrote
+    nothing. The session's status at the read path is what distinguishes
+    the two.
+    """
+    from syn_api._wiring import sync_published_events_to_projections
+    from syn_api.routes.sessions import complete_session, get_session, start_session
 
     start_result = await start_session(
         workflow_id="wf-test-789",
@@ -98,9 +105,62 @@ async def test_complete_session():
     assert isinstance(start_result, Ok)
     session_id = start_result.value
 
-    # CompleteSessionHandler is currently a stub (pass), so this should not error
+    before = await get_session(session_id)
+    assert isinstance(before, Ok)
+    assert before.value.status == "running"
+
     complete_result = await complete_session(session_id)
     assert isinstance(complete_result, Ok)
+    await sync_published_events_to_projections()
+
+    after = await get_session(session_id)
+    assert isinstance(after, Ok)
+    assert after.value.status == "completed"
+    assert after.value.completed_at is not None
+
+
+async def test_recorded_operation_reaches_the_session_read_path():
+    """An operation recorded through RecordOperationHandler must be visible
+    to the API that serves session detail (#1034).
+
+    The handler was a no-op, so nothing it was handed ever reached the event
+    store, the projection, or this endpoint. 4321 is deliberately a number
+    no other writer in this system produces: no default, no sum of defaults,
+    and the only Lane 1 token writer for a session is the operation stream.
+    """
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.agent_sessions import (
+        RecordOperationCommand,
+        RecordOperationHandler,
+    )
+    from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+
+    start_result = await start_session(workflow_id="wf-record-op", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    before = await get_session(session_id)
+    assert isinstance(before, Ok)
+    assert before.value.total_tokens == 0
+
+    await RecordOperationHandler(repository=get_session_repo()).handle(
+        RecordOperationCommand(
+            aggregate_id=session_id,
+            operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+            tool_name="Bash",
+            tool_use_id="toolu_record_op_1034",
+            tool_output="ran",
+            input_tokens=4000,
+            output_tokens=321,
+            total_tokens=4321,
+        )
+    )
+    await sync_published_events_to_projections()
+
+    after = await get_session(session_id)
+    assert isinstance(after, Ok)
+    assert after.value.total_tokens == 4321
 
 
 async def test_get_session_includes_lineage_fields():
