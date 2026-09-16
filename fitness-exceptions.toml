@@ -109,7 +109,10 @@ issue = "#673"
 
 [untyped-dicts.syn-adapters]
 path = "packages/syn-adapters"
-value = 208
+# 208 -> 206 (#1281): TriggerHistoryAdapter._dispatch and
+# _handle_execution_terminal took the model_dump() dict and handed it straight
+# back to model_validate; they take the event and a declared model now (#1268).
+value = 206
 issue = "#673"
 
 [untyped-dicts.syn-api]

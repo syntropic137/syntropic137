@@ -1,10 +1,10 @@
 """Fitness function: projection event handlers accept a typed payload (#1268).
 
-A projection's event handlers are dispatched off an event envelope, and every
-dispatch path flattens the event with ``model_dump()`` first (``checkpoint.py``,
-``projection_adapters.py``). So the handler receives a dict, and what it
-declares about that dict is the only thing standing between the typed event
-class and the read model.
+A projection's event handlers are dispatched off an event envelope, and the
+dispatch paths flatten the event with ``model_dump()`` first (``checkpoint.py``,
+``projection_adapters.py``, ``realtime_adapter.py``). So the handler receives a
+dict, and what it declares about that dict is the only thing standing between
+the typed event class and the read model.
 
 Today most of them declare nothing::
 
@@ -47,10 +47,22 @@ function is a handler when the event reaches it:
 2. ``on_*`` - not a convention but the dispatch contract:
    ``AutoDispatchProjection._discover_handlers`` walks the MRO for exactly this
    prefix and calls what it finds (``checkpoint.py``).
-3. A function named by a **string literal** in a module that reaches for an
-   attribute by variable name - ``getattr(self, handler_name)``. That is an
-   explicit dispatch table, whatever shape it is written in: a dict, a match
-   statement, a chain of ifs.
+3. A function the module **names somewhere other than a call site**, because
+   something else will do the calling. Three spellings of one fact:
+
+   - a **string literal**, in a module that resolves an attribute from a
+     variable - ``getattr(self, handler_name)``, or ``__getattribute__``, which
+     is the same operation through the object. The table's shape is not
+     something a gate should have to enumerate: a dict, a match statement, a
+     chain of ifs all reduce to this.
+   - a string literal the name is **built from** - ``getattr(self,
+     f"_on_{event}")`` writes the handler in two pieces, so a literal ending in
+     ``_`` is read as a prefix. Reading only whole literals leaves a module
+     that dispatches all of its handlers reporting none of them.
+   - the **function itself, as a value** - ``_EXTRACTORS = {"push":
+     _dedup_push}`` is the same table with the indirection removed, and
+     ``handler = self._on_x`` is the same again with the table inlined.
+
 4. Anything a handler hands a piece of its own payload to. This is the transitive
    step, and it is what ``_apply_*`` and ``_accumulate_*`` used to approximate:
    the untyped payload crosses into them unchanged, so they are the same
@@ -61,6 +73,23 @@ function is a handler when the event reaches it:
 list - ``handle_event``, ``_dispatch_event``, and the ``_on_*`` five all join -
 and it drops ``_apply_post_filters``, a query-side filter the prefix caught by
 accident and no event ever reaches.
+
+WHICH FILES: EVERY PRODUCTION FILE, FOR THE SAME REASON.
+
+The scan used to read only ``projection.py``, ``*_projection.py`` and anything
+under a ``projections/`` directory. Review found the hole in the one place it
+hurts most: the docstring above names ``projection_adapters.py`` as where the
+dispatch flattens the event, and that file was never scanned once. Six live
+handler parameters across it and ``realtime_adapter.py`` - including a
+``handle_event`` and a ``_dispatch`` holding the payload in a
+``dict[str, Any]`` - were reported as zero. Not miscounted: unread.
+
+A filename filter excuses a module for what it is *called* and lets the next
+one be excused by being renamed, which is the argument this gate already makes
+against a slice-path glob, one level up. So there is no filename filter. Every
+production file is parsed, and what is a handler inside it is decided only by
+(1)-(4) above. That is why it is safe: the population of files is wide and
+uninteresting; the population of functions is what the rule is about.
 
 WHAT IS AN ACCEPTABLE PARAMETER: STATED POSITIVELY.
 
@@ -90,12 +119,56 @@ The three ways to fail that are categorical rather than enumerated:
   four accepted kinds. A ``TypedDict`` lands here, class-based or functional,
   and that is the branch that makes the failure message true.
 
-The one place the rule is not closed is an imported type: the gate parses one
-module at a time and cannot open ``from elsewhere import Row`` to see what kind
-of thing ``Row`` is, so it is accepted on trust. Closing that needs whole-repo
-type resolution, which is a much larger machine than this gate should be; the
-local branch already covers where the evasion actually lives, because a payload
-type invented to satisfy this gate is invented next to the handler.
+WHAT THIS GATE DOES NOT SEE. READ THIS BEFORE TRUSTING A GREEN RUN.
+
+The claim is **not** that the population is complete. It is narrower, and
+exactly this:
+
+    Within one production module, a function reached by any of the four
+    mechanisms above has every annotated parameter checked, and the four
+    accepted payload kinds are the only ones that pass.
+
+Four shapes sit outside that sentence. Each is stated here because a gate that
+goes green over code it never read is worse than no gate, and because the only
+thing worse than a hole is a hole a reader has to rediscover. Each is pinned by
+a test below, so if one is ever closed the pin fails and this list is updated
+with it rather than drifting.
+
+1. **An imported payload type.** The gate parses one module at a time and
+   cannot open ``from elsewhere import Row`` to see what kind of thing ``Row``
+   is, so it is accepted on trust. Closing it needs whole-repo type resolution,
+   a much larger machine than this gate should be, and the local branch covers
+   where the evasion actually lives: a payload type invented to satisfy this
+   gate is invented next to the handler.
+
+2. **A handler registered by a decorator.** ``@handles("push")`` is
+   ``f = handles("push")(f)``, so the function IS handed off - but the gate
+   cannot open ``handles`` to see whether it registers ``f`` or merely wraps
+   it. Reading every decorated function as dispatched was measured against this
+   repository and enrols 17 functions, all of them Pydantic ``field_validator``
+   bodies and FastAPI routes, and none of them handlers. That is not
+   over-approximation, it is a different gate wearing this one's failure
+   message. A registration decorator is therefore a live way to add an untyped
+   handler this gate will not report.
+
+3. **A handler whose dispatch table lives in another module.** Same one-module
+   parse. In practice the target usually still lands in the population by its
+   own name - the ``on_*`` methods ``_ObservationProjectionAdapter`` reaches
+   for are found in the projections that define them - but a table in module A
+   naming a differently-prefixed function in module B reaches neither.
+
+4. **Anything under ``lib/``.** ``_PRODUCTION_DIRS`` is ``apps/*/src`` and
+   ``packages/*/src``; ``checkpoint.py``, which defines
+   ``AutoDispatchProjection`` and is cited above as the dispatch contract
+   itself, is in the event-sourcing-platform submodule and is not reachable
+   from here by any filter change. Per AGENTS.md, a fix there is pushed to the
+   submodule repo, not worked around in this one.
+
+Shapes 2-4 are the residue of a widening, not of an absence of effort: the
+filename scope, the callable dispatch table, the inlined bound method, the
+name built from a literal prefix and ``__getattribute__`` were all open when
+this was written and are all closed below, three of them with live sites the
+gate had never read.
 
 Every annotated parameter is checked, not just the payload. Picking out "the
 payload" would need a heuristic over parameter names - ``event_data``,
@@ -236,10 +309,7 @@ def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
     module that dispatches every one of its handlers reporting none of them.
     """
     reaches_dynamically = any(
-        isinstance(node, ast.Call)
-        and _called_name(node) in _DYNAMIC_ATTRIBUTE_LOOKUPS
-        and len(node.args) > 1
-        and not isinstance(node.args[1], ast.Constant)
+        isinstance(node, ast.Call) and _resolves_an_attribute_by_variable(node)
         for node in ast.walk(tree)
     )
     if not reaches_dynamically:
@@ -249,6 +319,25 @@ def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     )
+
+
+def _resolves_an_attribute_by_variable(call: ast.Call) -> bool:
+    """Whether ``call`` looks up an attribute under a name it did not write.
+
+    ``getattr(obj, name)`` names the object first and the attribute second;
+    ``obj.__getattribute__(name)`` carries the object in the callee, so the
+    attribute is first. Reading the name argument at a fixed index would make
+    the rule true for one spelling and false for the other.
+
+    A constant name is deliberately not a dispatch table: ``getattr(row,
+    "status")`` resolves one attribute the author wrote out, and treating it as
+    dispatch would enrol every string in the module.
+    """
+    name = _called_name(call)
+    if name not in _DYNAMIC_ATTRIBUTE_LOOKUPS:
+        return False
+    candidates = call.args if name == "__getattribute__" else call.args[1:]
+    return any(not isinstance(argument, ast.Constant) for argument in candidates)
 
 
 def _matches_a_dispatch_literal(name: str, literals: frozenset[str]) -> bool:
@@ -293,9 +382,7 @@ def _functions_handed_off(tree: ast.Module, local_names: frozenset[str]) -> froz
     repository the shape is dominated by Pydantic validators and FastAPI
     routes - none of them handlers.
     """
-    called = {
-        call.func for call in ast.walk(tree) if isinstance(call, ast.Call)
-    }
+    called = {call.func for call in ast.walk(tree) if isinstance(call, ast.Call)}
     referenced: set[str] = set()
     for node in ast.walk(tree):
         if node in called:
@@ -950,3 +1037,226 @@ class SessionProjection:
         row.pop("hidden", None)
 """
     assert _handler_names(source) == {"SessionProjection.on_session_started"}
+
+
+# ---------------------------------------------------------------------------
+# The shapes a new untyped handler could be written in, and what the gate does
+# with each. Split deliberately into two blocks: CLOSED, where the gate now
+# reports the handler, and STATED, where it does not and the docstring says so.
+#
+# A gate whose danger is a wrong POPULATION cannot be checked by its count.
+# Every case below is constructed - a handler written in the shape, run through
+# the scanner - because that is the only evidence that distinguishes "zero
+# violations here" from "never looked here".
+# ---------------------------------------------------------------------------
+
+
+_DISPATCH_TABLE_OF_CALLABLES = """
+from collections.abc import Callable
+from typing import Any
+
+
+def _dedup_push(action: str, payload: dict[str, Any]) -> str | None:
+    return payload["after"]
+
+
+_EXTRACTORS: dict[str, Callable[[str, dict[str, Any]], str | None]] = {
+    "push": _dedup_push,
+}
+
+
+def compute_dedup_key(event_type: str, action: str, payload: dict[str, Any]) -> str:
+    extractor = _EXTRACTORS.get(event_type)
+    return extractor(action, payload) or "" if extractor else ""
+"""
+
+
+@pytest.mark.architecture
+def test_a_dispatch_table_of_callables_is_a_dispatch_table() -> None:
+    """A table can hold the function instead of its name, and usually does.
+
+    Not hypothetical: this is `dedup_keys.py` reduced, where nine `_dedup_*`
+    extractors take a raw GitHub webhook payload off exactly such a table. The
+    string-literal rule saw none of them - there is no `getattr` and no name
+    written as a string - so nine untyped payload boundaries on the event
+    pipeline were never read.
+    """
+    assert _verdicts(_DISPATCH_TABLE_OF_CALLABLES)["_dedup_push.payload"] is Verdict.STRING_KEYED
+
+
+@pytest.mark.architecture
+def test_a_bound_method_saved_in_a_local_is_a_dispatch_table() -> None:
+    """The same table with the dict inlined, and the cheapest of all the dodges.
+
+    Two lines, no new import, and nothing at the point of use that reads as an
+    evasion. `_route` is never *called* by name anywhere in the module.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    async def handle_event(self, envelope: object) -> None:
+        route = self._route
+        await route(envelope)
+
+    async def _route(self, event_data: dict[str, Any]) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source)["SessionProjection._route.event_data"] is Verdict.STRING_KEYED
+
+
+@pytest.mark.architecture
+def test_a_handler_name_built_from_a_literal_prefix_is_reached() -> None:
+    """`getattr(self, f"_on_{event}")` writes the name in two pieces.
+
+    `_ObservationProjectionAdapter` dispatches exactly like this
+    (`f"on_{_camel_to_snake(event_type)}"`). Matching only whole literals means
+    a module that routes every one of its handlers this way reports none of
+    them - the same silent-green failure as the filename scope, one layer in.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    async def handle_event(self, envelope: object) -> None:
+        event_type = envelope.metadata.event_type
+        handler = getattr(self, f"_on_{event_type}")
+        await handler(envelope.event.model_dump())
+
+    async def _on_session_started(self, event_data: dict[str, Any]) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert (
+        _verdicts(source)["SessionProjection._on_session_started.event_data"]
+        is Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_a_dynamic_lookup_spelled_dunder_is_still_a_dynamic_lookup() -> None:
+    """Gating on the identifier `getattr` was gating on a spelling.
+
+    `self.__getattribute__(name)` is the same operation and the rule must not
+    be leavable by writing it, for the reason AGENTS.md gives about #1188: a
+    number that does not move for a rename is the same defect as one that does.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    _TABLE = {"SessionStarted": "_apply_session_started"}
+
+    async def handle_event(self, envelope: object) -> None:
+        handler_name = self._TABLE[envelope.metadata.event_type]
+        handler = self.__getattribute__(handler_name)
+        await handler(envelope.event.model_dump())
+
+    async def _apply_session_started(self, event_data: dict[str, Any]) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert (
+        _verdicts(source)["SessionProjection._apply_session_started.event_data"]
+        is Verdict.STRING_KEYED
+    )
+
+
+def _looks_like_a_projection_filename(path: str) -> bool:
+    """The filter the scan used to apply to decide which files to read.
+
+    Kept only so the test below can state what it is testing. Deleting it and
+    asserting a bare count would pin the number and not the property.
+    """
+    name = path.rsplit("/", 1)[-1]
+    return name == "projection.py" or name.endswith("_projection.py") or "/projections/" in path
+
+
+@pytest.mark.architecture
+def test_modules_not_named_like_a_projection_are_scanned() -> None:
+    """The live scan must read files the old filename filter excluded.
+
+    Constructed sources cannot show this one: it is a property of which FILES
+    the scan opens, so the evidence has to come from the repository. If the
+    filter comes back - in any spelling - this set empties and the gate is once
+    again green over `projection_adapters.py`, the module its own docstring
+    calls authoritative.
+    """
+    off_pattern = sorted(
+        {path for path, _ in _VIOLATIONS if not _looks_like_a_projection_filename(path)}
+    )
+    assert off_pattern, (
+        "every violation the gate found is in a file named like a projection, "
+        "which means the scan is choosing files by name again (#1268)"
+    )
+
+
+# --- STATED HOLES. These assert the gate does NOT see something. -----------
+#
+# Each corresponds to a numbered entry in the module docstring's "WHAT THIS
+# GATE DOES NOT SEE". They exist so the docstring cannot drift from behaviour
+# in either direction: if one of these shapes is ever closed, the test fails,
+# and whoever closed it deletes the test and the docstring entry together.
+
+
+@pytest.mark.architecture
+def test_a_decorator_registered_handler_is_not_seen() -> None:
+    """Docstring hole 2. Closing this requires knowing what `handles` does.
+
+    Reading every decorated function as dispatched was measured against this
+    repository: 17 functions, all `field_validator` bodies and FastAPI routes,
+    none of them handlers.
+    """
+    source = """
+from typing import Any
+
+from _registry import handles
+
+
+@handles("SessionStarted")
+async def apply_session_started(event_data: dict[str, Any]) -> None:
+    ROWS[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source) == {}, (
+        "the decorator hole is closed - delete this test and docstring hole 2"
+    )
+
+
+@pytest.mark.architecture
+def test_a_handler_dispatched_from_another_module_is_not_seen() -> None:
+    """Docstring hole 3. The gate parses one module at a time.
+
+    The table naming `apply_session_started` is in the coordinator; the handler
+    is here, with no prefix and no local caller.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    async def apply_session_started(self, event_data: dict[str, Any]) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source) == {}, (
+        "cross-module dispatch is closed - delete this test and docstring hole 3"
+    )
+
+
+@pytest.mark.architecture
+def test_the_submodule_that_defines_the_dispatch_contract_is_out_of_scope() -> None:
+    """Docstring hole 4. `checkpoint.py` is in `lib/`, not `packages/*/src`.
+
+    It defines `AutoDispatchProjection._discover_handlers`, which is what makes
+    `on_*` a contract rather than a convention - cited in this module's own
+    docstring - and no filter change here can reach it. A fix belongs in the
+    event-sourcing-platform repo (AGENTS.md on submodules).
+    """
+    checkpoint = (
+        repo_root()
+        / "lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/core/checkpoint.py"
+    )
+    assert checkpoint.exists(), "the file this limitation is about has moved"
+    assert checkpoint not in set(production_files(repo_root())), (
+        "lib/ is in scope now - delete this test and docstring hole 4"
+    )
