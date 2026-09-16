@@ -152,23 +152,6 @@ _FIELD_DECLARING_DECORATOR = "dataclass"
 _FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 
-def is_projection_module(path: Path) -> bool:
-    """Whether ``path`` is a projection module.
-
-    Deliberately not ``contexts/*/slices/*/projection.py``, which is where the
-    issue's reproduction lives. Nine sites sit one directory outside that glob
-    - ``organization/_shared/organization_projection.py`` and the adapters'
-    ``projections/`` package - and they are the same handlers with the same
-    untyped payload. A scope that names a slice path excuses them for where
-    they are filed, and lets the next one be excused by being moved.
-    """
-    return (
-        path.name == "projection.py"
-        or path.name.endswith("_projection.py")
-        or "projections" in path.parts
-    )
-
-
 class Verdict(Enum):
     """Why a handler parameter does not declare an attribute-readable payload.
 
@@ -226,6 +209,13 @@ def _payload_parameters(node: _FunctionNode) -> list[ast.arg]:
     return [arg for arg in declared if arg is not None and arg.arg not in ("self", "cls")]
 
 
+#: Spellings of "resolve an attribute from a name I computed". ``getattr`` is
+#: the one anybody writes; ``__getattribute__`` is the same operation reached
+#: through the object, and matching on the bare callee name covers both however
+#: they are qualified (``builtins.getattr``, ``self.__getattribute__``).
+_DYNAMIC_ATTRIBUTE_LOOKUPS = frozenset({"getattr", "__getattribute__"})
+
+
 def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
     """Names this module reaches for dynamically, if it reaches for any.
 
@@ -236,14 +226,18 @@ def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
     string literal in it is a candidate handler name; the caller intersects
     them with the functions that actually exist.
 
-    Gated on the ``getattr`` because without it the rule reads every string in
-    every projection, and a namespace constant that happens to share a name
-    with a method (``"session_list"``) would enrol it.
+    Gated on the dynamic lookup because without it the rule reads every string
+    in every module, and a namespace constant that happens to share a name with
+    a method (``"session_list"``) would enrol it.
+
+    Literals inside an f-string count, and count as *prefixes* too - see
+    ``_matches_a_dispatch_literal``. ``getattr(self, f"_on_{event}")`` writes
+    the handler's name in two pieces, and reading only whole literals leaves a
+    module that dispatches every one of its handlers reporting none of them.
     """
     reaches_dynamically = any(
         isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "getattr"
+        and _called_name(node) in _DYNAMIC_ATTRIBUTE_LOOKUPS
         and len(node.args) > 1
         and not isinstance(node.args[1], ast.Constant)
         for node in ast.walk(tree)
@@ -255,6 +249,62 @@ def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     )
+
+
+def _matches_a_dispatch_literal(name: str, literals: frozenset[str]) -> bool:
+    """Whether ``name`` is written in ``literals``, whole or as its prefix.
+
+    A computed handler name is built from a literal and a variable, so the
+    literal that survives in the AST is the stem: ``"_on_"``, ``"handle_"``.
+    Only stems ending in ``_`` count as prefixes, which is what a name built
+    by concatenation actually looks like and what keeps ``"id"`` from enrolling
+    every function in the module.
+    """
+    return name in literals or any(
+        literal.endswith("_") and len(literal) > 1 and name.startswith(literal)
+        for literal in literals
+    )
+
+
+def _functions_handed_off(tree: ast.Module, local_names: frozenset[str]) -> frozenset[str]:
+    """Functions of this module that are named somewhere other than a call.
+
+    A dispatch table's entries do not have to be strings. ``_EXTRACTORS = {
+    "push": _dedup_push}`` is the same table with the indirection removed, and
+    ``handler = self._on_x`` is the same again with the table inlined; in every
+    one of them the module writes the function's name and something else does
+    the calling. ``_names_dispatched_by_string`` sees none of these, because
+    there is no ``getattr`` and no string.
+
+    So the rule is stated on the fact they share: **a function referenced as a
+    value is a function handed to something else to call.** That covers a dict
+    of callables, a bound method saved in a local, a list of steps, a callback
+    argument.
+
+    It over-approximates onto callbacks that are not event handlers -
+    ``json_serializer`` handed to a driver, a retry body handed to a helper -
+    and that is the right direction and arguably not over-approximation at all:
+    a function whose caller is invisible at the point of definition is one
+    whose parameter types are the only thing describing what it will be sent.
+
+    A decorator is deliberately NOT read as a reference. See the module
+    docstring: a decorator IS ``f = deco(f)``, but this gate cannot open
+    ``deco`` to see whether it registers ``f`` or just wraps it, and in this
+    repository the shape is dominated by Pydantic validators and FastAPI
+    routes - none of them handlers.
+    """
+    called = {
+        call.func for call in ast.walk(tree) if isinstance(call, ast.Call)
+    }
+    referenced: set[str] = set()
+    for node in ast.walk(tree):
+        if node in called:
+            continue
+        if isinstance(node, ast.Name) and node.id in local_names:
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute) and node.attr in local_names:
+            referenced.add(node.attr)
+    return frozenset(referenced)
 
 
 def _binding(statement: ast.AST) -> tuple[ast.expr, list[ast.expr]] | None:
@@ -349,12 +399,14 @@ def dispatched_handlers(tree: ast.Module) -> dict[_FunctionNode, str]:
         by_name.setdefault(node.name, []).append(node)
 
     dispatched_by_string = _names_dispatched_by_string(tree)
+    handed_off = _functions_handed_off(tree, frozenset(by_name))
     reached: dict[_FunctionNode, str] = {
         node: qualname
         for node, qualname in qualnames.items()
         if node.name.startswith(_AUTO_DISPATCH_PREFIX)
         or node.name == _PROTOCOL_ENTRY_POINT
-        or node.name in dispatched_by_string
+        or _matches_a_dispatch_literal(node.name, dispatched_by_string)
+        or node.name in handed_off
     }
 
     frontier = list(reached)
@@ -470,8 +522,6 @@ def _scan() -> tuple[list[tuple[str, Violation]], frozenset[str]]:
     root = repo_root()
     found: list[tuple[str, Violation]] = []
     for py_file in production_files(root):
-        if not is_projection_module(py_file):
-            continue
         path = rel_path(py_file, root)
         for violation in find_untyped_handler_parameters(py_file.read_text()):
             found.append((path, violation))

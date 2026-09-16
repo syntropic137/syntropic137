@@ -371,3 +371,45 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:_update_cost_tokens.param:health" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:_update_trend.param:health" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:RepoHealthProjection._save.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# Pulled in when the gate stopped deciding scope by filename and started
+# reading the dispatch table's shape (#1281 review). Same debt, measured
+# correctly for the first time - never a relaxed ratchet.
+"apps/syn-api/src/syn_api/_wiring.py:_build_context_appendix.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_counted_loss.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_parsed_time.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_state_of.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_text.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_to_entry.param:event" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/object_storage/minio.py:_do_upload.param:metadata" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/object_storage/minio_queries.py:list_objects.param:get_client" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_helpers.py:json_serializer.param:obj" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore._deserialize.param:data" = { annotation = "str | dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore.query.param:filters" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:ManagedWorkspace.stream.param:environment" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py:TriggerRuleAggregate._parse_trigger_config.param:config_raw" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_run.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_suite.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_create.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_delete.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_issue_comment.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_issues.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_pr_review.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_pull_request.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_push.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_repo_name.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_evt.param:default" = { annotation = "Any", verdict = "undeclared", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_parse_phase_definitions.param:raw_defs" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:PhaseStartingPoints.record.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_cached_remote_refs.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_checked.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_git.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_repositories.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:record_phase_starting_point.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
