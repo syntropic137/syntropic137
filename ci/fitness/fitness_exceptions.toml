@@ -116,7 +116,7 @@ allowed_prefixes = [
 # test_no_stale_grandfathered_handlers REQUIRES the entry to go with it, so a
 # fixed site cannot leave standing permission to break again.
 #
-# These 171 were never budgeted debt - they were unmeasured. A bare `dict`
+# These 173 were never budgeted debt - they were unmeasured. A bare `dict`
 # annotation scores zero against the per-package ratchet in
 # fitness-exceptions.toml by design, so they consumed none of syn-domain's 440.
 #
@@ -126,6 +126,12 @@ allowed_prefixes = [
 # prefixes and the accepted annotation stopped being a list of rejected
 # spellings. Same re-baselining as #1188 and #1248, same rule - the number may
 # only go down from here.
+#
+# 171 -> 173 for the third time in the same shape: the taint walk that decides
+# which helpers a payload REACHES read only `ast.Assign`/`ast.AnnAssign`, so a
+# payload carved out by `for`, a comprehension, `with ... as` or `:=` handed
+# the receiving helper nothing the gate could follow. Those two helpers were
+# never passing this gate - it had never read them. Same rule still: down only.
 #
 # `verdict` is why it fails, and the three are the gate's whole vocabulary:
 #   string-keyed   a mapping at any nesting, whatever its key and value types
@@ -247,6 +253,7 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_merge_progress.param:existing" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_merge_progress.param:updates" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection._save_state.param:progress" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_item_from_dict.param:data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 
 # 14 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
@@ -272,6 +279,7 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_find_phase.param:phases" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_apply_phase_fields.param:phase" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_apply_phase_fields.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_refs.param:refs" = { annotation = "Iterable[object] | None", verdict = "undeclared", issue = "#1268" }
 
 # 6 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }

@@ -257,16 +257,51 @@ def _names_dispatched_by_string(tree: ast.Module) -> frozenset[str]:
     )
 
 
+def _binding(statement: ast.AST) -> tuple[ast.expr, list[ast.expr]] | None:
+    """The value a statement binds, and the targets it binds it to.
+
+    Assignment is not the only way a name comes to hold part of a payload.
+    Each of these binds a fresh name to something carved out of the expression
+    beside it, and a handler that hands that name to a helper has handed the
+    payload on exactly as ``item = event_data[...]`` would::
+
+        for item in event_data:                 # ast.For / ast.AsyncFor
+        [... for item in event_data]            # ast.comprehension
+        with self._open(event_data) as item:    # ast.withitem
+        if (item := event_data.get("x")):       # ast.NamedExpr
+
+    Reading only assignment drops the helper reached through any of them out
+    of the measured population entirely - not failing it, never looking at it -
+    which is the one failure mode a gate cannot have: it goes green over code
+    it never read. Naming every binding form in one place is what stops the
+    next form being a fifth silent hole.
+
+    ``ast.comprehension`` and ``ast.withitem`` are reached directly by
+    ``ast.walk``, since both are child nodes of the statements that hold them.
+    """
+    if isinstance(statement, ast.Assign):
+        return statement.value, list(statement.targets)
+    if isinstance(statement, ast.AnnAssign | ast.NamedExpr):
+        return None if statement.value is None else (statement.value, [statement.target])
+    if isinstance(statement, ast.For | ast.AsyncFor | ast.comprehension):
+        return statement.iter, [statement.target]
+    if isinstance(statement, ast.withitem):
+        target = statement.optional_vars
+        return None if target is None else (statement.context_expr, [target])
+    return None
+
+
 def _derived_from_parameters(node: _FunctionNode) -> frozenset[str]:
     """Local names holding something derived from ``node``'s own parameters.
 
     A payload does not stay in the variable it arrived in. ``event_data =
     envelope.event.model_dump()`` and ``data = event_data.get("data", {})`` are
     both the event, one transformation on, and a handler that passes either to
-    a helper has passed the payload on. So taint spreads across assignment and
-    is not narrowed by what the right-hand side does to the value: a gate
-    cannot tell ``model_dump()`` from ``.get("started_at")`` without types, and
-    guessing would drop exactly the sub-payload hops that matter.
+    a helper has passed the payload on. So taint spreads across every binding
+    form ``_binding`` names, and is not narrowed by what the right-hand side
+    does to the value: a gate cannot tell ``model_dump()`` from
+    ``.get("started_at")`` without types, and guessing would drop exactly the
+    sub-payload hops that matter.
 
     Over-approximating costs nothing here. A helper that receives a scalar
     carved out of the payload joins the population and then declares a scalar,
@@ -277,14 +312,12 @@ def _derived_from_parameters(node: _FunctionNode) -> frozenset[str]:
     while changed:
         changed = False
         for statement in ast.walk(node):
-            if not isinstance(statement, ast.Assign | ast.AnnAssign):
+            binding = _binding(statement)
+            if binding is None:
                 continue
-            value = statement.value
-            if value is None:
-                continue
+            value, targets = binding
             if not any(isinstance(n, ast.Name) and n.id in tainted for n in ast.walk(value)):
                 continue
-            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
             for target in targets:
                 for name in ast.walk(target):
                     if isinstance(name, ast.Name) and name.id not in tainted:
@@ -781,5 +814,89 @@ class SessionProjection:
 
     def _apply_post_filters(self, rows: dict[str, Any]) -> None:
         rows.pop("hidden", None)
+"""
+    assert _handler_names(source) == {"SessionProjection.on_session_started"}
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize(
+    ("label", "carve"),
+    [
+        ("for target", "for item in event_data:\n            self._store(item)"),
+        ("async for target", "async for item in event_data:\n            self._store(item)"),
+        (
+            "comprehension target",
+            "_ = [self._store(item) for item in event_data]",
+        ),
+        (
+            "generator target",
+            "_ = tuple(self._store(item) for item in event_data)",
+        ),
+        (
+            "dict comprehension target",
+            "_ = {k: self._store(item) for k, item in event_data.items()}",
+        ),
+        ("with target", "with self._open(event_data) as item:\n            self._store(item)"),
+        ("walrus target", "if (item := event_data.get('x')):\n            self._store(item)"),
+    ],
+)
+def test_a_payload_carved_out_by_any_binding_form_still_reaches_its_helper(
+    label: str, carve: str
+) -> None:
+    """The population is every helper the payload reaches, however it got there.
+
+    The taint walk read only `ast.Assign`/`ast.AnnAssign`, so a payload carved
+    out by any of these seven forms handed `_store` nothing the gate could
+    follow. `_store` did not FAIL the gate - it dropped out of the measured
+    population entirely and was never read, which is the one failure mode a
+    gate cannot have: green over code it never looked at.
+
+    Two live helpers in `syn-domain` were exactly this, found when the walk was
+    widened (see `fitness_exceptions.toml`, 171 -> 173).
+    """
+    source = f"""
+from typing import Any
+
+
+class SessionProjection:
+    async def on_session_started(self, event_data: dict[str, Any]) -> None:
+        {carve}
+
+    def _store(self, item: dict[str, Any]) -> None:
+        self.rows.update(item)
+"""
+    assert _verdicts(source)["SessionProjection._store.item"] is Verdict.STRING_KEYED, (
+        f"a payload reached `_store` through a {label} and the gate never read it"
+    )
+
+
+@pytest.mark.architecture
+def test_a_binding_form_that_never_touched_the_payload_reaches_nothing() -> None:
+    """Widening the walk must not enrol every local name in the module.
+
+    `for row in _DEFAULT_ROWS` binds a name the payload never reached, so the
+    helper it calls is read-path code and not a handler. A walk that tainted
+    every binding target rather than only those whose source mentions the
+    payload would pass the seven cases above for the wrong reason, and report
+    on the query side - the over-approximation the prefix list made.
+
+    Deliberately NOT a case where the payload was assigned to `self` first:
+    `self.seen = event_data[...]` taints `self` itself and has since before
+    this walk was widened, and the module docstring accepts over-approximation
+    by design. Pinning that here would pin a property the gate does not claim.
+    """
+    source = """
+from typing import Any
+
+_DEFAULT_ROWS: list[Any] = []
+
+
+class SessionProjection:
+    async def on_session_started(self, event_data: dict[str, Any]) -> None:
+        for row in _DEFAULT_ROWS:
+            self._render(row)
+
+    def _render(self, row: dict[str, Any]) -> None:
+        row.pop("hidden", None)
 """
     assert _handler_names(source) == {"SessionProjection.on_session_started"}
