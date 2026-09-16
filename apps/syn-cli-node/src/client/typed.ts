@@ -9,21 +9,33 @@
  * Migrate commands incrementally: replace apiGet/apiGetPaginated calls with api.GET/api.POST.
  */
 
-import createClient from "openapi-fetch";
+import createClient, { type Client } from "openapi-fetch";
 import type { paths } from "../generated/api-types.js";
 import { CLIError } from "../framework/errors.js";
 import { getApiUrl, getAuthHeaders } from "../config.js";
 import { API_PREFIX } from "./constants.js";
 
-export function createTypedClient() {
-  const baseUrl = getApiUrl().replace(/\/+$/, "");
-  return createClient<paths>({
-    baseUrl: `${baseUrl}${API_PREFIX}`,
+/**
+ * A typed client that knows where it points.
+ *
+ * `baseUrl` is the exact string requests are built from, carried on the client
+ * itself: a command reporting which deployment it dispatched to reads the same
+ * value the request used, so the two cannot disagree. Asking the environment a
+ * second time would be an independent read that can name a host nobody
+ * contacted — the defect in issue #1264.
+ */
+export type TypedClient = Client<paths> & { readonly baseUrl: string };
+
+export function createTypedClient(): TypedClient {
+  const baseUrl = `${getApiUrl().replace(/\/+$/, "")}${API_PREFIX}`;
+  const client = createClient<paths>({
+    baseUrl,
     headers: getAuthHeaders(),
     // Resolve fetch at call time, not at client creation time.
     // This allows tests to stub globalThis.fetch after module import.
     fetch: (...args) => globalThis.fetch(...args),
   });
+  return Object.assign(client, { baseUrl });
 }
 
 /** Singleton typed client — use this in command handlers. */

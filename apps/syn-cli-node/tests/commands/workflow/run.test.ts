@@ -15,6 +15,10 @@ describe("workflow run commands", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    // Tests that re-import the command against a different SYN_API_URL must
+    // not leave that env value or the module they built from it behind.
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   function jsonResponse(data: unknown, status = 200): Response {
@@ -22,6 +26,12 @@ describe("workflow run commands", () => {
       status,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  /** The URL a stubbed fetch was actually called with (openapi-fetch passes a Request). */
+  function urlOf(call: unknown[]): string {
+    const target = call[0];
+    return target instanceof Request ? target.url : String(target);
   }
 
   function stdout(): string {
@@ -75,6 +85,61 @@ describe("workflow run commands", () => {
       expect(out).toContain("Build Pipeline");
       expect(out).toContain("execution started");
       expect(out).toContain("exec-001");
+    });
+
+    // Issue #1264: an execution ID names no host, so a run dispatched to the
+    // wrong deployment looks identical to one dispatched to the right one.
+    // The printed target must come from the client that made the call, not
+    // from a second look at the environment.
+    it("names the deployment it dispatched to, and names the one actually called", async () => {
+      vi.stubEnv("SYN_API_URL", "https://vps.syn.example:8137");
+      vi.resetModules();
+      const { runCommand: freshRunCommand } = await import(
+        "../../../src/commands/workflow/run.js"
+      );
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              {
+                id: "wf-vps-123456789",
+                name: "Deploy Pipeline",
+                workflow_type: "implementation",
+                phase_count: 1,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-vps-123456789",
+            name: "Deploy Pipeline",
+            workflow_type: "implementation",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-vps-1" }),
+        );
+
+      await freshRunCommand.handler({
+        positionals: ["wf-vps"],
+        values: { task: "Ship it" },
+      });
+
+      const dispatchUrl = urlOf(mockFetch.mock.calls.at(-1)!);
+      expect(dispatchUrl).toContain("/workflows/wf-vps-123456789/execute");
+
+      // Derive the expectation from the request that was actually made, so the
+      // assertion is "printed host == called host" and not "printed host ==
+      // some literal in this test".
+      const dispatchedBase = dispatchUrl.replace(/\/workflows\/.*$/, "");
+      expect(dispatchedBase).toBe("https://vps.syn.example:8137/api/v1");
+      expect(stdout()).toContain(`Dispatched to: ${dispatchedBase}`);
     });
 
     it("supports dry-run mode", async () => {

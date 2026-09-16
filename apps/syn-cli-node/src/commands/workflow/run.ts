@@ -203,6 +203,10 @@ export const runCommand: CommandDef = {
     if (result.status === "started" && result.execution_id?.startsWith("exec-")) {
       printSuccess("\nWorkflow execution started");
       print(`  Execution ID: ${result.execution_id}`);
+      // Name the deployment, so an execution ID is traceable to the host that
+      // holds it. Read off the client that just dispatched, never from the
+      // environment again — a second read can name a host nobody called (#1264).
+      print(`  Dispatched to: ${api.baseUrl}`);
     } else {
       printError(`\nUnexpected server response: status=${result.status} execution_id=${result.execution_id ?? "<none>"}`);
       throw new CLIError("Workflow execution did not start", 1);
