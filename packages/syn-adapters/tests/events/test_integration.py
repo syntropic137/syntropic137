@@ -93,6 +93,45 @@ class TestAgentEventStoreIntegration:
         assert events[0]["data"]["tool_name"] == "Read"
 
     @pytest.mark.asyncio
+    async def test_hostile_agent_output_does_not_fail_the_write(self, event_store, session_id):
+        """A real NUL and a real lone surrogate, against a real Postgres (#1241).
+
+        This is the one that runs the actual rejection: unit tests assert on the
+        values handed to the driver, and only a live server can say whether it
+        accepts them. Unpatched, this raises
+        `unsupported Unicode escape sequence ... cannot be converted to text`
+        and, in production, took the whole execution with it.
+        """
+        await event_store.initialize()
+
+        hostile = "before" + chr(0) + "middle" + chr(0xDEAD) + "after"
+
+        await event_store.insert_one(
+            tool_completed(
+                session_id=session_id + chr(0),
+                tool_name="Bash",
+                tool_use_id="hostile-1",
+                success=False,
+                error=hostile,
+            )
+        )
+        await event_store.insert_batch(
+            [
+                tool_completed(
+                    session_id=session_id,
+                    tool_name="Bash",
+                    tool_use_id="hostile-2",
+                    success=False,
+                    error=hostile,
+                )
+            ]
+        )
+
+        events = await event_store.query(session_id)
+        errors = [e["data"].get("error") for e in events]
+        assert errors == ["beforemiddleafter", "beforemiddleafter"]
+
+    @pytest.mark.asyncio
     async def test_insert_batch_performance(self, event_store, session_id):
         """Test batch insert with many events."""
         await event_store.initialize()
