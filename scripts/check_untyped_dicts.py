@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Container, Mapping
+    from collections.abc import Collection, Container, Iterator, Mapping
 
 #: Mapping constructors that erase their value type when parameterised with
 #: ``Any``/``object``. Matched on the trailing name, so the dotted spellings
@@ -301,6 +301,64 @@ def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
     return [node.slice]
 
 
+def _resolves_to(
+    node: ast.expr, names: Container[str], renames: Mapping[str, frozenset[str]]
+) -> bool:
+    """Whether a type expression names one of ``names``, renames undone.
+
+    Asked as a question rather than answered as a name because a name can have
+    more than one binding in a module and this pass does not claim to know
+    which one is in scope - see ``_renames``. Every caller wants to know
+    whether a shape is among a set of them, which is answerable without picking
+    one: any binding landing in ``names`` is a hit.
+    """
+    name = _trailing_name(node)
+    if name is None:
+        return False
+    return any(origin in names for origin in renames.get(name, frozenset({name})))
+
+
+def _written_names(node: ast.expr, renames: Mapping[str, frozenset[str]]) -> Iterator[str]:
+    """Every name a type expression writes, quoted spellings followed.
+
+    The same walk ``_DictShapedStateCollector`` does, reporting names instead
+    of shapes, and skipping the same two constructs for the same reason:
+    ``Literal["dict"]`` holds a value and ``Annotated[str, "dict"]`` holds
+    metadata after its first argument, so neither is a place a type is written.
+
+    An ``Attribute``'s left-hand side is a module path, not a type, so
+    ``typing.Any`` writes ``Any`` and not ``typing``.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        name = _trailing_name(node)
+        if name is not None:
+            yield name
+            return
+        try:
+            inner = ast.parse(node.value, mode="eval")
+        except SyntaxError:
+            return
+        yield from _written_names(inner.body, renames)
+        return
+    if isinstance(node, ast.Name | ast.Attribute):
+        name = _trailing_name(node)
+        if name is not None:
+            yield name
+        return
+    if isinstance(node, ast.Subscript):
+        yield from _written_names(node.value, renames)
+        is_literal = _resolves_to(node.value, LITERAL_NAMES, renames)
+        is_annotated = _resolves_to(node.value, ANNOTATED_NAMES, renames)
+        for index, argument in enumerate(_subscript_arguments(node)):
+            if is_literal or (is_annotated and index > 0):
+                continue
+            yield from _written_names(argument, renames)
+        return
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.expr):
+            yield from _written_names(child, renames)
+
+
 class _DictShapedStateCollector(ast.NodeVisitor):
     """Collects the three declaration shapes, including ones hidden in strings.
 
@@ -338,18 +396,8 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         self.found: list[Occurrence] = []
 
     def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
-        """Whether a type expression names one of ``names``, renames undone.
-
-        Asked as a question rather than answered as a name because a name can
-        have more than one binding in a module and this pass does not claim to
-        know which one is in scope - see ``_renames``. Every caller here wants
-        to know whether a shape is among a set of them, which is answerable
-        without picking one: any binding landing in ``names`` is a hit.
-        """
-        name = _trailing_name(node)
-        if name is None:
-            return False
-        return any(origin in names for origin in self.renames.get(name, frozenset({name})))
+        """Whether a type expression names one of ``names``, renames undone."""
+        return _resolves_to(node, names, self.renames)
 
     def _is_untyped_str_mapping(self, node: ast.Subscript) -> bool:
         """Whether ``node`` maps ``str`` to one of ``self.values``."""
@@ -587,6 +635,24 @@ class ModuleShapes:
         collector._descend_into_string(node)
         collector.visit(node)
         return bool(collector.found)
+
+    def names_any_of(self, node: ast.expr, names: Container[str]) -> bool:
+        """Whether a type expression writes any of ``names``, renames undone.
+
+        The question ``contains_dict_shaped_state`` answers for one fixed set
+        of shapes, asked for an arbitrary one. A caller that needs to reject a
+        *category* rather than a list of spellings needs this: "does this
+        annotation name a mapping at all" is not expressible as a set of value
+        types, and neither is "does it name ``Any`` or ``object`` anywhere".
+
+        Quoted and nested spellings are followed, and renames are undone, so a
+        caller built on this inherits the same resistance to being spelled
+        around that the ratchet has.
+        """
+        return any(
+            any(origin in names for origin in self.renames.get(written, frozenset({written})))
+            for written in _written_names(node, self.renames)
+        )
 
 
 def module_shapes(tree: ast.Module) -> ModuleShapes:
