@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.events.models import AgentEvent
+from syn_adapters.postgres_text import pg_copy_row
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
@@ -19,17 +20,25 @@ logger = logging.getLogger(__name__)
 
 
 def _event_to_copy_row(validated: AgentEvent) -> str:
-    """Convert a validated AgentEvent to a tab-separated COPY row."""
+    """Render a validated AgentEvent as one row of COPY text format.
+
+    Every field here is agent- or harness-supplied, so any of them can contain
+    the characters COPY reads as framing - a tab in a session id splits it into
+    two columns, and the backslashes JSON writes its own escapes with are eaten
+    before the payload reaches the jsonb parser (#1241). pg_copy_row owns that;
+    this function only says which value goes in which column.
+    """
     time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
-    row = [
-        time.isoformat() if isinstance(time, datetime) else time,
-        event_type,
-        session_id or "unknown",
-        exec_id or "\\N",
-        phase_id or "\\N",
-        data_json,
-    ]
-    return "\t".join(str(v) for v in row) + "\n"
+    return pg_copy_row(
+        [
+            time.isoformat(),
+            event_type,
+            session_id or "unknown",
+            exec_id,
+            phase_id,
+            data_json,
+        ]
+    )
 
 
 def _build_copy_buffer(
