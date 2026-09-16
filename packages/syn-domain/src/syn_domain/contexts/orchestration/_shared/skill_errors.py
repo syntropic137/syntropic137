@@ -17,8 +17,9 @@ After the #772 Phase A redesign, these error families remain at the API tier:
 - ``SkillNotRegistered`` raised by ``SkillResolutionService`` when a
   workflow references a skill that has not yet been registered via
   ``POST /skills/registrations``.
-- ``SkillInstallFailed`` raised by ``WorkspaceProvisionHandler`` when the
-  in-container ``skills add`` invocation exits nonzero.
+- ``SkillInstallFailed`` raised by ``WorkspaceProvisionHandler`` when a
+  phase's skills do not get installed - either the in-container ``skills
+  add`` ended badly, or the install was refused before it ran.
 
 The previous ``SkillSourceUnreachable`` / ``SkillVersionNotFound`` /
 ``SkillAuthRequired`` errors were CLI-emitted (git clone failures) and
