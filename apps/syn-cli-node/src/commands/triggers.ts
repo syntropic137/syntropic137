@@ -285,7 +285,11 @@ const resumeCommand: CommandDef = {
       }),
       "Resume trigger",
     );
-    printSuccess(`Trigger ${id} resumed.`);
+    // Not enumerated by the review, but the same class as `register` and
+    // `enable`: resuming re-arms a standing instruction to start workflows, so
+    // the deployment it will fire on belongs in the report (issue #1264).
+    // `pause` and `delete` stay bare — they disarm rather than arm.
+    printStarted(api, `Trigger ${id} resumed.`);
   },
 };
 
