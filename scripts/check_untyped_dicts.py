@@ -170,6 +170,42 @@ def _trailing_name(node: ast.expr) -> str | None:
     return None
 
 
+def _aliased_name(value: ast.expr) -> str | None:
+    """The name a quoted right-hand side renames, if it renames one.
+
+    ``"dict"`` and ``"typing.Dict"`` each reach a constructor and give it a
+    second name; ``"dict[str, Any]"`` reaches a complete type and renames
+    nothing, so it is counted where it stands instead. The string is parsed
+    rather than matched as an identifier because that is what makes the dotted
+    spelling resolve like its unquoted twin - closing ``"dict"`` and leaving
+    ``"typing.Dict"`` open is the #1188 defect exactly, a rename the table
+    never learns and a number that stays still for it.
+    """
+    if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+        return None
+    try:
+        inner = ast.parse(value.value, mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(inner, ast.Name | ast.Attribute):
+        return None
+    return _trailing_name(inner)
+
+
+def _declares_an_alias(node: ast.AST) -> bool:
+    """Whether a statement announces in its syntax that it declares a type.
+
+    ``type D = ...`` and ``D: TypeAlias = ...`` both say so where they stand.
+    A plain ``D = ...`` does not, and at runtime ``D = "dict"`` binds a string
+    rather than a type. That is the line a QUOTED right-hand side turns on: a
+    forward reference is only a type where something declared a type, so the
+    two alias forms may have one and a bare assignment may not.
+    """
+    if isinstance(node, ast.TypeAlias):
+        return True
+    return isinstance(node, ast.AnnAssign) and _trailing_name(node.annotation) == "TypeAlias"
+
+
 def _renamed_shape(node: ast.AST) -> str | None:
     """The name an assignment renames, or ``None`` when it is not a rename.
 
@@ -182,12 +218,28 @@ def _renamed_shape(node: ast.AST) -> str | None:
     already fully spelled out where it stands, and is counted there like any
     other annotation. The dividing line is whether the right-hand side is a
     bare name: a rename copies a name, an alias writes a type.
+
+    An alias may write that name in quotes. ``D: TypeAlias = "dict"`` and
+    ``type D = "dict"`` rename a constructor exactly as their unquoted forms
+    do, and reading only the unquoted ones leaves a rename the table never
+    learns - a number that stays still for a spelling nobody listed, which is
+    the #1188 defect. Only the self-declared alias forms get this: ``D =
+    "dict"`` is a string assignment, not a rename, and stays unrecognised.
     """
     if not isinstance(node, ast.Assign | ast.AnnAssign | ast.TypeAlias):
         return None
-    if not isinstance(node.value, ast.Name | ast.Attribute):
+    value = node.value
+    if value is None:
         return None
-    return _trailing_name(node.value)
+    if isinstance(value, ast.Name | ast.Attribute):
+        return _trailing_name(value)
+    if _declares_an_alias(node):
+        # ``_aliased_name`` answers None for a quoted expression that is not a
+        # name, so ``D: TypeAlias = "dict[str, Any]"`` stays what it is: a
+        # complete type, counted where written by ``visit_AnnAssign`` below,
+        # not a rename.
+        return _aliased_name(value)
+    return None
 
 
 def _origins(name: str, renames: Mapping[str, Collection[str]]) -> frozenset[str]:
@@ -523,6 +575,18 @@ class _DictShapedStateCollector(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self._descend_into_string(node.annotation)
+        # A declared alias writes a type on its right-hand side, so that side
+        # is a type position and a quote hides no more there than it does in
+        # the annotation above it. Without this ``D: TypeAlias = "dict[str,
+        # Any]"`` spends no budget while its unquoted twin spends one, which is
+        # a dodge that moves the number rather than merely hiding from it.
+        if node.value is not None and _declares_an_alias(node):
+            self._descend_into_string(node.value)
+        self.generic_visit(node)
+
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        """``type D = "dict[str, Any]"`` - the other spelling of the same thing."""
+        self._descend_into_string(node.value)
         self.generic_visit(node)
 
     def visit_arg(self, node: ast.arg) -> None:

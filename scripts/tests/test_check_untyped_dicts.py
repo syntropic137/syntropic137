@@ -591,6 +591,62 @@ class TestAssignmentRenamesDoNotHide:
         """``D = dict`` is not an erased mapping until someone parameterises it."""
         assert count("D = dict\nE = Mapping\n") == 0
 
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            (
+                "quoted under a TypeAlias annotation",
+                'from typing import TypeAlias\nD: TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted under a dotted TypeAlias annotation",
+                'import typing\nD: typing.TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted by a type statement",
+                'type D = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename of a dotted constructor",
+                'type D = "typing.Dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename, chained onwards",
+                'type D = "dict"\nE = D\nx: E[str, Any]\n',
+            ),
+        ],
+    )
+    def test_an_alias_may_write_the_renamed_name_in_quotes(self, label: str, source: str) -> None:
+        """A quoted identifier renames exactly as the unquoted one does (#1268).
+
+        ``D: TypeAlias = "dict"`` is a forward reference to a constructor, and
+        the erasure still arrives at ``D[str, Any]``. Reading only the unquoted
+        spelling leaves the table not knowing ``D``, so the use below it counts
+        nothing at all - the number stays still for a spelling nobody listed.
+        """
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_a_quoted_alias_of_a_whole_type_is_not_a_rename(self) -> None:
+        """``D: TypeAlias = "dict[str, Any]"`` writes a type, so it is not a rename.
+
+        The unquoted rule already separates ``D = dict`` from ``D = dict[str,
+        Any]``; quoting must not collapse that distinction. The alias is a
+        complete type expression and is counted once where it stands, not
+        again at every use.
+        """
+        source = 'from typing import TypeAlias\nD: TypeAlias = "dict[str, Any]"\nx: D\ny: D\n'
+
+        assert count(source) == 1
+
+    def test_a_plain_string_assignment_is_not_an_alias(self) -> None:
+        """``D = "dict"`` binds a string at runtime, and must stay unrecognised.
+
+        This is the boundary that keeps the quoted form honest. Reading every
+        string assignment as a rename would enrol ``NAME = "dict"`` in a
+        settings module and invent mappings out of ordinary data.
+        """
+        assert count('D = "dict"\nx: D[str, Any]\n') == 0
+
     def test_an_unrelated_rename_is_not_invented(self) -> None:
         """Resolution must not turn every assigned name into a mapping."""
         source = """
