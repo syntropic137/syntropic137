@@ -111,6 +111,16 @@ class ExecutionDetailResponse(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     phases: list[PhaseExecutionInfo] = Field(default_factory=list)
+    total_phases: int = 0
+    """Phases this run set out to do, from its WorkflowExecutionStarted event.
+
+    ``len(phases)`` is not this number and never was: it counts the phases that
+    have started, so a three-phase run that died in phase one renders as a
+    one-phase execution to any client that measures the list (#1147). The two
+    phases that never ran are only visible as the gap between these.
+    """
+    completed_phases: int = 0
+    """Phases that finished. Same field, same meaning, as on the list view."""
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int

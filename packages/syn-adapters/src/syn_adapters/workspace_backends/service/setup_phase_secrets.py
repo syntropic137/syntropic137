@@ -161,12 +161,13 @@ class _GitHubClientProtocol(Protocol):
     """Structural protocol for GitHubAppClient — avoids circular import."""
 
     async def get_installation_for_repo(self, full_name: str) -> str: ...
-    async def get_installation_token(self, installation_id: str) -> str: ...
+    async def mint_agent_token(self, installation_id: str, *, can_open_pr: bool) -> str: ...
 
 
 async def _resolve_github_auth(
     repos: list[str],
     require_github: bool,
+    can_open_pr: bool,
 ) -> tuple[dict[str, str], str | None, str | None]:
     """Resolve GitHub App tokens for all repos and return (repo_tokens, author_name, author_email).
 
@@ -185,7 +186,7 @@ async def _resolve_github_auth(
 
     client: _GitHubClientProtocol = GitHubAppClient(github_settings)  # type: ignore[arg-type]
     url_to_installation = await _lookup_installations(client, repos, require_github)
-    repo_tokens = await _mint_tokens_per_installation(client, url_to_installation)
+    repo_tokens = await _mint_tokens_per_installation(client, url_to_installation, can_open_pr)
     return repo_tokens, github_settings.bot_name, github_settings.bot_email
 
 
@@ -224,17 +225,29 @@ async def _lookup_installations(
 async def _mint_tokens_per_installation(
     client: _GitHubClientProtocol,
     url_to_installation: dict[str, str],
+    can_open_pr: bool,
 ) -> dict[str, str]:
-    """Mint one token per unique installation and return url → token mapping."""
+    """Mint one token per unique installation and return url → token mapping.
+
+    These tokens are the ones the agent ends up holding — in
+    ~/.git-credentials and in the gh hosts.yml entry — so ``can_open_pr``
+    decides what the phase is CAPABLE of, not merely what it is asked to do
+    (#1197).
+    """
     installation_to_urls: dict[str, list[str]] = {}
     for url, inst_id in url_to_installation.items():
         installation_to_urls.setdefault(inst_id, []).append(url)
 
     tokens_by_installation: dict[str, str] = {}
     for inst_id, urls in installation_to_urls.items():
-        token = await client.get_installation_token(inst_id)
+        token = await client.mint_agent_token(inst_id, can_open_pr=can_open_pr)
         tokens_by_installation[inst_id] = token
-        logger.info("Generated token for installation %s (%d repo(s))", inst_id, len(urls))
+        logger.info(
+            "Generated token for installation %s (%d repo(s), can_open_pr=%s)",
+            inst_id,
+            len(urls),
+            can_open_pr,
+        )
 
     return {url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()}
 
@@ -282,6 +295,14 @@ class SetupPhaseSecrets:
     False therefore still resolves the installation, mints the token, writes
     the per-repo credential entries and configures gh. It skips ``git clone``
     and nothing else."""
+    can_open_pr: bool = False
+    """Whether the phase these credentials are for may create a pull request
+    (#1197).
+
+    The tokens in ``repo_tokens`` are minted to match: False downgrades
+    ``pull_requests`` to read, so the gh hosts.yml entry this writes cannot
+    open a PR. It is the answer to "what can this phase do", which is why it
+    sits beside the credentials rather than in the phase's prompt."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -294,6 +315,7 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
+        can_open_pr: bool = False,
         require_github: bool = True,
         include_codex_auth: bool = False,
     ) -> SetupPhaseSecrets:
@@ -310,6 +332,9 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
+            can_open_pr: Whether the phase may create a pull request (#1197).
+                Defaults to False so a caller that has not thought about it
+                provisions a phase that cannot publish.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -329,7 +354,7 @@ class SetupPhaseSecrets:
 
         if repos:
             repo_tokens, git_author_name, git_author_email = await _resolve_github_auth(
-                repos, require_github
+                repos, require_github, can_open_pr
             )
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
@@ -341,6 +366,7 @@ class SetupPhaseSecrets:
             repo_tokens=repo_tokens,
             repositories=repos,
             clone_repos=clone_repos,
+            can_open_pr=can_open_pr,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -360,6 +386,7 @@ class SetupPhaseSecrets:
         repositories: list[str] | None = None,
         repo_tokens: dict[str, str] | None = None,
         clone_repos: bool = True,
+        can_open_pr: bool = False,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -374,6 +401,7 @@ class SetupPhaseSecrets:
             repositories: Optional list of repo URLs (no tokens fetched)
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             clone_repos: False to credential the repos without checking them out (#1187)
+            can_open_pr: True to model a phase permitted to publish (#1197)
         """
         import os
 
@@ -387,6 +415,7 @@ class SetupPhaseSecrets:
             repo_tokens=repo_tokens or {},
             repositories=repositories or [],
             clone_repos=clone_repos,
+            can_open_pr=can_open_pr,
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),

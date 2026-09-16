@@ -46,6 +46,12 @@ phases:
     output_artifacts:
       - pr_metadata
       - changes_summary
+
+    # This phase's entire job is `gh pr create`, so it opts in (#1197).
+    # `verify-pr` below does not: it reads the PR and reports, and a token
+    # that could also open one would let it paper over a PR that never
+    # appeared by creating it.
+    can_open_pr: true
     timeout_seconds: 600
 
     # Tools available for this phase

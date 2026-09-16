@@ -889,6 +889,11 @@ class ExecutionDetailFull(BaseModel):
     workflow_name: str
     status: str
     phases: list[PhaseExecution] = Field(default_factory=list)
+    total_phases: int = 0
+    """Phases this run set out to do. Not ``len(phases)``: a run that died in
+    phase one carries one phase and a total of 3, and the gap is the phases
+    that never started (#1147)."""
+    completed_phases: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
     unpriced_observation_count: int = 0

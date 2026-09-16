@@ -64,6 +64,11 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # whether the setup script contains `git clone` at all (#1187). Applied,
     # not validated: any boolean is legal, and both values do something.
     "clone_repos": ("ExecutablePhase", "clone_repos"),
+    # Decides which GitHub permissions the phase's token carries, so it is
+    # applied by `WorkspaceProvisionHandler` minting a token whose
+    # `pull_requests` is `read` (#1197). Applied, not validated: both values
+    # are legal and both do something.
+    "can_open_pr": ("ExecutablePhase", "can_open_pr"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),

@@ -334,6 +334,14 @@ class ExecutablePhase:
     # contains, not how the agent is invoked.
     clone_repos: bool = True
 
+    # Whether this phase may create a pull request (#1197). Like clone_repos
+    # this decides what the WORKSPACE gets - specifically the permissions of
+    # the GitHub token in it - rather than how the agent is invoked, which is
+    # why it is not on `agent_config`. A prompt saying "do not open a PR" was
+    # already in place when `implement` opened one; this is the same statement
+    # made somewhere the agent cannot decline it.
+    can_open_pr: bool = False
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.

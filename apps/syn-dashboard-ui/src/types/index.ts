@@ -339,6 +339,17 @@ export interface ExecutionDetailResponse {
   started_at: string | null
   completed_at: string | null
   phases: PhaseExecutionDetail[]
+  /**
+   * Phases this run set out to do.
+   *
+   * NOT `phases.length`, which counts the phases that started: a three-phase
+   * run that died in phase one carries one phase and a total of 3, and the
+   * gap is the two phases that never ran (#1147). 0 means the count is
+   * unknown, which is a projection that has not rebuilt, not a run with no
+   * phases.
+   */
+  total_phases: number
+  completed_phases: number
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number

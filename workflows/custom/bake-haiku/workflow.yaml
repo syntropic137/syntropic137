@@ -116,6 +116,12 @@ phases:
     # `gh` still works: the repo is still resolved to its installation, still
     # gets a token, and still gets a hosts.yml entry. Only the clone is gone.
     clone_repos: false
+    # THE ONLY PHASE HERE ALLOWED TO PUBLISH (#1197). Every other phase in
+    # this workflow gets a token whose `pull_requests` permission is read, so
+    # the gate cannot be routed around by an earlier phase calling
+    # `gh pr create` before the verifier has rendered a verdict - which is
+    # exactly what happened on exec-0bac0e1ed2b2.
+    can_open_pr: true
     allowed_tools:
       - Read
       - Bash

@@ -456,7 +456,14 @@ def publishes_in_shell(path: str, text: str) -> list[Publish]:
 
 
 def tracked_files(root: Path) -> tuple[list[Path], list[Path]]:
-    """(compose files, shell files) that git tracks, as the gate's scope defines them."""
+    """(compose files, shell files) that git tracks, as the gate's scope defines them.
+
+    The exit status is the only thing separating "nothing in scope" from "could
+    not look": both spell themselves as no output. Trusting the output alone
+    means a failed `git ls-files` empties the gate's scope, and a gate with an
+    empty scope finds no public ports and says so - passing loudest at the
+    moment it checked nothing (#978, same defect as the marker gate's).
+    """
     listed = subprocess.run(
         [
             "git",
@@ -474,8 +481,14 @@ def tracked_files(root: Path) -> tuple[list[Path], list[Path]]:
         capture_output=True,
         text=True,
         check=False,
-    ).stdout.split()
-    paths = [Path(name) for name in listed if (root / name).is_file()]
+    )
+    if listed.returncode != 0:
+        raise SystemExit(
+            f"no_public_ports: git ls-files failed (exit {listed.returncode}) in {root};"
+            " refusing to scan a file list that may be short, because an empty"
+            f" scope passes this gate.\n{listed.stderr.strip()}"
+        )
+    paths = [Path(name) for name in listed.stdout.split() if (root / name).is_file()]
     paths = [p for p in paths if FIXTURE_DIR not in p.parents]
     compose = [p for p in paths if p.suffix in (".yml", ".yaml")]
     shell = [p for p in paths if p.suffix == ".sh" or p.name == "justfile"]

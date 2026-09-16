@@ -142,6 +142,19 @@ Only the API container has access to the PEM. Agent containers never see it.
 Installation tokens are automatically scoped to:
 - Only repositories where the app is installed
 - Only permissions granted to the app (contents, issues, PRs, etc.)
+- Only `pull_requests: read`, unless the phase holding the token declares
+  `can_open_pr: true` in its workflow YAML (#1197)
+
+That last one is ours, not GitHub's. Publication is a capability a phase either
+holds or does not, and a phase that does not hold it gets a token that cannot
+call `POST /repos/{owner}/{repo}/pulls` - so `gh pr create` fails for it no
+matter what its prompt says, and no matter which of the two credential paths
+(`~/.config/gh/hosts.yml` or `$GITHUB_TOKEN`) it reaches for. It can still read
+and check out pull requests, and still push branches.
+
+The reduced set is *derived* from `GET /app/installations/{id}` rather than
+enumerated, because GitHub rejects a request for permissions the installation
+does not hold. See `syn_adapters.github.agent_token.mint_agent_token`.
 
 ```python
 # Example: Token can only access these repos

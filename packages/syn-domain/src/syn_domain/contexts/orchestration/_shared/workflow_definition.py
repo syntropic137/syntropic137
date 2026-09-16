@@ -321,6 +321,21 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
+    can_open_pr: bool = False
+    """Whether this phase may create a pull request (#1197).
+
+    DEFAULTS TO FALSE BECAUSE PUBLICATION IS THE EXCEPTION. `implement`
+    published its own work 14 minutes before the verifier started, on a run
+    where the publication phase never executed at all; its prompt had said
+    not to. Opting in is one line in a workflow that means to publish, and
+    the phases that do are few. Defaulting the other way would mean every
+    phase anyone ever writes is a publisher until someone notices.
+
+    This is enforced by the token the phase is handed, not by its prompt or
+    its tool list - see ``agent_token.mint_agent_token``. False keeps
+    `pull_requests: read`, so a phase can still read and check out the PR it
+    is reworking; it just cannot open one."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -503,6 +518,7 @@ class PhaseYamlDefinition(BaseModel):
             timeout_seconds=self.timeout_seconds,
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
+            can_open_pr=self.can_open_pr,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

@@ -373,6 +373,7 @@ def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
 
 async def list_sessions(
     workflow_id: str | None = None,
+    execution_id: str | None = None,
     status: str | None = None,
     statuses: list[str] | None = None,
     started_after: datetime | None = None,
@@ -390,6 +391,7 @@ async def list_sessions(
 
     Args:
         workflow_id: Filter by workflow ID.
+        execution_id: Filter by the execution the session belongs to.
         status: Filter by single session status (legacy).
         statuses: Filter by multiple statuses (OR'd together). Takes
             precedence over ``status``.
@@ -407,6 +409,7 @@ async def list_sessions(
     projection = manager.session_list
     domain_page = await projection.page(
         workflow_id=workflow_id,
+        execution_id=execution_id,
         statuses=statuses if statuses else ([status] if status else None),
         started_after=started_after,
         started_before=started_before,
@@ -690,6 +693,14 @@ def _build_session_summary_response(
 @router.get("", response_model=SessionListResponse)
 async def list_sessions_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
+    execution_id: str | None = Query(
+        None,
+        description=(
+            "Filter by the execution these sessions belong to. Every session "
+            "carries one; before this existed the parameter was accepted and "
+            "silently dropped, returning the whole collection (#1263)."
+        ),
+    ),
     status: str | None = Query(None, description="Filter by single status (legacy)"),
     statuses: str | None = Query(
         None,
@@ -719,6 +730,7 @@ async def list_sessions_endpoint(
     effective_page_size = resolve_page_size(page_size, limit)
     result = await list_sessions(
         workflow_id=workflow_id,
+        execution_id=execution_id,
         status=status,
         statuses=parse_statuses(statuses, status),
         started_after=started_after,
