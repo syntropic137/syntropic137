@@ -5,8 +5,9 @@
 
 import type { CommandDef, ParsedArgs } from "../../framework/command.js";
 import { CLIError } from "../../framework/errors.js";
-import { api, apiBaseUrl, unwrap } from "../../client/typed.js";
-import { printError, printSuccess, print, printDim } from "../../output/console.js";
+import { api, unwrap } from "../../client/typed.js";
+import { printError, print, printDim } from "../../output/console.js";
+import { printStarted } from "../../output/started.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../../output/ansi.js";
 import { formatCost, formatTokens } from "../../output/format.js";
 import { Table } from "../../output/table.js";
@@ -200,16 +201,16 @@ export const runCommand: CommandDef = {
       "Failed to execute workflow",
     );
 
-    // Name the deployment, not just the execution: the same workflow ID resolves
-    // to different definitions on different hosts, so an execution ID on its own
-    // does not say which one ran (issue #1264). `apiBaseUrl` is the URL this
-    // request was sent to, so the line cannot name a host the run did not reach.
+    // `printStarted` names the deployment as well as the execution: the same
+    // workflow ID resolves to different definitions on different hosts, so an
+    // execution ID on its own does not say which one ran (issue #1264).
     if (result.status === "started" && result.execution_id?.startsWith("exec-")) {
-      printSuccess("\nWorkflow execution started");
-      print(`  Deployment:   ${apiBaseUrl}`);
-      print(`  Execution ID: ${result.execution_id}`);
+      printStarted(api, "\nWorkflow execution started", [
+        { label: "Execution ID", value: result.execution_id },
+        { label: "Workflow", value: wf.id },
+      ]);
     } else {
-      printError(`\nUnexpected server response from ${apiBaseUrl}: status=${result.status} execution_id=${result.execution_id ?? "<none>"}`);
+      printError(`\nUnexpected server response from ${api.deployment}: status=${result.status} execution_id=${result.execution_id ?? "<none>"}`);
       throw new CLIError("Workflow execution did not start", 1);
     }
   },

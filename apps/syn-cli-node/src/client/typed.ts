@@ -9,36 +9,44 @@
  * Migrate commands incrementally: replace apiGet/apiGetPaginated calls with api.GET/api.POST.
  */
 
-import createClient from "openapi-fetch";
+import createClient, { type Client } from "openapi-fetch";
 import type { paths } from "../generated/api-types.js";
 import { CLIError } from "../framework/errors.js";
 import { getApiUrl, getAuthHeaders } from "../config.js";
 import { API_PREFIX } from "./constants.js";
 
 /**
- * The deployment this CLI talks to: the resolved API base URL, without the
- * `/api/v1` prefix.
- *
- * WHY a module constant rather than a second `getApiUrl()` call at the point of
- * use: a command that reports where it dispatched has to report where the
- * request actually went. The client below is built from this exact string, so
- * the two cannot disagree — whereas re-reading the environment later can, and
- * a report that can disagree with the request is the bug (issue #1264).
+ * A typed API client that knows, and can be asked, which deployment it sends to.
  */
-export const apiBaseUrl: string = getApiUrl().replace(/\/+$/, "");
+export interface TypedClient extends Client<paths> {
+  /**
+   * The deployment this client talks to: its resolved base URL, without the
+   * `/api/v1` prefix.
+   *
+   * WHY it hangs off the client rather than being resolved again at the point
+   * of use: a command that reports where it started work has to report where
+   * the request actually went. The requests below are built from this exact
+   * string, so the two cannot disagree — whereas re-reading the environment
+   * later can, and a report that can disagree with the request is the bug
+   * (issue #1264).
+   */
+  readonly deployment: string;
+}
 
-export function createTypedClient() {
-  return createClient<paths>({
-    baseUrl: `${apiBaseUrl}${API_PREFIX}`,
+export function createTypedClient(): TypedClient {
+  const deployment = getApiUrl().replace(/\/+$/, "");
+  const client = createClient<paths>({
+    baseUrl: `${deployment}${API_PREFIX}`,
     headers: getAuthHeaders(),
     // Resolve fetch at call time, not at client creation time.
     // This allows tests to stub globalThis.fetch after module import.
     fetch: (...args) => globalThis.fetch(...args),
   });
+  return Object.assign(client, { deployment });
 }
 
 /** Singleton typed client — use this in command handlers. */
-export const api = createTypedClient();
+export const api: TypedClient = createTypedClient();
 
 /** Extract data from a typed API response, throwing CLIError on failure.
  *

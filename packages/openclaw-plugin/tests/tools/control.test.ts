@@ -64,7 +64,9 @@ describe("synResumeExecution", () => {
     const result = await synResumeExecution(client, { execution_id: "exec-abc-123" });
 
     expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("resumed successfully");
+    expect(result.content).toContain("Execution Resumed");
+    expect(result.content).toContain("exec-abc-123");
+    expect(result.content).toContain("running");
   });
 });
 
