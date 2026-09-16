@@ -108,12 +108,13 @@ async def test_setup_failure_names_the_secret_injection_step_and_the_phase() -> 
         )
     )
 
-    # Names WHICH setup...
-    assert "Secret-injection setup failed" in message
-    # ...and WHICH phase, so nobody goes looking at "Prepare the workspace".
-    assert f"phase '{FAILING_PHASE_NAME}'" in message
+    # Names WHICH setup, and WHICH phase, so nobody goes looking at
+    # "Prepare the workspace".
+    assert f"Secret-injection setup for phase '{FAILING_PHASE_NAME}'" in message
     # The bare wording that sent the operator to the wrong phase is gone.
-    assert "Setup phase failed" not in message
+    assert "Setup phase" not in message
+    # The status the process ended with leads, ahead of what it printed (#1158).
+    assert "exited 1: " in message
     # The diagnosis itself survives the rewording.
     assert "could not read Username" in message
 
@@ -131,10 +132,9 @@ async def test_setup_failure_with_no_stderr_still_names_setup_and_phase() -> Non
         ExecutionResult(exit_code=2, success=False, duration_ms=10_000.0)
     )
 
-    assert "Secret-injection setup failed" in message
-    assert f"phase '{FAILING_PHASE_NAME}'" in message
-    assert "Setup phase failed" not in message
-    assert "exit code 2" in message
+    assert f"Secret-injection setup for phase '{FAILING_PHASE_NAME}'" in message
+    assert "Setup phase" not in message
+    assert "exited 2" in message
 
 
 @pytest.mark.unit
@@ -191,7 +191,6 @@ async def test_the_execution_record_an_operator_reads_names_the_setup_and_the_ph
 
     assert result.status == "failed"
     assert result.error_message is not None
-    assert "Secret-injection setup failed" in result.error_message
-    assert f"phase '{FAILING_PHASE_NAME}'" in result.error_message
+    assert f"Secret-injection setup for phase '{FAILING_PHASE_NAME}'" in result.error_message
     assert "could not read Username" in result.error_message
-    assert "Setup phase failed" not in result.error_message
+    assert "Setup phase" not in result.error_message
