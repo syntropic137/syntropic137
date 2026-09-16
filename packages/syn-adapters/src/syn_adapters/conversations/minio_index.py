@@ -5,9 +5,10 @@ Extracted from minio.py to reduce module complexity.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
+
+from syn_adapters.postgres_text import pg_json, pg_safe
 
 if TYPE_CHECKING:
     import asyncpg
@@ -45,20 +46,20 @@ async def insert_index(
                 tool_counts = EXCLUDED.tool_counts,
                 success = EXCLUDED.success
             """,
-            session_id,
+            pg_safe(session_id),
             bucket_name,
-            object_key,
+            pg_safe(object_key),
             size_bytes,
-            context.execution_id,
-            context.phase_id,
-            context.workflow_id,
+            pg_safe(context.execution_id),
+            pg_safe(context.phase_id),
+            pg_safe(context.workflow_id),
             context.event_count,
             context.total_input_tokens,
             context.total_output_tokens,
-            json.dumps(context.tool_counts) if context.tool_counts else None,
+            pg_json(context.tool_counts) if context.tool_counts else None,
             context.started_at,
             context.completed_at,
-            context.model,
+            pg_safe(context.model),
             context.success,
         )
 

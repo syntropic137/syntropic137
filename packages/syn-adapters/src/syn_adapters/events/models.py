@@ -14,7 +14,6 @@ See ADR-029: Simplified Event System
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +23,7 @@ from syn_adapters.events.model_extractors import (
     _extract_tool_result,
     _extract_tool_use,
 )
+from syn_adapters.postgres_text import pg_json, pg_safe
 from syn_shared.events import (
     AGENT_STOPPED,
     CONTEXT_COMPACTED,
@@ -210,16 +210,21 @@ class AgentEvent(BaseModel):
     def to_insert_tuple(self) -> tuple[datetime, str, str | None, str | None, str | None, str]:
         """Convert to tuple for asyncpg insert.
 
+        Every string here is agent-produced - `data` carries captured tool
+        output, and the harness supplies its own session id - so all of it is
+        made storable first (#1241). This is the single boundary both write
+        paths cross, so the guard belongs here rather than in either of them.
+
         Returns:
             Tuple of (time, event_type, session_id, execution_id, phase_id, data_json)
         """
         return (
             self.time,
-            self.event_type,
-            self.session_id,
-            self.execution_id,
-            self.phase_id,
-            json.dumps(self.data),
+            pg_safe(self.event_type),
+            pg_safe(self.session_id),
+            pg_safe(self.execution_id),
+            pg_safe(self.phase_id),
+            pg_json(self.data),
         )
 
     @classmethod

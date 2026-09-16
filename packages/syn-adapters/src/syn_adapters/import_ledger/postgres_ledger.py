@@ -22,6 +22,7 @@ import logging
 import struct
 from typing import TYPE_CHECKING, Protocol
 
+from syn_adapters.postgres_text import pg_safe
 from syn_domain.contexts.agent_sessions import BilledUsage
 
 if TYPE_CHECKING:
@@ -47,6 +48,10 @@ _guarded_conn: contextvars.ContextVar[AsyncConnection | None] = contextvars.Cont
 )
 
 
+#: ``harness_session_id`` is read out of the harness's own transcript, so it is
+#: untrusted text in a TEXT primary key. Every method below normalises it
+#: through ``pg_safe`` before it is used as a key, a lookup or a lock - together,
+#: so the three cannot disagree about which row a session owns (#1241).
 CREATE_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS delegate_import_ledger (
         execution_id           TEXT   NOT NULL,
@@ -160,6 +165,7 @@ class PostgresImportLedger:
 
     async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
         await self._ensure_table()
+        harness_session_id = pg_safe(harness_session_id)
         async with self._connection() as conn:
             row = await conn.fetchrow(ALREADY_BILLED_SQL, execution_id, harness_session_id)
         if row is None:
@@ -175,6 +181,7 @@ class PostgresImportLedger:
         self, execution_id: str, harness_session_id: str, billed: BilledUsage
     ) -> None:
         await self._ensure_table()
+        harness_session_id = pg_safe(harness_session_id)
         async with self._connection() as conn:
             await conn.execute(
                 RECORD_BILLED_SQL,
@@ -200,6 +207,7 @@ class PostgresImportLedger:
         the real lock is held until that connection is recycled.
         """
         await self._ensure_table()
+        harness_session_id = pg_safe(harness_session_id)
         key = _advisory_key(execution_id, harness_session_id)
         async with self._pool.acquire() as conn:
             await conn.execute("SELECT pg_advisory_lock($1);", key)

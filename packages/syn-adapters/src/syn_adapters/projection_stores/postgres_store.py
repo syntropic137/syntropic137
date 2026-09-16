@@ -9,6 +9,7 @@ from typing import Any
 
 import asyncpg
 
+from syn_adapters.postgres_text import pg_safe
 from syn_shared.settings import get_settings
 
 
@@ -108,7 +109,7 @@ class PostgresProjectionStore:
                     data = EXCLUDED.data,
                     updated_at = NOW()
             """,
-                key,
+                pg_safe(key),
                 self._serialize(data),
             )
 
