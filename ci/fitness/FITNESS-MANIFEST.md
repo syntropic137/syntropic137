@@ -91,8 +91,10 @@ constructed against the head; five are now closed - the filename scope above,
 a table holding the function instead of its name (live: nine `_dedup_*`
 extractors on the GitHub event pipeline), that table inlined as a local, a
 name built from a literal prefix, and `__getattribute__`. That took the table
-from 171 to 211, and retyping the two `TriggerHistoryAdapter` payloads rather
-than grandfathering them took `untyped-dicts` `syn-adapters` from 208 to 206.
+from 173 to 211 (+38, none removed; 171 above plus the two the binding-form
+fix had already added), and retyping the two `TriggerHistoryAdapter` payloads
+rather than grandfathering them took `untyped-dicts` `syn-adapters` from 208
+to 206.
 
 Three shapes stay open and are now **stated in the gate's docstring with a
 test each pinning that it does not see them**: a handler registered by a
