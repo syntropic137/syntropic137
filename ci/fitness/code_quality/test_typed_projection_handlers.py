@@ -488,3 +488,298 @@ def test_no_stale_grandfathered_handlers() -> None:
         f"from [{_EXCEPTION_SECTION}] in ci/fitness/fitness_exceptions.toml:\n  "
         + "\n  ".join(stale)
     )
+
+
+# ---------------------------------------------------------------------------
+# What the gate itself does, pinned.
+#
+# The scan above reports on the codebase; these report on the scanner. Both
+# findings that sent PR #1281 back were the scanner being narrower than its own
+# docstring while the scan was green, so a green scan is not evidence about any
+# of this. Every case below is a shape the gate was measured to MISS before
+# this change.
+# ---------------------------------------------------------------------------
+
+
+def _verdicts(source: str) -> dict[str, Verdict]:
+    """``{"Class.handler.param": verdict}`` for one module's source."""
+    return {
+        f"{violation.qualname}.{violation.parameter}": violation.verdict
+        for violation in find_untyped_handler_parameters(source)
+    }
+
+
+def _handler_names(source: str) -> set[str]:
+    """The qualnames the gate considers handlers in one module's source."""
+    return set(dispatched_handlers(ast.parse(source)).values())
+
+
+_DISPATCH_TABLE_PROJECTION = '''
+from typing import Any, ClassVar
+
+
+class TriggerQueryProjection:
+    """The shape TriggerQueryProjection dispatches with, reduced."""
+
+    _EVENT_DISPATCH: ClassVar[dict[str, str]] = {
+        "github.TriggerRegistered": "_on_trigger_registered",
+    }
+
+    async def _dispatch_event(self, event_type: str, event_data: dict[str, Any]) -> None:
+        if event_type == "github.TriggerFired":
+            await self._on_trigger_fired(event_data)
+            return
+        handler_name = self._EVENT_DISPATCH.get(event_type)
+        if handler_name is not None:
+            handler = getattr(self, handler_name)
+            await handler(event_data)
+
+    async def handle_event(self, envelope: Envelope) -> None:
+        event_data = envelope.event.model_dump()
+        await self._dispatch_event(envelope.metadata.event_type, event_data)
+
+    async def _on_trigger_registered(self, data: dict[str, Any]) -> None:
+        self.store[data["trigger_id"]] = data
+
+    async def _on_trigger_fired(self, data: dict[str, Any]) -> None:
+        self.store[data["trigger_id"]] = data
+'''
+
+
+@pytest.mark.architecture
+def test_handler_named_only_by_a_dispatch_table_is_a_handler() -> None:
+    """`_on_trigger_registered` is reached by string, not by prefix.
+
+    The whole of finding 1: `_HANDLER_PREFIXES` listed `on_` and not `_on_`, so
+    five live handlers of `TriggerQueryProjection` were invisible while the
+    gate reported green. A prefix list cannot see this one at all - the name is
+    written once, as a value in `_EVENT_DISPATCH`, and reached with `getattr`.
+    """
+    assert (
+        _verdicts(_DISPATCH_TABLE_PROJECTION)["TriggerQueryProjection._on_trigger_registered.data"]
+        is Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_handler_reached_only_by_a_direct_call_is_a_handler() -> None:
+    """`_on_trigger_fired` is in no table; the dispatcher calls it by name.
+
+    So it is reached by neither of the two mechanisms a reader would name
+    first, and it takes the same `model_dump()` payload as its four siblings.
+    It arrives through the payload's reach: `handle_event` forwards the
+    envelope to `_dispatch_event`, which forwards the payload on.
+    """
+    assert (
+        _verdicts(_DISPATCH_TABLE_PROJECTION)["TriggerQueryProjection._on_trigger_fired.data"]
+        is Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_the_dispatcher_between_them_is_a_handler_too() -> None:
+    """`_dispatch_event` holds the payload in a `dict[str, Any]` on the way.
+
+    Named because it is the hop the prefix list could never have reached under
+    any prefix, and it is the one the payload spends longest in.
+    """
+    assert (
+        _verdicts(_DISPATCH_TABLE_PROJECTION)["TriggerQueryProjection._dispatch_event.event_data"]
+        is Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_a_typed_dict_payload_fails() -> None:
+    """The fix the failure message forbids must not be the fix that works.
+
+    Finding 2, and it was not hypothetical: three `TypedDict` handler payloads
+    were already live in the codebase and the gate scored all three as clean.
+    """
+    source = """
+from typing import TypedDict
+
+
+class _SkillRegisteredEventData(TypedDict, total=False):
+    skill_id: str
+
+
+class SkillProjection:
+    async def on_skill_registered(self, event_data: _SkillRegisteredEventData) -> None:
+        self.rows[event_data["skill_id"]] = event_data
+"""
+    assert _verdicts(source)["SkillProjection.on_skill_registered.event_data"] is (
+        Verdict.DECLARES_NO_FIELDS
+    )
+
+
+@pytest.mark.architecture
+def test_a_functional_typed_dict_payload_fails_too() -> None:
+    """`X = TypedDict("X", ...)` is the same declaration in one line.
+
+    Closing the class spelling alone would leave the number standing still for
+    a rename, which is the #1188 defect one level up (AGENTS.md).
+    """
+    source = """
+from typing import TypedDict
+
+_EventData = TypedDict("_EventData", {"skill_id": str})
+
+
+class SkillProjection:
+    async def on_skill_registered(self, event_data: _EventData) -> None:
+        self.rows[event_data["skill_id"]] = event_data
+"""
+    assert _verdicts(source)["SkillProjection.on_skill_registered.event_data"] is (
+        Verdict.DECLARES_NO_FIELDS
+    )
+
+
+@pytest.mark.architecture
+def test_an_unannotated_payload_fails() -> None:
+    """Declaring nothing must not beat declaring something useless.
+
+    The first version skipped a parameter with no annotation entirely, so
+    deleting `: dict[str, Any]` was a one-character way to leave the gate.
+    """
+    source = """
+class SessionProjection:
+    async def on_session_started(self, event_data) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source)["SessionProjection.on_session_started.event_data"] is (
+        Verdict.UNDECLARED
+    )
+
+
+@pytest.mark.architecture
+def test_an_object_payload_fails() -> None:
+    """`object` erases exactly as much as `Any` and was not on the list."""
+    source = """
+class SessionProjection:
+    async def on_session_started(self, event_data: object) -> None:
+        self.rows["x"] = event_data
+"""
+    assert _verdicts(source)["SessionProjection.on_session_started.event_data"] is (
+        Verdict.UNDECLARED
+    )
+
+
+@pytest.mark.architecture
+def test_a_str_valued_mapping_payload_fails() -> None:
+    """`dict[str, str]` is read by string key, which is the objection.
+
+    The first version asked only whether the VALUE type was erased, so every
+    mapping with a named value type passed - `dict[str, str]`,
+    `dict[str, JsonValue]`, `dict[str, int]`. There is no value-type list here
+    to be incomplete.
+    """
+    source = """
+class SessionProjection:
+    async def on_session_started(self, event_data: dict[str, str]) -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source)["SessionProjection.on_session_started.event_data"] is (
+        Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_a_quoted_mapping_payload_fails() -> None:
+    """A forward reference is still a type, and the gate reads it as one."""
+    source = """
+class SessionProjection:
+    async def on_session_started(self, event_data: "dict[str, str]") -> None:
+        self.rows[event_data["session_id"]] = event_data
+"""
+    assert _verdicts(source)["SessionProjection.on_session_started.event_data"] is (
+        Verdict.STRING_KEYED
+    )
+
+
+@pytest.mark.architecture
+def test_a_dataclass_payload_is_accepted() -> None:
+    """The remediation the message asks for has to be the one that works.
+
+    Without this the gate could reject everything and every case above would
+    still pass, which is the shape of an assertion that proves nothing.
+    """
+    source = """
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class SessionStarted:
+    session_id: str
+
+
+class SessionProjection:
+    async def on_session_started(self, event_data: SessionStarted) -> None:
+        self.rows[event_data.session_id] = event_data
+"""
+    assert _verdicts(source) == {}
+
+
+@pytest.mark.architecture
+def test_a_pydantic_payload_is_accepted() -> None:
+    """The other half of what the failure message names."""
+    source = """
+from pydantic import BaseModel
+
+
+class SessionStarted(BaseModel):
+    session_id: str
+
+
+class SessionProjection:
+    async def on_session_started(self, event_data: SessionStarted) -> None:
+        self.rows[event_data.session_id] = event_data
+"""
+    assert _verdicts(source) == {}
+
+
+@pytest.mark.architecture
+def test_a_payload_handed_on_is_still_measured() -> None:
+    """A helper the payload reaches is the same boundary one call deeper.
+
+    This is what `_apply_`/`_accumulate_` approximated by name. Here the
+    helper's name says nothing; it is a handler because the payload arrives.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    async def on_session_completed(self, event_data: dict[str, Any]) -> None:
+        payload = event_data.get("data", {})
+        self._merge(self.rows, payload)
+
+    def _merge(self, existing: dict[str, Any], payload: dict[str, Any]) -> None:
+        existing.update(payload)
+"""
+    verdicts = _verdicts(source)
+    assert verdicts["SessionProjection._merge.payload"] is Verdict.STRING_KEYED
+    assert verdicts["SessionProjection._merge.existing"] is Verdict.STRING_KEYED
+
+
+@pytest.mark.architecture
+def test_a_function_no_event_reaches_is_not_a_handler() -> None:
+    """The population is the payload's reach, not the module's contents.
+
+    `_apply_post_filters` is a real one: a query-side filter the prefix list
+    enrolled for its name, which no event has ever reached. A gate that
+    enrolled every function in a projection module would report on the read
+    path and call it dispatch.
+    """
+    source = """
+from typing import Any
+
+
+class SessionProjection:
+    async def on_session_started(self, event_data: dict[str, Any]) -> None:
+        self.rows["x"] = event_data
+
+    def _apply_post_filters(self, rows: dict[str, Any]) -> None:
+        rows.pop("hidden", None)
+"""
+    assert _handler_names(source) == {"SessionProjection.on_session_started"}
