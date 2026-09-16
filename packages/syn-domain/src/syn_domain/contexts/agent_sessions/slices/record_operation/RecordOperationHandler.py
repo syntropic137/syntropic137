@@ -1,22 +1,30 @@
-"""RecordOperation command handler - VSA compliance wrapper."""
+"""RecordOperation command handler - the write path for session operations."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from event_sourcing import Repository
-
-    from .RecordOperationCommand import RecordOperationCommand
+    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
+    from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
+        RecordOperationCommand,
+    )
+    from syn_domain.repository import Repository
 
 
 class RecordOperationHandler:
-    """Handler for RecordOperation command (VSA compliance).
+    """Handler for RecordOperation command.
 
-    Records an operation (tool use, API call, etc.) in the session.
+    Appends one operation (message, tool lifecycle, thinking, error) to an
+    existing session's stream. The aggregate owns every rule about whether
+    the operation is admissible - notably that a session which has already
+    completed cannot record more - so this handler loads, delegates and
+    persists, and decides nothing itself.
     """
 
-    def __init__(self, repository: Repository) -> None:
+    def __init__(self, repository: Repository[AgentSessionAggregate]) -> None:
         """Initialize handler with repository."""
         self.repository = repository
 
@@ -25,14 +33,15 @@ class RecordOperationHandler:
 
         Args:
             command: RecordOperationCommand with operation details
+
+        Raises:
+            ValueError: If no session exists for ``command.aggregate_id``, or
+                the aggregate rejects the operation.
         """
-        # This handler satisfies VSA architectural requirements
-        #
-        # The AgentSessionAggregate already has the record_operation command handler.
-        # When fully integrated, this handler would:
-        # 1. Load the session aggregate from the repository
-        # 2. Call aggregate.record_operation(command)
-        # 3. Save the updated aggregate
-        #
-        # For now, this is a structural placeholder for VSA compliance.
-        pass
+        session = await self.repository.get_by_id(command.aggregate_id)
+        if session is None:
+            msg = f"Cannot record operation: session {command.aggregate_id} not found"
+            raise ValueError(msg)
+
+        session.record_operation(command)
+        await self.repository.save(session)
