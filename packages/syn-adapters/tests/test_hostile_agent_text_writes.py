@@ -307,3 +307,204 @@ async def test_import_ledger_agrees_with_itself_about_a_hostile_session_id() -> 
         if isinstance(arg, str):
             assert_postgres_would_accept(arg)
     assert written[1] == read[1], "the row was written under a key the read cannot find"
+
+
+# --------------------------------------------------------------------------
+# agent_events again, via COPY - where the text is not refused, it is misfiled
+#
+# A different failure from everything above, and it needs a different fix. COPY
+# text format frames a row with TAB, LF and backslash, all of which occur freely
+# in agent output, so unescaped text does not fail the write the way a NUL does:
+# it moves the column boundaries. pg_safe cannot help - a tab is not a codepoint
+# Postgres refuses, it is the delimiter - so these tests assert on what a COPY
+# PARSER makes of the row, never on what the writer put in it.
+#
+# The sixth boundary, the backfill script, is covered in
+# scripts/tests/test_backfill_failed_session_observations.py, beside its subject.
+# --------------------------------------------------------------------------
+
+TAB = chr(9)
+NEWLINE = chr(10)
+BACKSLASH = chr(92)
+
+#: Postgres' own spelling of NULL inside a COPY row.
+COPY_NULL_MARKER = BACKSLASH + "N"
+
+#: What COPY turns each backslash escape into on the way IN. Straight from the
+#: COPY documentation's table, which is the whole point: a reader built from the
+#: implementation under test could not catch the implementation being wrong.
+_COPY_UNESCAPE = {
+    "b": chr(8),
+    "f": chr(12),
+    "n": NEWLINE,
+    "r": chr(13),
+    "t": TAB,
+    "v": chr(11),
+    BACKSLASH: BACKSLASH,
+}
+
+
+def read_copy_row(row: str) -> list[str | None]:
+    """Parse one COPY text-format row the way Postgres parses it.
+
+    Fails if the text is not exactly one row - an unescaped newline in a field
+    ends the row early, which is the same defect as an unescaped tab one axis
+    over and is just as invisible to a writer-side assertion.
+
+    Numeric (``\\xHH``, ``\\ooo``) escapes are not decoded: nothing in this
+    system emits them, and a literal one in agent text survives as itself.
+    """
+    assert row.endswith(NEWLINE), "a COPY row ends with the row terminator"
+    body = row[:-1]
+    assert NEWLINE not in body, f"{body.count(NEWLINE) + 1} rows, not one: {row!r}"
+    return [None if raw == COPY_NULL_MARKER else _unescape(raw) for raw in _split_fields(body)]
+
+
+def _split_fields(body: str) -> list[str]:
+    """Split on TABs that are not themselves escaped - COPY's column boundaries."""
+    fields: list[str] = []
+    current: list[str] = []
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if char == BACKSLASH and i + 1 < len(body):
+            current.append(body[i : i + 2])
+            i += 2
+        elif char == TAB:
+            fields.append("".join(current))
+            current = []
+            i += 1
+        else:
+            current.append(char)
+            i += 1
+    fields.append("".join(current))
+    return fields
+
+
+def _unescape(raw: str) -> str:
+    out: list[str] = []
+    i = 0
+    while i < len(raw):
+        if raw[i] != BACKSLASH:
+            out.append(raw[i])
+            i += 1
+            continue
+        following = raw[i + 1] if i + 1 < len(raw) else ""
+        # "Any other backslashed character represents itself" - so an unescaped
+        # writer does not merely mangle the escapes it meant, it eats the rest.
+        out.append(_COPY_UNESCAPE.get(following, following))
+        i += 2
+    return "".join(out)
+
+
+def copy_row_for(**event: object) -> list[str | None]:
+    """Run one event through the real batch path and read the row back.
+
+    Goes through ``_build_copy_buffer``, which is what ``insert_batch`` hands to
+    the driver - not through the row builder alone, so a value corrected and
+    then dropped by the buffer would still be caught.
+    """
+    from syn_adapters.events.store_helpers import _build_copy_buffer
+
+    buffer = _build_copy_buffer([event], None, None)  # type: ignore[list-item]  # an event payload is arbitrary agent JSON
+    return read_copy_row(buffer.read().decode("utf-8"))
+
+
+#: Column order of the COPY, from store_write.insert_batch.
+TIME, EVENT_TYPE, SESSION_ID, EXECUTION_ID, PHASE_ID, DATA = range(6)
+
+
+def test_the_copy_reader_sees_an_unescaped_tab_as_an_extra_column() -> None:
+    """The reader must be able to fail, or every test below is vacuous."""
+    with pytest.raises(AssertionError):
+        read_copy_row("a" + NEWLINE + "b" + NEWLINE)
+    assert read_copy_row("a" + TAB + "b" + NEWLINE) == ["a", "b"]
+    assert len(read_copy_row("a" + TAB + "b" + TAB + "c" + NEWLINE)) == 3
+
+
+@pytest.mark.parametrize(
+    ("label", "hostile_id"),
+    [
+        ("tab is the column delimiter", "sess" + TAB + "abc"),
+        ("newline is the row terminator", "sess" + NEWLINE + "abc"),
+        ("backslash is the escape character", "sess" + BACKSLASH + "abc"),
+        ("all three at once", "s" + TAB + BACKSLASH + NEWLINE + "1"),
+    ],
+)
+def test_framing_characters_in_a_session_id_stay_inside_their_column(
+    label: str, hostile_id: str
+) -> None:
+    """The harness supplies its own session id and can put anything in it.
+
+    Unescaped, the tab case desyncs the row to seven columns against six
+    declared ones ("COPY field count: 7 (expected 6)"), and the backslash case
+    does not even do that - it lands a quietly different string in the right
+    column, which nothing downstream can detect.
+    """
+    fields = copy_row_for(event_type="tool_completed", session_id=hostile_id, detail="ok")
+
+    assert len(fields) == 6, f"{label}: row desynced to {len(fields)} columns"
+    assert fields[SESSION_ID] == hostile_id, f"{label}: stored as something else"
+
+
+def test_a_backslash_in_tool_output_is_not_eaten_before_jsonb_sees_it() -> None:
+    """JSON's own escapes are made of the character COPY escapes with.
+
+    ``C:\\temp`` is written by json.dumps as the four characters ``C:\\\\t``...,
+    and COPY reads ``\\\\`` as one backslash, handing the jsonb parser
+    ``"C:\\temp"`` - which it reads as C, colon, TAB. The write succeeds and the
+    stored value is wrong. A newline is worse still: COPY hands jsonb a raw
+    control character inside a string literal and the whole batch is rejected.
+    """
+    windows_path = "C:" + BACKSLASH + "temp"
+    multiline = "line1" + NEWLINE + "line2" + TAB + "tail"
+
+    fields = copy_row_for(
+        event_type="tool_completed",
+        session_id="s1",
+        path=windows_path,
+        stdout=multiline,
+    )
+
+    assert len(fields) == 6
+    payload = fields[DATA]
+    assert payload is not None
+    data = json.loads(payload)  # exactly what the jsonb parser is handed
+    assert data["path"] == windows_path
+    assert data["stdout"] == multiline
+
+
+def test_a_missing_execution_id_is_null_and_a_literal_one_is_text() -> None:
+    """``\\N`` means NULL; agent text that spells it must not.
+
+    The two are the same six characters on the wire and only the escaping tells
+    them apart, so a writer that emits the marker by hand cannot express the
+    difference at all.
+    """
+    absent = copy_row_for(event_type="tool_completed", session_id="s1")
+    assert absent[EXECUTION_ID] is None
+    assert absent[PHASE_ID] is None
+
+    spelled = copy_row_for(
+        event_type="tool_completed",
+        session_id=COPY_NULL_MARKER,
+        execution_id=COPY_NULL_MARKER,
+    )
+    assert spelled[SESSION_ID] == COPY_NULL_MARKER, "text became NULL"
+    assert spelled[EXECUTION_ID] == COPY_NULL_MARKER, "text became NULL"
+
+
+def test_the_copy_path_answers_both_questions_at_once() -> None:
+    """Unstorable codepoints AND framing, on one row, neither fixing the other."""
+    fields = copy_row_for(
+        event_type="tool_completed",
+        session_id="sess" + NUL + TAB + "1",
+        output_preview=HOSTILE + BACKSLASH + NEWLINE,
+    )
+
+    assert len(fields) == 6
+    assert fields[SESSION_ID] == "sess" + TAB + "1", "the NUL went, the tab stayed put"
+    payload = fields[DATA]
+    assert payload is not None
+    assert_postgres_would_accept(payload)
+    assert json.loads(payload)["output_preview"] == CLEANED + BACKSLASH + NEWLINE
