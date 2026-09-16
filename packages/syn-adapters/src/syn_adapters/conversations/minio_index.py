@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# insert_index normalises the ids it stores, so the two readers below normalise
+# the ids they ask for. Sanitising only the write side files the row under a name
+# no caller can name, which loses the conversation rather than failing (#1241).
+
+
 async def insert_index(
     pool: asyncpg.Pool,
     session_id: str,
@@ -69,6 +74,7 @@ async def get_session_metadata(
     session_id: str,
 ) -> dict[str, Any] | None:
     """Get session metadata from index."""
+    session_id = pg_safe(session_id)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM session_conversations WHERE session_id = $1",
@@ -84,6 +90,7 @@ async def list_sessions_for_execution(
     execution_id: str,
 ) -> list[str]:
     """Get session IDs for an execution."""
+    execution_id = pg_safe(execution_id)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """

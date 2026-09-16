@@ -547,3 +547,66 @@ async def test_projection_read_asks_for_the_key_the_write_stored() -> None:
     assert read == written, "the row was written under a key the read cannot find"
     assert deleted == written, "the delete matched nothing and said nothing"
     assert scanned == written, "the prefix scan cannot see what was written"
+
+
+@pytest.mark.asyncio
+async def test_agent_events_are_queried_under_the_id_they_were_stored_under() -> None:
+    """insert_one normalises the ids; the queries that serve them must agree.
+
+    A session whose id carried a NUL is written, and then every dashboard, cost
+    query and conversation view asks for it by the id the harness reported -
+    which is not the id it is filed under. The events exist and nothing can
+    reach them, so the session reads as having produced no telemetry at all.
+    """
+    from syn_adapters.events.queries import query_execution_events, query_session_events
+    from syn_adapters.events.store import AgentEventStore
+
+    store = AgentEventStore("postgresql://unused")
+    store._initialized = True
+    pool = FakePool()
+    store.pool = pool  # type: ignore[assignment]  # see above
+    hostile_session = "sess" + NUL + "-1"
+    hostile_execution = "exec" + LONE_SURROGATE + "-1"
+
+    await store.insert_one(
+        {
+            "event_type": "tool_completed",
+            "session_id": hostile_session,
+            "execution_id": hostile_execution,
+        }
+    )
+    stored_session, stored_execution = pool.args[2], pool.args[3]
+
+    await query_session_events(pool, hostile_session)  # type: ignore[arg-type]  # see above
+    queried_session = pool.args[0]
+    await query_execution_events(pool, hostile_execution)  # type: ignore[arg-type]  # see above
+    queried_execution = pool.args[0]
+
+    for value in (stored_session, stored_execution, queried_session, queried_execution):
+        assert_postgres_would_accept(value)
+    assert queried_session == stored_session, "the query cannot reach the events"
+    assert queried_execution == stored_execution, "the query cannot reach the events"
+
+
+@pytest.mark.asyncio
+async def test_conversation_index_is_read_under_the_id_it_was_written_under() -> None:
+    """Same asymmetry, the store that points at the transcript in object storage."""
+    from syn_adapters.conversations.minio_index import (
+        get_session_metadata,
+        list_sessions_for_execution,
+    )
+
+    pool = FakePool()
+    hostile_session = "sess" + NUL + "-1"
+    hostile_execution = "exec" + NUL + "-1"
+
+    await get_session_metadata(pool, hostile_session)  # type: ignore[arg-type]  # see above
+    looked_up = pool.args[0]
+    await list_sessions_for_execution(pool, hostile_execution)  # type: ignore[arg-type]  # see above
+    listed = pool.args[0]
+
+    for value in (looked_up, listed):
+        assert_postgres_would_accept(value)
+    # insert_index stores pg_safe(session_id); these must ask for the same thing.
+    assert looked_up == "sess-1", "the transcript is filed under a name this cannot ask for"
+    assert listed == "exec-1", "the execution's conversations are unreachable"
