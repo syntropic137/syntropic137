@@ -2691,6 +2691,12 @@ export interface components {
             error_message?: string | null;
             /** Repos */
             repos?: string[];
+            /** Task */
+            task?: string | null;
+            /** Inputs */
+            inputs?: {
+                [key: string]: string;
+            };
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
