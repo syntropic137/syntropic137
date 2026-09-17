@@ -37,6 +37,18 @@ that could not be read resolved to something success-like.
       and then explained the reporting format reported failure.
       `TestTheBlockIsDelimitedNotLocated` pins that class shut.
 
+  (5) None of that ran. Both stream processors reduced the whole stream to one
+      mutable `_last_agent_message` BEFORE the parser saw anything, so a
+      complete, terminated `success: false` block followed by any later text -
+      "done", a sign-off, text with no report in it at all - was overwritten
+      and never parsed. The phase read NOT_REPORTED, which does not refuse,
+      and completed: the issue title unchanged, one hop above where it was
+      being fixed. `TestAReportSurvivesWhatIsSaidAfterIt` drives the real
+      processors over multi-event streams, and
+      `TestTwoReportsSettleByPrecedence` pins what two claims from one phase
+      mean, in both orders, so the undefined case is not left as the next
+      variant's hiding place.
+
 WHY THE FIXTURES ALL CARRY `TASK_RESULT_END` NOW. (1), (3) and (4) are three
 answers to one question the reader should never have been asking: WHERE, in
 this prose, is the payload. First, last and nearest-marker are all guesses, and
@@ -44,6 +56,12 @@ each was defeated by text that legitimately looks like a payload. The block is
 therefore delimited instead of located, and these fixtures are written the way
 the prompt now tells an agent to write one. A fixture without the terminator
 would be testing the pre-#1256 contract.
+
+WHY A SINGLE-MESSAGE TEST WAS NEVER GOING TO BE ENOUGH EITHER, which is (5)
+in the same voice: every test here that hands a finished string to
+`AgentVerdict.from_agent_text` hands over the string the processor had already
+discarded. They pass against the broken state. Only a stream with a SECOND
+message reaches it.
 
 WHY A PARSER TEST WAS NEVER GOING TO BE ENOUGH. Before this change the parsed
 report had NO production consumer: it reached `StreamResult` and stopped there.
@@ -70,6 +88,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProces
     CodexStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    EventStreamProcessor,
     StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -78,6 +97,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
+    VerdictReader,
     VerdictStatus,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
@@ -152,8 +172,14 @@ class TestTheReportIsReadAsJson:
         assert verdict.status is VerdictStatus.SUCCESS
         assert not verdict.refuses_completion
 
-    def test_the_last_report_wins(self) -> None:
-        """An agent that restates its result has stated it last, not first."""
+    def test_a_success_restated_as_a_failure_is_a_failure(self) -> None:
+        """Renamed from `test_the_last_report_wins`: it no longer wins for that.
+
+        The assertion is unchanged and still required. What changed is the
+        reason - being LAST is no longer what decides it, so a test whose name
+        says so would pass while pinning a rule the module has stopped
+        following. `TestTwoReportsSettleByPrecedence` pins the reverse order.
+        """
         text = (
             'TASK_RESULT: {"success": true, "comments": "spoke too soon"}\nTASK_RESULT_END\n'
             'TASK_RESULT: {"success": false, "comments": "the tests fail"}\nTASK_RESULT_END'
@@ -510,6 +536,243 @@ class TestTheBlockIsDelimitedNotLocated:
             "the prompt now contains a closed TASK_RESULT block, so an agent "
             "that quotes its own instructions reports whatever the example says"
         )
+
+
+#: A phase that reported failure and then kept talking. The second message
+#: carries NO report at all - which is the whole point: nothing about it is a
+#: competing claim, and it still buried the first one.
+CHATTER_AFTER_THE_REPORT = "done"
+
+
+def _claude_processor() -> EventStreamProcessor:
+    """The production processor, wired the way `AgentExecutionHandler` wires it."""
+    return EventStreamProcessor(
+        tokens=TokenAccumulator(),
+        subagents=SubagentTracker(),
+        observability=None,
+        controller=None,
+        execution_id="exec-A",
+        phase_id="implement",
+        session_id="s1",
+        workspace_id="ws-1",
+        agent_model=None,
+    )
+
+
+def _codex_processor() -> CodexStreamProcessor:
+    return CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_RecordingCollector(),
+        controller=None,
+        execution_id="exec-A",
+        phase_id="implement",
+        session_id="s1",
+        agent_model=None,
+    )
+
+
+def _claude_said(text: str) -> str:
+    """One assistant JSONL line carrying one text block."""
+    return json.dumps(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    )
+
+
+def _codex_said(text: str) -> str:
+    """One codex `item.completed` line carrying an agent_message."""
+    return json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": text}})
+
+
+async def _claude_verdict(*lines: str) -> AgentVerdict:
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    return (await _claude_processor().process_stream(stream(), _NoopWorkspace())).verdict
+
+
+async def _codex_verdict(*lines: str) -> AgentVerdict:
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    return (await _codex_processor().process_stream(stream(), _NoopWorkspace())).verdict
+
+
+class TestAReportSurvivesWhatIsSaidAfterIt:
+    """(4): the report was read off whichever message came last, so a phase
+    that reported failure and then said one more word completed.
+
+    These drive the REAL processors over a multi-event stream, which is the
+    only place the defect was visible. Every test above this point hands a
+    finished string straight to `AgentVerdict.from_agent_text`, and the string
+    it hands over is the one the processor had already thrown away - so the
+    whole file passed against the broken state. A stream with exactly ONE
+    message still passes today and proves nothing; the second message is the
+    test.
+    """
+
+    @pytest.mark.asyncio
+    async def test_claude_still_refuses_after_the_agent_says_one_more_word(self) -> None:
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE, (
+            "a complete, terminated failure report was dropped because the "
+            "agent kept talking - the phase would be recorded as completed"
+        )
+        assert verdict.refuses_completion
+        assert verdict.comments == "the handler returns dict{} not a model"
+
+    @pytest.mark.asyncio
+    async def test_codex_still_refuses_after_the_agent_says_one_more_word(self) -> None:
+        """The same shape on the other harness - not a copy left behind."""
+        verdict = await _codex_verdict(
+            _codex_said(REPORTED_FAILURE),
+            _codex_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+        assert verdict.comments == "the handler returns dict{} not a model"
+
+    @pytest.mark.asyncio
+    async def test_the_terminal_result_line_does_not_erase_the_report_either(self) -> None:
+        """The second overwrite hop, which is not the same line of code.
+
+        Claude's terminal `result` line overwrote the remembered message once
+        more, AFTER the assistant events had already been reduced to one. It
+        repeats the agent's final turn, so on a chatty phase it repeats the
+        chatter - fixing only the assistant branch would leave the report dead
+        at the very last line of the stream.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+            json.dumps({"type": "result", "result": CHATTER_AFTER_THE_REPORT}),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_report_only_the_result_line_carries_is_still_read(self) -> None:
+        """The other half of the same hop, and the one a fix can silently lose.
+
+        Reading at parse time means every place a message is taken from the
+        stream has to do it. This stream states the report ONLY on the terminal
+        `result` line - no assistant text at all, which is what a replayed or
+        truncated capture looks like - so it is the one shape that the previous
+        end-of-stream read got right and a partial fix would regress to
+        NOT_REPORTED.
+        """
+        verdict = await _claude_verdict(json.dumps({"type": "result", "result": REPORTED_FAILURE}))
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_chatty_success_is_still_a_success(self) -> None:
+        """THE HALF THIS FIX MAY NOT BUY ITSELF WITH, pinned against itself.
+
+        Refusing more is not the goal and is trivially achievable; defect (3)
+        was exactly that trade taken by accident. A phase that reported success
+        and then signed off must still complete.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(
+                'TASK_RESULT: {"success": true, "comments": "all green"}\nTASK_RESULT_END'
+            ),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+
+
+class TestTwoReportsSettleByPrecedence:
+    """Two claims from one phase: FAILURE > SUCCESS > UNREADABLE > NOT_REPORTED.
+
+    An undefined case here is how the next variant of this bug arrives, so the
+    precedence is pinned in both directions and across both ways of splitting
+    the same reports up.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_reported_failure_is_not_taken_back_by_a_later_success(self) -> None:
+        """The direction "last wins" gets wrong, and the reason for a precedence.
+
+        `test_a_success_restated_as_a_failure_is_a_failure` covers the other
+        order. Both refuse, and that agreement IS the rule.
+        """
+        verdict = await _claude_verdict(
+            _claude_said(REPORTED_FAILURE),
+            _claude_said('TASK_RESULT: {"success": true, "comments": "fixed it"}\nTASK_RESULT_END'),
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    def test_the_same_reports_settle_the_same_way_however_they_are_split(self) -> None:
+        """One message with two blocks, or two messages with one each.
+
+        The blocks and their order are identical; only the newline between
+        them moves. If these disagreed, an agent could change what it reported
+        by choosing where to break its output, which is the defect class this
+        issue is made of.
+        """
+        failure = 'TASK_RESULT: {"success": false, "comments": "the tests fail"}\nTASK_RESULT_END'
+        success = 'TASK_RESULT: {"success": true, "comments": "fixed it"}\nTASK_RESULT_END'
+
+        together = AgentVerdict.from_agent_text(f"{failure}\n{success}")
+        apart = VerdictReader()
+        apart.read(failure)
+        apart.read(success)
+
+        assert together.status is apart.verdict.status is VerdictStatus.FAILURE
+        assert together.comments == apart.verdict.comments == "the tests fail"
+
+    @pytest.mark.asyncio
+    async def test_quoting_the_marker_early_does_not_refuse_a_clean_success(self) -> None:
+        """SUCCESS > UNREADABLE, and why that step is not decoration.
+
+        Reading every message means reading the ones that merely TALK about
+        reporting - an agent restating its instructions writes the marker with
+        no block under it. Ranking a refusal above everything seen later makes
+        that mention fatal and turns a reported success into a refusal, which
+        is defect (3) again at stream scale. Found this way, by this test.
+        """
+        verdict = await _claude_verdict(
+            _claude_said("I will finish with TASK_RESULT: and a JSON object, as instructed."),
+            _claude_said(
+                'TASK_RESULT: {"success": true, "comments": "all green"}\nTASK_RESULT_END'
+            ),
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "an earlier MENTION of the marker refused a phase that went on to "
+            "report success properly"
+        )
+        assert not verdict.refuses_completion
+
+    @pytest.mark.asyncio
+    async def test_a_marker_never_followed_by_a_report_still_refuses(self) -> None:
+        """UNREADABLE > NOT_REPORTED - the price named in the module docstring.
+
+        The mention above is forgiven because a real report outranked it. With
+        no report anywhere, a botched block is all the phase said about itself,
+        and an unreadable claim may be a failure claim. Chatter afterwards does
+        not make it silence.
+        """
+        verdict = await _claude_verdict(
+            _claude_said('TASK_RESULT: {"success": false, "comments": "forgot to close it"}'),
+            _claude_said(CHATTER_AFTER_THE_REPORT),
+        )
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
 
 
 class TestTwoExecutionsCannotOverwrite:

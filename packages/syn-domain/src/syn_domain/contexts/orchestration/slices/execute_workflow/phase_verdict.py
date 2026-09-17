@@ -16,10 +16,10 @@ be turned into a completed phase two ways at once:
 The second is why the first survived: a value nobody consumes cannot be
 observed to be wrong.
 
-THEN AGAIN, IN THE FIXES. Four defects, one shape: what the report MEANT
-changed with what the surrounding text happened to contain - and (4) says the
-shape survives being fixed HERE, because the text can be thrown away before it
-ever reaches this module.
+THEN TWICE MORE IN THE FIXES, AND ONCE ABOVE THEM. Four defects, one shape:
+what the report MEANT changed with what the surrounding text happened to
+contain. (4) is the one that says the shape survives being fixed HERE - the
+text can be thrown away before it ever reaches this module.
 
   1. FAILURE became completed - a brace inside ``comments``, above.
   2. SUCCESS became UNREADABLE - the block was located with ``rfind``, the
@@ -30,7 +30,6 @@ ever reaches this module.
      it. The literal failure example lives in the prompt every phase is sent,
      so an agent that reports success and then explains the reporting format
      reported failure.
-
   4. FAILURE became completed again, one hop upstream - the defect this
      module was written for, arriving by a route the module could not see. A
      processor reduced the whole stream to a single mutable "last message"
@@ -56,21 +55,41 @@ because whatever holds them can be overwritten. `VerdictReader` is fed each
 message as the processor sees it, so a report that has been read is already a
 verdict and there is no longer any text for a later turn to replace.
 
-WHAT TWO REPORTS MEAN, DECIDED RATHER THAN LEFT OPEN. A REFUSAL IS FINAL: once
-a message has been read as FAILURE or UNREADABLE, nothing said afterwards
-takes it back. A message carrying no report changes nothing, and otherwise the
-later report stands.
+WHAT TWO REPORTS MEAN, DECIDED RATHER THAN LEFT OPEN. THE STRONGEST CLAIM IN
+THE STREAM STANDS, on this precedence and never on which arrived first:
 
-That is chosen over "first wins" and over "last wins" because it is the only
-one of the three whose answer does not depend on the order the reports arrived
-in: success-then-failure and failure-then-success both refuse. Ordering is
-evidence about text, and every defect above came from trusting it. It is also
-the fail-closed direction - the cost of being wrong is a rerun, and the cost of
-the other direction is the completed failure this module exists to stop.
+    FAILURE  >  SUCCESS  >  UNREADABLE  >  NOT_REPORTED
 
-The rule holds per REPORT, not per message, so it settles two blocks in one
-message and two messages with one block each identically; an agent cannot
-change what it reported by choosing where to put the newline.
+So a reported failure is not taken back by a later success, a closed report
+beats an unclosed marker wherever either sits, and a message carrying no report
+changes nothing.
+
+Chosen over "first wins" and "last wins" because neither of those consults
+anything but order, and order is a property of the TEXT - which is what every
+defect above came from trusting. A precedence is commutative: the same reports
+settle the same way however they are shuffled, so no agent can change what it
+reported by reordering or re-splitting its own output. It also runs
+fail-closed, and the two directions cost very differently: being wrong here
+costs a rerun, being wrong the other way is the completed failure this module
+exists to stop.
+
+The two middle steps are not decoration, and each was a live defect caught by
+test. SUCCESS > UNREADABLE is defect (3) at stream scale: an agent that
+mentions ``TASK_RESULT:`` mid-run and then reports success cleanly must not be
+refused for the mention, exactly as an unclosed block beside a closed one is
+already prose within a single message. FAILURE > SUCCESS is defect (1) at
+stream scale, in the direction that matters.
+
+The rule holds per REPORT, not per message, so two blocks in one message and
+two messages of one block each settle identically. Among equal claims the later
+wording stands - the agent restating itself is still the agent, and nothing
+about the decision turns on it.
+
+THE PRICE OF THIS ONE, ALSO STATED. A phase that writes the marker without a
+readable block and then never reports at all is UNREADABLE and refuses, where
+before only its FINAL message was ever examined and an intervening "done" hid
+it. That is a botched report being seen rather than a new rule; the phase that
+reports properly is unaffected whenever it reports.
 
 WHAT THE EMITTER MUST GUARANTEE, because a parser contract the producer does
 not honour is not a fix. `render_workspace_prompt` must (a) instruct the
@@ -260,20 +279,32 @@ class VerdictReader:
         return self._verdict
 
 
-def _settle(earlier: AgentVerdict, later: AgentVerdict) -> AgentVerdict:
-    """Which of two verdicts from the same phase stands. See the module docstring.
+#: Weakest to strongest, so the index IS the strength. The order is the
+#: decision and is argued in the module docstring; this tuple is the only place
+#: it is written down.
+_STRENGTH: Final[tuple[VerdictStatus, ...]] = (
+    VerdictStatus.NOT_REPORTED,
+    VerdictStatus.UNREADABLE,
+    VerdictStatus.SUCCESS,
+    VerdictStatus.FAILURE,
+)
 
-    Stated once, here, because both readings go through it: folding the reports
-    inside one message, and folding one message into a whole stream. Those give
-    the same answer for the same reports however they were split up, which is
-    the property that stops a message boundary being somewhere a verdict can
-    hide.
+
+def _settle(earlier: AgentVerdict, later: AgentVerdict) -> AgentVerdict:
+    """Which of two claims by one phase stands. See the module docstring.
+
+    Stated once, here, because both readings fold through it: the reports
+    inside one message, and each message into a whole stream. Being a max over
+    a fixed precedence rather than a rule about sequence is what makes those
+    two agree - the same reports settle the same way however they were split
+    up, so a message boundary is never somewhere a verdict can hide.
+
+    Ties go to ``later`` only so that an agent restating the same claim is
+    quoted in its own final words; no decision turns on it.
     """
-    if later.status is VerdictStatus.NOT_REPORTED:
-        return earlier
-    if earlier.refuses_completion:
-        return earlier
-    return later
+    if _STRENGTH.index(later.status) >= _STRENGTH.index(earlier.status):
+        return later
+    return earlier
 
 
 @dataclass(frozen=True)
