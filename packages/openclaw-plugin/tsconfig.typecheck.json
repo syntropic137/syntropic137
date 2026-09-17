@@ -1,0 +1,24 @@
+{
+  // `tsconfig.json` is the BUILD config: it emits, so it is rooted at `src` and
+  // cannot include anything outside it. That left the tests unchecked by any
+  // compiler, which is half of why #1288's fixture drift survived - the other
+  // half being that no gate ran the suite. vitest strips types without checking
+  // them, so without this file a fixture may claim any type it likes and
+  // nothing disagrees until a test throws at runtime, if anything runs it.
+  //
+  // Checking `tests` is what gives the fixtures teeth: they are annotated with
+  // the response types from `src/types.ts`, so a change to a response shape
+  // that the fixtures do not follow is now a compile error here rather than a
+  // silent divergence from what the API returns.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // `exclude` must be restated, not just `include`. The base config excludes
+  // `tests`, and an inherited `exclude` filters whatever `include` matched, so
+  // overriding `include` alone silently checks nothing new - this file was
+  // written that way first and passed a mutation it should have caught.
+  "exclude": ["node_modules", "dist"],
+  "include": ["src", "tests"]
+}

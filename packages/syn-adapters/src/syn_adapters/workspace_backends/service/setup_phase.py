@@ -16,9 +16,10 @@ See ADR-024: Secure Token Architecture
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
@@ -182,6 +183,45 @@ class _CredentialState(StrEnum):
 _PRESENT_MARKER = "STAGED_CREDENTIAL_PRESENT"
 _ABSENT_MARKER = "STAGED_CREDENTIAL_ABSENT"
 
+#: Long enough for a `[ -e ]` or an `rm` in a healthy container; short enough
+#: that a wedged one does not hold the setup phase open. Unchanged by #1293 -
+#: what changed is that ONE expiry of it no longer decides anything.
+_EXEC_TIMEOUT_SECONDS: Final = 5
+
+#: Waits BETWEEN attempts, so there is one more attempt than there are entries.
+#: An exec that did not answer has not established anything, and treating the
+#: first such stall as a confirmed failure discarded whole executions mid-run
+#: (#1293: exec-b8221f1169d9, $3.70, phase 1 of 3, identical retry succeeded).
+#: Bounded, and deliberately small: a workspace that cannot answer in ~23s of
+#: trying still fails closed, it just no longer fails on one stumble.
+_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
+_MAX_ATTEMPTS: Final = len(_RETRY_BACKOFF_SECONDS) + 1
+
+
+class _GuardOutcome(NamedTuple):
+    """Whether a guarded step established what it needed, and what it saw trying.
+
+    The record is the point. "unable to confirm removal" with nothing else in
+    it is fatal without being diagnosable, so every attempt is carried out of
+    the retry loop and into the error the operator reads.
+    """
+
+    succeeded: bool
+    attempts: tuple[str, ...]
+
+    def report(self) -> str:
+        return (
+            f"attempts={len(self.attempts)} ["
+            + ", ".join(f"#{i} {seen}" for i, seen in enumerate(self.attempts, 1))
+            + "]"
+        )
+
+
+async def _wait_before_retry(attempt: int) -> None:
+    """Back off between attempts; no wait after the last one."""
+    if attempt < _MAX_ATTEMPTS:
+        await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+
 
 async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
     """Advisory: does the staged credential appear to exist?
@@ -201,7 +241,7 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
             f"if [ -e {_CODEX_STAGED_AUTH} ]; then echo {_PRESENT_MARKER}; "
             f"else echo {_ABSENT_MARKER}; fi",
         ],
-        timeout_seconds=5,
+        timeout_seconds=_EXEC_TIMEOUT_SECONDS,
     )
 
     if probe.exit_code != 0:
@@ -232,6 +272,76 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
     return _CredentialState.UNVERIFIABLE
 
 
+async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
+    """Force-remove the staged credential, retrying a removal that could not run.
+
+    `rm -f` is idempotent, so repeating it risks nothing, and retrying cannot
+    launder a genuine refusal into success: permission denied is still denied
+    on the fourth attempt. What it survives is a container that stalled for a
+    moment, which is otherwise indistinguishable here from one that refused.
+    """
+    attempts: list[str] = []
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        removal = await ws.execute(
+            ["rm", "-f", "--", _CODEX_STAGED_AUTH],
+            timeout_seconds=_EXEC_TIMEOUT_SECONDS,
+        )
+        attempts.append(f"exit={removal.exit_code}")
+        if removal.exit_code == 0:
+            return _GuardOutcome(succeeded=True, attempts=tuple(attempts))
+        logger.warning(
+            "SECURITY: staged codex credential removal did not succeed "
+            "(workspace=%s, attempt=%d/%d, exit=%s): %s",
+            ws.workspace_id,
+            attempt,
+            _MAX_ATTEMPTS,
+            removal.exit_code,
+            removal.stderr,
+        )
+        await _wait_before_retry(attempt)
+
+    return _GuardOutcome(succeeded=False, attempts=tuple(attempts))
+
+
+async def _recheck_staged_credential_gone(ws: ManagedWorkspace) -> _GuardOutcome:
+    """Confirm the credential is gone, retrying ONLY a probe that did not answer.
+
+    The retry is scoped by what the probe established, not by whether we liked
+    the answer:
+
+    - ABSENT answers, and confirms. Done.
+    - PRESENT answers too. The credential survived a removal that reported
+      success, which is a fault to report AT ONCE - never something to probe
+      again in the hope a later attempt says something nicer. Retrying this
+      would be the one thing that turns a guard into a coin flip, so it
+      returns immediately, failed, after a single attempt.
+    - UNVERIFIABLE - a stall, a provider error, output we cannot parse -
+      establishes nothing at all, and is the only state worth another look
+      (#1293).
+
+    Exhausting the attempts still fails: silence is not clearance.
+    """
+    attempts: list[str] = []
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        state = await _staged_credential_state(ws)
+        attempts.append(state.value)
+        if state is not _CredentialState.UNVERIFIABLE:
+            return _GuardOutcome(
+                succeeded=state is _CredentialState.ABSENT,
+                attempts=tuple(attempts),
+            )
+        logger.warning(
+            "SECURITY: staged codex credential recheck did not answer "
+            "(workspace=%s, attempt=%d/%d); retrying",
+            ws.workspace_id,
+            attempt,
+            _MAX_ATTEMPTS,
+        )
+        await _wait_before_retry(attempt)
+
+    return _GuardOutcome(succeeded=False, attempts=tuple(attempts))
+
+
 async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     """Guarantee no staged codex credential lingers under /workspace, or raise.
 
@@ -243,6 +353,10 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
     when it cannot act - permission denied, an untraversable parent - which is
     exactly the case a `[ -e ]` probe reports as "absent". Removing without
     asking first costs one exec and removes a whole class of false clearance.
+
+    Both steps are bounded-retried, and neither retry relaxes the verdict: what
+    is retried is an exec that did NOT answer, which had been counted as an
+    answer meaning "no" (#1293). An answer of "still present" fails on the spot.
     """
     if await _staged_credential_state(ws) is _CredentialState.PRESENT:
         logger.error(
@@ -251,25 +365,30 @@ async def _assert_codex_credential_removed(ws: ManagedWorkspace) -> None:
             ws.workspace_id,
         )
 
-    removal = await ws.execute(["rm", "-f", "--", _CODEX_STAGED_AUTH], timeout_seconds=5)
-    if removal.exit_code != 0:
-        # Previously unchecked. Without this, a removal that could not run left
-        # the credential in place and the guard went on to trust a recheck that
-        # cannot distinguish absence from inaccessibility.
+    removal = await _remove_staged_credential(ws)
+    if not removal.succeeded:
+        # Previously unchecked, and then checked once. Without this, a removal
+        # that could not run left the credential in place and the guard went on
+        # to trust a recheck that cannot distinguish absence from
+        # inaccessibility.
         msg = (
             f"SECURITY: unable to remove staged codex credential "
             f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id}, "
-            f"exit={removal.exit_code})"
+            f"{removal.report()})"
         )
         raise RuntimeError(msg)
 
-    if await _staged_credential_state(ws) is not _CredentialState.ABSENT:
+    recheck = await _recheck_staged_credential_gone(ws)
+    if not recheck.succeeded:
         # Not `is PRESENT`: an UNVERIFIABLE recheck has not shown the
         # credential is gone, and accepting it is the same fail-open this
-        # function exists to prevent.
+        # function exists to prevent. The report says which of the two it was,
+        # and how many looks it took, because "unable to confirm" on its own
+        # ends a run without telling anyone why.
         msg = (
             f"SECURITY: unable to confirm removal of staged codex credential "
-            f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id})"
+            f"{_CODEX_STAGED_AUTH} (workspace={ws.workspace_id}, "
+            f"{recheck.report()})"
         )
         raise RuntimeError(msg)
 
