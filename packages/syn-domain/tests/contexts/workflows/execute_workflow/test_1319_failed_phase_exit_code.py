@@ -83,8 +83,7 @@ async def _failed_event_of_a_phase_that_exited(exit_code: int) -> dict:
         execution_id=execution_id,
     )
     assert result.status == "failed", (
-        f"a phase whose agent exited {exit_code} must fail the execution; "
-        f"got {result.status!r}"
+        f"a phase whose agent exited {exit_code} must fail the execution; got {result.status!r}"
     )
 
     failed = [e for e in recorded if type(e).__name__ == "WorkflowFailedEvent"]
@@ -97,9 +96,7 @@ class TestTheDurableEventCarriesTheStatus:
 
     @pytest.mark.anyio
     @pytest.mark.parametrize("exit_code", [TIMED_OUT, SEGFAULTED])
-    async def test_a_non_zero_exit_reaches_the_workflow_failed_event(
-        self, exit_code: int
-    ) -> None:
+    async def test_a_non_zero_exit_reaches_the_workflow_failed_event(self, exit_code: int) -> None:
         """The agent exits, the run fails, and the number is IN the event.
 
         Asserted on the serialized payload rather than on the event object,
@@ -131,7 +128,10 @@ class TestTheDurableEventCarriesTheStatus:
         failure = failed_phase_outcome(TimeoutError(), "phase-001", {}, {})
 
         assert failure.exit_code is None
-        assert failure.as_command("exec-1319-none", completed_phases=0, total_phases=1).exit_code is None
+        assert (
+            failure.as_command("exec-1319-none", completed_phases=0, total_phases=1).exit_code
+            is None
+        )
 
 
 class TestTheReadModelStoresTheStatus:
