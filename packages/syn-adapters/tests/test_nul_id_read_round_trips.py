@@ -398,3 +398,148 @@ async def test_bundle_uploaded_under_a_raw_id_loads_under_the_stored_one() -> No
     )
 
     assert loaded.bundle_id == "b1"
+
+
+# --- Class 5: an id with NOTHING storable in it ------------------------------
+#
+# The classes above all keep something: "sess-<NUL>abc" is stored as "sess-abc",
+# which is still an id and still distinguishes one session from another. An id
+# built ENTIRELY of unstorable codepoints keeps nothing, and stripping alone
+# answers it with "" - the same "" for every such id, so two hostile sessions
+# become one row, and neither can be told from a session whose id was blank.
+#
+# pg_safe therefore derives an id for that case instead. These tests hold the
+# derivation to the two things that make it an id at all: a round trip finds it,
+# and two different raw ids do not become the same one.
+
+#: Two ids a harness could hand us that have no storable codepoint between them.
+#: Written via chr() for the same reason as RAW_ID above.
+ALL_NUL_ID = NUL + NUL
+ALL_SURROGATE_ID = LONE_SURROGATE + LONE_SURROGATE
+
+
+class _AgentEventsWrites:
+    """The ``agent_events`` rows, keyed the way the writer keyed them.
+
+    Speaks the two statements the two writers issue - ``copy_to_table`` for the
+    batch path and ``INSERT`` for ``insert_one`` - and the one ``SELECT``
+    ``query_session_events`` issues. It knows nothing about ids except the
+    spelling it was handed, which is the entire content of this bug: a reader
+    finds the row only if it asks under the name the writer wrote.
+    """
+
+    def __init__(self) -> None:
+        self.session_ids: list[str] = []
+
+    async def copy_to_table(
+        self, table: str, *, source: object, columns: list[str], format: str
+    ) -> str:
+        assert table == "agent_events"
+        assert format == "text"
+        raw = source.read().decode("utf-8")  # type: ignore[attr-defined]  # a BytesIO, as insert_batch builds
+        rows = [line for line in raw.split("\n") if line]
+        for line in rows:
+            # Splitting on the delimiter is enough HERE because the assertion is
+            # about which column the id lands in. What may legally be inside a
+            # column, and how COPY escapes it, is owned by
+            # test_hostile_agent_text_writes.py and deliberately not re-tested.
+            self.session_ids.append(line.split("\t")[columns.index("session_id")])
+        return f"COPY {len(rows)}"
+
+    async def execute(self, query: str, *args: object) -> str:
+        assert "INSERT INTO agent_events" in query
+        session_id = args[2]
+        assert isinstance(session_id, str)
+        self.session_ids.append(session_id)
+        return "INSERT 0 1"
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
+        assert "WHERE session_id = $1" in query
+        wanted = args[0]
+        return [
+            {
+                "time": datetime.now(UTC),
+                "event_type": "session_started",
+                "session_id": stored,
+                "execution_id": None,
+                "phase_id": None,
+                "data": "{}",
+            }
+            for stored in self.session_ids
+            if stored == wanted
+        ]
+
+
+class _Store:
+    """Just enough of AgentEventStore for the two real write functions."""
+
+    def __init__(self, table: _AgentEventsWrites) -> None:
+        self.pool = _Pool(table)
+        self._initialized = True
+
+
+async def test_the_batch_writer_stores_an_all_unstorable_id_where_a_reader_finds_it() -> None:
+    """The round trip the ``or "unknown"`` fallback broke.
+
+    ``insert_batch``, not ``insert_one``: the fallback lived in the COPY row
+    builder only, so every test that went through the single-insert path passed
+    while this one input was written under a spelling - ``"unknown"`` - that no
+    reader in the system ever asks for.
+    """
+    from syn_adapters.events.queries import query_session_events
+    from syn_adapters.events.store_write import insert_batch
+
+    table = _AgentEventsWrites()
+
+    written = await insert_batch(
+        _Store(table), [{"event_type": "session_started", "session_id": ALL_NUL_ID}]
+    )  # type: ignore[arg-type]
+
+    assert written == 1
+    # The id as an outside caller holds it - raw, never sanitised by the caller.
+    found = await query_session_events(_Pool(table), ALL_NUL_ID)  # type: ignore[arg-type]
+    assert len(found) == 1, f"reader found nothing; the row was stored as {table.session_ids}"
+    assert found[0]["session_id"] == table.session_ids[0]
+    assert table.session_ids[0] != "unknown"
+
+
+async def test_two_different_all_unstorable_ids_do_not_collapse_to_one_key() -> None:
+    """Distinctness is what "" cannot give, and the reason a digest is used.
+
+    Both ids strip to nothing. If the canonical form were the strip alone, both
+    sessions would share one key and each read would return the other's events
+    as well as its own.
+    """
+    from syn_adapters.events.queries import query_session_events
+    from syn_adapters.events.store_write import insert_batch
+
+    table = _AgentEventsWrites()
+
+    await insert_batch(_Store(table), [{"event_type": "session_started", "session_id": ALL_NUL_ID}])  # type: ignore[arg-type]
+    await insert_batch(
+        _Store(table), [{"event_type": "session_started", "session_id": ALL_SURROGATE_ID}]
+    )  # type: ignore[arg-type]
+
+    assert len(set(table.session_ids)) == 2, f"collapsed to {table.session_ids}"
+
+    for raw in (ALL_NUL_ID, ALL_SURROGATE_ID):
+        found = await query_session_events(_Pool(table), raw)  # type: ignore[arg-type]
+        assert len(found) == 1, f"{raw!r} read back {len(found)} rows, not its own one"
+
+
+async def test_both_writers_store_an_all_unstorable_id_under_the_same_key() -> None:
+    """The agreement itself, asserted between the two write paths directly.
+
+    A reader can only ask for one spelling. The round trip above proves the
+    batch path agrees with the reader; this proves ``insert_one`` and
+    ``insert_batch`` agree with each other, so which path an event happened to
+    take cannot decide whether it is ever found again.
+    """
+    from syn_adapters.events.store_write import insert_batch, insert_one
+
+    table = _AgentEventsWrites()
+
+    await insert_one(_Store(table), {"event_type": "session_started", "session_id": ALL_NUL_ID})  # type: ignore[arg-type]
+    await insert_batch(_Store(table), [{"event_type": "session_started", "session_id": ALL_NUL_ID}])  # type: ignore[arg-type]
+
+    assert table.session_ids[0] == table.session_ids[1]

@@ -28,24 +28,32 @@ def _event_to_copy_row(validated: AgentEvent) -> str:
     before the payload reaches the jsonb parser (#1241). pg_copy_row owns that;
     this function only says which value goes in which column.
 
-    It says only that. The values arrive canonical from ``to_insert_tuple`` and
-    are written through unchanged, because this is the batch spelling of a row
-    ``insert_one`` also writes, and a serializer that substitutes a value of its
-    own makes the two disagree - which is the whole bug, one layer down from
-    where anyone looks for it. An id made entirely of unstorable codepoints used
-    to land here as ``""`` and be stored as ``"unknown"``, a spelling no reader
-    ever asks for; ``pg_safe`` now derives a real id for that case, so there is
-    nothing left for a fallback here to do. ``session_id`` is ``None`` only when
-    the event carried none at all, and the column is ``NOT NULL``: that write is
-    refused, on this path and on ``insert_one`` alike, rather than stored under
-    an id nothing can be found by.
+    It says only that, for every value that IS one. The ids arrive canonical
+    from ``to_insert_tuple`` and go through unchanged, because this is the batch
+    spelling of a row ``insert_one`` also writes: a serializer that substitutes
+    an id of its own makes the two writers disagree, and then which path an
+    event happened to take decides whether a reader ever finds it again. An id
+    made entirely of unstorable codepoints used to arrive here as ``""`` and be
+    stored as ``"unknown"`` for exactly that reason. It no longer arrives that
+    way - ``pg_safe`` derives a real id for it - so the substitution below can
+    no longer reach an id, and is written as an explicit ``is None`` rather than
+    ``or`` so that it cannot start reaching one again if an empty id ever
+    becomes representable.
+
+    ``None`` is not an id, and is the one case left: the event carried no
+    session at all. ``session_id`` is ``NOT NULL``, and COPY applies the whole
+    buffer as one statement, so writing NULL here would fail the entire batch -
+    discarding every valid event beside it - to reject one event that is still
+    worth keeping, because its ``execution_id`` is intact and the cost, totals
+    and heatmap readers key on that column alone. It is stored under a name no
+    session lookup asks for, which is the truth about it: it has no session.
     """
     time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
     return pg_copy_row(
         [
             time.isoformat(),
             event_type,
-            session_id,
+            session_id if session_id is not None else "unknown",
             exec_id,
             phase_id,
             data_json,
