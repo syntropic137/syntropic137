@@ -40,6 +40,7 @@ class _TallyRow:
             raise KeyError(column)
         return getattr(self, column)
 
+
 NUL = chr(0)
 LONE_SURROGATE = chr(0xDEAD)
 
