@@ -60,6 +60,18 @@ _ROLLOUT_FIXTURE = (
 #: while the value it exists to carry arrived as None.
 CAPTURED_MODEL = "gpt-5.6-sol"
 
+#: The session that capture is filed under.
+CAPTURED_SESSION = "01a0454b-169b-7952-ac16-944da94056d4"
+
+#: Two rollouts side by side in one workspace, each naming a DIFFERENT model,
+#: so the document that comes back says which of the two files was selected.
+#: An id that matches neither, for the cases about not finding one.
+TWO_ROLLOUTS = {
+    "aaaa1111-0000-4000-8000-00000000aaaa": "gpt-5.6-sol",
+    "bbbb2222-0000-4000-8000-00000000bbbb": "gpt-5.6-codex",
+}
+NO_SUCH_SESSION = "an-id-no-file-is-filed-under"
+
 
 def _captured_records() -> RolloutDocument:
     document = json.loads(_ROLLOUT_FIXTURE.read_text())
@@ -164,6 +176,17 @@ def _write_rollout(
     return path
 
 
+def _write_two_rollouts(codex_home: Path) -> None:
+    """``TWO_ROLLOUTS`` on disk, as two files under one sessions root."""
+    for session_id, model in TWO_ROLLOUTS.items():
+        _write_rollout(
+            codex_home,
+            session_id=session_id,
+            model=model,
+            stamp=f"2026-08-27T22-15-{session_id[:2]}",
+        )
+
+
 def _model_of(document: RolloutDocument | None) -> str | None:
     """What the domain gets out of the read - the reason the read exists."""
     assert document is not None
@@ -177,11 +200,9 @@ def codex_home(tmp_path: Path) -> Path:
 
 async def test_the_rollout_codex_wrote_reaches_the_domain(codex_home: Path) -> None:
     """The whole point: a file on disk becomes a document naming a model."""
-    _write_rollout(codex_home, session_id="01a0454b-169b-7952-ac16-944da94056d4")
+    _write_rollout(codex_home, session_id=CAPTURED_SESSION)
 
-    document = await read_codex_rollout(
-        _workspace(codex_home), "01a0454b-169b-7952-ac16-944da94056d4"
-    )
+    document = await read_codex_rollout(_workspace(codex_home), CAPTURED_SESSION)
 
     assert _model_of(document) == CAPTURED_MODEL
 
@@ -204,9 +225,7 @@ async def test_a_sessions_root_holding_no_rollout_reads_as_unread(codex_home: Pa
     assert await read_codex_rollout(_workspace(codex_home), "01a0454b-169b") is None
 
 
-@pytest.mark.parametrize(
-    "wanted", ["aaaa1111-0000-4000-8000-00000000aaaa", "bbbb2222-0000-4000-8000-00000000bbbb"]
-)
+@pytest.mark.parametrize("wanted", TWO_ROLLOUTS)
 async def test_several_rollouts_are_matched_by_session_id_not_position(
     codex_home: Path, wanted: str
 ) -> None:
@@ -218,21 +237,11 @@ async def test_several_rollouts_are_matched_by_session_id_not_position(
     for both ids, so it must fail one of these two cases whatever that order
     is.
     """
-    models = {
-        "aaaa1111-0000-4000-8000-00000000aaaa": "gpt-5.6-sol",
-        "bbbb2222-0000-4000-8000-00000000bbbb": "gpt-5.6-codex",
-    }
-    for session_id, model in models.items():
-        _write_rollout(
-            codex_home,
-            session_id=session_id,
-            model=model,
-            stamp=f"2026-08-27T22-15-{session_id[:2]}",
-        )
+    _write_two_rollouts(codex_home)
 
     document = await read_codex_rollout(_workspace(codex_home), wanted)
 
-    assert _model_of(document) == models[wanted]
+    assert _model_of(document) == TWO_ROLLOUTS[wanted]
 
 
 async def test_the_only_rollout_in_the_workspace_is_this_session_s(codex_home: Path) -> None:
@@ -244,9 +253,9 @@ async def test_the_only_rollout_in_the_workspace_is_this_session_s(codex_home: P
     would leave the model silently unknown on those versions, which is the
     failure #1284 is about.
     """
-    _write_rollout(codex_home, session_id="01a0454b-169b-7952-ac16-944da94056d4")
+    _write_rollout(codex_home, session_id=CAPTURED_SESSION)
 
-    document = await read_codex_rollout(_workspace(codex_home), "an-id-no-file-is-filed-under")
+    document = await read_codex_rollout(_workspace(codex_home), NO_SUCH_SESSION)
 
     assert _model_of(document) == CAPTURED_MODEL
 
@@ -258,28 +267,40 @@ async def test_several_rollouts_and_none_matching_is_refused(codex_home: Path) -
     and answering with one of them would put a model on the artifact that
     nothing observed.
     """
-    for session_id in (
-        "aaaa1111-0000-4000-8000-00000000aaaa",
-        "bbbb2222-0000-4000-8000-00000000bbbb",
-    ):
-        _write_rollout(
-            codex_home, session_id=session_id, stamp=f"2026-08-27T22-15-{session_id[:2]}"
-        )
+    _write_two_rollouts(codex_home)
 
-    assert await read_codex_rollout(_workspace(codex_home), "an-id-no-file-is-filed-under") is None
+    assert await read_codex_rollout(_workspace(codex_home), NO_SUCH_SESSION) is None
 
 
 async def test_a_half_written_last_line_does_not_cost_the_file(codex_home: Path) -> None:
     """A rollout is written while codex runs, so it can be caught mid-line."""
-    path = _write_rollout(codex_home, session_id="01a0454b-169b-7952-ac16-944da94056d4")
+    path = _write_rollout(codex_home, session_id=CAPTURED_SESSION)
     with path.open("a") as handle:
         handle.write('{"type": "event_msg", "payload": {"info": ')
 
-    document = await read_codex_rollout(
-        _workspace(codex_home), "01a0454b-169b-7952-ac16-944da94056d4"
-    )
+    document = await read_codex_rollout(_workspace(codex_home), CAPTURED_SESSION)
 
     assert _model_of(document) == CAPTURED_MODEL
+
+
+async def test_the_port_asks_for_the_session_codex_announced(codex_home: Path) -> None:
+    """The last hop: ``ManagedWorkspace.codex_rollout`` forwards WHICH id.
+
+    This is the trap a test at either end cannot see - a hop that forwarded
+    the workspace id, or the platform session id, instead of the id codex
+    announced still returns a document, and with one rollout in the tree it
+    even returns the right one. So the tree here holds two, where forwarding
+    the wrong id can only come back empty.
+
+    Production's own method body runs: it is called unbound on the double
+    because constructing a ``ManagedWorkspace`` takes a live container.
+    """
+    _write_two_rollouts(codex_home)
+    wanted = next(iter(TWO_ROLLOUTS))
+
+    document = await ManagedWorkspace.codex_rollout(_workspace(codex_home), wanted)
+
+    assert _model_of(document) == TWO_ROLLOUTS[wanted]
 
 
 def test_the_double_reports_the_real_execute_signature() -> None:
