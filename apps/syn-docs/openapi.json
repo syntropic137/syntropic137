@@ -10428,6 +10428,13 @@
             "title": "Unpriced Observation Count",
             "default": 0
           },
+          "unmeasured_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unmeasured Fields"
+          },
           "is_finalized": {
             "type": "boolean",
             "title": "Is Finalized",
