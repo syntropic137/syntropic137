@@ -46,6 +46,7 @@ from .models import (
     PhaseExecutionInfo,
     PhaseOperationInfo,
 )
+from .phase_activity import summarize_phase_activity
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
@@ -379,6 +380,10 @@ async def _map_phase_detail(
             ]
         ),
         operations=ops,
+        # Summarised here, where `ops` are still the projection dataclasses
+        # that know how to identify a call. One hop later they are the API
+        # model and that rule is gone (#1262).
+        activity=summarize_phase_activity(phase, ops, elapsed_seconds=duration_seconds),
     )
 
 
@@ -437,6 +442,11 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # distinction the field exists to carry.
         agent_session_ids=phase.agent_session_ids,
         operations=operations,
+        # Same model, forwarded whole rather than rebuilt field by field -
+        # this constructor is the hop that has dropped a field twice (#891,
+        # #1176), and the readings that tell a timed-out phase from a stalled
+        # one are worth nothing if one of the four goes missing here (#1262).
+        activity=phase.activity,
     )
 
 

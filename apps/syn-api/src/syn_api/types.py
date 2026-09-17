@@ -838,6 +838,92 @@ class BranchObservationInfo(BaseModel):
     from "this phase is holding work no remote has"."""
 
 
+class PhaseActivityInfo(BaseModel):
+    """What a phase was DOING when it ended, and against what budget (#1262).
+
+    THE ANSWER TO "was it busy or was it stuck", for the one failure that
+    cannot answer it itself. A phase killed on its deadline exits 124, and so
+    does a phase that hung; the two need opposite responses - dispatch a
+    continuation with a bigger budget, or do not pay for that run a second
+    time - and until this model existed nothing in the execution record
+    separated them. An operator had to open the transcript, and four runs in
+    one day were triaged without one.
+
+    Read as a whole, the fields are the triage:
+
+    * many operations and a push moments before the end - it was working, and
+      the budget was too short;
+    * a handful of operations and no push for most of an hour - it stalled,
+      and a bigger budget buys another stalled hour;
+    * ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,
+      as against a 124 reported well inside the budget, which is some other
+      death wearing the same exit code.
+
+    Every field is a READING, never a verdict. Nothing here says "stalled":
+    that word is a judgement about intent, and these are four measurements
+    that let a reader make it.
+    """
+
+    operations_count: int = 0
+    """Operations this phase performed, as ``phases[].operations`` records them.
+
+    NOT ``len(operations)``, and the difference is not cosmetic: a tool call is
+    two rows there, a start and a completion, so the list's length is about
+    twice the work that happened, and was counted that way until #1061. This
+    counts the CALLS, folding both rows of one call together by
+    ``ToolOperation.call_identity``.
+
+    Populated on a phase that was killed, which is the only reason it is worth
+    serving: it is read per request from the Lane 2 timeline, where every row
+    was written as its line arrived, so a phase that made 300 calls and then
+    died reports 300. A field written only at a clean teardown would report
+    nothing for exactly the runs this exists to triage.
+    """
+
+    last_push_at: datetime | None = None
+    """When this phase last pushed, as the timeline observed it.
+
+    ``None`` means NO PUSH WAS OBSERVED - including a phase whose work was
+    never pushed at all, which is the strongest thing this model can say about
+    lost work. It is not "pushed at time zero", and it is not a claim the push
+    reached the remote: the observation is written when the push is initiated
+    (the pre-push hook, ADR-043), so this is when the phase last TRIED.
+
+    Covers the legacy ``git_push_started``/``git_push_completed`` spellings as
+    well as today's ``git_push``. A rule that knew one of the three would
+    answer "never pushed" for a session recorded under another, which is the
+    expensive direction to be wrong in - it reads as a stall.
+    """
+
+    seconds_since_last_push: float | None = None
+    """Seconds from ``last_push_at`` to the end of the phase.
+
+    The stall signal stated as the number an operator actually compares. "The
+    end" is the same instant ``elapsed_seconds`` measures to: the completion
+    for a phase that finished, and the moment of the read for one still
+    running, so a live phase's silence grows while a dead one's is frozen.
+
+    ``None`` when nothing was pushed - ``elapsed_seconds`` is then the whole
+    answer, because the silence is the entire phase - or when the phase has no
+    end to measure to.
+    """
+
+    elapsed_seconds: float | None = None
+    """How long the phase ran. The same measurement ``duration_seconds``
+    reports on the phase itself, restated beside the budget it has to be read
+    against, and taken from that one value rather than computed again.
+
+    ``None`` is genuinely unknown, never zero.
+    """
+
+    timeout_seconds: int | None = None
+    """The wall-clock budget the phase was given, from its workflow definition.
+
+    ``None`` means the run stated no phase definitions and nothing knows the
+    budget - not that there was none, and not zero.
+    """
+
+
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
 
@@ -901,6 +987,16 @@ class PhaseExecution(BaseModel):
     verifiably unchanged when in truth nothing looked.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, summarised from `operations`
+    and the phase's budget (#1262).
+
+    Summarised HERE, one hop before the response, rather than at the response
+    boundary: the count has to fold a call's two rows together by
+    `ToolOperation.call_identity`, and that rule lives on the projection's
+    dataclass, which is the shape `_map_phase_detail` still holds and this
+    model no longer does.
+    """
 
 
 class ExecutionDetailFull(BaseModel):

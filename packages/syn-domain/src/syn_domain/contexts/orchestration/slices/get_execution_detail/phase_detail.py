@@ -35,6 +35,26 @@ class PhaseDetail:
     """
     started_at: str | None = None
     completed_at: str | None = None
+    timeout_seconds: int | None = None
+    """The wall-clock budget this phase was given, in seconds, or ``None``.
+
+    Read against ``duration_seconds`` it is what separates the two outcomes
+    that both report exit 124: a phase that ran to its cap and was killed
+    mid-work needs a bigger budget, and a phase that reported 124 well inside
+    its cap died of something else (#1262). Neither is legible from an elapsed
+    time alone, because the number that would make it legible is the one
+    nobody recorded.
+
+    Not on ``PhaseStartedEvent``: the budget is already domain truth on
+    ``WorkflowExecutionStarted``'s ``phase_definitions``, so the projection
+    reads it from the event it already handles rather than widening a second
+    event. That also makes it retroactive - a rebuild recovers the budget of
+    every run already in the store, including the ones that died before this
+    field existed.
+
+    ``None`` means the run stated no phase definitions, which is every
+    execution started without them; it is not a budget of zero.
+    """
     error_message: str | None = None
     deliverable_recovered: bool = False
     """True when this phase's deliverable was recovered from its transcript
@@ -56,6 +76,7 @@ class PhaseDetail:
         *,
         session_id: str | None = None,
         started_at: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> PhaseDetail:
         """Create a phase in running state."""
         return cls(
@@ -64,15 +85,32 @@ class PhaseDetail:
             status="running",
             session_id=session_id,
             started_at=started_at,
+            timeout_seconds=timeout_seconds,
         )
 
     @classmethod
-    def completed(cls, phase_id: str, name: str, event_data: dict[str, Any]) -> PhaseDetail:
-        """Create a completed phase from event data."""
+    def completed(
+        cls,
+        phase_id: str,
+        name: str,
+        event_data: dict[str, Any],
+        *,
+        timeout_seconds: int | None = None,
+    ) -> PhaseDetail:
+        """Create a completed phase from event data.
+
+        ``timeout_seconds`` is passed in rather than read from ``event_data``
+        because a completion event does not restate the budget - the run
+        stated it once at the start, and the projection is holding it. This
+        path is the one a phase takes when its PhaseStarted was never
+        projected, and leaving the budget off here is how a field ends up set
+        on the common path and absent on the rare one (#1300).
+        """
         return cls(
             phase_id=phase_id,
             name=name,
             status="completed",
+            timeout_seconds=timeout_seconds,
             session_id=event_data.get("session_id"),
             artifact_id=event_data.get("artifact_id"),
             input_tokens=event_data.get("input_tokens", 0),
@@ -101,6 +139,7 @@ class PhaseDetail:
             "duration_seconds": self.duration_seconds,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
         }
@@ -122,6 +161,7 @@ class PhaseDetail:
             duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
         )

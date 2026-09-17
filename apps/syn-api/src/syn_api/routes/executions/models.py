@@ -7,7 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 # Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
-from syn_api.types import BranchObservationInfo  # noqa: TC001
+from syn_api.types import BranchObservationInfo, PhaseActivityInfo  # noqa: TC001
 from syn_shared.display import EM_DASH
 
 
@@ -109,6 +109,18 @@ class PhaseExecutionInfo(BaseModel):
     carry that, so this reports the two readings and stops.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, and against what budget (#1262).
+
+    The four readings that tell a phase killed on its deadline from one that
+    hung - both exit 124, and they need opposite responses. `PhaseActivityInfo`
+    states what each one means and what its nulls do not mean.
+
+    Served so that an operator, or the agent triaging the run, can decide
+    without opening a transcript. `operations` below carries the same activity
+    row by row; this is the summary of it, and `operations_count` is
+    deliberately not that list's length.
+    """
 
 
 class ExecutionDetailResponse(BaseModel):

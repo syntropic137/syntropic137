@@ -74,7 +74,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 10  # Bumped: phase counts are now recorded (#1147)
+    VERSION = 11  # Bumped: per-phase timeout budgets are now recorded (#1262)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -96,6 +96,32 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
+
+    @staticmethod
+    def _phase_budgets(event_data: dict) -> dict[str, int]:
+        """Each phase's wall-clock budget, keyed by phase id, from the run's start.
+
+        The budget is stated once, on ``WorkflowExecutionStarted``, and the
+        phase that later consumes it does not restate it. So it is read here
+        and held on the execution record until ``on_phase_started`` has a
+        phase to attach it to - the projection's store IS its memory, and a
+        map on the instance would not survive a restart mid-run.
+
+        Phases with no stated budget are simply absent, so an unknown budget
+        stays ``None`` downstream rather than becoming a number nobody set.
+        """
+        raw = event_data.get("phase_definitions")
+        if not isinstance(raw, list):
+            return {}
+        budgets: dict[str, int] = {}
+        for definition in raw:
+            if not isinstance(definition, dict):
+                continue
+            phase_id = definition.get("phase_id")
+            timeout = definition.get("timeout_seconds")
+            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
+                budgets[phase_id] = timeout
+        return budgets
 
     @staticmethod
     def _find_phase(
@@ -179,6 +205,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
             "completed_phases": 0,
+            # Held here, not served from here: `on_phase_started` moves each
+            # budget onto the phase that it belongs to, which is where a
+            # reader needs it next to that phase's elapsed time (#1262).
+            "phase_budgets": self._phase_budgets(event_data),
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
@@ -199,11 +229,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phases = existing.get("phases", [])
 
         if self._find_phase(phases, phase_id) is None:
+            budgets = existing.get("phase_budgets") or {}
             phase = PhaseDetail.running(
                 phase_id=phase_id,
                 name=event_data.get("phase_name", phase_id),
                 session_id=event_data.get("session_id"),
                 started_at=event_data.get("started_at"),
+                timeout_seconds=budgets.get(phase_id),
             )
             phases.append(phase.to_dict())
             existing["phases"] = phases
@@ -264,7 +296,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             _, phase = found
             self._update_phase_metrics(phase, event_data)
         else:
-            new_phase = PhaseDetail.completed(phase_id or "", phase_id or "", event_data)
+            budgets = existing.get("phase_budgets") or {}
+            new_phase = PhaseDetail.completed(
+                phase_id or "",
+                phase_id or "",
+                event_data,
+                timeout_seconds=budgets.get(phase_id or ""),
+            )
             phases.append(new_phase.to_dict())
 
         # Aggregate totals
