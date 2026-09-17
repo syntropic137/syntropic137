@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import pytest
 
+from syn_domain.storable_text import pg_safe
+
 # Use centralized event type constants - NO hardcoded strings!
 from syn_shared.events import TOOL_EXECUTION_STARTED
 
@@ -127,9 +129,36 @@ class TestAgentEventStoreIntegration:
             ]
         )
 
-        events = await event_store.query(session_id)
-        errors = [e["data"].get("error") for e in events]
-        assert errors == ["beforemiddleafter", "beforemiddleafter"]
+        # THE HOSTILE ID IS ITS OWN SESSION, and that is the whole point.
+        #
+        # Event 1 was written under `session_id + chr(0)`. This assertion used
+        # to read `errors == ["beforemiddleafter", "beforemiddleafter"]`, and
+        # it passed because that id STRIPPED to `session_id`: the event landed
+        # in the CLEAN session's stream. One harness emitting a NUL could write
+        # into another session's history, and a reader of the clean session
+        # could not tell. That is the collision #1241 closed, and this test was
+        # asserting it.
+        clean = await event_store.query(session_id)
+        assert len(clean) == 1, "a NUL-bearing session id wrote into the clean session"
+
+        hostile_session = pg_safe(session_id + chr(0))
+        assert hostile_session != session_id, "the two ids must not share a key"
+        theirs = await event_store.query(hostile_session)
+        assert len(theirs) == 1, "the hostile session's own event is unreachable"
+
+        # Both stored, both readable, and neither carrying a codepoint Postgres
+        # refuses - which is what this test exists to prove against a real
+        # server rather than against the values handed to the driver.
+        for row in (*clean, *theirs):
+            stored = row["data"].get("error")
+            assert isinstance(stored, str)
+            assert stored.startswith("beforemiddleafter"), stored
+            assert chr(0) not in stored
+
+        # Same raw error in both, so the same stored spelling in both: the
+        # derivation depends only on the input, which is what lets a writer and
+        # a reader agree without coordinating.
+        assert clean[0]["data"].get("error") == theirs[0]["data"].get("error")
 
     @pytest.mark.asyncio
     async def test_insert_batch_performance(self, event_store, session_id):
