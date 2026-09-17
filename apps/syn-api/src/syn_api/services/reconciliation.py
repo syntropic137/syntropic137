@@ -271,6 +271,12 @@ async def _reconcile_one(
     from syn_domain.contexts.orchestration import FailExecutionCommand
 
     execution_id = summary.workflow_execution_id
+    # Declared before the `try` so the guarded exception below can still report
+    # a salvage that already happened. The salvage is persisted by the SAME
+    # `repository.save` that persists the failure, but it is a real event on
+    # the aggregate the moment it returns, and a count that forgets it
+    # understates what was recovered.
+    salvaged_phase: str | None = None
     try:
         aggregate = await repository.get_by_id(execution_id)
         if aggregate is None:
@@ -310,9 +316,14 @@ async def _reconcile_one(
         await repository.save(aggregate)
     except Exception:
         logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
-        return _ReconcileOutcome()
+        # `failed=0` because the execution was NOT terminalised, and
+        # `salvaged` from what actually happened before the exception. Written
+        # out rather than returning a bare default, because collapsing both to
+        # zero is what the inline version did not do and is a behaviour change
+        # hiding inside a refactor.
+        return _ReconcileOutcome(failed=0, salvaged=int(salvaged_phase is not None))
 
-    return _ReconcileOutcome(failed=1, salvaged=1 if salvaged_phase is not None else 0)
+    return _ReconcileOutcome(failed=1, salvaged=int(salvaged_phase is not None))
 
 
 @dataclass(frozen=True)
