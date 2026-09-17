@@ -43,7 +43,9 @@ THE_FIND = (
 )
 
 
-def _inspection_failure(exit_code: int, *, timed_out: bool = False) -> WorkspaceInspectionFailedError:
+def _inspection_failure(
+    exit_code: int, *, timed_out: bool = False
+) -> WorkspaceInspectionFailedError:
     return WorkspaceInspectionFailedError(
         doing="listing the repositories in the workspace",
         failure=FailedWorkspaceCommand(

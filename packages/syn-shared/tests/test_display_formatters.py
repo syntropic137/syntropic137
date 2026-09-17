@@ -13,6 +13,7 @@ from syn_shared.display import (
     compute_duration_seconds,
     format_cost,
     format_duration_seconds,
+    format_exit_code,
     format_model_compact,
     format_phase,
     format_repos,
@@ -367,3 +368,36 @@ class TestFormatRepos:
         self, value: list[str] | tuple[str, ...] | None, expected: str | None
     ) -> None:
         assert format_repos(value) == expected
+
+
+@pytest.mark.unit
+class TestFormatExitCode:
+    """The contract the #1295 consumers rely on, including the branch they cannot reach."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (0, "0"),
+            (1, "1"),
+            (127, "127"),
+            (-11, "-11 (SIGSEGV: Segmentation fault)"),
+            (-9, "-9 (SIGKILL: Killed)"),
+            (-15, "-15 (SIGTERM: Terminated)"),
+            # Not SIGHUP: every isolation provider writes -1 for "no status
+            # was ever collected", so decoding it would name a cause that
+            # never happened.
+            (-1, "-1 (no exit status)"),
+            # CPython leaves returncode None until the process is reaped.
+            (None, "no exit status"),
+        ],
+    )
+    def test_renders_expected_string(self, value: int | None, expected: str) -> None:
+        assert format_exit_code(value) == expected
+
+    def test_a_number_that_is_no_signal_says_so_instead_of_raising(self) -> None:
+        """``signal.Signals`` RAISES on an out-of-range number, and this runs on
+        the path where something has already gone wrong - so the fallback is the
+        difference between a bad diagnostic and losing the diagnostic entirely.
+        No real ``returncode`` reaches it, which is exactly why it needs a test.
+        """
+        assert format_exit_code(-999) == "-999 (unknown signal 999)"

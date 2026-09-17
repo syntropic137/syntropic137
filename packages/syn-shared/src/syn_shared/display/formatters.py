@@ -313,7 +313,7 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     return f"{first} +{len(items) - 1}"
 
 
-def format_exit_code(exit_code: int) -> str:
+def format_exit_code(exit_code: int | None) -> str:
     """Render a process exit status so nobody has to decode it by hand.
 
     Callers hold an ``exit_code`` from the workspace isolation port and want to
@@ -336,6 +336,12 @@ def format_exit_code(exit_code: int) -> str:
     to recognise as SIGSEGV unaided, on a failure class that was already
     expensive.
 
+    ``None`` is the same fact arriving by the other route: CPython types a
+    ``returncode`` as ``int | None`` and leaves it ``None`` until the process
+    is reaped, so a caller holding one has no status either. Taking it here
+    rather than making every caller pick a stand-in keeps that decision in
+    one place.
+
     ``-1`` is the exception, and it is not a signal. Every isolation provider
     writes ``exit_code=-1`` as a sentinel for "we never got a status at all"
     (a missing container, a timeout, a raised exception), so decoding it as
@@ -354,9 +360,10 @@ def format_exit_code(exit_code: int) -> str:
     That distinction is what #1295 turns on, but it depends on the caller's
     transport, which a formatter cannot see.
     """
+    if exit_code is None or exit_code == _NO_EXIT_STATUS:
+        return "no exit status" if exit_code is None else f"{exit_code} (no exit status)"
     if exit_code >= 0:
         return str(exit_code)
-    if exit_code == _NO_EXIT_STATUS:
         return f"{exit_code} (no exit status)"
     signal_number = -exit_code
     try:
