@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.storable_text import pg_safe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -404,16 +405,23 @@ class TimescaleSessionCostQuery:
         two things that have to agree about pricing, and nothing would force
         them to.
         """
+        session_id = pg_safe(session_id)
         return (await self.calculate_many([session_id])).get(session_id)
 
     async def calculate_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
         """Calculate cost for many sessions in a fixed number of round-trips.
 
-        Sessions with no cost data are absent from the result, exactly as
-        ``calculate`` returns ``None`` for them. Order is not meaningful; the
-        caller indexes by session id.
+            Sessions with no cost data are absent from the result, exactly as
+            ``calculate`` returns ``None`` for them. Order is not meaningful; the
+            caller indexes by session id - by the STORED id, which is what the
+            result is keyed by and what the rows carry.
+
+            # agent_events holds every id in its stored (sanitised) form, because
+        # AgentEvent's validator applies pg_safe on the way in. A read binds text
+        # against those columns, so it has to ask for the same spelling or it
+        # matches nothing and reports that as "nothing was recorded" (#1241).
         """
-        ids = list(dict.fromkeys(session_ids))
+        ids = list(dict.fromkeys(pg_safe(sid) for sid in session_ids))
         if not ids:
             return {}
         page = await self._fetch_page(ids)

@@ -52,6 +52,13 @@ _guarded_conn: contextvars.ContextVar[AsyncConnection | None] = contextvars.Cont
 #: untrusted text in a TEXT primary key. Every method below normalises it
 #: through ``pg_safe`` before it is used as a key, a lookup or a lock - together,
 #: so the three cannot disagree about which row a session owns (#1241).
+#:
+#: ``execution_id`` gets the same treatment. It is host-minted today
+#: (``str(uuid4())``) and so cannot carry an unstorable codepoint, but it is the
+#: OTHER half of this table's primary key: normalising one half and not the
+#: other means the row a write creates and the row a read asks for are only
+#: guaranteed to agree while that provenance holds, and nothing at this
+#: boundary states or enforces it.
 CREATE_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS delegate_import_ledger (
         execution_id           TEXT   NOT NULL,
@@ -165,6 +172,7 @@ class PostgresImportLedger:
 
     async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
         await self._ensure_table()
+        execution_id = pg_safe(execution_id)
         harness_session_id = pg_safe(harness_session_id)
         async with self._connection() as conn:
             row = await conn.fetchrow(ALREADY_BILLED_SQL, execution_id, harness_session_id)
@@ -181,6 +189,7 @@ class PostgresImportLedger:
         self, execution_id: str, harness_session_id: str, billed: BilledUsage
     ) -> None:
         await self._ensure_table()
+        execution_id = pg_safe(execution_id)
         harness_session_id = pg_safe(harness_session_id)
         async with self._connection() as conn:
             await conn.execute(
@@ -207,6 +216,7 @@ class PostgresImportLedger:
         the real lock is held until that connection is recycled.
         """
         await self._ensure_table()
+        execution_id = pg_safe(execution_id)
         harness_session_id = pg_safe(harness_session_id)
         key = _advisory_key(execution_id, harness_session_id)
         async with self._pool.acquire() as conn:

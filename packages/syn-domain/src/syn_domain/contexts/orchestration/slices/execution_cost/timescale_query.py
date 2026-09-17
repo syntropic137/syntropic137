@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.read_models.execution_cost import 
     UNATTRIBUTED_PHASE_ID,
     ExecutionCost,
 )
+from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
@@ -690,7 +691,13 @@ class TimescaleExecutionCostQuery:
 
         Prefers session_summary events (authoritative). Falls back to
         token_usage aggregation, grouped by model, for in-progress executions.
+
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
         """
+        execution_id = pg_safe(execution_id)
         async with self._pool.acquire() as conn:
             token_rows, has_summary = await self._resolve_token_rows(conn, execution_id)
             if not token_rows:

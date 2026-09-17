@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.postgres_text import pg_safe
+
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 
@@ -36,10 +38,16 @@ def filter_values(wanted: object) -> tuple[object, ...]:
     by Python equality, ``count`` by ``str()`` because Postgres compares the
     text that ``->>`` extracts. Cardinality is the decision they share; the
     comparison is not.
+
+    Sanitised for the same agree-with-Postgres reason. Both stores hold a
+    record in its ``pg_safe`` form, so both must compare against a filter
+    value in that form; a raw one asks for text neither store ever wrote and
+    gets the silent empty answer this function was named to make visible
+    (#1241).
     """
     if isinstance(wanted, (list, tuple, set, frozenset)):
-        return tuple(wanted)
-    return (wanted,)
+        return tuple(pg_safe(v) for v in wanted)
+    return (pg_safe(wanted),)
 
 
 def apply_filters(

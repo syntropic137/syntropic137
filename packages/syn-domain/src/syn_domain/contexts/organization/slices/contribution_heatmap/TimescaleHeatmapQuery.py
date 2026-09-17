@@ -14,6 +14,7 @@ from syn_domain.contexts.agent_sessions import CANONICAL_SESSION_USAGE_CTE, Cost
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
 )
+from syn_domain.storable_text import pg_safe
 from syn_shared.events import GIT_COMMIT
 
 # Every observation belonging to a session that STARTED inside the window -
@@ -225,9 +226,16 @@ class TimescaleHeatmapQuery:
         end: date,
         execution_ids: set[str] | None,
     ) -> list[asyncpg.Record]:
+        """Run one of the three templates, scoped to ``execution_ids`` if given.
+
+        The one place this class binds an id, so the one place it has to be
+        spelled the way agent_events holds it: AgentEvent's validator applies
+        pg_safe on the way in, and a filter carrying a codepoint that stripped
+        matches no row and reports that as an empty heatmap (#1241).
+        """
         sql = self._render(template, execution_ids is not None)
         if execution_ids is not None:
-            return await conn.fetch(sql, start, end, list(execution_ids))
+            return await conn.fetch(sql, start, end, [pg_safe(eid) for eid in execution_ids])
         return await conn.fetch(sql, start, end)
 
     def _price_by_day_and_model(

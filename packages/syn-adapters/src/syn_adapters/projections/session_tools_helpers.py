@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
+from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projections.session_tools_dispatch import row_to_operation
 from syn_adapters.projections.session_tools_queries import query_session_tools
 from syn_shared.events import (
@@ -78,6 +79,11 @@ async def get_session_tools(
     if pool is None:
         logger.debug("No pool available, returning empty list")
         return []
+
+    # Every row in agent_events was written with a sanitised session id
+    # (AgentEvent's validator), so a lookup must ask for the same spelling -
+    # see syn_adapters.events.queries, which reads the same table (#1241).
+    session_id = pg_safe(session_id)
 
     try:
         async with pool.acquire() as conn:

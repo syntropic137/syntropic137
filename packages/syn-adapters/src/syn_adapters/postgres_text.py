@@ -18,8 +18,9 @@ frame a COPY row, or what we do about either.
 
 Those are two questions, not one, and they have different answers:
 
-* :func:`pg_safe` / :func:`pg_json` remove codepoints Postgres cannot hold.
-  Getting this wrong fails the write, loudly.
+* :func:`pg_safe` (defined in :mod:`syn_domain.storable_text` and re-exported
+  here) and :func:`pg_json` remove codepoints Postgres cannot hold. Getting
+  this wrong fails the write, loudly.
 * :func:`pg_copy_row` escapes the characters COPY's text format reads as
   framing. Getting this wrong does NOT fail the write - it silently stores the
   data in the wrong columns.
@@ -31,9 +32,10 @@ and escaping a tab does nothing about a NUL.
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
+
+from syn_domain.storable_text import pg_safe
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -42,42 +44,11 @@ if TYPE_CHECKING:
 
 __all__ = ["pg_copy_row", "pg_json", "pg_safe"]
 
-# What Postgres refuses inside a text value - in a TEXT column, and as an escape
-# in a JSONB document:
-#
-#   U+0000          a text value is NUL-terminated internally, so a NUL has no
-#                   representation at all; jsonb rejects the escaped form for
-#                   that same reason.
-#   U+D800..U+DFFF  a lone surrogate is not valid UTF-8. Python holds them
-#                   without complaint - json.loads accepts a bare surrogate
-#                   escape out of an agent's own JSONL, and surrogateescape
-#                   decoding manufactures them from undecodable bytes - so they
-#                   arrive here from agent output the same way a NUL does.
-_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
-
-
-def pg_safe[T](value: T) -> T:
-    """Return ``value`` with every codepoint Postgres cannot store removed.
-
-    Recurses into dicts, lists and tuples so a whole event payload can be handed
-    over in one call; anything that is not a string is returned unchanged. Only
-    real unstorable codepoints go: a literal ``"\\u0000"`` *text* sequence is six
-    ordinary characters and survives untouched.
-    """
-    return cast("T", _sanitize(value))
-
-
-def _sanitize(value: object) -> object:
-    if isinstance(value, str):
-        return _UNSTORABLE.sub("", value) if _UNSTORABLE.search(value) else value
-    if isinstance(value, dict):
-        items = cast("dict[object, object]", value).items()
-        return {_sanitize(k): _sanitize(v) for k, v in items}
-    if isinstance(value, list):
-        return [_sanitize(v) for v in cast("list[object]", value)]
-    if isinstance(value, tuple):
-        return tuple(_sanitize(v) for v in cast("tuple[object, ...]", value))
-    return value
+# :func:`pg_safe` and the character class it strips now live in
+# :mod:`syn_domain.storable_text`, one layer down, because the read services
+# that must ask for the same spelling live in ``syn_domain`` and cannot import
+# this package. It is re-exported above, so this module remains the one import
+# an adapter needs for "make this storable".
 
 
 def pg_json(data: Mapping[str, JsonValue]) -> str:
