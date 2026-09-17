@@ -754,3 +754,119 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
 
         assert cache.files == {"p-1": files}
         assert cache.primary == {"p-1": "r"}
+
+
+@pytest.mark.unit
+class TestHandleCollectArtifactsAssemblesIdentity:
+    """The one hop nothing above drives: `_handle_collect_artifacts` reading
+    `self._runtime.agent_for(...)` and handing the result to the real
+    `ArtifactCollectionHandler` / `ArtifactCollector`, landing on the saved
+    artifact.
+
+    `TestACodexPhasesArtifactNamesWhoRanIt`
+    (test_announced_model_is_not_the_requested_one.py) proves the same fact
+    about `PhaseRuntime.agent_for` and `ArtifactCollector` separately, by
+    calling `runtime.agent_for(...)` itself and handing the result to the
+    collector by hand - which is what the processor does, not a drive of the
+    processor doing it. A regression that drops the identity between the two
+    calls INSIDE `_handle_collect_artifacts` (wrong keyword, wrong order, a
+    stray default) leaves every test on either side of that join green,
+    because neither side ever calls `_handle_collect_artifacts` itself. This
+    one does, and reads the identity off what actually got saved.
+
+    `test_collecting_artifacts_records_the_files_it_collected` above also
+    drives `_handle_collect_artifacts`, but replaces `ArtifactCollectionHandler`
+    wholesale with a `MagicMock`, so the `agent=` keyword the method builds is
+    handed to a double that never looks at it - `handler.handle.call_args`
+    is never inspected either. This test uses the real handler and the real
+    collector so the identity has somewhere real to land, and is read back
+    off the repository rather than off a mock's call log.
+    """
+
+    async def test_the_agent_identity_reaches_the_saved_artifact(self) -> None:
+        from syn_domain.contexts.artifacts import AgentIdentity
+        from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+            TodoAction,
+            TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            AgentExecutionCompletedCommand,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            AgentConfiguration,
+            ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+            StreamResult,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+            AgentExecutionResult,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+            SubagentTracker,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.test_artifact_collector import (
+            MockArtifactRepo,
+            MockWorkspace,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+            TokenAccumulator,
+        )
+
+        processor = _make_processor()
+        artifact_repo = MockArtifactRepo()
+        processor._artifact_repo = artifact_repo
+        processor._journal.append = AsyncMock()
+
+        processor._runtime.attach_workspace(
+            "verify",
+            workspace=MockWorkspace(
+                collected_files=[("artifacts/output/deliverable.md", b"# Verified")]
+            ),  # type: ignore[arg-type]
+            workspace_cm=AsyncMock(),
+            agent_env={},
+            claude_cmd=[],
+        )
+        processor._runtime.record_agent_run(
+            "verify",
+            AgentExecutionResult(
+                stream_result=StreamResult(
+                    line_count=1,
+                    interrupt_requested=False,
+                    interrupt_reason=None,
+                    agent_task_result=None,
+                    announced_model="gpt-5.6-sol",
+                ),
+                tokens=TokenAccumulator(),
+                subagents=SubagentTracker(),
+                command=AgentExecutionCompletedCommand(
+                    execution_id="exec-1", phase_id="verify", session_id="sess-1"
+                ),
+            ),
+        )
+
+        todo = TodoItem(
+            execution_id="exec-1",
+            action=TodoAction.COLLECT_ARTIFACTS,
+            phase_id="verify",
+            session_id="sess-1",
+        )
+        # The requested model is deliberately the OTHER provider's alias
+        # (#1284): a codex phase never runs it, so if it turned up on the
+        # saved artifact it could only have arrived by falling back to
+        # `agent_config`, not by carrying what the runtime observed.
+        phase = ExecutablePhase(
+            phase_id="verify",
+            name="Verify",
+            order=1,
+            prompt_template="x",
+            agent_config=AgentConfiguration(provider="codex", model="haiku"),
+        )
+        aggregate = MagicMock()
+        aggregate.workflow_id = "w1"
+
+        await processor._handle_collect_artifacts(todo, phase, aggregate, [], PhaseOutputCache())
+
+        assert [saved.agent for saved in artifact_repo.saved] == [
+            AgentIdentity(provider="codex", model="gpt-5.6-sol")
+        ]
