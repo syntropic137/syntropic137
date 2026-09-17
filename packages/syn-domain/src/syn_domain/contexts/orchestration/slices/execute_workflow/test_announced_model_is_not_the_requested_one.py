@@ -9,10 +9,17 @@ than its parent - so "requested" written under the name "ran" would read as
 evidence in exactly the cases where there is none, which is worse than the field
 being absent.
 
-So the processor below is constructed with a REQUESTED model and fed a stream
+So each processor below is constructed with a REQUESTED model and fed a stream
 announcing a different one, and every assertion is about which of the two comes
 out. The requested value never does, including when the stream says nothing at
 all.
+
+BOTH HARNESSES ARE HERE ON PURPOSE. The second model in this platform is always
+codex - it runs implement's verify phase and review's falsify phase - so a
+cross-model claim that can name only the claude side is no more provable than
+one that can name neither. The codex cases sit beside the claude ones rather
+than in a file of their own because they are the same claim about the other half
+of it, and the pair is what a reader needs to see at once.
 """
 
 from __future__ import annotations
@@ -21,8 +28,15 @@ import json
 
 import pytest
 
+from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
@@ -30,6 +44,22 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_artifact_collector import (
+    MockArtifactRepo,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_artifact_collector import (
+    MockWorkspace as CollectedWorkspace,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
+    _FIXTURES_DIR,
+    _RecordingCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
+    _lines as _file_to_stream,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
+    _make_processor as _make_codex_processor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_event_stream_processor import (
     MockWorkspace,
@@ -127,10 +157,6 @@ def _runtime() -> PhaseRuntime:
 
 
 def _run(announced_model: str | None) -> AgentExecutionResult:
-    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-        StreamResult,
-    )
-
     return AgentExecutionResult(
         stream_result=StreamResult(
             line_count=1,
@@ -177,3 +203,181 @@ class TestTheRuntimeHandsBackWhoRan:
 
     def test_a_phase_that_never_ran_an_agent_has_no_model(self) -> None:
         assert _runtime().agent_for("verify", provider="claude").model is None
+
+
+# ── the codex half ───────────────────────────────────────────────────────────
+
+#: What a codex phase actually asks for. `AgentConfiguration.model` defaults to
+#: the Claude alias "haiku", and `_is_codex_model` deliberately does not forward
+#: it to `codex exec`, so codex runs its ChatGPT-account default instead. That
+#: makes this the single most dangerous value in the file: it is in scope at
+#: collection time, and recording it would state that a claude model ran the
+#: phase whose only job is to be a DIFFERENT model from claude.
+REQUESTED_BY_A_CODEX_PHASE = "haiku"
+CODEX_ANNOUNCED = "gpt-5.6-sol"
+CODEX_LATER = "gpt-5.6-codex"
+
+
+def _codex_line(model: object) -> str:
+    """A `thread.started` that also names a model.
+
+    HYPOTHETICAL, and the only fixture here that is: no captured codex stream
+    carries a model on any event (checked across all nine fixtures and the real
+    `codex exec --json` recording), which is why the golden-recording test
+    below asserts None. This line exists to prove the value is CARRIED when it
+    is present rather than dropped on the floor - the failure mode that a test
+    asserting only today's None cannot distinguish from no code at all.
+
+    `thread.started` is where codex already announces its own identity (the
+    thread id the rollout is keyed by), so it is the event a model would most
+    plausibly arrive on; the parser reads a top-level `model` off whichever
+    event carries it rather than keying on this one.
+    """
+    return json.dumps({"type": "thread.started", "thread_id": "01a04903-c2f9", "model": model})
+
+
+def _codex_thread_started() -> str:
+    """The `thread.started` a real codex stream opens with - no model on it."""
+    return json.dumps({"type": "thread.started", "thread_id": "01a04903-c2f9"})
+
+
+def _codex_turn_completed() -> str:
+    return json.dumps({"type": "turn.completed", "usage": {"input_tokens": 12, "output_tokens": 3}})
+
+
+async def _codex_result(
+    *lines: str, requested: str | None = REQUESTED_BY_A_CODEX_PHASE
+) -> StreamResult:
+    proc, _ = _make_codex_processor(_RecordingCollector(), agent_model=requested)
+    return await proc.process_stream(_lines_to_stream(*lines), MockWorkspace())
+
+
+class TestTheCodexStreamIsReadTheSameWay:
+    """The codex parser is a sibling of the claude one, not a lesser one.
+
+    It used to build its `StreamResult` with no `announced_model` argument at
+    all, so the field took the dataclass default. The value that reached the
+    artifact was correct and entirely unpinned: nothing here would have noticed
+    the requested model being substituted, and no code path would have picked up
+    a model if codex started reporting one.
+    """
+
+    async def test_the_real_recording_names_no_model_and_is_not_filled_in(self) -> None:
+        """The golden `codex exec --json` capture, unedited.
+
+        Codex names its model on DISK (`turn_context.payload.model`, which is
+        where `transcript_usage` reads it) but nowhere on the wire, so None here
+        is the honest answer and not a gap to be papered over. It must not
+        become "haiku", and it must not become the string "unknown" either - a
+        sentinel that reads like a model id would flow onward as a value, which
+        is the mistake that once priced unspecified codex phases as a real
+        model (see `syn_shared/pricing`).
+        """
+        proc, _ = _make_codex_processor(
+            _RecordingCollector(), agent_model=REQUESTED_BY_A_CODEX_PHASE
+        )
+        result = await proc.process_stream(
+            _file_to_stream(_FIXTURES_DIR / "codex_exec_recording.jsonl"), MockWorkspace()
+        )
+        assert result.announced_model is None
+        assert result.announced_model != REQUESTED_BY_A_CODEX_PHASE
+        # The run itself worked - this is a stream that reached its terminal
+        # turn, not one that died before it could announce anything.
+        assert result.error_reason is None
+
+    async def test_a_codex_stream_that_names_a_model_is_believed(self) -> None:
+        result = await _codex_result(_codex_line(CODEX_ANNOUNCED), _codex_turn_completed())
+        assert result.announced_model == CODEX_ANNOUNCED
+        assert result.announced_model != REQUESTED_BY_A_CODEX_PHASE
+
+    async def test_the_first_announcement_wins(self) -> None:
+        """Same rule and same reason as the claude side and as the leader
+        thread id: a line arriving late must not rebind the identity."""
+        result = await _codex_result(
+            _codex_line(CODEX_ANNOUNCED), _codex_line(CODEX_LATER), _codex_turn_completed()
+        )
+        assert result.announced_model == CODEX_ANNOUNCED
+
+    @pytest.mark.parametrize("blank", ["", "   ", None, 4])
+    async def test_a_line_that_says_nothing_usable_is_not_taken(self, blank: object) -> None:
+        """Both parsers reject these identically because they share the rule,
+        rather than each restating it and drifting apart."""
+        result = await _codex_result(_codex_line(blank), _codex_turn_completed())
+        assert result.announced_model is None
+
+    async def test_cli_noise_and_echoed_braces_announce_nothing(self) -> None:
+        """A codex phase's stdout carries the agent's own output too (ADR-043),
+        so a line that looks like JSON is not evidence of anything."""
+        result = await _codex_result(
+            "warning: `--full-auto` is deprecated; use `--sandbox workspace-write` instead.",
+            '{"model": "not-an-event"',
+            _codex_turn_completed(),
+        )
+        assert result.announced_model is None
+
+    async def test_a_truncated_stream_announces_nothing(self) -> None:
+        """No terminal turn, so no report - and still no invented model."""
+        result = await _codex_result()
+        assert result.announced_model is None
+
+
+class TestACodexPhasesArtifactNamesWhoRanIt:
+    """The hop that matters: stream -> runtime -> the artifact record.
+
+    Every layer between was already provider-agnostic and already tested with
+    `provider="codex"`, so this is the join that was missing - and it is the one
+    a test at either end cannot see, because a value dropped at the constructor
+    in between satisfies both.
+    """
+
+    async def _collect(self, agent: AgentIdentity) -> MockArtifactRepo:
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        await collector.collect_from_workspace(
+            workspace=CollectedWorkspace(
+                collected_files=[("artifacts/output/deliverable.md", b"# Verified")]
+            ),  # type: ignore[arg-type]
+            workflow_id="w1",
+            phase_id="verify",
+            execution_id="exec-1",
+            session_id="sess-1",
+            phase_name="Verify",
+            output_artifact_types=("markdown",),
+            agent=agent,
+        )
+        return repo
+
+    async def _agent_after_running(self, *lines: str) -> AgentIdentity:
+        runtime = _runtime()
+        runtime.record_agent_run(
+            "verify",
+            AgentExecutionResult(
+                stream_result=await _codex_result(*lines),
+                tokens=TokenAccumulator(),
+                subagents=SubagentTracker(),
+                command=AgentExecutionCompletedCommand(
+                    execution_id="exec-1", phase_id="verify", session_id="sess-1"
+                ),
+            ),
+        )
+        # `provider` is the phase's own config, exactly as
+        # WorkflowExecutionProcessor passes it: we launched the binary.
+        return runtime.agent_for("verify", provider="codex")
+
+    async def test_the_model_a_codex_stream_named_reaches_the_artifact(self) -> None:
+        agent = await self._agent_after_running(
+            _codex_line(CODEX_ANNOUNCED), _codex_turn_completed()
+        )
+        repo = await self._collect(agent)
+        assert [a.agent for a in repo.saved] == [
+            AgentIdentity(provider="codex", model=CODEX_ANNOUNCED)
+        ]
+
+    async def test_a_codex_phase_that_named_nothing_still_names_its_harness(self) -> None:
+        """Today's real case, and the one the workflow prompts already handle:
+        the artifact proves WHICH HARNESS ran - the cross-model question - and
+        reports the model as absent rather than guessed.
+        """
+        agent = await self._agent_after_running(_codex_thread_started(), _codex_turn_completed())
+        repo = await self._collect(agent)
+        assert [a.agent for a in repo.saved] == [AgentIdentity(provider="codex", model=None)]
