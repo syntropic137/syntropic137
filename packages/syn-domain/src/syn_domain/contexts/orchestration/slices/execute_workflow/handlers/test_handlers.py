@@ -11,6 +11,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.artifacts import UNREPORTED_AGENT
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -558,6 +559,7 @@ class TestArtifactCollectionHandler:
             session_id="sess-1",
             phase_name="Research",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert isinstance(result.command, ArtifactsCollectedCommand)
@@ -606,6 +608,7 @@ class TestArtifactCollectionHandler:
             session_id="sess-1",
             phase_name="Research",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.command.artifact_ids == []

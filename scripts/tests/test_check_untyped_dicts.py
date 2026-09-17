@@ -34,6 +34,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_untyped_dicts import (
+    MAPPING_NAMES,
+    UNCONSTRAINED_VALUES,
     Occurrence,
     contains_dict_shaped_state,
     find_dict_shaped_state,
@@ -589,6 +591,62 @@ class TestAssignmentRenamesDoNotHide:
         """``D = dict`` is not an erased mapping until someone parameterises it."""
         assert count("D = dict\nE = Mapping\n") == 0
 
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            (
+                "quoted under a TypeAlias annotation",
+                'from typing import TypeAlias\nD: TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted under a dotted TypeAlias annotation",
+                'import typing\nD: typing.TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted by a type statement",
+                'type D = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename of a dotted constructor",
+                'type D = "typing.Dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename, chained onwards",
+                'type D = "dict"\nE = D\nx: E[str, Any]\n',
+            ),
+        ],
+    )
+    def test_an_alias_may_write_the_renamed_name_in_quotes(self, label: str, source: str) -> None:
+        """A quoted identifier renames exactly as the unquoted one does (#1268).
+
+        ``D: TypeAlias = "dict"`` is a forward reference to a constructor, and
+        the erasure still arrives at ``D[str, Any]``. Reading only the unquoted
+        spelling leaves the table not knowing ``D``, so the use below it counts
+        nothing at all - the number stays still for a spelling nobody listed.
+        """
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_a_quoted_alias_of_a_whole_type_is_not_a_rename(self) -> None:
+        """``D: TypeAlias = "dict[str, Any]"`` writes a type, so it is not a rename.
+
+        The unquoted rule already separates ``D = dict`` from ``D = dict[str,
+        Any]``; quoting must not collapse that distinction. The alias is a
+        complete type expression and is counted once where it stands, not
+        again at every use.
+        """
+        source = 'from typing import TypeAlias\nD: TypeAlias = "dict[str, Any]"\nx: D\ny: D\n'
+
+        assert count(source) == 1
+
+    def test_a_plain_string_assignment_is_not_an_alias(self) -> None:
+        """``D = "dict"`` binds a string at runtime, and must stay unrecognised.
+
+        This is the boundary that keeps the quoted form honest. Reading every
+        string assignment as a rename would enrol ``NAME = "dict"`` in a
+        settings module and invent mappings out of ordinary data.
+        """
+        assert count('D = "dict"\nx: D[str, Any]\n') == 0
+
     def test_an_unrelated_rename_is_not_invented(self) -> None:
         """Resolution must not turn every assigned name into a mapping."""
         source = """
@@ -1035,3 +1093,109 @@ class TestModuleAwareShapes:
         )
 
         assert module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+
+@pytest.mark.unit
+class TestAskingForACategoryRatherThanAList:
+    """``names_any_of``: whether a type expression writes any of some names.
+
+    ``contains_dict_shaped_state`` answers for one fixed shape parameterised by
+    a set of VALUE types, which is exactly what a caller cannot use when the
+    thing it needs to reject is a category. "Any mapping, whatever its values"
+    is not a set of value types, and neither is "names ``Any`` or ``object``
+    anywhere". The projection-handler gate needed both, and until it had them
+    it was reduced to listing the spellings it happened to know - which let
+    ``dict[str, str]``, ``object`` and a ``TypedDict`` straight through (#1281).
+
+    The point of putting it here rather than in the gate is that it inherits
+    rename resolution and quoted spellings, so a gate built on it cannot be
+    spelled around in the ways #1188 and #1248 documented.
+    """
+
+    @staticmethod
+    def _annotation(source: str) -> tuple[ast.Module, ast.expr]:
+        tree = ast.parse(source)
+        annotations = [
+            node.annotation
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign | ast.arg) and node.annotation is not None
+        ]
+        return tree, annotations[-1]
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            "dict",
+            "dict[str, str]",
+            "dict[str, Any]",
+            "Mapping[str, Row]",
+            "list[dict[str, int]]",
+            '"dict[str, str]"',
+            "dict[str, str] | None",
+        ],
+    )
+    def test_every_mapping_answers_regardless_of_its_parameters(self, annotation: str) -> None:
+        """The value type is not part of the question.
+
+        ``dict[str, Row]`` constrains its values perfectly and is still read as
+        ``value["key"]``. A caller that objects to the string-keyed access has
+        no value-type list to write, so it must be able to ask without one.
+        """
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    @pytest.mark.parametrize("annotation", ["Row", "int", "list[str]", "Envelope[Event]"])
+    def test_a_type_that_names_no_mapping_does_not_answer(self, annotation: str) -> None:
+        """The other direction, or the question above is answered by "yes"."""
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    @pytest.mark.parametrize("annotation", ["object", "Any", "Any | None", "typing.Any"])
+    def test_the_erasures_are_reachable_as_a_category_too(self, annotation: str) -> None:
+        """``object`` erases as much as ``Any``; neither is a mapping.
+
+        Both are invisible to ``contains_dict_shaped_state``, which only ever
+        looks for a mapping to put them inside. A parameter annotated plain
+        ``object`` is the gap that closed (#1281).
+        """
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, UNCONSTRAINED_VALUES)
+
+    def test_a_rename_is_undone_before_the_name_is_matched(self) -> None:
+        """One line, no import, nothing at the point of use to notice.
+
+        The #1248 lesson: when you close a spelling, close the class it belongs
+        to. A category question that could be evaded by ``D = dict`` would be
+        the same defect in a new API.
+        """
+        tree, node = self._annotation("D = dict\ndef f(x: D[str, str]) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_a_literal_argument_is_a_value_and_is_not_read(self) -> None:
+        """``Literal["dict"]`` holds a string, not a declaration.
+
+        Pinned because reading it would make the string ``"dict"`` - a status
+        value, a namespace name - answer as a mapping, which is the false
+        positive that makes a gate built on this unusable.
+        """
+        tree, node = self._annotation('def f(x: Literal["dict"]) -> None: ...')
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_annotated_metadata_after_the_first_argument_is_not_read(self) -> None:
+        """Same rule, the other construct whose arguments are not all types."""
+        tree, node = self._annotation('def f(x: Annotated[str, "dict"]) -> None: ...')
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_a_dotted_spelling_answers_on_its_trailing_name(self) -> None:
+        """``t.Mapping`` is ``Mapping``, and ``t`` is a module, not a type."""
+        tree, node = self._annotation("def f(x: t.Mapping[str, str]) -> None: ...")
+        shapes = module_shapes(tree)
+
+        assert shapes.names_any_of(node, MAPPING_NAMES)
+        assert not shapes.names_any_of(node, {"t"})

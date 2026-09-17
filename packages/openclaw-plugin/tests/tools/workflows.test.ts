@@ -80,6 +80,22 @@ describe("synExecuteWorkflow", () => {
     expect(result.content).toContain("syn_get_execution");
   });
 
+  it("names the deployment the execution was started on (issue #1264)", async () => {
+    // A tool that hands back an execution ID and no host lets a run land on
+    // one deployment while the caller reasons about another. Point this client
+    // somewhere other than the default so the reported host cannot be a
+    // coincidence, and pin it to the URL the request actually used.
+    const vps = new SyntropicClient({ apiUrl: "http://100.114.86.77:8137" });
+    mockFetch.mockResolvedValueOnce(jsonResponse(executeResponse));
+
+    const result = await synExecuteWorkflow(vps, { workflow_id: "wf-issue-001" });
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(result.content).toContain(new URL(url as string).origin);
+    expect(result.content).toContain("http://100.114.86.77:8137");
+    expect(result.content).toContain("exec-abc-123");
+  });
+
   it("sends correct POST body", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(executeResponse));
 
