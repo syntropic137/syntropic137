@@ -200,9 +200,23 @@ class FakeAgentExecutionHandler:
         return cls(interrupt=False, exit_code=0, produces=produces, says=says)
 
     @classmethod
-    def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
-        """Simulates an agent failure with the given non-zero exit code."""
-        return cls(interrupt=False, exit_code=exit_code)
+    def failed(
+        cls,
+        exit_code: int = 1,
+        produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
+    ) -> FakeAgentExecutionHandler:
+        """Simulates an agent failure with the given non-zero exit code.
+
+        ``produces`` and ``says`` mean what they mean on ``success`` above, and
+        are here because a failing agent is not an agent that did nothing. A
+        phase whose process died after writing its deliverable leaves the file
+        on disk exactly as a successful one does; until this double could
+        express that, the only failures any test could drive were empty ones,
+        and an empty workspace is the case where losing the output costs
+        nothing (#1321).
+        """
+        return cls(interrupt=False, exit_code=exit_code, produces=produces, says=says)
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
