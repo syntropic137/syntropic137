@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import logging
 import re
+import signal
 from datetime import UTC, datetime
 from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
 EM_DASH = "\u2014"
+
+_NO_EXIT_STATUS = -1
+"""Sentinel every isolation provider uses for "no status was ever collected"."""
 
 
 def format_tokens(n: int | None) -> str:
@@ -307,3 +311,56 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     if len(items) == 1:
         return first
     return f"{first} +{len(items) - 1}"
+
+
+def format_exit_code(exit_code: int) -> str:
+    """Render a process exit status so nobody has to decode it by hand.
+
+    Callers hold an ``exit_code`` from the workspace isolation port and want to
+    put it in a message. That integer carries three different meanings and the
+    reader is expected to know which is which - so this decides, once, here:
+
+    ==========  =====================  =====================================
+    Value       Renders as             Means
+    ==========  =====================  =====================================
+    ``0``/``3`` ``"0"`` / ``"3"``      the process exited with that status
+    ``-11``     ``"-11 (SIGSEGV:      the process was killed by that signal
+                Segmentation fault)"``
+    ``-1``      ``"-1 (no exit        no status was ever collected
+                status)"``
+    ==========  =====================  =====================================
+
+    A negative value is CPython's documented ``Popen.returncode`` convention:
+    ``-N`` means the child was terminated by signal ``N``. Issue #1295 is the
+    cost of not saying so - repeated ``exit -11`` reports that an operator had
+    to recognise as SIGSEGV unaided, on a failure class that was already
+    expensive.
+
+    ``-1`` is the exception, and it is not a signal. Every isolation provider
+    writes ``exit_code=-1`` as a sentinel for "we never got a status at all"
+    (a missing container, a timeout, a raised exception), so decoding it as
+    SIGHUP - which is what the arithmetic alone would say - would invent a
+    cause that never happened. Fabricating a plausible one on a diagnostic
+    path is worse than the bare number this replaces, so it is named for what
+    it is instead.
+
+    Positive codes render exactly as before, so existing messages that carry
+    one are unchanged.
+
+    WHOSE status this is is a separate question and deliberately not answered
+    here: for a ``docker exec`` the negative code belongs to the local
+    ``docker`` client process, not to the command inside the container (a
+    contained process killed by a signal comes back as a POSITIVE ``128+N``).
+    That distinction is what #1295 turns on, but it depends on the caller's
+    transport, which a formatter cannot see.
+    """
+    if exit_code >= 0:
+        return str(exit_code)
+    if exit_code == _NO_EXIT_STATUS:
+        return f"{exit_code} (no exit status)"
+    signal_number = -exit_code
+    try:
+        named = signal.Signals(signal_number)
+    except ValueError:
+        return f"{exit_code} (unknown signal {signal_number})"
+    return f"{exit_code} ({named.name}: {signal.strsignal(signal_number)})"

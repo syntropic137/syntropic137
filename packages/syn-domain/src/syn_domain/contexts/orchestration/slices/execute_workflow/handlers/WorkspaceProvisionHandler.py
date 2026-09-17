@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     PhaseOutputCache,
 )
 from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_shared.display import format_exit_code
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -550,7 +551,9 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
+            detail = setup_result.stderr or (
+                f"exit code {format_exit_code(setup_result.exit_code)} (no stderr output)"
+            )
             msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             raise RuntimeError(msg)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
