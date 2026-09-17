@@ -14,6 +14,7 @@ vi.mock('../useExecutionStream', () => ({
 }))
 
 import { getExecution } from '../../api/executions'
+import { useExecutionStream } from '../useExecutionStream'
 
 const mockGetExecution = vi.mocked(getExecution)
 
@@ -95,6 +96,114 @@ describe('useExecutionData live polling (#1048)', () => {
     expect(mockGetExecution).toHaveBeenCalledTimes(2)
 
     await vi.waitFor(() => expect(result.current.execution?.total_tokens).toBe(500))
+  })
+
+  // The #1095 defect: the poll interval was a constant and the poll had no idea
+  // whether the last request had come back. Once an endpoint got slower than
+  // the interval, every tick opened another connection and they stacked.
+  describe('an endpoint slower than the poll interval (#1095)', () => {
+    it('opens no second request while one is outstanding, however far past the interval', async () => {
+      mockGetExecution.mockResolvedValueOnce(makeExecution({ status: 'running' }))
+
+      const { result } = renderHook(() => useExecutionData('exec-1'))
+      await vi.waitFor(() => expect(result.current.execution?.status).toBe('running'))
+      expect(mockGetExecution).toHaveBeenCalledTimes(1)
+
+      // The endpoint now degrades: this answer will not come back at all.
+      let releaseSlow: (value: ExecutionDetailResponse) => void = () => {}
+      mockGetExecution.mockReturnValue(
+        new Promise<ExecutionDetailResponse>((resolve) => {
+          releaseSlow = resolve
+        }),
+      )
+
+      // Six poll intervals pass with that request still on the wire. A fixed 3s
+      // interval that cannot see it fires on every one of them - seven calls in
+      // total, which is the pile-up seen in pg_stat_activity. One poll opened
+      // it; nothing may open another until it settles.
+      await vi.advanceTimersByTimeAsync(18_000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(2)
+
+      // And the loop is waiting, not wedged: when the answer lands it resumes.
+      mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+      releaseSlow(makeExecution({ status: 'running' }))
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mockGetExecution.mock.calls.length).toBeGreaterThan(2)
+    })
+
+    it('coalesces a burst of SSE frames into one follow-up request, not one each', async () => {
+      mockGetExecution.mockResolvedValueOnce(makeExecution({ status: 'running' }))
+
+      const { result } = renderHook(() => useExecutionData('exec-1'))
+      await vi.waitFor(() => expect(result.current.execution?.status).toBe('running'))
+
+      let releaseSlow: (value: ExecutionDetailResponse) => void = () => {}
+      mockGetExecution.mockReturnValue(
+        new Promise<ExecutionDetailResponse>((resolve) => {
+          releaseSlow = resolve
+        }),
+      )
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(2)
+
+      // `OperationRecorded` arrives on every tool call an agent makes, so a
+      // burst of twenty while one request is outstanding is an ordinary
+      // afternoon. The poll is not the only thing that can pile up: these are
+      // the second trigger on the same resource, and they must not each open a
+      // connection of their own.
+      const onEvent = vi.mocked(useExecutionStream).mock.calls.at(-1)?.[1]?.onEvent
+      expect(onEvent).toBeDefined()
+      for (let i = 0; i < 20; i++) {
+        onEvent?.({
+          type: 'event',
+          event_type: 'OperationRecorded',
+          execution_id: 'exec-1',
+          data: {},
+          timestamp: '2026-03-23T00:00:00Z',
+        })
+      }
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mockGetExecution).toHaveBeenCalledTimes(2)
+
+      // One follow-up when the outstanding answer lands - not twenty queued
+      // behind it, which would be the pile-up deferred rather than prevented.
+      mockGetExecution.mockResolvedValue(makeExecution({ status: 'running' }))
+      releaseSlow(makeExecution({ status: 'running' }))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mockGetExecution).toHaveBeenCalledTimes(3)
+    })
+
+    it('spaces the next poll by how long the last answer took, not by the interval', async () => {
+      mockGetExecution.mockResolvedValueOnce(makeExecution({ status: 'running' }))
+
+      const { result } = renderHook(() => useExecutionData('exec-1'))
+      await vi.waitFor(() => expect(result.current.execution?.status).toBe('running'))
+
+      // 12s is four times the 3s floor and is not any constant in the
+      // production code: only a gap derived from THIS latency can produce it.
+      const LATENCY_MS = 12_000
+      mockGetExecution.mockImplementation(
+        () =>
+          new Promise<ExecutionDetailResponse>((resolve) => {
+            setTimeout(() => resolve(makeExecution({ status: 'running' })), LATENCY_MS)
+          }),
+      )
+
+      // The floor still applies while the endpoint is unproven, so one poll
+      // goes out - and stays out for twelve seconds.
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(LATENCY_MS)
+
+      // Now the loop has seen a 12s answer. Ten more seconds pass - three floor
+      // intervals, on which a constant-paced poll would have fired three times.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(2)
+
+      // Crossing the observed latency is what releases the next one.
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(mockGetExecution).toHaveBeenCalledTimes(3)
+    })
   })
 
   it('polls a mid-phase execution the same as a zero-phase one', async () => {

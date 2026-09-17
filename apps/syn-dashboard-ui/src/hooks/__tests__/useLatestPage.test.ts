@@ -19,7 +19,7 @@
  * size" is expressible here and nowhere above it.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 
 import { listAllExecutions } from '../../api/executions'
@@ -219,6 +219,41 @@ describe('useLatestPage', () => {
 
     await waitFor(() => expect(result.current.result.rows).toEqual([{ id: 'b' }]))
     expect(fetchPage.mock.calls.at(-1)?.[0]).toBe(FIRST_PAGE)
+  })
+
+  // The list-shaped half of #1095. The poll used to be a `setInterval` beside
+  // this hook, and a timer outside it cannot see the fetch the hook does on
+  // mount - so a list whose FIRST page took longer than the interval was
+  // already being polled while that first page was still on the wire. Asking
+  // again had to move inside for the count to be enforceable at all.
+  describe('a list endpoint slower than its poll interval', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    /** Rows are still moving, so this list wants to poll - from mount onwards. */
+    const pollEvery3s = () => 3000
+
+    it('does not poll a first page that has not come back yet', async () => {
+      const pending = deferred<ListPage<{ id: string }>>()
+      const fetchPage = vi.fn(() => pending.promise)
+
+      renderHook(() => useLatestPage(fetchPage, FIRST_PAGE, pollEvery3s))
+      await vi.waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(1))
+
+      // Six intervals with that page still outstanding.
+      await vi.advanceTimersByTimeAsync(18_000)
+      expect(fetchPage).toHaveBeenCalledTimes(1)
+
+      // It resumes once the page lands - after a gap that respects how long
+      // that page actually took, which is why 20s and not 3s.
+      pending.resolve(page(['a'], 1))
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(fetchPage.mock.calls.length).toBeGreaterThan(1)
+    })
   })
 
   it('leaves the last good page on screen when a request fails', async () => {
