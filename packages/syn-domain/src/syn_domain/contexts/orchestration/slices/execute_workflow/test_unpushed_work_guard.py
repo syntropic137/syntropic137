@@ -377,6 +377,112 @@ async def test_d_a_phase_that_changed_nothing_succeeds(clone: _Clone) -> None:
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
 
+# --------------------------------------------------------------------------
+# What the phase's own declaration decides (#1308).
+#
+# `test_b` above and `test_the_lockfile_a_build_tool_rewrote...` below stage
+# THE SAME EVIDENCE - one modified tracked file, uncommitted - and must end
+# differently. Nothing in the diff separates them, which is the whole finding:
+# on exec-e7e34af42553 a bootstrap phase ran `cargo check`, `Cargo.lock` was
+# rewritten, and the phase was failed for it. What separates them is
+# `delivers_repo_changes`, declared by the phase in the workflow definition.
+# --------------------------------------------------------------------------
+
+
+def _rewrite_a_tracked_lockfile(clone: _Clone, content: str) -> None:
+    """Stage #1308's evidence: one TRACKED file, modified, uncommitted.
+
+    Tracked and already pushed, in its own commit, before it is dirtied - so
+    what the gate sees afterwards is exactly the one porcelain line the
+    incident reported and nothing else. An untracked file would be a different
+    status code and a different question.
+    """
+    (clone.path / "Cargo.lock").write_text("written by cargo check\n")
+    clone.git("add", "Cargo.lock")
+    clone.git("commit", "-m", "track a lockfile")
+    clone.git("push", "origin", _BRANCH)
+    (clone.path / "Cargo.lock").write_text(content)
+    # `clone.git` strips, so the porcelain status code arrives without its
+    # leading space.
+    assert clone.git("status", "--porcelain") == "M Cargo.lock", (
+        "this fixture must leave exactly one modified tracked file"
+    )
+
+
+async def test_the_lockfile_a_build_tool_rewrote_does_not_fail_a_reporting_phase(
+    clone: _Clone,
+) -> None:
+    """THE #1308 INCIDENT, in the shape it actually had.
+
+    A tracked lockfile, rewritten by a tool the phase ran while inspecting the
+    toolchain, in a phase whose deliverable is a markdown report. The phase
+    completes and nothing is quarantined: there was never a deliverable in this
+    working tree for the workspace's death to take.
+
+    The path is named `Cargo.lock` because that is what the incident named, and
+    for no other reason - the gate is told nothing about filenames and must
+    not be. `test_b` proves the same path in the other declaration still fails.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+
+    await clone.run_gate(delivers_repo_changes=False)
+
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_reporting_phase_that_committed_still_fails_and_keeps_its_work(
+    clone: _Clone,
+) -> None:
+    """THE GATE'S PURPOSE, which the declaration must not be able to switch off.
+
+    No build tool writes a commit, so a commit is an authoring act whatever the
+    phase declared. A phase that says it delivers no repository changes and
+    commits anyway has produced work, and that work must still be saved and the
+    phase must still fail - otherwise the declaration is a way to opt out of
+    #1184 entirely, one line at a time.
+    """
+    authored = clone.commit("investigation.py", "committed by a phase that said it would not\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.reachable_in_origin(authored, _QUARANTINE_REF)
+
+
+async def test_a_reporting_phase_holding_commits_quarantines_its_whole_tree(
+    clone: _Clone,
+) -> None:
+    """The declaration decides what COUNTS as work, never what gets SAVED.
+
+    Once a phase is failing for a commit, everything beside that commit is
+    worth keeping - including the uncommitted change the declaration said was
+    not a deliverable, because the judgement that produced that verdict is now
+    known to be about a phase that authored something after all.
+
+    So this holds both at once, and asserts the discounted change on BOTH
+    halves of the output, because they are built from different things and only
+    one of them is automatic. The commit's tree comes from `git add --all`,
+    which was never selective; the error's file list is `_UnsavedWork.files`,
+    which is chosen, and choosing the discounted subset there would hand an
+    operator a ref whose contents their own recovery notes do not mention.
+    """
+    clone.commit("investigation.py", "committed by a phase that said it would not\n")
+    (clone.path / "README.md").write_text("and the tool dirtied this too\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:README.md") == (
+        "and the tool dirtied this too"
+    ), "the quarantine commit is missing the working tree it was built from"
+    reported = [line.strip() for line in str(raised.value).splitlines()]
+    # Two spaces: the report prints the porcelain line verbatim, and its status
+    # code is " M" - modified in the tree, unstaged.
+    assert "uncommitted:  M README.md" in reported, (
+        f"the quarantine saved a path the report it printed does not name: {reported}"
+    )
+
+
 async def test_e_quarantining_touches_no_branch_and_no_tag(clone: _Clone) -> None:
     """(e) The quarantine push writes one ref and moves nothing else."""
     before = clone.origin_refs()
@@ -805,6 +911,54 @@ async def test_d_a_failed_inspection_leaves_teardown_to_the_failure_path(
 
     run.session.complete_failure.assert_called_once()
     assert not run.workspace_still_held, "the failure path left the workspace open"
+
+
+async def test_the_declaration_reaches_the_gate_from_the_phase_being_completed(
+    clone: _Clone,
+) -> None:
+    """THE HOP #1308 WAS LOST AT, asserted against the aggregate.
+
+    `_handle_complete_phase` was handed a `TodoItem` and nothing else, while
+    `_dispatch` had the `ExecutablePhase` one frame up and gave it to every
+    other handler. So the declaration had nowhere to arrive, and no test of the
+    guard alone can show that it now does: hand the gate the right boolean
+    directly and every one of them stays green with this hop deleted.
+
+    What is asserted is therefore the aggregate being TOLD the phase completed,
+    which is the outcome the incident got wrong - a phase that had done its job
+    reported as failed - with the dirty tree still sitting in the workspace and
+    only the phase's own declaration standing between the two.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+    run = _PhaseRun(clone.workspace)
+
+    await run.complete(delivers_repo_changes=False)
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_same_workspace_completing_a_phase_that_owns_a_branch_still_fails(
+    clone: _Clone,
+) -> None:
+    """The other half of the hop, on identical evidence.
+
+    Same dirty lockfile, same workspace, same handler - only the phase's
+    declaration differs, and the outcome inverts. Without this, a hop that
+    ignored the phase and hardcoded False would satisfy the test above while
+    removing the gate from every phase in the system.
+    """
+    _rewrite_a_tracked_lockfile(clone, "edited by an agent that forgot to commit\n")
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.complete(delivers_repo_changes=True)
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "edited by an agent that forgot to commit"
+    )
 
 
 async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone) -> None:
