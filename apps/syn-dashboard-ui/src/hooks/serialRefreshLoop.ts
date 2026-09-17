@@ -250,12 +250,11 @@ function retarget(state: LoopState, fetch: () => Promise<void>): void {
 function reconfigure(state: LoopState, options: SerialRefreshOptions): void {
   retarget(state, options.fetch)
   state.pollIntervalMs = options.pollIntervalMs
-  if (options.pollIntervalMs === null) {
-    clearTimer(state)
-    return
-  }
-  // A request in flight schedules the next poll when it settles; scheduling
-  // here too would put a second timer on the same loop.
+  // A surface that has just asked to stop polling needs no branch of its own:
+  // rescheduling clears the pending timer first and then declines to set one.
+  //
+  // A request in flight is the case that does: it schedules the next poll when
+  // it settles, and scheduling here too would put a second timer on the loop.
   if (!state.inFlight) scheduleNextPoll(state)
 }
 
