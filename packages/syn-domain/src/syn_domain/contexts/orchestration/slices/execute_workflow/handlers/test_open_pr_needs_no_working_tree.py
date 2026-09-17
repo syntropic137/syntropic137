@@ -653,10 +653,18 @@ def _run_gh(
 #:   together - after #1256 left the terminator in a fence with no JSON and the
 #:   JSON in fences with no terminator, so an agent had to assemble the block
 #:   from two places and could silently omit the terminator. Shared, seen by
-#:   every phase, and the reason these bytes move: the examples still must not
-#:   be complete REPORTS, so ``comments`` is a ``<"...">`` slot that is not JSON
-#:   until the agent fills it. That keeps #1256's emitter guarantee exactly as
-#:   strict while making the block copyable, which is the whole change.
+#:   every phase.
+#: * #1324 again, reworked, and these bytes move a second time. The first fix
+#:   kept #1256's emitter guarantee by making ``comments`` a ``<"...">`` slot,
+#:   so the fences were complete but still not COPYABLE - an agent that copied
+#:   one faithfully wrote no readable verdict and lost the run exactly as
+#:   before. The JSON is now literal in both fences and nothing in them is left
+#:   to substitute. That gives up "the prompt closes no block of its own",
+#:   which cannot be kept alongside verbatim copyability - the bytes of a
+#:   copyable example ARE the bytes of a report - and keeps the half that
+#:   protects #1256: quoting these bytes can only refuse a phase, never
+#:   complete one. Argued in `workspace_prompt`'s docstring, pinned by
+#:   `test_the_prompt_can_never_manufacture_a_completion`.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -760,20 +768,21 @@ A failure reason is specific. What a useful one looks like:
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-You are free to quote, explain or discuss this format anywhere else in your
-reply: nothing outside a closed block is read, so only the block you write from
-here counts.
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out the other one to explain the
+format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
 
-Copy the ONE block below that matches your outcome, and change nothing in it
-except the `<...>` slot - replace that, angle brackets and all, with your own
-text in double quotes. **Write both lines. A block whose `TASK_RESULT_END` line
-is missing is failed as UNREADABLE instead of completed, so stopping after the
-JSON loses the run.**
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
 
 You completed the task - copy both lines:
 
 ```
-TASK_RESULT: {"success": true, "comments": <"what you accomplished, in one line">}
+TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
 TASK_RESULT_END
 ```
 
@@ -781,7 +790,7 @@ You could NOT complete the task, because you were blocked, lacked access, or hit
 an error - copy both lines:
 
 ```
-TASK_RESULT: {"success": false, "comments": <"what was missing or what failed">}
+TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
 TASK_RESULT_END
 ```
 
