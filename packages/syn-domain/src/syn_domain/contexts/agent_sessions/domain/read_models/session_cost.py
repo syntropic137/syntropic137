@@ -20,17 +20,26 @@ class CostField(StrEnum):
     #1041 stayed invisible for a month precisely because the dropped fields
     arrived as plausible zeroes.
 
-    ``total_cost_usd`` is absent because every read path really does compute
-    it. ``turns`` IS listed even though a read path can measure it, because
-    only one can: ``num_turns`` exists on a ``session_summary`` event and
-    nowhere else, so a session still running has no turn count rather than
-    zero turns. That is the whole distinction - membership is per record, not
-    per field.
+    ``total_cost_usd`` and ``cost_by_model`` are absent because every read path
+    really does compute them. ``turns`` IS listed even though a read path can
+    measure it, because only one can: ``num_turns`` exists on a
+    ``session_summary`` event and nowhere else, so a session still running has
+    no turn count rather than zero turns. That is the whole distinction -
+    membership is per record, not per field.
+
+    ``cost_by_tool`` sits with ``compute_cost_usd`` rather than with
+    ``cost_by_model``, and the reason is easy to get backwards. Both cost maps
+    are populated by the projection from a ``SessionCostFinalized`` payload,
+    but only ``cost_by_model`` is ALSO derived by the read path, which prices
+    per model. No read path attributes cost to a tool, so on the read path -
+    the one the API actually serves (#532) - ``cost_by_tool`` is an empty dict
+    that reads as "this session used no tools".
     """
 
     COMPUTE_COST_USD = "compute_cost_usd"
     TOKENS_BY_TOOL = "tokens_by_tool"
     COST_BY_TOOL_TOKENS = "cost_by_tool_tokens"
+    COST_BY_TOOL = "cost_by_tool"
     TURNS = "turns"
 
 

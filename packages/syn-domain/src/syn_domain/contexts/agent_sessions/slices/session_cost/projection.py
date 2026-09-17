@@ -117,13 +117,19 @@ def _apply_finalized_tokens(session_cost: SessionCost, event_data: dict[str, Any
 
 
 def _apply_finalized_breakdowns(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
-    """Apply model and tool cost breakdowns."""
+    """Apply model and tool cost breakdowns.
+
+    An event carrying ``cost_by_tool`` is the only thing that measures it - no
+    read path attributes cost to a tool - so this is where that field stops
+    being unmeasured, exactly as ``compute_cost_usd`` does above.
+    """
     cost_by_model = event_data.get("cost_by_model", {})
     if cost_by_model:
         session_cost.cost_by_model = {k: Decimal(str(v)) for k, v in cost_by_model.items()}
     cost_by_tool = event_data.get("cost_by_tool", {})
     if cost_by_tool:
         session_cost.cost_by_tool = {k: Decimal(str(v)) for k, v in cost_by_tool.items()}
+        session_cost.record_measured(CostField.COST_BY_TOOL)
 
 
 class SessionCostProjection:

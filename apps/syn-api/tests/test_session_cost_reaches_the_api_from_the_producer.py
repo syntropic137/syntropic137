@@ -337,7 +337,24 @@ class TestFinalizedSessionDetail:
         assert response.compute_cost_usd == Decimal("0")
         assert response.tokens_by_tool == {}
         assert response.cost_by_tool_tokens == {}
+        assert response.cost_by_tool == {}
         assert set(response.unmeasured_fields) == set(_UNMEASURED_WHEN_FINALIZED)
+
+    async def test_cost_by_tool_is_reported_unmeasured_not_as_no_tools_used(self) -> None:
+        # The near-miss this catches: cost_by_model and cost_by_tool are filled
+        # side by side by the projection, so cost_by_tool looks measured. Only
+        # cost_by_model is ALSO derived by the read path. This session ran two
+        # tools; an empty cost_by_tool beside tool_calls=2 would otherwise read
+        # as "the tools were free" rather than "nobody priced them".
+        response = await _finalized_response()
+        assert response.tool_calls > 0, "fixture must run tools for this to mean anything"
+        assert response.cost_by_tool == {}
+        assert CostField.COST_BY_TOOL.value in response.unmeasured_fields
+        # Its twin is genuinely derived, so it must NOT be listed - the pair
+        # differing is what shows this is a per-field judgement, not a blanket
+        # "all the maps are unknown".
+        assert response.cost_by_model != {}
+        assert "cost_by_model" not in response.unmeasured_fields
 
     async def test_a_session_with_a_summary_reports_itself_finalized(self) -> None:
         # This endpoint reported every finished session as still running: the
