@@ -559,8 +559,17 @@ dashboard-build:
 dashboard-lint:
     cd apps/syn-dashboard-ui && pnpm run lint
 
-# Mirrors ci.yml dashboard-ui, which installs deps before linting. Use this,
-# not dashboard-qa, when the question is "will CI pass".
+# Run dashboard frontend tests (#1288)
+dashboard-test:
+    cd apps/syn-dashboard-ui && NO_COLOR=1 pnpm run test
+
+# Follows ci.yml dashboard-ui, which installs deps before linting. It is no
+# longer a strict mirror: dashboard-qa now runs the suite and that job does not
+# (#1288). The 257 tests here were in the same position as openclaw-plugin's -
+# declared, green, and gating nothing - so the local half is closed first and
+# this recipe deliberately runs MORE than CI until `- run: pnpm run test` is
+# added to ci.yml's dashboard-ui job. Erring that way means a failure shows up
+# here rather than nowhere.
 dashboard-ci:
     # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
     # modules directory without it. This matches ci.yml's dashboard-ui COMMAND
@@ -570,8 +579,9 @@ dashboard-ci:
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
     just dashboard-qa
 
-# Full dashboard QA (lint + build)
-dashboard-qa: dashboard-lint dashboard-build
+# Full dashboard QA (lint + test + build). Adds ~140s; a "full QA" that skipped
+# 257 tests is what #1288 is about.
+dashboard-qa: dashboard-lint dashboard-test dashboard-build
     @echo "✅ Dashboard UI checks passed!"
 
 # --- Pulse UI ---
