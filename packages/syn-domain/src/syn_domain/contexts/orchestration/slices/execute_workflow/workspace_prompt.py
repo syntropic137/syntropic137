@@ -53,6 +53,47 @@ NOT a relaxation of #1167. That check still fails a phase that writes nothing,
 and must: it is what catches a phase that silently did nothing. This removes
 the reason a correct phase had to trip it, rather than teaching the check to
 look away.
+
+WHY THE RESULT BLOCK IS ONE FENCE PER OUTCOME, AND WHY ITS ``comments`` IS A
+SLOT AND NOT A STRING (#1324). #1256 made ``TASK_RESULT_END`` mandatory and this
+prompt was not updated to match, so the only fence carrying the terminator
+carried no JSON, and the two fences carrying JSON carried no terminator. An
+agent copying either one could not arrive at a complete block: the parts were in
+different fences and it had to assemble them. exec-138d516b91e8 wrote valid JSON,
+omitted the terminator and lost the run; three runs and $20.44 in forty minutes
+went the same way.
+
+So each outcome now gets one fence holding the whole block - marker, JSON and
+terminator already on its own line - and the fences are the last instruction
+before the sign-off, because the rule they state is about the last thing in the
+reply. The consequence of dropping the terminator is stated immediately ABOVE
+them rather than in a paragraph below, since an agent that skims to the first
+code fence never reads what follows the examples.
+
+WHAT CANNOT BE DONE, and the reason the slot is not an oversight to tidy up:
+the fences must NOT be literally parseable. `phase_verdict` is delimited, not
+located - it reads any complete block out of any text - so a fence that parses
+is a live report sitting inside every phase's prompt. Both halves were measured
+on the production reader before this was written: two fully-closed example blocks
+make the prompt itself report FAILURE, and make a genuine success that merely
+QUOTES its instructions report FAILURE too - which is defect (3) of
+`phase_verdict`'s docstring, reintroduced by the emitter instead of the reader.
+There is no wording that is obeyable when pasted and inert when quoted, because
+the reader cannot tell those two apart; that is the property that makes it
+immune to everything else.
+
+The slot is where that tension is paid, at the one token the agent must replace
+anyway. ``<"...">`` is not JSON, so `raw_decode` stops on the ``<`` and the fence
+is prose; fill it as instructed and the same bytes parse as a verdict. Copying a
+fence UNCHANGED is therefore UNREADABLE, which refuses the phase - deliberately
+the fail-closed direction, and strictly better than what it replaces, where a
+verbatim copy completed the phase while reporting the template's words
+("Brief summary of what was accomplished") instead of the agent's. It is also
+Critical Rule 2 applied to the block: placeholder text is not a report.
+
+Both halves are pinned by test in `test_reported_failure_stays_a_failure.py` -
+that filling the slot yields a verdict of the right polarity, and that the
+rendered prompt still states none.
 """
 
 from __future__ import annotations
@@ -193,35 +234,39 @@ the previous phase failed - report this in your output.
 ## Task Result (REQUIRED)
 
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
-three parts, and it is read as your result only when all three are there:
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-```
-TASK_RESULT: <-- replace this with one of the JSON objects below
-TASK_RESULT_END
-```
-
-If you completed the task successfully, the JSON object is:
-
-```
-{{"success": true, "comments": "Brief summary of what was accomplished"}}
-```
-
-If you could NOT complete the task (blocked, missing access, error, etc.):
-
-```
-{{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
-```
-
-Examples of failure reasons:
+A failure reason is specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-The `TASK_RESULT_END` line is what marks the block as your result rather than a
-mention of one, so write it. Without it your phase is failed as unreadable
-instead of completed. With it you are free to quote, explain or discuss this
-format anywhere else in your reply - nothing outside a closed block is read.
+You are free to quote, explain or discuss this format anywhere else in your
+reply: nothing outside a closed block is read, so only the block you write from
+here counts.
+
+Copy the ONE block below that matches your outcome, and change nothing in it
+except the `<...>` slot - replace that, angle brackets and all, with your own
+text in double quotes. **Write both lines. A block whose `TASK_RESULT_END` line
+is missing is failed as UNREADABLE instead of completed, so stopping after the
+JSON loses the run.**
+
+You completed the task - copy both lines:
+
+```
+TASK_RESULT: {{"success": true, "comments": <"what you accomplished, in one line">}}
+TASK_RESULT_END
+```
+
+You could NOT complete the task, because you were blocked, lacked access, or hit
+an error - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "comments": <"what was missing or what failed">}}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
