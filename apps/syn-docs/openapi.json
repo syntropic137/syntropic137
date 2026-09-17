@@ -5694,6 +5694,28 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Metadata"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
+          },
+          "agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model"
           }
         },
         "type": "object",
@@ -5765,6 +5787,28 @@
               }
             ],
             "title": "Created At"
+          },
+          "agent_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Provider"
+          },
+          "agent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Model"
           }
         },
         "type": "object",

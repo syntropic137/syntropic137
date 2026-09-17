@@ -243,6 +243,7 @@ async def test_codex_recording_carries_its_harness_ids_to_the_aggregation() -> N
         phase_id="phase-1",
         session_id=_SESSION_ID,
         agent_model="gpt-5.6",
+        rollout=None,
     )
 
     await processor.process_stream(

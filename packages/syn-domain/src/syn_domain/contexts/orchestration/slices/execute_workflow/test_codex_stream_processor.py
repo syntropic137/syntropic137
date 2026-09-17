@@ -22,6 +22,8 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
 
+    from syn_domain.contexts.orchestration.ports import CodexRolloutPort
+
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     MISSING_TERMINAL_TURN_REASON,
     CodexStreamProcessor,
@@ -71,8 +73,12 @@ def _is_json(line: str) -> bool:
 
 
 def _make_processor(
-    collector: _RecordingCollector, agent_model: str | None = "gpt-5.6"
+    collector: _RecordingCollector,
+    agent_model: str | None = "gpt-5.6",
+    rollout: CodexRolloutPort | None = None,
 ) -> tuple[CodexStreamProcessor, TokenAccumulator]:
+    """A codex processor. `rollout` defaults to None - NOBODY LOOKED - because
+    most tests here are about the stream; the ones about the model say so."""
     tokens = TokenAccumulator()
     processor = CodexStreamProcessor(
         tokens=tokens,
@@ -82,6 +88,7 @@ def _make_processor(
         phase_id="p1",
         session_id="s1",
         agent_model=agent_model,
+        rollout=rollout,
     )
     return processor, tokens
 
@@ -303,6 +310,7 @@ async def test_cancel_signal_interrupts() -> None:
         phase_id="p1",
         session_id="s1",
         agent_model="gpt-5.6",
+        rollout=None,
     )
     workspace = _SpyWorkspace()
 
@@ -356,6 +364,7 @@ async def test_cancel_with_no_reason_still_interrupts() -> None:
         phase_id="p1",
         session_id="s1",
         agent_model="gpt-5.6",
+        rollout=None,
     )
     workspace = _SpyWorkspace()
 
