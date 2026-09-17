@@ -26,6 +26,7 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
+from syn_domain.storable_text import pg_safe
 
 pytestmark = pytest.mark.unit
 
@@ -44,7 +45,13 @@ LONE_SURROGATE = chr(0xDEAD)
 RAW_ID = "sess-" + NUL + "abc" + LONE_SURROGATE + "def"
 #: ...and the only spelling Postgres can hold, which is therefore the only
 #: spelling any stored row is keyed by.
-STORED_ID = "sess-abcdef"
+#:
+#: Derived rather than written out, because the derivation is the policy and a
+#: literal here would have to be kept in step with it by hand. It is NOT simply
+#: the stripped text: stripping alone is not injective, so a marker recording
+#: that the value was altered is appended - otherwise this id and a genuine
+#: "sess-abcdef" share every key derived from them.
+STORED_ID = pg_safe(RAW_ID)
 
 
 def test_the_two_spellings_differ() -> None:
@@ -543,3 +550,58 @@ async def test_both_writers_store_an_all_unstorable_id_under_the_same_key() -> N
     await insert_batch(_Store(table), [{"event_type": "session_started", "session_id": ALL_NUL_ID}])  # type: ignore[arg-type]
 
     assert table.session_ids[0] == table.session_ids[1]
+
+
+class TestStrippingIsInjective:
+    """A value changed by stripping never lands on a value that was not.
+
+    The earlier rule returned the stripped text whenever anything survived, so
+    `"session-a\x00b"` stored as `"session-ab"` - the same key a genuine
+    `"session-ab"` uses. Two sessions then shared projection rows, conversation
+    keys, import-ledger records and advisory locks, and the collision survived
+    restarts.
+
+    The existing all-unstorable test could not see this: it compares two values
+    that are BOTH erased, and the erased case was the one already handled. The
+    hazard is a hostile value colliding with a legitimate one, so that is what
+    these build. Found by cross-model review.
+    """
+
+    def test_a_hostile_id_does_not_collide_with_the_clean_id_it_strips_to(self) -> None:
+        clean = pg_safe("session-ab")
+        hostile = pg_safe("session-a\x00b")
+
+        assert clean != hostile, "distinct sessions share one durable identity"
+
+    def test_the_clean_id_is_left_exactly_as_it_was(self) -> None:
+        """The fix must not rename values that were always storable.
+
+        Without this, "make everything a digest" would pass the test above and
+        make every id in the system unreadable.
+        """
+        assert pg_safe("session-ab") == "session-ab"
+
+    def test_the_readable_part_survives_in_front(self) -> None:
+        """A row has to stay recognisable in a column."""
+        assert pg_safe("session-a\x00b").startswith("session-ab")
+
+    def test_two_different_hostile_ids_stay_different(self) -> None:
+        assert pg_safe("session-a\x00b") != pg_safe("session-ab\x00")
+
+    def test_a_stripped_key_no_longer_swallows_its_clean_neighbour(self) -> None:
+        """`{"a": 1, "a\x00": 2}` used to store as `{"a": 2}` - data gone.
+
+        Dict keys go through the same sanitiser, so a non-injective one merges
+        two entries into whichever was written last, with nothing recording
+        that a key was dropped.
+        """
+        stored = pg_safe({"a": 1, "a\x00": 2})
+
+        assert len(stored) == 2, f"a key was silently merged away: {stored}"
+        assert stored["a"] == 1
+
+    def test_the_derived_form_is_idempotent(self) -> None:
+        """pg_safe is applied on write and again on read; it must be stable."""
+        once = pg_safe("session-a\x00b")
+
+        assert pg_safe(once) == once

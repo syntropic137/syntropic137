@@ -64,24 +64,39 @@ def pg_safe[T](value: T) -> T:
 #: by accident - the 64 hex digits that follow make that a non-question.
 _UNSTORABLE_PREFIX = "unstorable-"
 
+#: Marks a value that SURVIVED stripping but was changed by it. Without this,
+#: stripping is not injective - `"session-a\x00b"` and `"session-ab"` both
+#: become `"session-ab"` - and the two share every key derived from them.
+_STRIPPED_INFIX = "-stripped-"
+
+#: Half a sha256 is 64 bits of collision resistance on a value that is already
+#: rare. The whole digest would make a session id unreadable in a column, which
+#: is the property this form exists to keep.
+_STRIPPED_DIGEST_LEN = 16
+
 
 def _sanitize_str(value: str) -> str:
     """Strip the unstorable codepoints, unless that would erase the value.
 
-    Stripping is the right answer while something survives it: ``"a\\x00b"`` is
-    stored as ``"ab"``, and a reader asking for the same raw string asks for
-    ``"ab"`` too. It stops being the right answer when nothing survives, because
-    the result is then no longer derived from the input - EVERY all-unstorable
-    value strips to ``""``, so two different ones become the same one. For a
-    payload field that is merely lossy. For anything used as a key it is a
-    correctness bug: two sessions share a row, and ``""`` is indistinguishable
-    from "this field was empty" besides.
+    DELETION IS NOT INJECTIVE, and that is the whole problem this solves. An
+    earlier version returned the stripped text whenever anything survived, so
+    ``"session-a\\x00b"`` was stored as ``"session-ab"`` - the same key as a
+    genuine ``"session-ab"``. Two different sessions then shared projection
+    rows, conversation keys, import-ledger records and advisory locks, and the
+    collision persisted across restarts. The all-unstorable case was handled
+    and the partial case, which is the likelier one, was not.
 
-    So a value that would be erased is replaced by a digest of itself instead.
-    That keeps the one property the empty string loses - distinct values stay
-    distinct - and it is a derivation, not an invention: it depends only on the
-    input, so a writer and a reader handed the same raw value still agree
-    without having to coordinate.
+    So the rule is now about whether the value CHANGED, not whether anything
+    survived:
+
+    * unchanged            -> returned as is
+    * partially stripped   -> ``<stripped>-stripped-<16 hex>``
+    * entirely stripped    -> ``unstorable-<64 hex>``
+
+    Both derived forms are functions of the raw input alone, so a writer and a
+    reader handed the same raw value agree without coordinating, and distinct
+    inputs stay distinct. The readable part is kept in front precisely so the
+    row is still recognisable in a column at 2am.
 
     ``surrogatepass`` because the lone surrogates in the class above are exactly
     what plain UTF-8 encoding refuses; it is the encoding that maps each of them
@@ -91,10 +106,11 @@ def _sanitize_str(value: str) -> str:
     unstorable codepoint, so passing it through again returns it unchanged.
     """
     stripped = _UNSTORABLE.sub("", value)
-    if stripped:
-        return stripped
     raw = value.encode("utf-8", "surrogatepass")
-    return _UNSTORABLE_PREFIX + hashlib.sha256(raw).hexdigest()
+    digest = hashlib.sha256(raw).hexdigest()
+    if not stripped:
+        return _UNSTORABLE_PREFIX + digest
+    return f"{stripped}{_STRIPPED_INFIX}{digest[:_STRIPPED_DIGEST_LEN]}"
 
 
 def _sanitize(value: object) -> object:

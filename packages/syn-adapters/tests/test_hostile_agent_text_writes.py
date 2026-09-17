@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
+from syn_adapters.postgres_text import pg_safe  # noqa: E402
 
 # The actual characters. Written via chr() so no editor, formatter or copy-paste
 # can quietly turn them into their harmless six-character text spelling - which
@@ -39,8 +40,18 @@ ESCAPE_TEXT = chr(92) + "u0000"  # six ordinary characters: backslash u 0 0 0 0
 
 #: What an agent's captured tool output looked like on the way in.
 HOSTILE = "before" + NUL + "middle" + LONE_SURROGATE + "after"
-#: ...and what it must look like on the way out. Nothing else may be lost.
-CLEANED = "beforemiddleafter"
+#: ...and what it must look like on the way out.
+#:
+#: The readable text survives IN FRONT, followed by a marker recording that the
+#: value was altered. The marker is not decoration: stripping alone is not
+#: injective, so `"session-a\x00b"` and `"session-ab"` stripped to the same
+#: string and two sessions shared every key derived from it. The suffix is a
+#: function of the raw input, so distinct inputs stay distinct.
+#:
+#: It also makes the edit VISIBLE, which plain stripping never did. Agent text
+#: that reaches a reader without its NUL is text the system changed, and a
+#: reader has a right to know that rather than being handed a quiet forgery.
+CLEANED_PREFIX = "beforemiddleafter"
 
 
 def assert_postgres_would_accept(value: object) -> None:
@@ -135,15 +146,29 @@ class FakePool:
 def test_pg_safe_removes_nul_and_lone_surrogate() -> None:
     from syn_adapters.postgres_text import pg_safe
 
-    assert pg_safe(HOSTILE) == CLEANED
+    cleaned = pg_safe(HOSTILE)
+
+    assert cleaned.startswith(CLEANED_PREFIX), cleaned
+    assert NUL not in cleaned
+    assert cleaned != CLEANED_PREFIX, (
+        "a value the sanitiser changed is indistinguishable from one it did not"
+    )
 
 
 def test_pg_safe_recurses_into_containers() -> None:
     from syn_adapters.postgres_text import pg_safe
 
-    assert pg_safe({"k" + NUL: ["a" + NUL, {"b": "c" + LONE_SURROGATE}, 7]}) == {
-        "k": ["a", {"b": "c"}, 7]
-    }
+    cleaned = pg_safe({"k" + NUL: ["a" + NUL, {"b": "c" + LONE_SURROGATE}, 7]})
+
+    assert isinstance(cleaned, dict)
+    [(key, values)] = cleaned.items()
+    assert isinstance(key, str) and key.startswith("k")
+    assert isinstance(values, list)
+    assert isinstance(values[0], str) and values[0].startswith("a")
+    assert isinstance(values[1], dict)
+    inner = values[1]["b"]
+    assert isinstance(inner, str) and inner.startswith("c")
+    assert values[2] == 7, "a non-string value must pass through untouched"
 
 
 def test_pg_safe_keeps_the_text_that_merely_looks_like_an_escape() -> None:
@@ -159,7 +184,7 @@ def test_pg_json_output_is_accepted_and_still_says_what_it_said() -> None:
     out = pg_json({"output": HOSTILE, "at": datetime(2026, 9, 16, tzinfo=UTC)})
 
     assert_postgres_would_accept(out)
-    assert json.loads(out)["output"] == CLEANED
+    assert str(json.loads(out)["output"]).startswith(CLEANED_PREFIX)
     assert json.loads(out)["at"].startswith("2026-09-16")
 
 
@@ -190,8 +215,12 @@ async def test_insert_one_writes_storable_values() -> None:
         if isinstance(arg, str):
             assert_postgres_would_accept(arg)
     data = json.loads(str(pool.args[5]))
-    assert data["output_preview"] == CLEANED, "sanitised into oblivion, not stored"
-    assert pool.args[2] == "sess-1"
+    assert str(data["output_preview"]).startswith(CLEANED_PREFIX), (
+        "sanitised into oblivion, not stored"
+    )
+    # The key it was written under, asked for the same way the writer derives
+    # it, rather than a literal that has to be kept in step with the policy.
+    assert pool.args[2] == pg_safe("sess" + NUL + "-1")
 
 
 @pytest.mark.asyncio
@@ -216,7 +245,7 @@ async def test_insert_batch_buffer_is_encodable() -> None:
     source = pool.calls[-1][1][0]
     assert source is not None
     body = source.read().decode("utf-8")  # type: ignore[union-attr]  # io.BytesIO
-    assert CLEANED in body
+    assert CLEANED_PREFIX in body
     assert NUL not in body
 
 
@@ -243,7 +272,7 @@ async def test_projection_save_writes_storable_key_and_payload() -> None:
     key, payload = pool.args
     assert_postgres_would_accept(key)
     assert_postgres_would_accept(payload)
-    assert json.loads(str(payload))["error_message"] == CLEANED
+    assert str(json.loads(str(payload))["error_message"]).startswith(CLEANED_PREFIX)
 
 
 # --------------------------------------------------------------------------
@@ -274,7 +303,7 @@ async def test_conversation_index_writes_storable_values() -> None:
     await insert_index(
         pool,  # type: ignore[arg-type]  # see above
         "sess" + NUL + "-1",
-        "conversations/sess-1.jsonl",
+        f"conversations/{pg_safe('sess' + NUL + '-1')}.jsonl",
         123,
         context,
         "syn-conversations",
@@ -283,8 +312,11 @@ async def test_conversation_index_writes_storable_values() -> None:
     for arg in pool.args:
         if isinstance(arg, str):
             assert_postgres_would_accept(arg)
-    assert pool.args[0] == "sess-1"
-    assert json.loads(str(pool.args[10])) == {"Bash": 3}
+    assert pool.args[0] == pg_safe("sess" + NUL + "-1")
+    # The tool name carried a NUL, so its key is marked as altered rather than
+    # silently becoming plain "Bash" - which would merge it with a real Bash
+    # count from the same session.
+    assert json.loads(str(pool.args[10])) == {pg_safe("Bash" + NUL): 3}
 
 
 # --------------------------------------------------------------------------
@@ -507,11 +539,21 @@ def test_the_copy_path_answers_both_questions_at_once() -> None:
     )
 
     assert len(fields) == 6
-    assert fields[SESSION_ID] == "sess" + TAB + "1", "the NUL went, the tab stayed put"
+    assert fields[SESSION_ID] == pg_safe("sess" + NUL + TAB + "1"), (
+        "the NUL went, the tab stayed put"
+    )
+    assert fields[SESSION_ID].startswith("sess" + TAB + "1"), (
+        "the tab is storable and must survive untouched in the readable part"
+    )
     payload = fields[DATA]
     assert payload is not None
     assert_postgres_would_accept(payload)
-    assert json.loads(payload)["output_preview"] == CLEANED + BACKSLASH + NEWLINE
+    preview = str(json.loads(payload)["output_preview"])
+    assert preview.startswith(CLEANED_PREFIX)
+    # The ordinary characters after the hostile ones are untouched. The marker
+    # goes on the END of the whole value, so the readable text - backslash and
+    # newline included - sits in front of it, not behind.
+    assert preview.startswith(CLEANED_PREFIX + BACKSLASH + NEWLINE)
 
 
 @pytest.mark.asyncio
@@ -608,5 +650,7 @@ async def test_conversation_index_is_read_under_the_id_it_was_written_under() ->
     for value in (looked_up, listed):
         assert_postgres_would_accept(value)
     # insert_index stores pg_safe(session_id); these must ask for the same thing.
-    assert looked_up == "sess-1", "the transcript is filed under a name this cannot ask for"
-    assert listed == "exec-1", "the execution's conversations are unreachable"
+    assert looked_up == pg_safe("sess" + NUL + "-1"), (
+        "the transcript is filed under a name this cannot ask for"
+    )
+    assert listed == pg_safe("exec" + NUL + "-1"), "the execution's conversations are unreachable"

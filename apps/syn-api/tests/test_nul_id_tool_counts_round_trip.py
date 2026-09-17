@@ -23,8 +23,12 @@ type _Cell = str | int
 NUL = chr(0)
 LONE_SURROGATE = chr(0xDEAD)
 
+from syn_domain.storable_text import pg_safe  # noqa: E402
+
 RAW_ID = "exec-" + NUL + "abc" + LONE_SURROGATE + "def"
-STORED_ID = "exec-abcdef"
+#: Derived rather than written out: the derivation IS the policy, and stripping
+#: alone is not injective, so a marker recording the alteration is appended.
+STORED_ID = pg_safe(RAW_ID)
 
 
 def _stored_spelling() -> str:
