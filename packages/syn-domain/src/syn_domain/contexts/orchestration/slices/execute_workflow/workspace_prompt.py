@@ -54,46 +54,57 @@ and must: it is what catches a phase that silently did nothing. This removes
 the reason a correct phase had to trip it, rather than teaching the check to
 look away.
 
-WHY THE RESULT BLOCK IS ONE FENCE PER OUTCOME, AND WHY ITS ``comments`` IS A
-SLOT AND NOT A STRING (#1324). #1256 made ``TASK_RESULT_END`` mandatory and this
-prompt was not updated to match, so the only fence carrying the terminator
-carried no JSON, and the two fences carrying JSON carried no terminator. An
-agent copying either one could not arrive at a complete block: the parts were in
-different fences and it had to assemble them. exec-138d516b91e8 wrote valid JSON,
-omitted the terminator and lost the run; three runs and $20.44 in forty minutes
-went the same way.
+WHY THE RESULT BLOCK IS ONE COMPLETE FENCE PER OUTCOME (#1324). #1256 made
+``TASK_RESULT_END`` mandatory and this prompt was not updated to match, so the
+only fence carrying the terminator carried no JSON, and the two fences carrying
+JSON carried no terminator. An agent copying either one could not arrive at a
+complete block: the parts were in different fences and it had to assemble them.
+exec-138d516b91e8 wrote valid JSON, omitted the terminator and lost the run;
+three runs and $20.44 in forty minutes went the same way.
 
-So each outcome now gets one fence holding the whole block - marker, JSON and
-terminator already on its own line - and the fences are the last instruction
+So each outcome gets one fence holding the whole block - marker, literal JSON
+and terminator already on its own line - and the fences are the last instruction
 before the sign-off, because the rule they state is about the last thing in the
 reply. The consequence of dropping the terminator is stated immediately ABOVE
 them rather than in a paragraph below, since an agent that skims to the first
 code fence never reads what follows the examples.
 
-WHAT CANNOT BE DONE, and the reason the slot is not an oversight to tidy up:
-the fences must NOT be literally parseable. `phase_verdict` is delimited, not
-located - it reads any complete block out of any text - so a fence that parses
-is a live report sitting inside every phase's prompt. Both halves were measured
-on the production reader before this was written: two fully-closed example blocks
-make the prompt itself report FAILURE, and make a genuine success that merely
-QUOTES its instructions report FAILURE too - which is defect (3) of
-`phase_verdict`'s docstring, reintroduced by the emitter instead of the reader.
-There is no wording that is obeyable when pasted and inert when quoted, because
-the reader cannot tell those two apart; that is the property that makes it
-immune to everything else.
+WHY THE JSON IS LITERAL, AND WHAT THAT COSTS. A first fix for #1324 kept the
+fences unparseable by making ``comments`` a ``<"...">`` slot, so that quoting
+the prompt could never be mistaken for obeying it. That reintroduces the defect
+it was meant to fix, one step later: an agent that copies the fence UNCHANGED
+has written no readable verdict and loses the run, which is the same lost run as
+before, now charged to faithful copying rather than to assembly.
 
-The slot is where that tension is paid, at the one token the agent must replace
-anyway. ``<"...">`` is not JSON, so `raw_decode` stops on the ``<`` and the fence
-is prose; fill it as instructed and the same bytes parse as a verdict. Copying a
-fence UNCHANGED is therefore UNREADABLE, which refuses the phase - deliberately
-the fail-closed direction, and strictly better than what it replaces, where a
-verbatim copy completed the phase while reporting the template's words
-("Brief summary of what was accomplished") instead of the agent's. It is also
-Critical Rule 2 applied to the block: placeholder text is not a report.
+The two properties cannot both hold, and this is worth stating plainly because
+it is the first thing the next reader will try to fix. A fence that is copyable
+verbatim IS, by construction, byte-identical to a real report; `phase_verdict`
+is delimited rather than located, so it cannot tell a pasted block from a quoted
+one - there is nothing to tell apart. "Copyable verbatim" and "inert when
+quoted" are therefore mutually exclusive, and no wording recovers both.
 
-Both halves are pinned by test in `test_reported_failure_stays_a_failure.py` -
-that filling the slot yields a verdict of the right polarity, and that the
-rendered prompt still states none.
+WHICH SIDE THIS TAKES, AND WHY IT IS SAFE. The literal side, because the two
+costs are not the same size and not the same kind:
+
+  - The slot charges EVERY agent on EVERY phase a substitution step, on the
+    common path where the work was done and only the report is left. That is
+    the step #1324 exists because agents demonstrably get wrong.
+  - Literal JSON charges only an agent that closes a SECOND complete block it
+    did not mean as its report. Under `phase_verdict`'s precedence
+    (FAILURE > SUCCESS) that resolves to FAILURE.
+
+Both are fail-closed, and that is the property that makes the trade safe rather
+than merely cheaper. Quoting this prompt can only move a verdict UP the
+precedence, toward refusal; it can never manufacture a completion, and it can
+never take back a reported failure - which is the whole of what #1256 exists to
+protect. The prompt therefore says outright that a closed block is a report
+wherever it sits and that only one may be written, since reducing how often that
+second block gets closed is the part still available to the emitter.
+
+Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
+copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
+#1324 - and that the rendered prompt, read whole by the production reader, never
+yields SUCCESS.
 """
 
 from __future__ import annotations
@@ -243,20 +254,21 @@ A failure reason is specific. What a useful one looks like:
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-You are free to quote, explain or discuss this format anywhere else in your
-reply: nothing outside a closed block is read, so only the block you write from
-here counts.
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out the other one to explain the
+format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
 
-Copy the ONE block below that matches your outcome, and change nothing in it
-except the `<...>` slot - replace that, angle brackets and all, with your own
-text in double quotes. **Write both lines. A block whose `TASK_RESULT_END` line
-is missing is failed as UNREADABLE instead of completed, so stopping after the
-JSON loses the run.**
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
 
 You completed the task - copy both lines:
 
 ```
-TASK_RESULT: {{"success": true, "comments": <"what you accomplished, in one line">}}
+TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplished"}}
 TASK_RESULT_END
 ```
 
@@ -264,7 +276,7 @@ You could NOT complete the task, because you were blocked, lacked access, or hit
 an error - copy both lines:
 
 ```
-TASK_RESULT: {{"success": false, "comments": <"what was missing or what failed">}}
+TASK_RESULT: {{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
 TASK_RESULT_END
 ```
 

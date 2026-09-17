@@ -93,10 +93,21 @@ reports properly is unaffected whenever it reports.
 
 WHAT THE EMITTER MUST GUARANTEE, because a parser contract the producer does
 not honour is not a fix. `render_workspace_prompt` must (a) instruct the
-terminator and (b) contain no complete block of its own, so that quoting the
-instructions can never be mistaken for obeying them. (b) is pinned by test, not
-by care: `test_reported_failure_stays_a_failure.py` reads the rendered prompt
-with this module and requires NOT_REPORTED.
+terminator and (b) hand out blocks that are copyable VERBATIM - marker, literal
+JSON and terminator in one fence - because an example an agent has to edit is an
+example it can get wrong, which is #1324.
+
+(b) used to read "contain no complete block of its own". That was stronger and
+it is no longer available: a fence copyable verbatim is byte-identical to a
+report, and this reader is delimited rather than located, so quoting and obeying
+are the same bytes and nothing can separate them. What survives is the half that
+matters, pinned by test rather than by care - THE PROMPT CAN NEVER MANUFACTURE A
+COMPLETION. Reading the rendered prompt with this module yields FAILURE, never
+SUCCESS, because the precedence below makes the prompt's own failure example the
+strongest claim in it. So quoting the instructions moves a verdict only toward
+refusal, which costs a rerun, and never toward the completed failure this module
+exists to stop. See `workspace_prompt`'s docstring for why that trade is the
+cheaper one.
 
 THE PRICE, STATED. A block written without its terminator is UNREADABLE, which
 refuses completion. That is the fail-closed direction and it is the whole cost
