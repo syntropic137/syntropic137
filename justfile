@@ -1111,7 +1111,7 @@ check-ci-parity:
 #   osv-scan, pip-audit  - query remote vulnerability databases
 #   dependency-review    - a GitHub API action with no local equivalent
 #   python-integration-tests - skipped on PR branches in CI too (needs services)
-qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
+qa-ci: preflight test-unit-ci cli-node-ci openclaw-plugin-ci dashboard-ci docs-site-ci
     @echo ""
     @echo "✅ qa-ci: every PR-gating CI JOB with a local equivalent passed."
     @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
@@ -1148,6 +1148,26 @@ cli-node-ci:
     cd apps/syn-cli-node && pnpm run build
     cd apps/syn-cli-node && pnpm run check:api-drift
     cd apps/syn-cli-node && pnpm run check:untyped-api
+
+# The openclaw-plugin equivalent of cli-node-ci (#1288). Unlike its siblings
+# this one does NOT yet mirror a ci.yml job, because there is no such job: the
+# package's suite ran under no gate at all, locally or in CI, which is how it
+# came to sit red for three tests against a response shape the API stopped
+# returning at c467de3b (#1204). This recipe closes the local half. The CI half
+# needs one job added to .github/workflows/ci.yml, and when it lands it must
+# arrive with `"ci.yml:openclaw-plugin": "openclaw-plugin-ci"` in
+# scripts/check_ci_parity.py's LOCAL_EQUIVALENT - that map rejects a job with no
+# target AND a target for a job that does not exist, so the two cannot be split
+# across commits.
+#
+# No `pnpm run build` step: here `build` is `tsc` and `typecheck` is
+# `tsc --noEmit` over the same inputs, so building would re-run the check just
+# performed and differ only in emitting. cli-node runs both because its build is
+# tsup, a different toolchain.
+openclaw-plugin-ci:
+    cd packages/openclaw-plugin && pnpm install --frozen-lockfile --ignore-scripts
+    cd packages/openclaw-plugin && pnpm run typecheck
+    cd packages/openclaw-plugin && NO_COLOR=1 pnpm run test
 
 # Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
 # codegen; CI builds the committed tree as-is.
