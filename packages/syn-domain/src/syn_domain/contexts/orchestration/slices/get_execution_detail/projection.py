@@ -346,6 +346,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
+        kept_artifact_ids = event_data.get("failed_phase_artifact_ids") or []
+
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
             # Create minimal entry for orphaned failure events (#598)
@@ -391,6 +393,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                     # field, which is null: correct, because nothing looked.
                     phase["observed_branches"] = event_data.get("observed_branches")
 
+                    # What this phase wrote and got to keep (#1321). A failed
+                    # phase always read artifact_id=None here, because the only
+                    # thing that ever set it was PhaseCompleted - so the one
+                    # field an operator looks at to find a refused phase's
+                    # deliverable was the one field guaranteed to be empty.
+                    # First, matching the success path: PhaseDetail names one
+                    # artifact and the primary deliverable is stored first.
+                    if kept_artifact_ids:
+                        phase["artifact_id"] = kept_artifact_ids[0]
+
                     # The failed phase never gets a PhaseCompleted event, so
                     # without this its duration_seconds is stuck at the 0.0
                     # PhaseDetail.running() seeded it with -- reporting a
@@ -405,6 +417,14 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                         # under-reports by exactly the failed phase's time --
                         # it only accumulates from PhaseCompleted events.
                         self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
+
+        # Outside the phase lookup, and outside the orphan branch above, on
+        # purpose: an artifact that was stored exists whether or not this
+        # projection can still find the phase it came from, and an execution
+        # whose artifact_ids stay empty is one whose deliverable nothing links
+        # to (#1321).
+        for artifact_id in kept_artifact_ids:
+            self._track_artifact(existing, artifact_id)
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

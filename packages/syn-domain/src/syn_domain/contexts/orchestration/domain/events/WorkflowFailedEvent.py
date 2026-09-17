@@ -52,6 +52,21 @@ class WorkflowFailedEvent(DomainEvent):
     # location, including the phase that did nothing at all.
     observed_branches: list[BranchObservation] | None = None
 
+    # What the failed phase had already written, kept out of its workspace
+    # before it was torn down (#1321). Empty when it wrote nothing collectable.
+    #
+    # A phase failing and the work it produced being thrown away were one
+    # decision until this field existed: the workspace goes when the run does,
+    # so a phase that wrote a 1322-line deliverable and then botched its
+    # `TASK_RESULT` was refused - correctly, #1256 - and its deliverable went
+    # with the container. This is how a failed phase names what survived it.
+    #
+    # THE PHASE STILL FAILED. Nothing here is a completion: these ids arrive
+    # on the failure event, not through `ArtifactsCollectedEvent`, because
+    # collecting artifacts is what a phase that finished does and emitting it
+    # would tell the stream the next phase is ready in a run being failed.
+    failed_phase_artifact_ids: list[str] = []
+
     # Partial progress
     completed_phases: int
     total_phases: int
