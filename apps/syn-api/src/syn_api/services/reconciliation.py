@@ -12,6 +12,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
+    )
+    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
+        WorkflowExecutionRepositoryPort,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
     )
@@ -190,7 +196,7 @@ async def reconcile_orphaned_executions(
     try:
         from syn_adapters.storage.repositories import get_workflow_execution_repository
         from syn_api._wiring import get_projection_mgr
-        from syn_domain.contexts.orchestration import ExecutionStatus, FailExecutionCommand
+        from syn_domain.contexts.orchestration import ExecutionStatus
 
         manager = get_projection_mgr()
         stranded = await manager.workflow_execution_list.get_all(
@@ -210,48 +216,9 @@ async def reconcile_orphaned_executions(
     failed = 0
     salvaged = 0
     for summary in stranded:
-        execution_id = summary.workflow_execution_id
-        try:
-            aggregate = await repository.get_by_id(execution_id)
-            if aggregate is None:
-                logger.warning(
-                    "Execution %s is 'running' in the read model but has no "
-                    "aggregate; leaving it alone",
-                    execution_id,
-                )
-                continue
-            # BEFORE the failure, because the failure is terminal: a phase
-            # whose agent finished and whose artifacts nobody collected still
-            # has a deliverable, and this is the only place in production that
-            # ever reaches such an execution again (#1300). Everything the
-            # recovery needs came off the event stream, so it works precisely
-            # when the workspace, the container and the processor are gone.
-            salvaged_phase = await _salvage_before_failing(aggregate, execution_id)
-            if salvaged_phase is not None:
-                salvaged += 1
-            aggregate.fail_execution(
-                FailExecutionCommand(
-                    execution_id=execution_id,
-                    error=(
-                        _ORPHAN_REASON
-                        if salvaged_phase is None
-                        else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
-                    ),
-                    error_type="OrphanedByRestart",
-                    # The phase that was mid-flight, so both phase read models
-                    # terminalise it. With None they skip phase mutation
-                    # entirely and the phase stays "running" under a "failed"
-                    # execution, forever - PhaseCompleted is their only other
-                    # writer (#1036).
-                    failed_phase_id=aggregate.running_phase_id,
-                    completed_phases=summary.completed_phases,
-                    total_phases=summary.total_phases,
-                )
-            )
-            await repository.save(aggregate)
-            failed += 1
-        except Exception:
-            logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
+        outcome = await _reconcile_one(summary, repository=repository)
+        failed += outcome.failed
+        salvaged += outcome.salvaged
 
     logger.warning(
         "Reconciled %d of %d stranded execution(s) -> marked as failed; "
@@ -265,6 +232,82 @@ async def reconcile_orphaned_executions(
             "Hit the %d-execution reconciliation ceiling; more may remain for the next startup",
             _MAX_ORPHANS_PER_STARTUP,
         )
+
+
+@dataclass(frozen=True)
+class _ReconcileOutcome:
+    """What one execution contributed to the run's totals.
+
+    Counts rather than booleans so the caller adds them without re-deciding
+    anything: an execution that could not be reconciled at all contributes
+    zero to both, which is the same arithmetic as one that was skipped.
+    """
+
+    failed: int = 0
+    salvaged: int = 0
+
+
+async def _reconcile_one(
+    summary: WorkflowExecutionSummary,
+    *,
+    repository: WorkflowExecutionRepositoryPort,
+) -> _ReconcileOutcome:
+    """Salvage and then terminalise one stranded execution.
+
+    Extracted from the loop it used to be written inline in, because the loop
+    carried the branching of both jobs and crossed the cyclomatic threshold.
+    The seam is where it already was: everything here is about ONE execution,
+    and the caller is about the set.
+
+    Never raises. A failure to reconcile one execution must not stop the
+    others - this runs at startup, and the alternative is a single unreadable
+    aggregate stranding every other execution behind it.
+    """
+    from syn_domain.contexts.orchestration import FailExecutionCommand
+
+    execution_id = summary.workflow_execution_id
+    try:
+        aggregate = await repository.get_by_id(execution_id)
+        if aggregate is None:
+            logger.warning(
+                "Execution %s is 'running' in the read model but has no "
+                "aggregate; leaving it alone",
+                execution_id,
+            )
+            return _ReconcileOutcome()
+
+        # BEFORE the failure, because the failure is terminal: a phase whose
+        # agent finished and whose artifacts nobody collected still has a
+        # deliverable, and this is the only place in production that ever
+        # reaches such an execution again (#1300). Everything the recovery
+        # needs came off the event stream, so it works precisely when the
+        # workspace, the container and the processor are gone.
+        salvaged_phase = await _salvage_before_failing(aggregate, execution_id)
+
+        aggregate.fail_execution(
+            FailExecutionCommand(
+                execution_id=execution_id,
+                error=(
+                    _ORPHAN_REASON
+                    if salvaged_phase is None
+                    else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
+                ),
+                error_type="OrphanedByRestart",
+                # The phase that was mid-flight, so both phase read models
+                # terminalise it. With None they skip phase mutation entirely
+                # and the phase stays "running" under a "failed" execution,
+                # forever - PhaseCompleted is their only other writer (#1036).
+                failed_phase_id=aggregate.running_phase_id,
+                completed_phases=summary.completed_phases,
+                total_phases=summary.total_phases,
+            )
+        )
+        await repository.save(aggregate)
+    except Exception:
+        logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
+        return _ReconcileOutcome()
+
+    return _ReconcileOutcome(failed=1, salvaged=1 if salvaged_phase is not None else 0)
 
 
 @dataclass(frozen=True)
