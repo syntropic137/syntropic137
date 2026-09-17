@@ -158,7 +158,7 @@ def _elapsed_ms(started: datetime, completed: datetime) -> int | None:
     return round(elapsed) if elapsed >= 0 else None
 
 
-def _resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
+def resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
     """Fill in each completion's `duration_ms` from its own start row (#1064).
 
     A tool call's duration is a property of the PAIR of rows, not of either
@@ -228,4 +228,4 @@ def rows_to_operations(
         for row in rows
         if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
     ]
-    return _resolve_durations(converted)
+    return resolve_durations(converted)

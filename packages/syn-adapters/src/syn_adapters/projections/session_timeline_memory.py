@@ -31,7 +31,7 @@ from syn_adapters.projections.session_tools import (
     SessionToolsProjection,
     ToolOperation,
 )
-from syn_adapters.projections.session_tools_dispatch import to_operation
+from syn_adapters.projections.session_tools_dispatch import resolve_durations, to_operation
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
@@ -98,7 +98,14 @@ class InMemorySessionTimeline(SessionToolsProjection):
             for o in self._observed
             if o.session_id == session_id and o.event_type not in TIMELINE_EXCLUDE
         )
-        return [op for op in converted if op is not None]
+        # The SAME multi-row pass the SQL reader applies (#1064). A call's
+        # duration is a property of the PAIR of rows - nothing in a harness
+        # stream carries a per-item timestamp - so a converter that sees one
+        # row can never produce it. Without this the two readers answer
+        # differently for identical rows, and the in-memory one is what tests
+        # and offline runs see, so the divergence hides exactly where it would
+        # be caught.
+        return resolve_durations([op for op in converted if op is not None])
 
 
 @lru_cache(maxsize=1)

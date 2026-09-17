@@ -811,7 +811,7 @@ class CodexStreamProcessor:
         """Handle ``item.started``: record the start codex announced, if any.
 
         A call is timed from the gap between the row that opens it and the row
-        that closes it (`session_tools_dispatch._resolve_durations`), so what
+        that closes it (`session_tools_dispatch.resolve_durations`), so what
         is recorded here decides whether that number means anything. Only what
         codex actually announces is recorded, and only when it announces it.
 
