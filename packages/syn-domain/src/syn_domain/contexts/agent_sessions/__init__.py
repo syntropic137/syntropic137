@@ -113,6 +113,7 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     PricedUsage,
     RolloutDocument,
+    RolloutRecord,
     StoredTranscript,
     model_from_rollout,
 )
@@ -139,6 +140,7 @@ __all__ = [
     "PricedUsage",
     "RecordOperationCommand",
     "RolloutDocument",
+    "RolloutRecord",
     "SessionCompletedEvent",
     "SessionCostQueryService",
     "SessionStartedEvent",

@@ -34,6 +34,8 @@ from syn_shared.agents import AgentRunner
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syn_domain.contexts.agent_sessions import RolloutDocument
+
 from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
@@ -242,7 +244,7 @@ _ROLLOUT_FIXTURE = _FIXTURES_DIR.parent / "delegation" / "codex_rollout_usage.js
 CODEX_THREAD_ID = "01a04903-c2f9"
 
 
-def _real_rollout() -> list[dict[str, object]]:
+def _real_rollout() -> RolloutDocument:
     document = json.loads(_ROLLOUT_FIXTURE.read_text())
     assert isinstance(document, list)
     # Fail here rather than three assertions later if the capture is ever
@@ -263,11 +265,11 @@ class _RolloutOnDisk:
     second one survives a processor that passes its own platform session id.
     """
 
-    def __init__(self, document: list[dict[str, object]] | None) -> None:
+    def __init__(self, document: RolloutDocument | None) -> None:
         self._document = document
         self.asked_for: list[str] = []
 
-    async def codex_rollout(self, native_session_id: str) -> list[dict[str, object]] | None:
+    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
         self.asked_for.append(native_session_id)
         return self._document
 
@@ -466,7 +468,7 @@ class _CodexWorkspace:
     still reach it once that container is gone.
     """
 
-    def __init__(self, *lines: str, document: list[dict[str, object]] | None) -> None:
+    def __init__(self, *lines: str, document: RolloutDocument | None) -> None:
         self._lines = lines
         self._document = document
         self.last_stream_exit_code: int | None = 0
@@ -475,7 +477,7 @@ class _CodexWorkspace:
     def stream(self, *_args: object, **_kwargs: object) -> AsyncIterator[str]:
         return _lines_to_stream(*self._lines)
 
-    async def codex_rollout(self, native_session_id: str) -> list[dict[str, object]] | None:
+    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
         self.asked_for.append(native_session_id)
         return self._document
 

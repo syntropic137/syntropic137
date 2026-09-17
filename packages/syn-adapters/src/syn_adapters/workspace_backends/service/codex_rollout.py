@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from agentic_isolation.harnesses import ExecFn
 
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-    from syn_domain.contexts.agent_sessions import RolloutDocument
+    from syn_domain.contexts.agent_sessions import RolloutDocument, RolloutRecord
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def _records(lines: list[str]) -> RolloutDocument:
     A rollout is written while codex runs, so its last line can be a partial
     one, and a single unusable line must never cost the rest of the file.
     """
-    document: list[dict[str, object]] = []
+    document: list[RolloutRecord] = []
     for line in lines:
         try:
             record = json.loads(line)
