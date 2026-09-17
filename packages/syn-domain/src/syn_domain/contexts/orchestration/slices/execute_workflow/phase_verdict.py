@@ -16,8 +16,10 @@ be turned into a completed phase two ways at once:
 The second is why the first survived: a value nobody consumes cannot be
 observed to be wrong.
 
-THEN TWICE MORE, IN THE FIXES. Three defects, one shape: what the report MEANT
-changed with what the surrounding text happened to contain.
+THEN AGAIN, IN THE FIXES. Four defects, one shape: what the report MEANT
+changed with what the surrounding text happened to contain - and (4) says the
+shape survives being fixed HERE, because the text can be thrown away before it
+ever reaches this module.
 
   1. FAILURE became completed - a brace inside ``comments``, above.
   2. SUCCESS became UNREADABLE - the block was located with ``rfind``, the
@@ -29,6 +31,14 @@ changed with what the surrounding text happened to contain.
      so an agent that reports success and then explains the reporting format
      reported failure.
 
+  4. FAILURE became completed again, one hop upstream - the defect this
+     module was written for, arriving by a route the module could not see. A
+     processor reduced the whole stream to a single mutable "last message"
+     BEFORE any of this ran, so a complete, correctly terminated failure
+     report followed by one more assistant turn - "done", a sign-off, anything
+     at all - was overwritten and never parsed. The phase read NOT_REPORTED,
+     which does not refuse, and completed.
+
 Each fix moved the same guess - WHERE IS THE PAYLOAD IN THIS PROSE - rather
 than removing it. First, last and nearest-marker all fail for one reason: the
 text legitimately contains things that look exactly like the payload, and no
@@ -38,9 +48,29 @@ SO THE PAYLOAD IS DELIMITED, NOT LOCATED. A report is
 ``TASK_RESULT:``, one JSON value, and ``TASK_RESULT_END``; anything missing the
 terminator is prose about a report, whatever it looks like. Which text is the
 report therefore has one answer given by structure, and it does not depend on
-what else the message says, in what order, or how JSON-shaped it is. Several
-COMPLETE blocks still means the agent reported more than once and its last
-report stands - that is a fact about the agent, not a guess about the text.
+what else the message says, in what order, or how JSON-shaped it is.
+
+AND A REPORT IS READ WHEN IT ARRIVES, NOT WHEN THE STREAM ENDS. That is what
+(4) costs to close: nothing may hold the agent's words waiting to be parsed,
+because whatever holds them can be overwritten. `VerdictReader` is fed each
+message as the processor sees it, so a report that has been read is already a
+verdict and there is no longer any text for a later turn to replace.
+
+WHAT TWO REPORTS MEAN, DECIDED RATHER THAN LEFT OPEN. A REFUSAL IS FINAL: once
+a message has been read as FAILURE or UNREADABLE, nothing said afterwards
+takes it back. A message carrying no report changes nothing, and otherwise the
+later report stands.
+
+That is chosen over "first wins" and over "last wins" because it is the only
+one of the three whose answer does not depend on the order the reports arrived
+in: success-then-failure and failure-then-success both refuse. Ordering is
+evidence about text, and every defect above came from trusting it. It is also
+the fail-closed direction - the cost of being wrong is a rerun, and the cost of
+the other direction is the completed failure this module exists to stop.
+
+The rule holds per REPORT, not per message, so it settles two blocks in one
+message and two messages with one block each identically; an agent cannot
+change what it reported by choosing where to put the newline.
 
 WHAT THE EMITTER MUST GUARANTEE, because a parser contract the producer does
 not honour is not a fix. `render_workspace_prompt` must (a) instruct the
@@ -94,6 +124,7 @@ __all__ = [
     "TASK_RESULT_MARKER",
     "TASK_RESULT_TERMINATOR",
     "AgentVerdict",
+    "VerdictReader",
     "VerdictStatus",
 ]
 
@@ -105,7 +136,7 @@ TASK_RESULT_MARKER: Final[str] = "TASK_RESULT:"
 #: The token that CLOSES the block, and the entire reason a report can be told
 #: apart from a quotation of one. It is not decoration on the marker: without
 #: it there is no answer to "which of these is the report" that some legal
-#: message does not contradict - see the three defects in the module docstring.
+#: message does not contradict - see the defects in the module docstring.
 TASK_RESULT_TERMINATOR: Final[str] = "TASK_RESULT_END"
 
 
@@ -138,18 +169,28 @@ class AgentVerdict:
 
     @classmethod
     def from_agent_text(cls, text: str | None) -> AgentVerdict:
-        """Read the phase's own verdict out of the report its agent wrote.
+        """Read the phase's own verdict out of the report(s) its agent wrote.
 
-        WHICH text is the report is `_delimited_report`'s question; this one
-        decides only what that report SAYS. A verdict is a JSON object whose
-        ``success`` is a JSON boolean, and anything the agent wrote in its
-        place is unreadable rather than a pass.
+        WHICH parts of the text are reports is `_delimited_reports`'s question;
+        this one decides what each of them SAYS and, when they disagree, which
+        stands. A verdict is a JSON object whose ``success`` is a JSON boolean,
+        and anything the agent wrote in its place is unreadable rather than a
+        pass.
+
+        One message is one reading, not the whole phase: use `VerdictReader`
+        when the messages arrive one at a time, so that a report already read
+        cannot be undone by the next one.
         """
+        verdict = cls.not_reported()
         if not text:
-            return cls.not_reported()
-        report = _delimited_report(text)
-        if report is None:
-            return cls.not_reported()
+            return verdict
+        for report in _delimited_reports(text):
+            verdict = _settle(verdict, cls._from_report(report))
+        return verdict
+
+    @classmethod
+    def _from_report(cls, report: _Report) -> AgentVerdict:
+        """What one delimited block claims, judged on its own."""
         reported = report.decoded
         if not isinstance(reported, dict):
             return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
@@ -192,6 +233,49 @@ class AgentVerdict:
         return ""
 
 
+class VerdictReader:
+    """The phase's verdict, accumulated from its agent's messages as they arrive.
+
+    The caller feeds every message it sees and asks, at the end, what the
+    phase claimed. It never learns which message the answer came from, whether
+    any message held more than one report, or how a disagreement was settled -
+    which is what lets the policy in this module's docstring change without
+    touching a stream processor.
+
+    Feeding the same message twice is safe and means nothing new: the harnesses
+    repeat the final assistant text on their terminal line, and a report read
+    twice agrees with itself.
+    """
+
+    def __init__(self) -> None:
+        self._verdict = AgentVerdict.not_reported()
+
+    def read(self, message: str | None) -> None:
+        """Take whatever verdict ``message`` carries, if it may still change one."""
+        self._verdict = _settle(self._verdict, AgentVerdict.from_agent_text(message))
+
+    @property
+    def verdict(self) -> AgentVerdict:
+        """What the phase has claimed about itself so far."""
+        return self._verdict
+
+
+def _settle(earlier: AgentVerdict, later: AgentVerdict) -> AgentVerdict:
+    """Which of two verdicts from the same phase stands. See the module docstring.
+
+    Stated once, here, because both readings go through it: folding the reports
+    inside one message, and folding one message into a whole stream. Those give
+    the same answer for the same reports however they were split up, which is
+    the property that stops a message boundary being somewhere a verdict can
+    hide.
+    """
+    if later.status is VerdictStatus.NOT_REPORTED:
+        return earlier
+    if earlier.refuses_completion:
+        return earlier
+    return later
+
+
 @dataclass(frozen=True)
 class _Report:
     """The text of one report, and the JSON value that text carried.
@@ -212,8 +296,8 @@ def _payload_starts(text: str, after: int) -> int:
     return after
 
 
-def _delimited_report(text: str) -> _Report | None:
-    """The report ``text`` contains, or None when it contains no marker at all.
+def _delimited_reports(text: str) -> list[_Report]:
+    """Every report ``text`` contains, in the order written. Empty means none.
 
     A REPORT IS THE THREE PARTS TOGETHER: the marker, one JSON value that
     `raw_decode` says where to end, and `TASK_RESULT_TERMINATOR` after it
@@ -224,16 +308,19 @@ def _delimited_report(text: str) -> _Report | None:
     brace, a nested object, or the prompt's own failure example, before or
     after a genuine report.
 
-    Two blocks correctly written means the agent reported twice; its final
-    report is the one it stands behind, which is ordering used as evidence
-    about the AGENT rather than as a guess about the text.
+    Two blocks correctly written means the agent reported twice, and BOTH are
+    returned: which one stands is `_settle`'s decision, not this function's,
+    and it is the same decision whether the second block arrived in this text
+    or in a later message. Picking a winner here is what made that untrue.
 
-    A marker with no complete block anywhere returns a `_Report` that cannot
+    A marker with no complete block anywhere yields one `_Report` that cannot
     decode, so it reads as UNREADABLE and refuses completion. Silence and a
-    botched report are different facts and only the second is fatal.
+    botched report are different facts and only the second is fatal. An
+    unclosed block alongside a closed one is prose and is dropped - see
+    `test_a_truncated_second_block_does_not_unmake_a_closed_first_one`.
     """
     decoder = json.JSONDecoder()
-    report: _Report | None = None
+    reports: list[_Report] = []
     unclosed_at: int | None = None
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
@@ -250,13 +337,13 @@ def _delimited_report(text: str) -> _Report | None:
             unclosed_at = payload_at
             search_from = payload_ends
             continue
-        report = _Report(payload=text[payload_at:payload_ends], decoded=decoded)
+        reports.append(_Report(payload=text[payload_at:payload_ends], decoded=decoded))
         search_from = payload_ends + len(TASK_RESULT_TERMINATOR)
-    if report is not None:
-        return report
+    if reports:
+        return reports
     if unclosed_at is None:
-        return None
-    return _Report(payload=text[unclosed_at:], decoded=None)
+        return []
+    return [_Report(payload=text[unclosed_at:], decoded=None)]
 
 
 def _excerpt(raw: str) -> str:

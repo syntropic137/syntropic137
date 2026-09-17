@@ -68,7 +68,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
-    AgentVerdict,
+    VerdictReader,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
@@ -368,6 +368,10 @@ class CodexStreamProcessor:
         self._totals = _CodexTotals()
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
+        # Same two questions, same two fields as the claude processor: last
+        # words for the artifact fallback, and a verdict read per message so a
+        # report cannot be overwritten before it is parsed (#1256).
+        self._verdict_reader = VerdictReader()
         self._leader_native_session_id: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
@@ -473,11 +477,12 @@ class CodexStreamProcessor:
             line_count=line_count,
             interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
-            # The same reader as the claude path: TASK_RESULT is this
-            # platform's contract with its agents, not a harness format, so a
-            # codex phase that reports failure is failed for the same reason
-            # and by the same code (#1256).
-            verdict=AgentVerdict.from_agent_text(self._last_agent_message),
+            # The same reader as the claude path, and now the same TIMING
+            # too: TASK_RESULT is this platform's contract with its agents,
+            # not a harness format, so a codex phase that reports failure is
+            # failed for the same reason and by the same code - including when
+            # it goes on talking afterwards (#1256).
+            verdict=self._verdict_reader.verdict,
             conversation_lines=conversation_lines,
             total_cost_usd=total_cost_usd,
             # Present only when codex reached `turn.completed`. A stream that
@@ -715,6 +720,10 @@ class CodexStreamProcessor:
             said = str(item.get("text", ""))
             if said.strip():
                 self._last_agent_message = said
+                # Read in the turn that said it - see the claude processor's
+                # `_handle_assistant_event`. This is the identical shape, so
+                # it takes the identical fix rather than being left behind.
+                self._verdict_reader.read(said)
 
     async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
         tool_use_id = str(item.get("id", "unknown"))

@@ -29,6 +29,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
+    VerdictReader,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.delegation import (
@@ -377,6 +378,13 @@ class EventStreamProcessor:
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
+        # Two different questions about the same words, so two fields. The
+        # message above is the agent's LAST words, which is what the artifact
+        # fallback wants (#1195). The verdict is what the agent CLAIMED, and
+        # that is read as each message arrives rather than off whatever text
+        # survived to the end - a claim already read cannot then be erased by
+        # a later "done" (#1256).
+        self._verdict_reader = VerdictReader()
 
         # #894: A claude phase delegates to `codex exec`. Track the tool_use_ids
         # of those invocations so the tool_result can tell "tried and failed"
@@ -455,8 +463,10 @@ class EventStreamProcessor:
         # Read from what the agent SAID, not only from the terminal `result`
         # line: a phase that was killed or timed out after stating its verdict
         # is exactly the phase whose verdict matters, and the terminal line is
-        # the thing it is missing (#1195, #1256).
-        verdict = AgentVerdict.from_agent_text(self._last_agent_message)
+        # the thing it is missing (#1195, #1256). Already decided by now - the
+        # reader was fed each message as it arrived, so nothing here depends on
+        # which message happened to be last.
+        verdict = self._verdict_reader.verdict
         logger.info("Agent verdict: %s %s", verdict.status.name, verdict.comments[:100])
 
         logger.info(
@@ -640,11 +650,17 @@ class EventStreamProcessor:
             self._error_reason = _extract_error_reason(result_text)
         elif result_text.strip():
             # The terminal, most-complete statement the agent made, so it wins
-            # over anything remembered mid-stream. Skipped when `is_error`,
+            # over any earlier message remembered mid-stream - the MESSAGE,
+            # that is. The verdict below is settled by `VerdictReader` and is
+            # not the last speaker's to overwrite. Skipped when `is_error`,
             # where `result` holds the harness's own failure text rather than
             # the agent's - recovering THAT into an artifact would file a stack
             # trace as a verdict (#1195).
             self._last_agent_message = result_text
+            # Inside the same branch, for the same reason: `is_error` text is
+            # the HARNESS's, and harness prose that mentions the marker would
+            # otherwise be read as the agent having botched a report.
+            self._verdict_reader.read(result_text)
         self._capture_result_tokens(cli_event)
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
@@ -676,6 +692,12 @@ class EventStreamProcessor:
                 said = str(item.get("text", ""))
                 if said.strip():
                     self._last_agent_message = said
+                    # Parsed HERE, in the turn that said it. This assignment
+                    # is last-one-wins by design and always was; feeding the
+                    # reader on the same line is what stops the verdict
+                    # inheriting that, which is how a terminated failure
+                    # report followed by "done" used to complete (#1256).
+                    self._verdict_reader.read(said)
 
     async def _record_turn_usage_once(self, message: Mapping[str, Any]) -> None:
         """Record per-turn token usage, deduped by message.id (#695)."""
