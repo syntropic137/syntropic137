@@ -1021,14 +1021,21 @@ class DashboardMetrics(BaseModel):
 
 
 class SessionCostData(BaseModel):
-    """Cost data for a single session."""
+    """Cost data for a single session.
+
+    Every field `SessionCostResponse` declares must appear here, or the
+    response advertises it and always serves its default (#1041). The two
+    field sets are compared in `test_dto_carries_every_response_field.py`.
+    """
 
     session_id: str
     execution_id: str | None = None
     workflow_id: str | None = None
     phase_id: str | None = None
+    workspace_id: str | None = None
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -1045,6 +1052,8 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    tokens_by_tool: dict[str, int] = Field(default_factory=dict)
+    cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
     unpriced_observation_count: int = 0
     """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
     is_finalized: bool = False
