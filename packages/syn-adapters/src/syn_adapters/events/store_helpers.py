@@ -27,13 +27,25 @@ def _event_to_copy_row(validated: AgentEvent) -> str:
     two columns, and the backslashes JSON writes its own escapes with are eaten
     before the payload reaches the jsonb parser (#1241). pg_copy_row owns that;
     this function only says which value goes in which column.
+
+    It says only that. The values arrive canonical from ``to_insert_tuple`` and
+    are written through unchanged, because this is the batch spelling of a row
+    ``insert_one`` also writes, and a serializer that substitutes a value of its
+    own makes the two disagree - which is the whole bug, one layer down from
+    where anyone looks for it. An id made entirely of unstorable codepoints used
+    to land here as ``""`` and be stored as ``"unknown"``, a spelling no reader
+    ever asks for; ``pg_safe`` now derives a real id for that case, so there is
+    nothing left for a fallback here to do. ``session_id`` is ``None`` only when
+    the event carried none at all, and the column is ``NOT NULL``: that write is
+    refused, on this path and on ``insert_one`` alike, rather than stored under
+    an id nothing can be found by.
     """
     time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
     return pg_copy_row(
         [
             time.isoformat(),
             event_type,
-            session_id or "unknown",
+            session_id,
             exec_id,
             phase_id,
             data_json,
