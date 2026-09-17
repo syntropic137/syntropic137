@@ -14,7 +14,6 @@ See ADR-029: Simplified Event System
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +23,7 @@ from syn_adapters.events.model_extractors import (
     _extract_tool_result,
     _extract_tool_use,
 )
+from syn_adapters.postgres_text import pg_json, pg_safe
 from syn_shared.events import (
     AGENT_STOPPED,
     CONTEXT_COMPACTED,
@@ -192,10 +192,20 @@ class AgentEvent(BaseModel):
     @field_validator("session_id", "execution_id", "phase_id", mode="before")
     @classmethod
     def ensure_string(cls, v: str | UUID | None) -> str | None:
-        """Convert UUID objects to strings if needed."""
+        """Normalise a correlation id to the one form the whole system uses.
+
+        UUID objects become strings, and codepoints Postgres cannot store are
+        removed (see :func:`~syn_adapters.postgres_text.pg_safe`). This is
+        ingress, not a write boundary: it runs once, when the event is built
+        from harness output, so ``session_id`` is already canonical everywhere
+        it is read afterwards - the insert, the queries that look the row up
+        again, the projections, the API. Sanitising instead at each place that
+        writes leaves every other place holding a different string, and two
+        stores keyed on those two strings lose the data between them (#1241).
+        """
         if v is None:
             return None
-        return v if isinstance(v, str) else str(v)
+        return pg_safe(v if isinstance(v, str) else str(v))
 
     @field_validator("data", mode="before")
     @classmethod
@@ -210,6 +220,11 @@ class AgentEvent(BaseModel):
     def to_insert_tuple(self) -> tuple[datetime, str, str | None, str | None, str | None, str]:
         """Convert to tuple for asyncpg insert.
 
+        The correlation ids are already canonical - :meth:`ensure_string`
+        normalised them when the event was built, so no consumer of this model
+        holds a different form (#1241). ``data`` carries captured tool output
+        verbatim and is made storable here, where it is serialised.
+
         Returns:
             Tuple of (time, event_type, session_id, execution_id, phase_id, data_json)
         """
@@ -219,7 +234,7 @@ class AgentEvent(BaseModel):
             self.session_id,
             self.execution_id,
             self.phase_id,
-            json.dumps(self.data),
+            pg_json(self.data),
         )
 
     @classmethod

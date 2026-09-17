@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from syn_adapters.in_memory import InMemoryAdapterError, assert_test_only
+from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
@@ -51,16 +52,24 @@ class InMemoryProjectionStore:
         """Validate that we're in a test environment."""
         assert_test_only()
 
+    # WHAT A RECORD LOOKS LIKE ONCE STORED is this double's whole reason to
+    # exist, so it holds keys and payloads in the form its Postgres
+    # counterpart does - sanitised (`pg_safe`, via `save`) rather than as the
+    # caller spelled them. Storing the raw form would make this store
+    # SELF-consistent and production-inconsistent: a read with a hostile id
+    # would find its row here and find nothing in Postgres, so the one place
+    # the difference shows up is a passing test for a broken query (#1241).
+
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        self._data.setdefault(projection, {})[key] = data.copy()
+        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
         self._update_state(projection)
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
         if projection not in self._data:
             return None
-        return self._data[projection].get(key)
+        return self._data[projection].get(pg_safe(key))
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         """Get all records for a projection."""
@@ -93,6 +102,7 @@ class InMemoryProjectionStore:
 
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
+        key = pg_safe(key)
         if projection in self._data and key in self._data[projection]:
             del self._data[projection][key]
             self._update_state(projection)
@@ -118,6 +128,7 @@ class InMemoryProjectionStore:
         """Get all records whose key starts with the given prefix."""
         if projection not in self._data:
             return []
+        prefix = pg_safe(prefix)
         return [
             (key, data.copy())
             for key, data in self._data[projection].items()

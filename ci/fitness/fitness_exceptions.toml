@@ -385,7 +385,13 @@ allowed_prefixes = [
 "apps/syn-api/src/syn_api/routes/capture.py:_to_entry.param:event" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/object_storage/minio.py:_do_upload.param:metadata" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/object_storage/minio_queries.py:list_objects.param:get_client" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
-"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_helpers.py:json_serializer.param:obj" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+# Moved here from `projection_stores/postgres_helpers.py:json_serializer`,
+# same function and same reason. It is a `json.dumps(default=...)`
+# callback, not a projection handler: the stdlib calls it with whatever
+# it could not serialise, so `object` IS the declared contract and there
+# is no narrower type to take. Narrowing it would be a lie about what
+# json can hand it.
+"packages/syn-adapters/src/syn_adapters/postgres_text.py:_json_default.param:obj" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore._deserialize.param:data" = { annotation = "str | dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore.query.param:filters" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:ManagedWorkspace.stream.param:environment" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }

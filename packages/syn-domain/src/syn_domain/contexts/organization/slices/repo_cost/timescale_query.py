@@ -75,7 +75,17 @@ class TimescaleRepoCostQuery:
         self._store = projection_store
 
     async def _get_execution_ids_for_repo(self, repo_full_name: str) -> list[str]:
-        """Look up execution IDs correlated with a repo."""
+        """Look up execution IDs correlated with a repo.
+
+        THE ONLY SOURCE of the ids this class binds, and they arrive already in
+        the form agent_events holds them: they were READ OUT of the projection
+        store, which writes through ``pg_json`` and therefore hands back the
+        sanitised spelling. Nothing here re-applies ``pg_safe`` for that reason
+        - a call no caller can falsify only asserts a guarantee it does not
+        provide. The value that does come from outside is ``repo_full_name``,
+        and it is canonicalised where it is bound, inside the store's filter
+        builder (#1241).
+        """
         from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 
         correlations = await self._store.query(

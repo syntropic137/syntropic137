@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query imp
     price_grouped_token_usage,
     price_phase_rows,
 )
+from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
@@ -248,8 +249,13 @@ class ExecutionCostQueryService:
         recency + limit, so it returns exactly the requested executions
         regardless of how the caller selected them. Replaces one round trip
         of up to 6 sequential queries *per execution id* (issue #1077).
+
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
         """
-        ids = list(execution_ids)
+        ids = [pg_safe(eid) for eid in execution_ids]
         if not ids:
             return []
         async with self._pool.acquire() as conn:

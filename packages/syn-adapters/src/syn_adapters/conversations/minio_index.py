@@ -5,9 +5,10 @@ Extracted from minio.py to reduce module complexity.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
+
+from syn_adapters.postgres_text import pg_json, pg_safe
 
 if TYPE_CHECKING:
     import asyncpg
@@ -15,6 +16,11 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.protocol import SessionContext
 
 logger = logging.getLogger(__name__)
+
+
+# insert_index normalises the ids it stores, so the two readers below normalise
+# the ids they ask for. Sanitising only the write side files the row under a name
+# no caller can name, which loses the conversation rather than failing (#1241).
 
 
 async def insert_index(
@@ -45,20 +51,20 @@ async def insert_index(
                 tool_counts = EXCLUDED.tool_counts,
                 success = EXCLUDED.success
             """,
-            session_id,
+            pg_safe(session_id),
             bucket_name,
-            object_key,
+            pg_safe(object_key),
             size_bytes,
-            context.execution_id,
-            context.phase_id,
-            context.workflow_id,
+            pg_safe(context.execution_id),
+            pg_safe(context.phase_id),
+            pg_safe(context.workflow_id),
             context.event_count,
             context.total_input_tokens,
             context.total_output_tokens,
-            json.dumps(context.tool_counts) if context.tool_counts else None,
+            pg_json(context.tool_counts) if context.tool_counts else None,
             context.started_at,
             context.completed_at,
-            context.model,
+            pg_safe(context.model),
             context.success,
         )
 
@@ -68,6 +74,7 @@ async def get_session_metadata(
     session_id: str,
 ) -> dict[str, Any] | None:
     """Get session metadata from index."""
+    session_id = pg_safe(session_id)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM session_conversations WHERE session_id = $1",
@@ -83,6 +90,7 @@ async def list_sessions_for_execution(
     execution_id: str,
 ) -> list[str]:
     """Get session IDs for an execution."""
+    execution_id = pg_safe(execution_id)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
