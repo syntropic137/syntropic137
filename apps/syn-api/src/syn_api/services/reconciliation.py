@@ -9,14 +9,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from syn_adapters.storage.repositories import RepositoryAdapter
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
-    )
-    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
-        WorkflowExecutionRepositoryPort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
@@ -250,7 +248,14 @@ class _ReconcileOutcome:
 async def _reconcile_one(
     summary: WorkflowExecutionSummary,
     *,
-    repository: WorkflowExecutionRepositoryPort,
+    # The concrete adapter, NOT `WorkflowExecutionRepositoryPort`, which is
+    # what this ought to depend on. The adapter does not satisfy that
+    # Protocol: it names the parameter `aggregate_id` where the port says
+    # `execution_id`, and a Protocol match compares parameter NAMES. So the
+    # port is unsatisfied by its only implementation and nothing noticed,
+    # because until this function had an annotation nobody asked. Filed
+    # separately rather than renamed inside a conflict resolution (#1305).
+    repository: RepositoryAdapter[WorkflowExecutionAggregate],
 ) -> _ReconcileOutcome:
     """Salvage and then terminalise one stranded execution.
 
