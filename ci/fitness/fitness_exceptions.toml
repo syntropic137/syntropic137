@@ -186,8 +186,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_apply_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_accumulate_tokens.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_accumulate_tokens.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_append_operation.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_append_operation.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 
 # 11 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:SessionCostProjection.on_agent_observation.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
