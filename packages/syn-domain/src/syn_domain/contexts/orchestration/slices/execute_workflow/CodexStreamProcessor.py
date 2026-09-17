@@ -219,6 +219,22 @@ class _CodexItem(TypedDict, total=False):
     text: str
 
 
+def _changed_paths_preview(item: _CodexItem) -> str:
+    """The paths a ``file_change`` item touched, as one preview string.
+
+    Both ends of a file change carry the same change list, and both record it
+    - the start as its ``input_preview``, the completion as its
+    ``output_preview`` - so the reading of it lives in one place.
+    """
+    changes = item.get("changes")
+    paths = (
+        [str(change.get("path", "")) for change in changes if isinstance(change, dict)]
+        if isinstance(changes, list)
+        else []
+    )
+    return ", ".join(paths)[:_MAX_PREVIEW_LEN]
+
+
 class _CodexUsage(TypedDict, total=False):
     """The ``usage`` block on a codex ``turn.completed`` event."""
 
@@ -792,24 +808,43 @@ class CodexStreamProcessor:
         self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
-        """Handle ``item.started``: only ``command_execution`` starts a tool op.
+        """Handle ``item.started``: record the start codex announced, if any.
 
-        ``file_change`` items only carry useful data on ``item.completed``
-        (the change list), so they are recorded as a synthetic
-        started+completed pair there instead (see ``_handle_item_completed``).
+        A call is timed from the gap between the row that opens it and the row
+        that closes it (`session_tools_dispatch._resolve_durations`), so what
+        is recorded here decides whether that number means anything. Only what
+        codex actually announces is recorded, and only when it announces it.
+
+        ``command_execution`` is always opened before the command runs.
+        ``file_change`` depends on the CLI version: some emit ``item.started``
+        with the change list already on it and then ``item.completed``
+        (`codex_exec_recording.jsonl`), others emit only ``item.completed``
+        (`codex_brace_echo_clean.jsonl`). Where the start arrives the pair
+        brackets the change and times it; where it does not, the completion
+        stands alone and reports no duration, which is the answer every reader
+        already gets for a completion with no start.
         """
         item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != CodexItemType.COMMAND_EXECUTION:
+        if not isinstance(item, dict):
             return
 
+        item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
-        command = str(item.get("command", ""))
-        self._note_delegation_attempt(tool_use_id, command)
-        await self._collector.record_tool_started(
-            tool_name=CODEX_TOOL_NAME_COMMAND,
-            tool_use_id=tool_use_id,
-            input_preview=command[:_MAX_PREVIEW_LEN],
-        )
+
+        if item_type == CodexItemType.COMMAND_EXECUTION:
+            command = str(item.get("command", ""))
+            self._note_delegation_attempt(tool_use_id, command)
+            await self._collector.record_tool_started(
+                tool_name=CODEX_TOOL_NAME_COMMAND,
+                tool_use_id=tool_use_id,
+                input_preview=command[:_MAX_PREVIEW_LEN],
+            )
+        elif item_type == CodexItemType.FILE_CHANGE:
+            await self._collector.record_tool_started(
+                tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
+                tool_use_id=tool_use_id,
+                input_preview=_changed_paths_preview(item),
+            )
 
     async def _handle_item_completed(self, event: _CodexEvent) -> None:
         """Handle ``item.completed`` for command_execution and file_change items."""
@@ -867,25 +902,29 @@ class CodexStreamProcessor:
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:
-        tool_use_id = str(item.get("id", "unknown"))
-        changes = item.get("changes")
-        paths = (
-            [str(change.get("path", "")) for change in changes if isinstance(change, dict)]
-            if isinstance(changes, list)
-            else []
-        )
-        preview = ", ".join(paths)[:_MAX_PREVIEW_LEN]
-        success = item.get("status") != "failed"
+        """Record the completion of a ``file_change``, and nothing else (#1064).
 
-        await self._collector.record_tool_started(
-            tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
-            tool_use_id=tool_use_id,
-            input_preview=preview,
-        )
+        This used to write a start here too, immediately before the
+        completion, for the versions of codex that announce no
+        ``item.started`` for a file change. That start was not an observation
+        of anything: it said "this call began" from an event that says the
+        call has ended, and the duration rule then measured the gap between
+        this method's own two writes and reported it as how long the edit
+        took - a few milliseconds or zero, depending on how fast the store
+        answered. A number with the shape of a measurement and none of the
+        content.
+
+        A duration is only knowable from a pair of rows, so it is only
+        reportable when the harness produced a pair. `_handle_item_started`
+        records one end when codex announces it; this records the other. When
+        codex announced no start, that leaves the duration `None` - what this
+        producer actually knows.
+        """
+        preview = _changed_paths_preview(item)
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
-            tool_use_id=tool_use_id,
-            success=success,
+            tool_use_id=str(item.get("id", "unknown")),
+            success=item.get("status") != "failed",
             output_preview=preview or None,
         )
 

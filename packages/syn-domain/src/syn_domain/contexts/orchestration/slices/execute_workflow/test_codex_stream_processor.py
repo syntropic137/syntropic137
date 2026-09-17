@@ -134,6 +134,16 @@ async def test_codex_recording_produces_timeline() -> None:
 
 @pytest.mark.asyncio
 async def test_command_execution_tool_pair_recorded() -> None:
+    """Both ends of each call, and every one of them announced by codex.
+
+    This recording is the capture where codex opens a `file_change` with its
+    own `item.started` (with the change list already on it), so `item_1` and
+    `item_3` get a real pair - a start observed when codex said the change
+    began, not one synthesized from the event that says it ended (#1064).
+    `codex_brace_echo_clean.jsonl` is the other shape, and
+    `test_a_file_change_codex_never_opened_records_only_its_completion`
+    covers it.
+    """
     rec = _FIXTURES_DIR / "codex_exec_recording.jsonl"
     collector = _RecordingCollector()
     processor, _tokens = _make_processor(collector)
@@ -156,6 +166,37 @@ async def test_command_execution_tool_pair_recorded() -> None:
     assert len(edit_started) == 2  # item_1 (one.txt), item_3 (two.txt)
     assert len(edit_completed) == 2
     assert all(c["success"] is True for c in edit_completed)
+    # Read off the `item.started` codex sent, which carries the same change
+    # list its `item.completed` does.
+    assert str(edit_started[0]["input_preview"]).endswith("one.txt")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_file_change_codex_never_opened_records_only_its_completion() -> None:
+    """The other capture shape: a `file_change` that arrives already finished.
+
+    Codex emits no `item.started` for `item_2` here - the completion is the
+    first and only thing it says about that change. A synthetic start written
+    beside the completion (which is what this did before #1064) would give the
+    duration rule two rows written microseconds apart and it would report the
+    gap between them as how long the edit took. One row leaves it unmeasured,
+    which is the truth about this change, and
+    `apps/syn-api/tests/test_codex_file_change_duration.py` is where that is
+    followed through to what the API answers.
+    """
+    rec = _FIXTURES_DIR / "codex_brace_echo_clean.jsonl"
+    collector = _RecordingCollector()
+    processor, _tokens = _make_processor(collector)
+
+    await processor.process_stream(_lines(rec), _NoopWorkspace())
+
+    edits = [c for c in collector.calls if c[1].get("tool_name") == "Edit"]
+    assert [kind for kind, _ in edits] == ["tool_completed"]
+    # The changed path is still reported: it was the start row's
+    # `input_preview` and it is the completion's `output_preview`, which the
+    # API returns as `tool_output`.
+    assert str(edits[0][1]["output_preview"]).endswith("ExecutionTokenTotals.tsx")
 
 
 @pytest.mark.unit
