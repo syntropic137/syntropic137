@@ -123,9 +123,7 @@ class _StubProjectionManager:
     workflow_execution_detail: WorkflowExecutionDetailProjection
 
 
-async def _read_path(
-    monkeypatch: pytest.MonkeyPatch, task: str | None
-) -> _StubProjectionManager:
+async def _read_path(monkeypatch: pytest.MonkeyPatch, task: str | None) -> _StubProjectionManager:
     """Drive the real projection from a real start event and wire the routes."""
     from syn_api import _wiring
     from syn_api.routes.executions import queries
@@ -155,9 +153,7 @@ async def _served(
     return await queries.get_execution_endpoint(EXECUTION_ID)
 
 
-async def _summary_dto(
-    monkeypatch: pytest.MonkeyPatch, task: str | None = TASK
-) -> ExecutionDetail:
+async def _summary_dto(monkeypatch: pytest.MonkeyPatch, task: str | None = TASK) -> ExecutionDetail:
     """The other execution-detail DTO, built by `queries.get`."""
     from syn_api.routes.executions import queries
 
