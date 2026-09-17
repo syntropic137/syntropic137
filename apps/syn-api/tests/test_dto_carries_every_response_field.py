@@ -187,6 +187,32 @@ def _fields_at_their_default(model: BaseModel) -> list[str]:
     return stuck
 
 
+def test_every_mapper_in_the_module_is_registered_as_a_chain() -> None:
+    """A chain nobody registered is a chain nobody tests.
+
+    The tests below only measure what `_CHAINS` lists, so a third DTO ->
+    response mapper added to `costs.py` would be covered by nothing while this
+    file still reads as coverage - a gate whose number cannot move is the
+    failure mode this repo has been bitten by before (#1188). Discovering the
+    mappers from the module instead of trusting the list makes adding one
+    fail here until it is registered.
+    """
+    import syn_api.routes.costs as costs_module
+
+    in_module = {
+        name
+        for name in dir(costs_module)
+        if name.endswith("_to_api") and callable(getattr(costs_module, name))
+    }
+    registered = {c.to_api.__name__ for c in _CHAINS}
+
+    assert in_module == registered, (
+        f"unregistered DTO -> response mappers in costs.py: "
+        f"{sorted(in_module - registered)}. Add each to _CHAINS with a source "
+        f"fixture, or it is tested by nothing."
+    )
+
+
 @pytest.mark.parametrize("chain", _CHAINS, ids=_CHAIN_IDS)
 def test_the_fixture_covers_every_field_on_the_read_model(chain: _Chain) -> None:
     """A new field on the read model fails HERE first.
