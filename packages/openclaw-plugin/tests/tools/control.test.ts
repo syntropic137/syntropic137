@@ -23,6 +23,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function jsonResponse(data: unknown): Response {
@@ -58,13 +59,35 @@ describe("synPauseExecution", () => {
 });
 
 describe("synResumeExecution", () => {
+  it("names the deployment the execution was restarted on (issue #1264)", async () => {
+    // Resuming restarts work, so the result has to say WHERE: `exec-abc-123`
+    // names a different run on a different deployment. Two distinct non-default
+    // hosts — the client's, and one the environment offers afterwards. Naming
+    // the environment's would mean the result was built from something other
+    // than the client the request actually went through.
+    vi.stubEnv("SYNTROPIC_URL", "http://100.114.86.77:8137");
+    const vps = new SyntropicClient({ apiUrl: "http://100.112.178.5:8137" });
+    mockFetch.mockResolvedValueOnce(jsonResponse(controlResume));
+
+    const result = await synResumeExecution(vps, { execution_id: "exec-abc-123" });
+
+    const [url] = mockFetch.mock.calls[0]!;
+    const resumedOn = new URL(url as string).origin;
+    expect(resumedOn).toBe("http://100.112.178.5:8137");
+    expect(result.content).toContain(resumedOn);
+    expect(result.content).toContain("exec-abc-123");
+    expect(result.content).not.toContain("100.114.86.77");
+  });
+
   it("resumes successfully", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(controlResume));
 
     const result = await synResumeExecution(client, { execution_id: "exec-abc-123" });
 
     expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("resumed successfully");
+    expect(result.content).toContain("Execution Resumed");
+    expect(result.content).toContain("exec-abc-123");
+    expect(result.content).toContain("running");
   });
 });
 

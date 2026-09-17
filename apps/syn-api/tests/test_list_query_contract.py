@@ -127,6 +127,7 @@ async def _seed_session(
     status: str = "completed",
     started_at: str | None,
     workflow_id: str = "wf-1",
+    execution_id: str = "exec-1",
 ) -> None:
     from syn_api._wiring import ensure_connected, get_projection_mgr
 
@@ -138,6 +139,7 @@ async def _seed_session(
         {
             "id": row_id,
             "workflow_id": workflow_id,
+            "execution_id": execution_id,
             "agent_type": "claude",
             "status": status,
             "started_at": started_at,
@@ -1214,3 +1216,36 @@ async def test_artifacts_the_excluded_count_survives_paging():
     assert len(last.ids) == 5
     assert last.total == 30
     assert last.excluded_undated == 7
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sessions_execution_id_selects_rows_over_http() -> None:
+    """`execution_id` must select rows, not be accepted and discarded (#1263).
+
+    THE DEFECT THIS PROTECTS. The parameter was undeclared, and FastAPI drops
+    an unknown query parameter silently, so a real id, a nonsense id and no
+    filter all returned the whole collection. Nothing 4xx'd, and the answer
+    looked like data.
+
+    WHY AT THIS LEVEL. The projection-level tests exercise `page()` directly,
+    which is BELOW the two hops where the defect actually lived: endpoint ->
+    `list_sessions`, and `list_sessions` -> `projection.page`. Removing either
+    forwarding argument recreates the silent drop while leaving every
+    projection test green - confirmed by mutation, 53 passed 0 failed. Only an
+    HTTP-level exercise sees what a client sees.
+    """
+    await _seed_session("s-a1", started_at=_at(1), execution_id="exec-a")
+    await _seed_session("s-a2", started_at=_at(2), execution_id="exec-a")
+    await _seed_session("s-b1", started_at=_at(3), execution_id="exec-b")
+
+    bogus = await _sessions(execution_id="exec-TOTALLY-BOGUS")
+    assert bogus["sessions"] == [], "a nonsense execution id returned rows"
+    assert bogus["total"] == 0, "a nonsense execution id returned a non-zero total"
+
+    only_a = await _sessions(execution_id="exec-a")
+    assert {s["id"] for s in only_a["sessions"]} == {"s-a1", "s-a2"}
+    assert only_a["total"] == 2
+
+    everything = await _sessions()
+    assert everything["total"] == 3, "omitting the filter must not narrow"

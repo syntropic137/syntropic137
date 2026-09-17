@@ -43,10 +43,14 @@ class ArtifactListProjection(AutoDispatchProjection):
             whole output tree at its original relative paths (issue #988).
             Rebuilding is safe: pre-v5 ArtifactCreated events carry no
             source_path and simply project as None.
+        v6: Added agent_provider and agent_model, so a review can name the
+            models that produced its inputs (issue #1284). Rebuilding is safe
+            for the same reason v4's was: pre-v6 events carry neither key and
+            project as None, which reads as "not reported".
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 5  # Added is_primary_deliverable to the read model (#997)
+    VERSION = 6  # Added agent_provider/agent_model to the read model (#1284)
 
     def __init__(self, store: Any):  # Using Any to avoid circular import  # noqa: ANN401
         """Initialize with a projection store.
@@ -92,6 +96,11 @@ class ArtifactListProjection(AutoDispatchProjection):
             content=content,
             content_hash=event_data.get("content_hash"),
             source_path=event_data.get("source_path"),  # v5 event field (#988)
+            # v6 event fields (#1284). Absent on every pre-v6 event, and no
+            # upcaster runs, so None here IS the record that nothing was
+            # reported - it must never be filled in from configuration.
+            agent_provider=event_data.get("agent_provider"),
+            agent_model=event_data.get("agent_model"),
             # Without this the flag the collector writes never reaches the
             # read model, and the cold path silently falls back to row
             # order -- the exact divergence #997 exists to close.

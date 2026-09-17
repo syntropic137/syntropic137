@@ -1915,6 +1915,10 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
         };
         /**
          * ArtifactSummaryResponse
@@ -1938,6 +1942,10 @@ export interface components {
             size_bytes: number;
             /** Created At */
             created_at?: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
         };
         /**
          * AssignRepoToSystemRequest
@@ -4201,6 +4209,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Unmeasured Fields */
+            unmeasured_fields?: string[];
             /**
              * Is Finalized
              * @default false
@@ -6221,6 +6231,8 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
+                /** @description Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263). */
+                execution_id?: string | null;
                 /** @description Filter by single status (legacy) */
                 status?: string | null;
                 /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */

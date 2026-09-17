@@ -497,6 +497,7 @@ class WorkspaceProvisionHandler:
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
+            await self._install_attribution_hook(workspace)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], outputs, todo
             )
@@ -759,6 +760,80 @@ class WorkspaceProvisionHandler:
             "https://github.com/org/repo-b/"   → "repo-b"
         """
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+    @staticmethod
+    async def _install_attribution_hook(workspace: ManagedWorkspace) -> None:
+        """Put the operator co-authorship hook where the image's own git config looks.
+
+        The image is meant to carry this. The ``claude-cli`` provider does; the
+        ``omni-agent`` provider does not, and its entrypoint skips a missing hook
+        source in silence, so on those images every agent commit is authored by
+        the bot alone with nothing anywhere saying attribution is off
+        (AgentParadise/agentic-primitives#401).
+
+        Installing at provision time makes attribution work on EVERY image,
+        including ones built before the hook existed - which is what actually
+        makes the feature real, rather than real-once-the-next-image-ships.
+
+        No-op when attribution is not configured. The hook is itself a no-op in
+        that case, but writing a file nobody asked for into every workspace is
+        worse than not writing it, and the check is one settings read.
+
+        Failures are logged, never raised. A missing trailer is a lost credit; a
+        raise here would cost the whole phase. That trade only holds because the
+        install is verified - see below - so a silent failure cannot be mistaken
+        for success.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_hooks import (
+            HOOK_FILENAME,
+            WORKSPACE_HOOKS_DIR,
+            attribution_hook_source,
+        )
+        from syn_shared.settings.git_identity import OperatorSettings
+
+        if not OperatorSettings().is_configured:
+            return
+
+        target = WORKSPACE_HOOKS_DIR / HOOK_FILENAME
+        # inject_files' base_path never reaches the container: copy_to_workspace
+        # writes relative to the workspace root and takes no base_path at all
+        # (adapter_copy.py:118-133). Passing one is accepted and discarded, which
+        # put the hook at /workspace/prepare-commit-msg and left chmod reporting
+        # "No such file or directory". So stage inside the workspace, then MOVE
+        # it into place with a shell that can create the directory.
+        #
+        # The staging name is dotted and the move is a `mv`, so nothing is left
+        # behind for an agent to notice or accidentally commit.
+        staged = ".syn-attribution-hook"
+        try:
+            await workspace.inject_files([(staged, attribution_hook_source())])
+            install = await workspace.execute(
+                [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {WORKSPACE_HOOKS_DIR} "
+                    f"&& mv /workspace/{staged} {target} "
+                    f"&& chmod +x {target}",
+                ],
+                timeout_seconds=30,
+            )
+            if install.exit_code != 0:
+                logger.warning(
+                    "attribution hook could not be installed at %s: %s",
+                    target,
+                    install.stderr,
+                )
+                return
+            # Assert the effect, not the call. Writing a file and reporting
+            # success is how this feature stayed broken for four months, and a
+            # hook git cannot execute is ignored in silence.
+            check = await workspace.execute(["test", "-x", str(target)], timeout_seconds=30)
+            if check.exit_code != 0:
+                logger.warning("attribution hook is not present after install at %s", target)
+            else:
+                logger.info("attribution hook installed at %s", target)
+        except Exception as exc:
+            logger.warning("attribution hook install failed at %s: %s", target, exc)
 
     @staticmethod
     async def _install_baked_delegation_skill(
