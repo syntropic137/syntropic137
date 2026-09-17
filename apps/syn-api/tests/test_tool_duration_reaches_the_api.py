@@ -437,6 +437,7 @@ async def _rows_codex_wrote(capture: str) -> list[_Row]:
         phase_id="phase-1",
         session_id=SESSION_ID,
         agent_model="gpt-5.6",
+        rollout=None,
     )
 
     async def lines() -> AsyncIterator[str]:
