@@ -57,6 +57,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
+from syn_domain.contexts.agent_sessions import model_from_rollout
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -86,6 +87,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.orchestration.ports import CodexRolloutPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -356,8 +358,16 @@ class CodexStreamProcessor:
         phase_id: str,
         session_id: str,
         agent_model: str | None,
+        rollout: CodexRolloutPort | None,
     ) -> None:
         self._tokens = tokens
+        #: Where the model comes from when the stream does not name one, which
+        #: so far is every codex run there has ever been (#1284). Stated by
+        #: every caller and given no default on purpose: `None` here means
+        #: NOBODY LOOKED, and that has to be a decision someone made rather
+        #: than a keyword they omitted - the omission is the exact shape of the
+        #: bug this parameter exists to close.
+        self._rollout = rollout
         self._collector = collector
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -371,8 +381,8 @@ class CodexStreamProcessor:
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
         self._leader_native_session_id: str | None = None
-        #: The model codex NAMED on its own stream, or None if it named none
-        #: (#1284). FIRST wins, the rule and reason of
+        #: The model codex NAMED, on its own stream or failing that in the
+        #: rollout it wrote (#1284). FIRST wins, the rule and reason of
         #: `_leader_native_session_id` directly above.
         #:
         #: `_agent_model` (the REQUESTED model) is deliberately not a fallback
@@ -455,6 +465,8 @@ class CodexStreamProcessor:
                 or MISSING_TERMINAL_TURN_REASON
             )
 
+        await self._name_the_model_from_disk()
+
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
@@ -519,6 +531,73 @@ class CodexStreamProcessor:
             # cross-model claim this platform makes (#1284).
             announced_model=self._announced_model,
         )
+
+    async def _name_the_model_from_disk(self) -> None:
+        """Ask the rollout what ran, because the stream never says.
+
+        THIS IS NOT A FALLBACK IN PRACTICE, it is the path. No codex version
+        captured here puts a model anywhere on stdout, across every fixture and
+        the golden recording, so the check above this one has never once
+        fired - which left every codex artifact reading
+        `provider="codex", model=null` and proving harness diversity where the
+        claim being made was model diversity (#1284). Codex does say what it
+        ran; it says it on disk, in the same `turn_context.payload.model` that
+        prices a codex delegate, read here by that same function.
+
+        Runs at end-of-stream, once, and only when the stream named nothing:
+        the rollout is complete by then and the workspace is still alive, and a
+        stream that DID name a model needs no second opinion.
+
+        Nothing here can fail the phase. A model that cannot be recovered is a
+        gap in what we can say about the run, not a defect in the run, and the
+        three ways of getting there are kept apart in the log because only one
+        of them is an operational fault:
+
+        - no rollout source wired          -> nobody looked;
+        - source read nothing (`None`)     -> looked, could not read;
+        - rollout named no single model    -> read, it does not say.
+
+        All three leave `_announced_model` as None, which is the honest answer
+        and the one `AgentIdentity` already defines as "not reported".
+        """
+        if self._announced_model is not None:
+            return
+        if self._rollout is None:
+            logger.debug(
+                "No codex rollout source wired (phase=%s) - the model this phase "
+                "ran goes unrecorded",
+                self._phase_id,
+            )
+            return
+        if self._leader_native_session_id is None:
+            # The rollout is filed under the id codex announced, and picking
+            # one by any other means is a guess. A phase whose stream never got
+            # as far as `thread.started` has no key, so there is nothing to
+            # ask with.
+            logger.warning(
+                "Codex announced no session id (phase=%s) - cannot match its rollout, "
+                "so the model it ran goes unrecorded",
+                self._phase_id,
+            )
+            return
+
+        document = await self._rollout.codex_rollout(self._leader_native_session_id)
+        if document is None:
+            logger.warning(
+                "Could not read the codex rollout for session %s (phase=%s) - "
+                "the model it ran goes unrecorded",
+                self._leader_native_session_id,
+                self._phase_id,
+            )
+            return
+
+        self._announced_model = model_from_rollout(document)
+        if self._announced_model is None:
+            logger.info(
+                "Codex rollout for session %s (phase=%s) names no single model",
+                self._leader_native_session_id,
+                self._phase_id,
+            )
 
     def _estimate_cost(self) -> float | None:
         """Estimate total cost via the STRICT resolver (never Sonnet default).

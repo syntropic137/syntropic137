@@ -437,6 +437,7 @@ class TestTheVerdictSurvivesEveryHop:
             phase_id="verify",
             session_id="s1",
             agent_model="gpt-5.6",
+            rollout=None,
         )
 
         result = await processor.process_stream(

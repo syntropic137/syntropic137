@@ -25,20 +25,31 @@ of it, and the pair is what a reader needs to see at once.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_shared.agents import AgentRunner
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 from syn_domain.contexts.artifacts import AgentIdentity
+from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    MISSING_TERMINAL_TURN_REASON,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     StreamResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+    AgentExecutionHandler,
     AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
@@ -218,22 +229,47 @@ CODEX_ANNOUNCED = "gpt-5.6-sol"
 CODEX_LATER = "gpt-5.6-codex"
 
 
-def _codex_line(model: object) -> str:
-    """A `thread.started` that also names a model.
+#: A REAL captured codex rollout: the same on-disk document `transcript_usage`
+#: prices a codex delegate from, `turn_context.payload.model` and all. Nothing
+#: in this file manufactures a stream that names a model, because no codex
+#: version has ever emitted one - a test driven by a shape that does not occur
+#: pins nothing, and the one that used to live here (a `thread.started` with a
+#: top-level `model`, labelled HYPOTHETICAL in its own docstring) asserted the
+#: fallback that matters was never exercised at all.
+_ROLLOUT_FIXTURE = _FIXTURES_DIR.parent / "delegation" / "codex_rollout_usage.json"
 
-    HYPOTHETICAL, and the only fixture here that is: no captured codex stream
-    carries a model on any event (checked across all nine fixtures and the real
-    `codex exec --json` recording), which is why the golden-recording test
-    below asserts None. This line exists to prove the value is CARRIED when it
-    is present rather than dropped on the floor - the failure mode that a test
-    asserting only today's None cannot distinguish from no code at all.
+#: The session `_ROLLOUT_FIXTURE` was captured from, as codex filed it.
+CODEX_THREAD_ID = "01a04903-c2f9"
 
-    `thread.started` is where codex already announces its own identity (the
-    thread id the rollout is keyed by), so it is the event a model would most
-    plausibly arrive on; the parser reads a top-level `model` off whichever
-    event carries it rather than keying on this one.
+
+def _real_rollout() -> list[dict[str, object]]:
+    document = json.loads(_ROLLOUT_FIXTURE.read_text())
+    assert isinstance(document, list)
+    # Fail here rather than three assertions later if the capture is ever
+    # replaced by one that does not name a model: a fixture that cannot carry
+    # the value makes every test below pass for the wrong reason.
+    assert any(
+        record.get("type") == "turn_context" and record["payload"]["model"] == CODEX_ANNOUNCED
+        for record in document
+    ), f"{_ROLLOUT_FIXTURE} no longer names {CODEX_ANNOUNCED} on a turn_context"
+    return document
+
+
+class _RolloutOnDisk:
+    """A `CodexRolloutPort` serving what codex actually wrote.
+
+    Records the id it was asked for, because "the lookup happened" and "the
+    lookup used the id codex announced" are different claims and only the
+    second one survives a processor that passes its own platform session id.
     """
-    return json.dumps({"type": "thread.started", "thread_id": "01a04903-c2f9", "model": model})
+
+    def __init__(self, document: list[dict[str, object]] | None) -> None:
+        self._document = document
+        self.asked_for: list[str] = []
+
+    async def codex_rollout(self, native_session_id: str) -> list[dict[str, object]] | None:
+        self.asked_for.append(native_session_id)
+        return self._document
 
 
 def _codex_thread_started() -> str:
@@ -246,9 +282,11 @@ def _codex_turn_completed() -> str:
 
 
 async def _codex_result(
-    *lines: str, requested: str | None = REQUESTED_BY_A_CODEX_PHASE
+    *lines: str,
+    requested: str | None = REQUESTED_BY_A_CODEX_PHASE,
+    rollout: _RolloutOnDisk | None = None,
 ) -> StreamResult:
-    proc, _ = _make_codex_processor(_RecordingCollector(), agent_model=requested)
+    proc, _ = _make_codex_processor(_RecordingCollector(), agent_model=requested, rollout=rollout)
     return await proc.process_stream(_lines_to_stream(*lines), MockWorkspace())
 
 
@@ -260,18 +298,24 @@ class TestTheCodexStreamIsReadTheSameWay:
     artifact was correct and entirely unpinned: nothing here would have noticed
     the requested model being substituted, and no code path would have picked up
     a model if codex started reporting one.
+
+    Then it had the argument and still no value, because it read a top-level
+    `model` off the stdout stream and NO CODEX STREAM CARRIES ONE - not the
+    golden recording, not any of the ten fixtures. Every codex artifact said
+    `provider="codex", model=null`, which proves which harness ran and never
+    which model, and codex is always the second model in this platform's
+    cross-model reviews. The model it ran is on disk, in the rollout, and these
+    are driven by a real one.
     """
 
-    async def test_the_real_recording_names_no_model_and_is_not_filled_in(self) -> None:
-        """The golden `codex exec --json` capture, unedited.
+    async def test_the_real_recording_names_no_model_on_the_wire(self) -> None:
+        """The golden `codex exec --json` capture, unedited, with nobody to ask.
 
-        Codex names its model on DISK (`turn_context.payload.model`, which is
-        where `transcript_usage` reads it) but nowhere on the wire, so None here
-        is the honest answer and not a gap to be papered over. It must not
-        become "haiku", and it must not become the string "unknown" either - a
-        sentinel that reads like a model id would flow onward as a value, which
-        is the mistake that once priced unspecified codex phases as a real
-        model (see `syn_shared/pricing`).
+        The stream itself establishes nothing, which is why the rollout read
+        below exists. It must not become "haiku", and it must not become the
+        string "unknown" either - a sentinel that reads like a model id would
+        flow onward as a value, which is the mistake that once priced
+        unspecified codex phases as a real model (see `syn_shared/pricing`).
         """
         proc, _ = _make_codex_processor(
             _RecordingCollector(), agent_model=REQUESTED_BY_A_CODEX_PHASE
@@ -285,24 +329,113 @@ class TestTheCodexStreamIsReadTheSameWay:
         # turn, not one that died before it could announce anything.
         assert result.error_reason is None
 
-    async def test_a_codex_stream_that_names_a_model_is_believed(self) -> None:
-        result = await _codex_result(_codex_line(CODEX_ANNOUNCED), _codex_turn_completed())
+    async def test_the_model_the_rollout_names_is_the_one_reported(self) -> None:
+        """The whole point: a real stream that says nothing, a real rollout
+        that does, and the rollout's value coming out.
+
+        `gpt-5.6-sol` appears nowhere on the stream and cannot arrive by any
+        other route - it is not the requested model, not a default, and not a
+        value this test hands to the processor.
+        """
+        rollout = _RolloutOnDisk(_real_rollout())
+        result = await _codex_result(
+            _codex_thread_started(), _codex_turn_completed(), rollout=rollout
+        )
         assert result.announced_model == CODEX_ANNOUNCED
         assert result.announced_model != REQUESTED_BY_A_CODEX_PHASE
 
-    async def test_the_first_announcement_wins(self) -> None:
-        """Same rule and same reason as the claude side and as the leader
-        thread id: a line arriving late must not rebind the identity."""
-        result = await _codex_result(
-            _codex_line(CODEX_ANNOUNCED), _codex_line(CODEX_LATER), _codex_turn_completed()
+    async def test_the_rollout_is_asked_for_by_the_id_codex_announced(self) -> None:
+        """Not the platform's session id, which is `s1` here and which codex
+        has never seen. Asking with the wrong id finds another session's
+        rollout or none, and both are worse than no answer."""
+        rollout = _RolloutOnDisk(_real_rollout())
+        await _codex_result(_codex_thread_started(), _codex_turn_completed(), rollout=rollout)
+        assert rollout.asked_for == [CODEX_THREAD_ID]
+
+    async def test_a_stream_that_named_a_model_is_not_second_guessed(self) -> None:
+        """If codex ever does announce one, the rollout is not consulted at
+        all. FIRST wins, the same rule as the leader thread id."""
+        rollout = _RolloutOnDisk(_real_rollout())
+        proc, _ = _make_codex_processor(
+            _RecordingCollector(), agent_model=REQUESTED_BY_A_CODEX_PHASE, rollout=rollout
         )
-        assert result.announced_model == CODEX_ANNOUNCED
+        result = await proc.process_stream(
+            _lines_to_stream(
+                json.dumps(
+                    {"type": "thread.started", "thread_id": CODEX_THREAD_ID, "model": CODEX_LATER}
+                ),
+                _codex_turn_completed(),
+            ),
+            MockWorkspace(),
+        )
+        assert result.announced_model == CODEX_LATER
+        assert rollout.asked_for == []
+
+    async def test_an_unreadable_rollout_leaves_the_model_unknown(self) -> None:
+        """Looked, could not read. None, and not the requested model."""
+        rollout = _RolloutOnDisk(None)
+        result = await _codex_result(
+            _codex_thread_started(), _codex_turn_completed(), rollout=rollout
+        )
+        assert rollout.asked_for == [CODEX_THREAD_ID]
+        assert result.announced_model is None
+
+    async def test_a_rollout_that_names_no_model_leaves_it_unknown(self) -> None:
+        """Read, and it does not say. The usage-bearing records of the real
+        capture with its one `turn_context` removed - a rollout cut off before
+        its first turn looks exactly like this."""
+        without_model = [r for r in _real_rollout() if r.get("type") != "turn_context"]
+        result = await _codex_result(
+            _codex_thread_started(),
+            _codex_turn_completed(),
+            rollout=_RolloutOnDisk(without_model),
+        )
+        assert result.announced_model is None
 
     @pytest.mark.parametrize("blank", ["", "   ", None, 4])
-    async def test_a_line_that_says_nothing_usable_is_not_taken(self, blank: object) -> None:
-        """Both parsers reject these identically because they share the rule,
-        rather than each restating it and drifting apart."""
-        result = await _codex_result(_codex_line(blank), _codex_turn_completed())
+    async def test_a_rollout_that_says_nothing_usable_is_not_taken(self, blank: object) -> None:
+        """Same rule as the claude side rather than a restatement of it: a
+        model that is not a non-blank string names nothing, so `""` must not
+        reach an artifact as though it were an id."""
+        document = _real_rollout()
+        for record in document:
+            if record.get("type") == "turn_context":
+                record["payload"]["model"] = blank  # type: ignore[index]
+        result = await _codex_result(
+            _codex_thread_started(), _codex_turn_completed(), rollout=_RolloutOnDisk(document)
+        )
+        assert result.announced_model is None
+
+    async def test_a_rollout_spanning_two_models_names_neither(self) -> None:
+        """The refusal `_codex_usage` already makes for pricing, for the same
+        reason: a session that spanned models cannot be attributed to one of
+        them, and the later one is not more true for being later."""
+        document = [*_real_rollout(), {"type": "turn_context", "payload": {"model": CODEX_LATER}}]
+        result = await _codex_result(
+            _codex_thread_started(), _codex_turn_completed(), rollout=_RolloutOnDisk(document)
+        )
+        assert result.announced_model is None
+
+    async def test_nobody_looking_is_not_the_same_as_looking_and_finding_nothing(self) -> None:
+        """Both report None, and they must: `None` means "not reported" and no
+        other value would be honest. What differs is that one of them ASKED -
+        so a processor wired without a source cannot quietly pass for one that
+        asked and got nothing."""
+        rollout = _RolloutOnDisk(_real_rollout())
+        looked = await _codex_result(
+            _codex_thread_started(), _codex_turn_completed(), rollout=rollout
+        )
+        nobody = await _codex_result(_codex_thread_started(), _codex_turn_completed())
+        assert looked.announced_model == CODEX_ANNOUNCED
+        assert nobody.announced_model is None
+        assert rollout.asked_for == [CODEX_THREAD_ID]
+
+    async def test_a_stream_that_never_named_a_session_is_not_matched(self) -> None:
+        """No `thread.started`, so no key - and the rollout of whichever
+        session happens to be lying around is not this phase's evidence."""
+        rollout = _RolloutOnDisk(_real_rollout())
+        result = await _codex_result(_codex_turn_completed(), rollout=rollout)
+        assert rollout.asked_for == []
         assert result.announced_model is None
 
     async def test_cli_noise_and_echoed_braces_announce_nothing(self) -> None:
@@ -315,10 +448,69 @@ class TestTheCodexStreamIsReadTheSameWay:
         )
         assert result.announced_model is None
 
-    async def test_a_truncated_stream_announces_nothing(self) -> None:
-        """No terminal turn, so no report - and still no invented model."""
-        result = await _codex_result()
-        assert result.announced_model is None
+    async def test_a_truncated_stream_still_reports_what_the_rollout_says(self) -> None:
+        """No terminal turn, so no authoritative usage - but the rollout on
+        disk is still there and still says what ran. A phase killed mid-run is
+        exactly when a reader most needs to know which model was running."""
+        rollout = _RolloutOnDisk(_real_rollout())
+        result = await _codex_result(_codex_thread_started(), rollout=rollout)
+        assert result.error_reason == MISSING_TERMINAL_TURN_REASON
+        assert result.announced_model == CODEX_ANNOUNCED
+
+
+class _CodexWorkspace:
+    """The workspace the handler is given: it streams, and it holds the rollout.
+
+    Both on one object because in production both ARE one object - the rollout
+    is a file inside the container the stream came out of, and nothing else can
+    still reach it once that container is gone.
+    """
+
+    def __init__(self, *lines: str, document: list[dict[str, object]] | None) -> None:
+        self._lines = lines
+        self._document = document
+        self.last_stream_exit_code: int | None = 0
+        self.asked_for: list[str] = []
+
+    def stream(self, *_args: object, **_kwargs: object) -> AsyncIterator[str]:
+        return _lines_to_stream(*self._lines)
+
+    async def codex_rollout(self, native_session_id: str) -> list[dict[str, object]] | None:
+        self.asked_for.append(native_session_id)
+        return self._document
+
+    async def interrupt(self) -> bool:
+        return True
+
+
+class TestTheHandlerGivesTheProcessorSomethingToAsk:
+    """The wiring hop, which no test on either side of it can see.
+
+    `CodexStreamProcessor` asks whatever it was handed; the handler decides what
+    that is. Pass `rollout=None` there - the one-word change that turns this
+    whole feature off - and every test above still passes, because they hand
+    the processor a source themselves. This runs the real handler.
+    """
+
+    async def test_a_codex_phase_reports_the_model_its_rollout_names(self) -> None:
+        workspace = _CodexWorkspace(
+            _codex_thread_started(),
+            _codex_turn_completed(),
+            document=_real_rollout(),
+        )
+        result = await AgentExecutionHandler(controller=None).handle(
+            todo=TodoItem(execution_id="exec-1", action=TodoAction.RUN_AGENT, phase_id="verify"),
+            workspace=workspace,  # type: ignore[arg-type]
+            agent_env={"CODEX_HOME": "/home/agent/.codex"},
+            claude_cmd=["codex", "exec", "--json", "verify it"],
+            session_id="sess-1",
+            agent_model=REQUESTED_BY_A_CODEX_PHASE,
+            timeout_seconds=300,
+            collector=_RecordingCollector(),
+            runner=AgentRunner.CODEX,
+        )
+        assert workspace.asked_for == [CODEX_THREAD_ID]
+        assert result.stream_result.announced_model == CODEX_ANNOUNCED
 
 
 class TestACodexPhasesArtifactNamesWhoRanIt:
@@ -347,12 +539,14 @@ class TestACodexPhasesArtifactNamesWhoRanIt:
         )
         return repo
 
-    async def _agent_after_running(self, *lines: str) -> AgentIdentity:
+    async def _agent_after_running(
+        self, *lines: str, rollout: _RolloutOnDisk | None = None
+    ) -> AgentIdentity:
         runtime = _runtime()
         runtime.record_agent_run(
             "verify",
             AgentExecutionResult(
-                stream_result=await _codex_result(*lines),
+                stream_result=await _codex_result(*lines, rollout=rollout),
                 tokens=TokenAccumulator(),
                 subagents=SubagentTracker(),
                 command=AgentExecutionCompletedCommand(
@@ -364,14 +558,35 @@ class TestACodexPhasesArtifactNamesWhoRanIt:
         # WorkflowExecutionProcessor passes it: we launched the binary.
         return runtime.agent_for("verify", provider="codex")
 
-    async def test_the_model_a_codex_stream_named_reaches_the_artifact(self) -> None:
+    async def test_the_model_the_rollout_named_reaches_the_artifact(self) -> None:
+        """THE HOP THIS FILE EXISTS FOR, now with a value that can only have
+        come from the rollout.
+
+        `gpt-5.6-sol` is read out of a real captured codex rollout, carried
+        through the processor, the runtime and the collector, and read back off
+        the SAVED artifact record. Every layer in between had to pass it along,
+        and a constructor that drops it satisfies a test at either end.
+        """
         agent = await self._agent_after_running(
-            _codex_line(CODEX_ANNOUNCED), _codex_turn_completed()
+            _codex_thread_started(),
+            _codex_turn_completed(),
+            rollout=_RolloutOnDisk(_real_rollout()),
         )
         repo = await self._collect(agent)
         assert [a.agent for a in repo.saved] == [
             AgentIdentity(provider="codex", model=CODEX_ANNOUNCED)
         ]
+
+    async def test_a_codex_phase_whose_rollout_was_unreadable_still_names_its_harness(
+        self,
+    ) -> None:
+        """Looked, could not read: the artifact reports the harness and says
+        the model is absent rather than guessing it."""
+        agent = await self._agent_after_running(
+            _codex_thread_started(), _codex_turn_completed(), rollout=_RolloutOnDisk(None)
+        )
+        repo = await self._collect(agent)
+        assert [a.agent for a in repo.saved] == [AgentIdentity(provider="codex", model=None)]
 
     async def test_a_codex_phase_that_named_nothing_still_names_its_harness(self) -> None:
         """Today's real case, and the one the workflow prompts already handle:

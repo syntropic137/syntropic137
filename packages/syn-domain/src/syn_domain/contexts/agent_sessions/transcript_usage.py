@@ -326,11 +326,18 @@ def model_from_rollout(document: RolloutDocument) -> str | None:
     attributed to one of them, and naming whichever came first would read as
     evidence. The caller cannot tell those two apart, and does not need to -
     both mean "the rollout does not establish a model".
+
+    A blank model names nothing and is dropped rather than returned. ``""``
+    is not an id, and a caller that received one would carry it onward as
+    though it were - which is the "unknown" sentinel mistake in a shorter
+    spelling.
     """
     models = {
-        model
+        model.strip()
         for record in document
-        if isinstance(record, Mapping) and (model := _codex_model(record)) is not None
+        if isinstance(record, Mapping)
+        and (model := _codex_model(record)) is not None
+        and model.strip()
     }
     return next(iter(models)) if len(models) == 1 else None
 
