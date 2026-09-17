@@ -374,7 +374,50 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)
             )
-            self._stamp_failed_phase(existing, event_data, kept_artifact_ids)
+
+            # Mark failed phase if specified
+            failed_phase_id = event_data.get("failed_phase_id")
+            if failed_phase_id:
+                found = self._find_phase(existing.get("phases", []), failed_phase_id)
+                if found:
+                    _, phase = found
+                    phase["status"] = "failed"
+                    phase["error_message"] = event_data.get("error_message")
+
+                    # How this phase's branches stood when it died (#1200).
+                    # Copied verbatim INCLUDING None and []: the two are
+                    # different incidents - nobody could read the workspace,
+                    # versus read it and found no branch differing from how the
+                    # phase found it - and a `or []` here would report the first
+                    # as the second. Absent on every event that predates the
+                    # field, which is null: correct, because nothing looked.
+                    phase["observed_branches"] = event_data.get("observed_branches")
+
+                    # What this phase wrote and got to keep (#1321). A failed
+                    # phase always read artifact_id=None here, because the only
+                    # thing that ever set it was PhaseCompleted -- so the one
+                    # field an operator looks at to find a refused phase's
+                    # deliverable was the one field guaranteed to be empty for
+                    # a refused phase. One id, matching the success path:
+                    # PhaseDetail names a single artifact and the primary
+                    # deliverable is stored first.
+                    if kept_artifact_ids:
+                        phase["artifact_id"] = kept_artifact_ids[0]
+
+                    # The failed phase never gets a PhaseCompleted event, so
+                    # without this its duration_seconds is stuck at the 0.0
+                    # PhaseDetail.running() seeded it with -- reporting a
+                    # timed-out phase as instantaneous (#1036). The processor
+                    # computes this from when the phase actually started, so
+                    # it is present exactly when a phase was in flight.
+                    failed_duration = event_data.get("failed_phase_duration_seconds")
+                    if failed_duration is not None:
+                        phase["duration_seconds"] = failed_duration
+                        phase["completed_at"] = event_data.get("failed_at")
+                        # Also roll into the execution total, which otherwise
+                        # under-reports by exactly the failed phase's time --
+                        # it only accumulates from PhaseCompleted events.
+                        self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
 
         # Outside the phase lookup, and outside the orphan branch above, on
         # purpose: an artifact that was stored exists whether or not this
@@ -385,66 +428,6 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             self._track_artifact(existing, artifact_id)
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
-
-    def _stamp_failed_phase(
-        self,
-        existing: dict[str, Any],
-        event_data: dict,
-        kept_artifact_ids: list[str],
-    ) -> None:
-        """Record on the phase that died everything the failure event knows.
-
-        Sibling of ``_stamp_terminal_phase`` below, which does the same job for
-        the cancel and interrupt paths. Guard clauses rather than nesting for
-        the same reason it uses them: every field a failure learns to carry
-        lands here, and under three levels of nesting each new one costs more
-        to read than it does to write.
-
-        A failure event that names no phase, or names one this projection never
-        saw, leaves the phases untouched - the execution-level fields the
-        caller already wrote still stand.
-        """
-        phase_id = event_data.get("failed_phase_id")
-        if not phase_id:
-            return
-        found = self._find_phase(existing.get("phases", []), phase_id)
-        if not found:
-            return
-        _, phase = found
-
-        phase["status"] = "failed"
-        phase["error_message"] = event_data.get("error_message")
-
-        # How this phase's branches stood when it died (#1200).
-        # Copied verbatim INCLUDING None and []: the two are different
-        # incidents - nobody could read the workspace, versus read it and found
-        # no branch differing from how the phase found it - and a `or []` here
-        # would report the first as the second. Absent on every event that
-        # predates the field, which is null: correct, because nothing looked.
-        phase["observed_branches"] = event_data.get("observed_branches")
-
-        # What this phase wrote and got to keep (#1321). A failed phase always
-        # read artifact_id=None here, because the only thing that ever set it
-        # was PhaseCompleted - so the one field an operator looks at to find a
-        # refused phase's deliverable was the one field guaranteed to be empty.
-        # First, matching the success path: PhaseDetail names one artifact and
-        # the primary deliverable is stored first.
-        if kept_artifact_ids:
-            phase["artifact_id"] = kept_artifact_ids[0]
-
-        # The failed phase never gets a PhaseCompleted event, so without this
-        # its duration_seconds is stuck at the 0.0 PhaseDetail.running() seeded
-        # it with -- reporting a timed-out phase as instantaneous (#1036). The
-        # processor computes this from when the phase actually started, so it
-        # is present exactly when a phase was in flight.
-        failed_duration = event_data.get("failed_phase_duration_seconds")
-        if failed_duration is not None:
-            phase["duration_seconds"] = failed_duration
-            phase["completed_at"] = event_data.get("failed_at")
-            # Also roll into the execution total, which otherwise under-reports
-            # by exactly the failed phase's time -- it only accumulates from
-            # PhaseCompleted events.
-            self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
 
     def _stamp_terminal_phase(
         self,
