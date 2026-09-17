@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
 import { useLiveTimer } from './useLiveTimer'
-import { useRefetchWhileRunning } from './useRefetchWhileRunning'
+import { RUNNING_POLL_INTERVAL_MS, useSerialRefresh } from './useSerialRefresh'
 import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 export interface UseSessionDataResult {
@@ -30,11 +30,13 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
   const isRunning = session?.status === 'running'
   const now = useLiveTimer(isRunning)
 
-  const fetchSession = useCallback(() => {
-    if (!sessionId) return
+  // No "cancel the previous request" step: `useSerialRefresh` does not start a
+  // second one while the first is outstanding, so there is never a previous
+  // request to cancel (#1095). The controller is still how the timeout below
+  // and unmount stop a request that IS outstanding.
+  const fetchSession = useCallback((): Promise<void> => {
+    if (!sessionId) return Promise.resolve()
 
-    // Cancel any in-flight request
-    abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -45,14 +47,14 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
       controller.abort()
     }, FETCH_TIMEOUT_MS)
 
-    getSession(sessionId, controller.signal)
+    return getSession(sessionId, controller.signal)
       .then((data) => {
         setSession(data)
         setError(null)
         setLoading(false)
       })
       .catch((err) => {
-        // Intentional aborts (navigation, new fetch cycle) — skip all state updates
+        // Intentional aborts (navigation) — skip all state updates
         if (err.name === 'AbortError' && !didTimeout) return
         setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
         setLoading(false)
@@ -62,18 +64,18 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
       })
   }, [sessionId])
 
-  // Initial fetch
-  useEffect(() => {
-    fetchSession()
-    return () => abortRef.current?.abort()
-  }, [fetchSession])
-
-  // Poll while non-terminal; also pauses while the tab is hidden (#1048).
-  useRefetchWhileRunning({
-    items: session ? [session] : [],
-    isTerminal: isTerminalSession,
-    refetch: fetchSession,
+  // Poll while non-terminal; pauses while the tab is hidden (#1048), and never
+  // issues a poll on top of one that has not come back (#1095).
+  const { refetch } = useSerialRefresh({
+    fetch: fetchSession,
+    pollIntervalMs: session && !isTerminalSession(session) ? RUNNING_POLL_INTERVAL_MS : null,
   })
+
+  // Initial fetch, and again whenever the session being viewed changes.
+  useEffect(() => {
+    refetch()
+    return () => abortRef.current?.abort()
+  }, [refetch, fetchSession])
 
   return { session, loading, error, now, showConversationLog, setShowConversationLog }
 }
