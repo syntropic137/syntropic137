@@ -139,6 +139,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Final
 
+from pydantic import BaseModel, ConfigDict, ValidationError
+
 __all__ = [
     "TASK_RESULT_MARKER",
     "TASK_RESULT_TERMINATOR",
@@ -210,18 +212,14 @@ class AgentVerdict:
     @classmethod
     def _from_report(cls, report: _Report) -> AgentVerdict:
         """What one delimited block claims, judged on its own."""
-        reported = report.decoded
-        if not isinstance(reported, dict):
+        try:
+            reported = _ReportedResult.model_validate(report.decoded)
+        except ValidationError:
             return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
-        claim: object = reported.get("success")
-        comments: object = reported.get("comments")
-        said = str(comments) if comments is not None else ""
-        # A JSON boolean or nothing. `"success": "false"` is a string, and a
-        # string is truthy, so anything looser here would read a reported
-        # FAILURE as a pass - the exact direction this module exists to close.
-        if not isinstance(claim, bool):
-            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
-        return cls(VerdictStatus.SUCCESS if claim else VerdictStatus.FAILURE, said)
+        return cls(
+            VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
+            reported.said,
+        )
 
     @property
     def refuses_completion(self) -> bool:
@@ -318,6 +316,38 @@ class _Report:
 
     payload: str
     decoded: object | None
+
+
+class _ReportedResult(BaseModel):
+    """The ``TASK_RESULT`` block, as a type instead of two string lookups.
+
+    This replaces `decoded.get("success")` / `decoded.get("comments")`. Those
+    read a parsed-but-unvalidated `object` by string key, so the keys were
+    spelled in one place and their types checked in another, and every caller
+    had to re-derive that a report is a mapping at all.
+
+    ``strict`` is the point of the model, not a default carried along. The
+    report crosses a trust boundary - an agent writes it - and pydantic's
+    permissive mode would coerce ``"success": "true"`` into `True`. That is the
+    exact direction this module exists to close: a string is not a JSON
+    boolean, and a report that sends one has not reported an outcome. Under
+    ``strict`` it fails validation and the verdict is UNREADABLE, which refuses
+    the phase; under lax coercion it would silently PASS one. The old
+    `isinstance(claim, bool)` check made the same judgement and this keeps it.
+
+    ``extra="ignore"`` because agents add keys, and an unexpected one is not a
+    reason to discard an otherwise well-formed outcome.
+    """
+
+    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
+
+    success: bool
+    comments: object | None = None
+
+    @property
+    def said(self) -> str:
+        """The comments as an operator will read them, never None."""
+        return str(self.comments) if self.comments is not None else ""
 
 
 def _payload_starts(text: str, after: int) -> int:

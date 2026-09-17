@@ -224,6 +224,42 @@ class TestTheReportIsReadAsJson:
     @pytest.mark.parametrize(
         "text",
         [
+            pytest.param(
+                'TASK_RESULT: {"success": "true", "comments": "done"} TASK_RESULT_END',
+                id="success-is-the-string-true",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": "false", "comments": "could not"} TASK_RESULT_END',
+                id="success-is-the-string-false",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": 1, "comments": "done"} TASK_RESULT_END',
+                id="success-is-a-number",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"comments": "no success key at all"} TASK_RESULT_END',
+                id="success-is-missing",
+            ),
+        ],
+    )
+    def test_success_must_be_a_json_boolean(self, text: str) -> None:
+        """A near-miss `success` is UNREADABLE, never a pass.
+
+        The reader validates the block with a strict pydantic model. Strict is
+        the load-bearing part: pydantic's default mode coerces `"true"` to
+        `True`, which would turn a malformed report into a COMPLETED phase -
+        the one direction this module exists to close. `"false"` is included
+        because it fails in the safe direction and would therefore hide a
+        regression in the other two if it were the only case tested.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
             pytest.param(None, id="no-message-at-all"),
             pytest.param("", id="empty-message"),
             pytest.param("I have finished the work.", id="prose-with-no-marker"),
