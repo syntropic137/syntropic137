@@ -1915,6 +1915,10 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
         };
         /**
          * ArtifactSummaryResponse
@@ -1938,6 +1942,10 @@ export interface components {
             size_bytes: number;
             /** Created At */
             created_at?: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
         };
         /**
          * AssignRepoToSystemRequest
