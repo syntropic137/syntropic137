@@ -439,6 +439,13 @@ export interface paths {
          * List Artifacts Endpoint
          * @description List artifacts with optional filtering.
          *
+         *     ``execution_id`` is declared here rather than left to the client because an
+         *     undeclared query parameter is dropped, not refused (#1306): a real id, a
+         *     nonsense id and no filter at all returned the same unfiltered page, so "this
+         *     run's deliverable" resolved to whatever any run wrote most recently. The
+         *     same defect #1263 fixed on ``/sessions``, on the surface where it decides
+         *     what a phase reads.
+         *
          *     The window is named after ``created_at`` because that is the timestamp an
          *     artifact has; the siblings bound ``started_at`` and spell it
          *     ``started_after``. The validation is the same one (#1186): a bound with no
@@ -1929,6 +1936,8 @@ export interface components {
             id: string;
             /** Workflow Id */
             workflow_id: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
             /** Artifact Type */
@@ -6320,6 +6329,8 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
+                /** @description Filter by execution ID */
+                execution_id?: string | null;
                 /** @description Filter by phase ID */
                 phase_id?: string | null;
                 /** @description Filter by session ID */

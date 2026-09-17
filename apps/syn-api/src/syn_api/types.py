@@ -542,6 +542,12 @@ class ArtifactSummary(BaseModel):
 
     id: str
     workflow_id: str | None = None
+    #: Which run produced it (#1306). The row has always carried it; the list
+    #: did not report it, so a client that asked for one execution's artifacts
+    #: could not tell from the answer whether it had got them. Reported as well
+    #: as filtered on, because a filter a client cannot verify is what the
+    #: silent drop looked like from outside.
+    execution_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None

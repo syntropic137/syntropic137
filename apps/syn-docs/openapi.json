@@ -1474,7 +1474,7 @@
           "artifacts"
         ],
         "summary": "List Artifacts Endpoint",
-        "description": "List artifacts with optional filtering.\n\nThe window is named after ``created_at`` because that is the timestamp an\nartifact has; the siblings bound ``started_at`` and spell it\n``started_after``. The validation is the same one (#1186): a bound with no\noffset is refused rather than guessed at.",
+        "description": "List artifacts with optional filtering.\n\n``execution_id`` is declared here rather than left to the client because an\nundeclared query parameter is dropped, not refused (#1306): a real id, a\nnonsense id and no filter at all returned the same unfiltered page, so \"this\nrun's deliverable\" resolved to whatever any run wrote most recently. The\nsame defect #1263 fixed on ``/sessions``, on the surface where it decides\nwhat a phase reads.\n\nThe window is named after ``created_at`` because that is the timestamp an\nartifact has; the siblings bound ``started_at`` and spell it\n``started_after``. The validation is the same one (#1186): a bound with no\noffset is refused rather than guessed at.",
         "operationId": "list_artifacts_endpoint_artifacts_get",
         "parameters": [
           {
@@ -1494,6 +1494,24 @@
               "title": "Workflow Id"
             },
             "description": "Filter by workflow ID"
+          },
+          {
+            "name": "execution_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by execution ID",
+              "title": "Execution Id"
+            },
+            "description": "Filter by execution ID"
           },
           {
             "name": "phase_id",
@@ -5745,6 +5763,17 @@
               }
             ],
             "title": "Workflow Id"
+          },
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
           },
           "phase_id": {
             "anyOf": [
