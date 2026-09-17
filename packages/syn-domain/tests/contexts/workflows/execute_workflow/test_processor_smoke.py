@@ -36,11 +36,9 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -78,13 +76,6 @@ class FakeExecutionRepository:
 
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
         return self._aggregates.get(aggregate_id)
-
-
-class FakeSessionRepository:
-    """Minimal in-memory session repository (save-only) for smoke tests."""
-
-    async def save(self, aggregate: AgentSessionAggregate) -> None:
-        pass  # No-op — smoke tests don't assert on session state
 
 
 class FakeArtifactRepository:

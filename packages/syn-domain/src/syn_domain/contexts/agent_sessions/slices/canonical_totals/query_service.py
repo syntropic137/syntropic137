@@ -23,6 +23,7 @@ from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
     price_canonical_row,
 )
+from syn_domain.storable_text import pg_safe
 
 # Mirrors the heatmap's scoping so both read the same rows for the same
 # filter. Callers that pass no filter get all-time totals, which is what the
@@ -106,11 +107,17 @@ class CanonicalUsageQueryService:
         return template.format(execution_filter=_EXECUTION_FILTER if filtered else "")
 
     async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
-        """Canonical totals, optionally narrowed to a set of executions."""
+        """Canonical totals, optionally narrowed to a set of executions.
+
+            # agent_events holds every id in its stored (sanitised) form, because
+        # AgentEvent's validator applies pg_safe on the way in. A read binds text
+        # against those columns, so it has to ask for the same spelling or it
+        # matches nothing and reports that as "nothing was recorded" (#1241).
+        """
         filtered = execution_ids is not None
         totals_sql = self._render(_TOTALS_QUERY, filtered)
         sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
-        args = [list(execution_ids)] if execution_ids is not None else []
+        args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(totals_sql, *args)

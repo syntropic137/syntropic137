@@ -17,11 +17,12 @@ if TYPE_CHECKING:
     from syn_adapters.projections.session_tools import ToolOperation
 
 from syn_adapters.projections.session_tools_converters import (
-    row_to_git_operation,
-    row_to_subagent_operation,
+    to_git_operation,
+    to_subagent_operation,
 )
 from syn_adapters.projections.session_tools_verdict import observation_id, read_verdict
 from syn_shared.events import (
+    SESSION_COMPLETED,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
     TOOL_EXECUTION_COMPLETED,
@@ -29,6 +30,15 @@ from syn_shared.events import (
 )
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
+
+#: Row types that report a FINISHED subject, and so are the ones whose
+#: `output_preview` and `duration_ms` mean anything. This was spelled
+#: `event_type == TOOL_EXECUTION_COMPLETED`, which made `is_completed` narrower
+#: than its own name: `session_completed` carries the phase's wall-clock
+#: duration and was having it dropped one hop after the writer computed it.
+_COMPLETION_EVENT_TYPES: frozenset[str] = frozenset(
+    {TOOL_EXECUTION_COMPLETED, SESSION_COMPLETED},
+)
 
 # The two rows a single call produces. Subagent types are here because the
 # converters relabel an Agent/Task tool's rows to them before anyone downstream
@@ -52,8 +62,8 @@ def _is_subagent_tool_event(event_type: str, tool_name: str, subagent_tool_names
     return tool_name in subagent_tool_names
 
 
-def _build_standard_operation(
-    row: asyncpg.Record, data: dict[str, Any], event_type: str
+def build_standard_operation(
+    when: datetime, data: dict[str, Any], event_type: str
 ) -> ToolOperation:
     """Build a ToolOperation for a standard tool event.
 
@@ -64,14 +74,14 @@ def _build_standard_operation(
     """
     from syn_adapters.projections.session_tools import ToolOperation
 
-    is_completed = event_type == TOOL_EXECUTION_COMPLETED
+    is_completed = event_type in _COMPLETION_EVENT_TYPES
     verdict = read_verdict(event_type, data)
     # `event_type` is always present, so this is never empty. The old
     # `or str(uuid4())` tail could therefore never fire either - and a uuid
     # here would have broken the determinism `_accumulate_tool_stats` relies
     # on, so the dead branch is gone rather than kept "just in case".
     obs_id = data.get("observation_id") or observation_id(
-        event_type, data.get("tool_use_id"), row["time"].isoformat()
+        event_type, data.get("tool_use_id"), when.isoformat()
     )
 
     return ToolOperation(
@@ -79,7 +89,7 @@ def _build_standard_operation(
         tool_name=data.get("tool_name", ""),
         tool_use_id=data.get("tool_use_id"),
         operation_type=event_type,
-        timestamp=row["time"],
+        timestamp=when,
         success=verdict.success,
         error_message=verdict.error_message,
         input_preview=data.get("input_preview"),
@@ -88,18 +98,22 @@ def _build_standard_operation(
     )
 
 
-def row_to_operation(
-    row: asyncpg.Record,
+def to_operation(
+    when: datetime,
+    data: dict[str, Any],
+    event_type: str,
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
 ) -> ToolOperation | None:
-    """Convert a database row to a ToolOperation.
+    """Convert one recorded observation to a ToolOperation.
 
-    Dispatches to specialized handlers based on event type.
-    Returns None if the row should be skipped.
+    Takes the three things an observation IS rather than the row it arrived
+    in, so the same dispatch serves the TimescaleDB reader and the in-memory
+    timeline. A timeline that converts its own way is a timeline that can pass
+    a test production would fail (#1034).
+
+    Returns None if the observation should not appear on the timeline.
     """
-    data = _parse_row_data(row)
-    event_type = row["event_type"]
     tool_name = data.get("tool_name") or (data.get("context") or {}).get("tool_name", "")
 
     # TODO(#175): Flip dedup direction when Claude Code's SubagentStart hook
@@ -110,12 +124,27 @@ def row_to_operation(
         return None
 
     if _is_subagent_tool_event(event_type, tool_name, subagent_tool_names):
-        return row_to_subagent_operation(row, data, event_type)
+        return to_subagent_operation(when, data, event_type)
 
     if event_type in git_event_types:
-        return row_to_git_operation(row, data, event_type)
+        return to_git_operation(when, data, event_type)
 
-    return _build_standard_operation(row, data, event_type)
+    return build_standard_operation(when, data, event_type)
+
+
+def row_to_operation(
+    row: asyncpg.Record,
+    subagent_tool_names: set[str],
+    git_event_types: tuple[str, ...],
+) -> ToolOperation | None:
+    """Unpack a TimescaleDB row and convert it. Row shape stops here."""
+    return to_operation(
+        row["time"],
+        _parse_row_data(row),
+        row["event_type"],
+        subagent_tool_names,
+        git_event_types,
+    )
 
 
 def _elapsed_ms(started: datetime, completed: datetime) -> int | None:
@@ -129,7 +158,7 @@ def _elapsed_ms(started: datetime, completed: datetime) -> int | None:
     return round(elapsed) if elapsed >= 0 else None
 
 
-def _resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
+def resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
     """Fill in each completion's `duration_ms` from its own start row (#1064).
 
     A tool call's duration is a property of the PAIR of rows, not of either
@@ -199,4 +228,4 @@ def rows_to_operations(
         for row in rows
         if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
     ]
-    return _resolve_durations(converted)
+    return resolve_durations(converted)

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
+    AgentVerdict,
     StreamResult,
     SubagentTracker,
     TokenAccumulator,
@@ -87,6 +88,13 @@ class FakeAgentExecutionHandler:
         #: is what lets a test drive the collection step for real instead of
         #: mocking out the very hop under test.
         self._produces = tuple(produces)
+        #: The last thing this double's agent SAYS, verbatim - including its
+        #: ``TASK_RESULT`` block if it writes one. Passed through the REAL
+        #: `AgentVerdict.from_agent_text` below rather than setting a verdict
+        #: directly, so a test that drives a reported failure exercises the
+        #: production reader of that report and not a fixture's idea of it
+        #: (#1256).
+        self._says = says
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -121,7 +129,7 @@ class FakeAgentExecutionHandler:
             line_count=0,
             interrupt_requested=self._interrupt,
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
-            agent_task_result=None,
+            verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
         )
         command = AgentExecutionCompletedCommand(
@@ -170,9 +178,7 @@ class FakeAgentExecutionHandler:
 
     @classmethod
     def success(
-        cls,
-        produces: Sequence[tuple[str, bytes]] = (),
-        says: str | None = None,
+        cls, produces: Sequence[tuple[str, bytes]] = (), says: str | None = None
     ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
@@ -180,6 +186,10 @@ class FakeAgentExecutionHandler:
         under ``artifacts/output/``. The default writes none: exit code 0 and
         an empty output tree is a real and previously undetected combination,
         so the double must be able to express it.
+
+        ``says`` is the agent's last message. Exit code 0 with a ``says`` that
+        reports ``success: false`` is not a contradiction but the defect
+        #1256 is about: the harness ran fine and the AGENT said it had failed.
 
         ``says`` is its last stream message, and is deliberately a SEPARATE
         argument rather than derived from ``produces``. Wrote-nothing-but-said-

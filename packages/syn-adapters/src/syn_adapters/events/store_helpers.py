@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.events.models import AgentEvent
+from syn_adapters.postgres_text import pg_copy_row
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
@@ -19,17 +20,45 @@ logger = logging.getLogger(__name__)
 
 
 def _event_to_copy_row(validated: AgentEvent) -> str:
-    """Convert a validated AgentEvent to a tab-separated COPY row."""
+    """Render a validated AgentEvent as one row of COPY text format.
+
+    Every field here is agent- or harness-supplied, so any of them can contain
+    the characters COPY reads as framing - a tab in a session id splits it into
+    two columns, and the backslashes JSON writes its own escapes with are eaten
+    before the payload reaches the jsonb parser (#1241). pg_copy_row owns that;
+    this function only says which value goes in which column.
+
+    It says only that, for every value that IS one. The ids arrive canonical
+    from ``to_insert_tuple`` and go through unchanged, because this is the batch
+    spelling of a row ``insert_one`` also writes: a serializer that substitutes
+    an id of its own makes the two writers disagree, and then which path an
+    event happened to take decides whether a reader ever finds it again. An id
+    made entirely of unstorable codepoints used to arrive here as ``""`` and be
+    stored as ``"unknown"`` for exactly that reason. It no longer arrives that
+    way - ``pg_safe`` derives a real id for it - so the substitution below can
+    no longer reach an id, and is written as an explicit ``is None`` rather than
+    ``or`` so that it cannot start reaching one again if an empty id ever
+    becomes representable.
+
+    ``None`` is not an id, and is the one case left: the event carried no
+    session at all. ``session_id`` is ``NOT NULL``, and COPY applies the whole
+    buffer as one statement, so writing NULL here would fail the entire batch -
+    discarding every valid event beside it - to reject one event that is still
+    worth keeping, because its ``execution_id`` is intact and the cost, totals
+    and heatmap readers key on that column alone. It is stored under a name no
+    session lookup asks for, which is the truth about it: it has no session.
+    """
     time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
-    row = [
-        time.isoformat() if isinstance(time, datetime) else time,
-        event_type,
-        session_id or "unknown",
-        exec_id or "\\N",
-        phase_id or "\\N",
-        data_json,
-    ]
-    return "\t".join(str(v) for v in row) + "\n"
+    return pg_copy_row(
+        [
+            time.isoformat(),
+            event_type,
+            session_id if session_id is not None else "unknown",
+            exec_id,
+            phase_id,
+            data_json,
+        ]
+    )
 
 
 def _build_copy_buffer(

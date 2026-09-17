@@ -504,10 +504,18 @@ async def _load_execution_enrichment(
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Query tool_execution_completed counts from agent_events."""
+    """Query tool_execution_completed counts from agent_events.
+
+    Keyed by the execution id AS agent_events holds it: the table's writer
+    sanitises the id (AgentEvent's validator), so both the ids bound here and
+    the keys of the returned mapping have to be in that spelling, or a caller
+    looks its count up under a name the result never carries (#1241).
+    """
     try:
+        from syn_adapters.postgres_text import pg_safe
         from syn_api._wiring import get_event_store_instance
 
+        execution_ids = [pg_safe(eid) for eid in execution_ids]
         event_store = get_event_store_instance()
         pool = event_store.pool
         if pool is None:

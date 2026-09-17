@@ -186,7 +186,6 @@ def _run(announced_model: str | None) -> AgentExecutionResult:
             line_count=1,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             announced_model=announced_model,
         ),
         tokens=TokenAccumulator(),
@@ -206,7 +205,7 @@ class TestTheRuntimeHandsBackWhoRan:
         """Two different KINDS of fact in one value: we CHOSE the provider, so
         there is no observation to make; only the stream ever said the model."""
         runtime = _runtime()
-        runtime.record_agent_run("verify", _run(ANNOUNCED))
+        runtime.record_agent_run("verify", execution_id="exec-1", result=_run(ANNOUNCED))
         agent = runtime.agent_for("verify", provider="claude")
         assert (agent.provider, agent.model) == ("claude", ANNOUNCED)
 
@@ -216,13 +215,13 @@ class TestTheRuntimeHandsBackWhoRan:
         rather than being filled in from configuration.
         """
         runtime = _runtime()
-        runtime.record_agent_run("verify", _run(None))
+        runtime.record_agent_run("verify", execution_id="exec-1", result=_run(None))
         agent = runtime.agent_for("verify", provider="codex")
         assert (agent.provider, agent.model) == ("codex", None)
 
     def test_one_phase_s_announcement_is_not_read_for_another(self) -> None:
         runtime = _runtime()
-        runtime.record_agent_run("investigate", _run(ANNOUNCED))
+        runtime.record_agent_run("investigate", execution_id="exec-1", result=_run(ANNOUNCED))
         assert runtime.agent_for("report", provider="claude").model is None
 
     def test_a_phase_that_never_ran_an_agent_has_no_model(self) -> None:
@@ -558,7 +557,8 @@ class TestACodexPhasesArtifactNamesWhoRanIt:
         runtime = _runtime()
         runtime.record_agent_run(
             "verify",
-            AgentExecutionResult(
+            execution_id="exec-1",
+            result=AgentExecutionResult(
                 stream_result=await _codex_result(*lines, rollout=rollout),
                 tokens=TokenAccumulator(),
                 subagents=SubagentTracker(),
@@ -662,7 +662,8 @@ class TestTheProcessorAssemblesTheIdentityItself:
         )
         processor._runtime.record_agent_run(
             "verify",
-            AgentExecutionResult(
+            execution_id="exec-1",
+            result=AgentExecutionResult(
                 stream_result=ran,
                 tokens=TokenAccumulator(),
                 subagents=SubagentTracker(),

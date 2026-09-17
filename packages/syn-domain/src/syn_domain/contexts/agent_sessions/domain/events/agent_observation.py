@@ -56,6 +56,24 @@ class ObservationType(StrEnum):
     ERROR = "error"  # Error occurred
     CANCELLED = "cancelled"  # Execution cancelled
 
+    # The terminal row for a session that ended WELL, and the counterpart of
+    # the `session_error` one `SessionLifecycleManager._record_terminal_status`
+    # already writes when it ends badly. Only the failure half existed, so a
+    # successful phase left the domain lane holding a token roll-up and the
+    # timeline holding nothing (#1034).
+    #
+    # Deliberately NOT `COMPLETED` above: that value is "completed", which is
+    # absent from `syn_shared.events.EventType` and so fails the
+    # `VALID_EVENT_TYPES` check that gates the write - it can never reach
+    # `agent_events`. "session_completed" is in that Literal already, which is
+    # why this needs no change to syn_shared.
+    #
+    # Deliberately NOT `SESSION_SUMMARY`: a summary is a USAGE record that
+    # `TimescaleSessionCostQuery` prices and `TIMELINE_EXCLUDE` hides, so it
+    # would both double a session's cost and stay invisible - the two failures
+    # this member exists to avoid.
+    SESSION_COMPLETED = "session_completed"
+
     # Session capture (ADR-004 s13). Lane 2 telemetry, never domain state:
     # whether a transcript reached the central store has no bearing on whether
     # the workflow succeeded, and must never be allowed to acquire one.

@@ -172,9 +172,15 @@ class PhaseRuntime:
         #: NOTE: keyed by phase id alone, so two concurrent runs of the same
         #: workflow overwrite each other, and a restart loses it entirely -
         #: the same two hazards that moved `last_agent_message` onto the event
-        #: stream in #1300. Left as it is here because widening this merge to
-        #: fix it is how one side of a merge gets lost; tracked as its own
-        #: problem.
+        #: stream in #1300.
+        #:
+        #: `record_agent_run` is handed an `execution_id` and does not use it,
+        #: which looks like the fix is one line away. It is not. EVERY map on
+        #: this object is keyed the same way - `_workspaces`, `_envs`,
+        #: `_cmds`, `_session_ids`, `_tokens`, `_artifact_ids`, `_started_at` -
+        #: and `finalize`, which clears them, is not given an execution id at
+        #: all. Fixing this field alone would close one instance of the class
+        #: and leave the rest open while looking settled. Tracked as #1311.
         self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
@@ -243,7 +249,13 @@ class PhaseRuntime:
         """Note the id this phase's own harness announced, for the delegate sweep."""
         remember_leader_native_id(self._leader_native_ids, (execution_id, phase_id), stream_result)
 
-    def record_agent_run(self, phase_id: str, result: AgentExecutionResult) -> None:
+    def record_agent_run(
+        self,
+        phase_id: str,
+        *,
+        execution_id: str,  # noqa: ARG002 - see the note below
+        result: AgentExecutionResult,
+    ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
         # What the agent SAID is deliberately not held here. It is the salvage

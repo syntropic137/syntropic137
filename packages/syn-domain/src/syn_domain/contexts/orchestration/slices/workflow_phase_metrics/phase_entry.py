@@ -71,12 +71,19 @@ class PhaseMetricsEntry:
     measurement: it reads as "finished instantly".
     """
 
-    settled_status: str = "completed"
+    settled_status: str = "failed"
     """How the most recent run of this phase ENDED.
 
     Read it through ``status``, never directly: while any execution is still
     running the phase, what that run is doing outranks how an earlier one
     ended.
+
+    Defaults to failed, not completed. Every live construction sets this
+    explicitly - a started phase through ``with_run_started``, a finished one
+    through ``with_run_finished`` - so the default is only ever reached by an
+    entry whose ending was never recorded or could not be read back, and that
+    is exactly the case the invariant names: absence of a verdict is not a
+    verdict (#1256).
     """
 
     active_runs: Mapping[str, datetime | str | None] = field(default_factory=dict)
@@ -107,7 +114,20 @@ class PhaseMetricsEntry:
             artifact_count=data.get("artifact_count", 0),
             recovered_runs=data.get("recovered_runs", 0),
             completed_seconds=data.get("duration_seconds"),
-            settled_status=data.get("settled_status", "completed"),
+            # Three sources, in order of how much they know.
+            #
+            # `settled_status` is the current key. `status` is what this
+            # projection wrote before 37a1d86a renamed it, and rows written by
+            # that version are still in the store: reading only the new key
+            # would send every one of them to the `or` branch and reclassify a
+            # COMPLETED phase as failed. The rename shipped without a
+            # migration, so the old key has to be read here or the history is
+            # rewritten on deploy.
+            #
+            # "failed" is the last resort and is deliberately the pessimistic
+            # one: a row carrying neither key recorded no outcome, and a phase
+            # whose outcome nobody recorded must not read as a pass.
+            settled_status=(data.get("settled_status") or data.get("status") or "failed"),
             active_runs=data.get("active_runs") or {},
         )
 
