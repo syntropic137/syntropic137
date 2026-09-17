@@ -65,6 +65,14 @@ class SessionCostResponse(BaseModel):
 
     Non-zero means this cost is INCOMPLETE, not that the work was free.
     """
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields on this response whose value was never measured.
+
+    Each entry names a field above that holds its default rather than a
+    reading - ``compute_cost_usd`` at ``0`` because nothing prices compute,
+    not because the session used none. Render those as unknown, never as zero
+    (#1041).
+    """
     is_finalized: bool = False
     started_at: str | None = None
     completed_at: str | None = None
@@ -159,6 +167,7 @@ def session_cost_to_data(c: SessionCost) -> SessionCostData:
         tokens_by_tool=c.tokens_by_tool,
         cost_by_tool_tokens=c.cost_by_tool_tokens,
         unpriced_observation_count=c.unpriced_observation_count,
+        unmeasured_fields=sorted(c.unmeasured_fields),
         is_finalized=c.is_finalized,
         started_at=c.started_at,
         completed_at=c.completed_at,
@@ -363,6 +372,7 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         tokens_by_tool=dict(c.tokens_by_tool or {}),
         cost_by_tool_tokens={k: str(v) for k, v in (c.cost_by_tool_tokens or {}).items()},
         unpriced_observation_count=c.unpriced_observation_count,
+        unmeasured_fields=list(c.unmeasured_fields),
         is_finalized=c.is_finalized,
         started_at=str(c.started_at) if c.started_at else None,
         completed_at=str(c.completed_at) if c.completed_at else None,

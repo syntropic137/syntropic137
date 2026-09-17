@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
@@ -249,6 +252,7 @@ class SessionCostQueryService:
         sc.token_cost_usd = cost
         sc.tool_calls = tool_counts.get(sid, 0)
         sc.turns = row["num_turns"] or 0  # type: ignore[index]
+        sc.record_measured(CostField.TURNS)
         sc.duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
         sc.execution_id = row["execution_id"]  # type: ignore[index]
         sc.phase_id = row["phase_id"]  # type: ignore[index]

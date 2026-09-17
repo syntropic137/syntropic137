@@ -1056,6 +1056,18 @@ class SessionCostData(BaseModel):
     cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
     unpriced_observation_count: int = 0
     """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields ON THIS MODEL whose value was never measured.
+
+    A field listed here holds its default, not a reading. Today that is always
+    ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``: no
+    read path can derive them from ``agent_events``.
+
+    It is a list of names rather than nulls on the fields themselves because a
+    null is as falsy as a zero, and a client writing ``x ?? 0`` erases the
+    distinction exactly the way #1041 erased these fields for a month. A
+    non-empty list is truthy and has to be read.
+    """
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None

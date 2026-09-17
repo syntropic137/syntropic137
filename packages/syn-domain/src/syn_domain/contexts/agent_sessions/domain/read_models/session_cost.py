@@ -3,7 +3,35 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
+
+
+class CostField(StrEnum):
+    """A ``SessionCost`` field that a read path either measures or does not.
+
+    Each member's VALUE is the field's own name, so a consumer holding one of
+    these knows exactly which number not to trust without a lookup table.
+
+    Exists because zero is not a truthful answer to "how much compute did this
+    session cost" when nothing ever measured compute. ``PricingStatus`` draws
+    that line for a single amount whose model has no rate (ADR-067 D3); this
+    draws it for a whole field that no producer in the system fills. Issue
+    #1041 stayed invisible for a month precisely because the dropped fields
+    arrived as plausible zeroes.
+
+    ``total_cost_usd`` is absent because every read path really does compute
+    it. ``turns`` IS listed even though a read path can measure it, because
+    only one can: ``num_turns`` exists on a ``session_summary`` event and
+    nowhere else, so a session still running has no turn count rather than
+    zero turns. That is the whole distinction - membership is per record, not
+    per field.
+    """
+
+    COMPUTE_COST_USD = "compute_cost_usd"
+    TOKENS_BY_TOOL = "tokens_by_tool"
+    COST_BY_TOOL_TOKENS = "cost_by_tool_tokens"
+    TURNS = "turns"
 
 
 def _coerce_decimal(value: str | Decimal | int | float | None, default: str = "0") -> Decimal:
@@ -30,6 +58,22 @@ def _coerce_decimal_dict(raw: dict[str, str | Decimal] | None) -> dict[str, Deci
     if not raw:
         return {}
     return {k: _coerce_decimal(v) for k, v in raw.items()}
+
+
+def _coerce_cost_fields(raw: object) -> frozenset[CostField]:
+    """Coerce stored field names back to ``CostField``.
+
+    A key absent from an older stored record means it predates the
+    distinction, and every one of these fields was unmeasured then too - so
+    absent coerces to the full set, not to the empty one. Empty would claim
+    the old record had measured them all, which is the silent zero this type
+    exists to prevent, restored via the persistence hop.
+    """
+    if raw is None:
+        return frozenset(CostField)
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset(CostField)
+    return frozenset(CostField(name) for name in raw if name in set(CostField))
 
 
 @dataclass
@@ -114,6 +158,22 @@ class SessionCost:
     total is incomplete, not confidently wrong.
     """
 
+    unmeasured_fields: frozenset[CostField] = field(default_factory=lambda: frozenset(CostField))
+    """Fields whose value on this record was never measured, only defaulted.
+
+    Defaults to EVERY member of ``CostField``, so a record is presumed not to
+    have measured them until a producer says otherwise via ``record_measured``.
+    That direction is the point: the failure mode of forgetting is then a field
+    that honestly reports itself unmeasured, rather than one that reports a
+    confident zero. #1041 was the second kind, and it survived a month of use.
+
+    Today no producer measures any of them - ``agent_events`` records no
+    per-tool token counts and there is no compute rate table - so this is the
+    full set on every read path. Emptying it is what a future producer of one
+    of these fields has to do, and until it does, a zero here means "nobody
+    counted", not "it was free".
+    """
+
     # Status
     is_finalized: bool = False
     """Whether the session has completed."""
@@ -123,6 +183,14 @@ class SessionCost:
 
     completed_at: datetime | None = None
     """When the session completed."""
+
+    def record_measured(self, cost_field: CostField) -> None:
+        """Declare that this record's value for *cost_field* was really computed.
+
+        Call it beside the assignment it vouches for; the two together are what
+        makes the number readable as a measurement rather than a default.
+        """
+        self.unmeasured_fields -= {cost_field}
 
     @property
     def total_tokens(self) -> int:
@@ -167,6 +235,7 @@ class SessionCost:
             is_finalized=data.get("is_finalized", False),
             agent_model=data.get("agent_model"),
             unpriced_observation_count=data.get("unpriced_observation_count", 0),
+            unmeasured_fields=_coerce_cost_fields(data.get("unmeasured_fields")),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
         )
@@ -197,6 +266,7 @@ class SessionCost:
             "is_finalized": self.is_finalized,
             "agent_model": self.agent_model,
             "unpriced_observation_count": self.unpriced_observation_count,
+            "unmeasured_fields": sorted(self.unmeasured_fields),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

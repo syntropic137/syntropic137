@@ -51,7 +51,10 @@ from syn_api.routes.costs import (
     session_cost_to_data,
 )
 from syn_api.types import ExecutionCostData, SessionCostData
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 if TYPE_CHECKING:
@@ -115,6 +118,10 @@ _SESSION = SessionCost(
     cost_by_tool_tokens={"Bash": Decimal("0.0031")},
     agent_model="claude-opus-5",
     unpriced_observation_count=3,
+    #: A PROPER SUBSET of the default (which is every member). A fixture using
+    #: the full set would pass with the mapper line deleted, and the empty set
+    #: is not reachable today - no producer measures all three.
+    unmeasured_fields=frozenset({CostField.TOKENS_BY_TOOL}),
     is_finalized=True,
     started_at=datetime(2026, 9, 17, 10, 0, tzinfo=UTC),
     completed_at=datetime(2026, 9, 17, 10, 30, tzinfo=UTC),

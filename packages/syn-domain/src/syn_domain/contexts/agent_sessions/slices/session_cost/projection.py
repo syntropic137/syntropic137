@@ -25,7 +25,10 @@ if TYPE_CHECKING:
     )
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
@@ -81,7 +84,11 @@ def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str
 
 
 def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
-    """Apply finalized cost values from a SessionCostFinalized event."""
+    """Apply finalized cost values from a SessionCostFinalized event.
+
+    An event that carries ``compute_cost_usd`` is the only thing in the system
+    that measures it, so this is also where that field stops being unmeasured.
+    """
     for field, attr in [
         ("total_cost_usd", "total_cost_usd"),
         ("token_cost_usd", "token_cost_usd"),
@@ -90,6 +97,8 @@ def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]
         value = event_data.get(field)
         if value is not None:
             setattr(session_cost, attr, Decimal(str(value)))
+            if field == CostField.COMPUTE_COST_USD:
+                session_cost.record_measured(CostField.COMPUTE_COST_USD)
 
 
 def _apply_finalized_tokens(session_cost: SessionCost, event_data: dict[str, Any]) -> None:

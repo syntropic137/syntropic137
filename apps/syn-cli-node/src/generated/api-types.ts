@@ -4201,6 +4201,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Unmeasured Fields */
+            unmeasured_fields?: string[];
             /**
              * Is Finalized
              * @default false

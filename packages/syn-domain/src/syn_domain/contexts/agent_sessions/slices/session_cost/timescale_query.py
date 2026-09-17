@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -48,6 +51,7 @@ SELECT DISTINCT ON (session_id)
     (data->>'duration_ms')::bigint as duration_ms_val,
     data->>'model' as agent_model,
     data->>'workspace_id' as workspace_id,
+    (data->>'num_turns')::int as num_turns,
     time as completed_at,
     execution_id,
     phase_id
@@ -365,6 +369,7 @@ class TimescaleSessionCostQuery:
         started_at: datetime | None,
         completed_at: datetime | None,
         duration_ms: int | None,
+        summary: asyncpg.Record | None,
     ) -> SessionCost:
         """Assemble a SessionCost from priced, model-grouped totals.
 
@@ -374,6 +379,23 @@ class TimescaleSessionCostQuery:
         rather than asserted (issue #890). ``cost_by_model`` carries only the
         groups that were actually priced; an entry there claims that model cost
         that much.
+
+        ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``
+        are deliberately NOT assigned here, and are not assignable: a
+        ``tool_completed`` observation records ``{tool_name, tool_use_id,
+        success, output_preview}`` and a ``token_usage`` observation records no
+        tool, so no query over ``agent_events`` can attribute tokens to a tool,
+        and no compute rate table exists to price one. They keep their
+        ``SessionCost`` defaults and stay listed in ``unmeasured_fields``,
+        which is what stops the resulting zeroes from reading as measurements
+        (#1041).
+
+        ``summary`` is the authoritative ``session_summary`` row this was
+        priced from, or ``None`` when it fell back to ``token_usage``. It is
+        the only thing that can answer whether the session finished and how
+        many turns it took, and passing the row rather than two extra
+        arguments keeps those two answers from drifting apart: both are true
+        exactly when a summary exists.
         """
         sc = SessionCost(session_id=session_id)
         sc.input_tokens = totals.input_tokens
@@ -391,6 +413,14 @@ class TimescaleSessionCostQuery:
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
         sc.workspace_id = totals.workspace_id
+        if summary is not None:
+            # A summary row IS the session's completion record, so its presence
+            # is what "finalized" means on this path - the list path already
+            # read it that way and this one reported every finished session as
+            # still running.
+            sc.is_finalized = True
+            sc.turns = summary.get("num_turns") or 0
+            sc.record_measured(CostField.TURNS)
         if completed_at:
             sc.completed_at = completed_at
         if duration_ms is not None:
@@ -476,4 +506,5 @@ class TimescaleSessionCostQuery:
             started_at=started_at,
             completed_at=completed_at,
             duration_ms=duration_ms,
+            summary=summary,
         )
