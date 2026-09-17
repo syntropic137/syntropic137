@@ -42,7 +42,12 @@ describe("workflow run commands", () => {
    * execute response is queued: a test that expects the dispatch to be refused
    * would otherwise pass just as well against a fourth mock it never reaches.
    */
-  function mockWorkflow(name: string, prompt: string, id = "wf-task-123456789"): void {
+  function mockWorkflow(
+    name: string,
+    prompt: string,
+    declarations: { name: string; description: null; required: boolean; default: string | null }[] = [],
+    id = "wf-task-123456789",
+  ): void {
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
       .mockResolvedValueOnce(
@@ -57,7 +62,7 @@ describe("workflow run commands", () => {
           workflow_type: "custom",
           classification: "standard",
           phases: [{ phase_id: "p1", name: "work", prompt_template: prompt }],
-          input_declarations: [],
+          input_declarations: declarations,
         }),
       );
   }
@@ -659,6 +664,58 @@ describe("workflow run commands", () => {
 
       expect(stdout()).not.toContain("Warning:");
       expect(stdout()).toContain("exec-tt3");
+    });
+
+    it("lets a `task` declaration default satisfy a $ARGUMENTS phase (issue #1280)", async () => {
+      // The server merges declaration defaults into inputs.task, so this
+      // workflow answers its own $ARGUMENTS and must not be refused for want
+      // of -t. Only a default present in the RESPONSE can produce this pass:
+      // with input_declarations: [] the same dispatch is refused above.
+      mockWorkflow("Self-answering WF", "Your task: $ARGUMENTS", [
+        { name: "task", description: null, required: false, default: "report the sentinel" },
+      ]);
+      mockFetch.mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-tt4" }));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("exec-tt4");
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it("runs a workflow whose unused `task` default nothing consumes (issue #1280)", async () => {
+      // selfhost-skills-injection-v1's exact shape: fixed prompts, plus a
+      // `task` declaration whose own description says it is unused. Nobody
+      // typed a task, so nothing of the caller's is being discarded and a
+      // plain `syn workflow run <id>` must still work.
+      mockWorkflow("Skills Injection", "Report the deployment sentinel.", [
+        { name: "task", description: null, required: false, default: "report the sentinel" },
+      ]);
+      mockFetch.mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-tt5" }));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("exec-tt5");
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it("still refuses a typed -t that a declaration default cannot rescue (issue #1280)", async () => {
+      // A default is the workflow author's answer, not the caller's. It must
+      // not launder a task the caller typed into a workflow that reads none --
+      // that is exactly the dispatch #1280 reported, and the in-repo
+      // `-i task=` invocation in workflows/validation/README.md was one.
+      mockWorkflow("Unused-task WF", "Report the deployment sentinel.", [
+        { name: "task", description: null, required: false, default: "report the sentinel" },
+      ]);
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-task"],
+          values: { input: ["task=Audit the retry path"] },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stderr()).toContain("the task would be discarded");
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
     it("fails loud when API returns status!=started", async () => {

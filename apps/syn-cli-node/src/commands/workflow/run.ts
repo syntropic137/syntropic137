@@ -208,16 +208,27 @@ export const runCommand: CommandDef = {
     // Dropping -t from a workflow that never consumes it yields a byte-
     // identical dispatch, and the empty case has -t "" as an explicit opt-in,
     // so neither refusal blocks a run that can be expressed any other way.
-    const taskSupplied = task !== undefined || Object.hasOwn(parsedInputs, TASK_INPUT_KEY);
+    //
+    // The two refusals ask different questions and so read different channels.
+    // "Did the caller type a task" is --task or -i task=; a `task` input
+    // declaration with a default is the workflow author's choice, not the
+    // caller's, and nothing of the caller's is lost when it reaches nothing.
+    // "Will $ARGUMENTS resolve to anything" includes that default, because the
+    // server merges declaration defaults into inputs.task the same as the rest
+    // (ExecuteWorkflowHandler._merge_inputs) -- a workflow that ships its own
+    // default is already answered and must not be refused for want of -t.
+    const taskGiven = task !== undefined || Object.hasOwn(parsedInputs, TASK_INPUT_KEY);
+    const taskWillResolve =
+      taskGiven || declarations.some((d) => d.name === TASK_INPUT_KEY && d.default != null);
     const taskConsumed = consumed.has(TASK_INPUT_KEY);
-    if (taskSupplied && !taskConsumed) {
+    if (taskGiven && !taskConsumed) {
       printError(
         `No phase in '${wf.name}' references $ARGUMENTS or {{task}} — the task would be discarded.`,
       );
       printDim("Pick a workflow that consumes a task, or drop --task: the dispatch is identical without it.");
       throw new CLIError("Task has no consumer", 1);
     }
-    if (taskConsumed && !taskSupplied) {
+    if (taskConsumed && !taskWillResolve) {
       printError(
         `'${wf.name}' substitutes a task into its phase prompts, but no task was supplied.`,
       );

@@ -17,7 +17,12 @@ having it fail during real work.
 ## Running
 
     syn workflow install workflows/validation
-    syn workflow run selfhost-skills-injection-v1 -i task="..."
+    syn workflow run selfhost-skills-injection-v1
+
+No task is passed: these phases have fixed prompts and reference neither
+`$ARGUMENTS` nor `{{task}}`, so a task would be substituted into nothing. The
+CLI refuses that dispatch outright now rather than running and reporting on
+something else (#1280).
 
 Each is deliberately small. They are a smoke test, not a benchmark: the question
 is "does this capability exist on this deployment", not "how well does it work".
