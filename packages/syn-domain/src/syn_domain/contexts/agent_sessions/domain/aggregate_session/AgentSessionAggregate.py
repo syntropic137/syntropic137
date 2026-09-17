@@ -87,6 +87,16 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         return self._workflow_id
 
     @property
+    def execution_id(self) -> str | None:
+        """Get the workflow execution this session belongs to.
+
+        Exposed so a writer can correlate this session's telemetry with its
+        execution without re-deriving it; the projections that filter by
+        execution_id cannot see a row that was written without one.
+        """
+        return self._execution_id
+
+    @property
     def phase_id(self) -> str | None:
         """Get the phase ID within the workflow."""
         return self._phase_id

@@ -9,13 +9,15 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import asyncpg
 
     from syn_adapters.projections.session_tools import ToolOperation
 
 from syn_adapters.projections.session_tools_converters import (
-    row_to_git_operation,
-    row_to_subagent_operation,
+    to_git_operation,
+    to_subagent_operation,
 )
 from syn_adapters.projections.session_tools_verdict import observation_id, read_verdict
 from syn_shared.events import (
@@ -43,8 +45,8 @@ def _is_subagent_tool_event(event_type: str, tool_name: str, subagent_tool_names
     return tool_name in subagent_tool_names
 
 
-def _build_standard_operation(
-    row: asyncpg.Record, data: dict[str, Any], event_type: str
+def build_standard_operation(
+    when: datetime, data: dict[str, Any], event_type: str
 ) -> ToolOperation:
     """Build a ToolOperation for a standard tool event.
 
@@ -62,7 +64,7 @@ def _build_standard_operation(
     # here would have broken the determinism `_accumulate_tool_stats` relies
     # on, so the dead branch is gone rather than kept "just in case".
     obs_id = data.get("observation_id") or observation_id(
-        event_type, data.get("tool_use_id"), row["time"].isoformat()
+        event_type, data.get("tool_use_id"), when.isoformat()
     )
 
     return ToolOperation(
@@ -70,7 +72,7 @@ def _build_standard_operation(
         tool_name=data.get("tool_name", ""),
         tool_use_id=data.get("tool_use_id"),
         operation_type=event_type,
-        timestamp=row["time"],
+        timestamp=when,
         success=verdict.success,
         error_message=verdict.error_message,
         input_preview=data.get("input_preview"),
@@ -79,18 +81,22 @@ def _build_standard_operation(
     )
 
 
-def row_to_operation(
-    row: asyncpg.Record,
+def to_operation(
+    when: datetime,
+    data: dict[str, Any],
+    event_type: str,
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
 ) -> ToolOperation | None:
-    """Convert a database row to a ToolOperation.
+    """Convert one recorded observation to a ToolOperation.
 
-    Dispatches to specialized handlers based on event type.
-    Returns None if the row should be skipped.
+    Takes the three things an observation IS rather than the row it arrived
+    in, so the same dispatch serves the TimescaleDB reader and the in-memory
+    timeline. A timeline that converts its own way is a timeline that can pass
+    a test production would fail (#1034).
+
+    Returns None if the observation should not appear on the timeline.
     """
-    data = _parse_row_data(row)
-    event_type = row["event_type"]
     tool_name = data.get("tool_name") or (data.get("context") or {}).get("tool_name", "")
 
     # TODO(#175): Flip dedup direction when Claude Code's SubagentStart hook
@@ -101,9 +107,24 @@ def row_to_operation(
         return None
 
     if _is_subagent_tool_event(event_type, tool_name, subagent_tool_names):
-        return row_to_subagent_operation(row, data, event_type)
+        return to_subagent_operation(when, data, event_type)
 
     if event_type in git_event_types:
-        return row_to_git_operation(row, data, event_type)
+        return to_git_operation(when, data, event_type)
 
-    return _build_standard_operation(row, data, event_type)
+    return build_standard_operation(when, data, event_type)
+
+
+def row_to_operation(
+    row: asyncpg.Record,
+    subagent_tool_names: set[str],
+    git_event_types: tuple[str, ...],
+) -> ToolOperation | None:
+    """Unpack a TimescaleDB row and convert it. Row shape stops here."""
+    return to_operation(
+        row["time"],
+        _parse_row_data(row),
+        row["event_type"],
+        subagent_tool_names,
+        git_event_types,
+    )

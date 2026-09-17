@@ -19,9 +19,28 @@ from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand i
 from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
+from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
-from .RecordOperationHandler import RecordOperationHandler
+from .RecordOperationHandler import _OBSERVATION_TYPES, RecordOperationHandler
+
+
+class _FakeObservations:
+    """Stands in for the session's telemetry lane, remembering what reached it."""
+
+    def __init__(self) -> None:
+        self.recorded: list[tuple[str, str, dict[str, object]]] = []
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: ObservationType | str,
+        data: dict[str, object],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.recorded.append((session_id, str(observation_type), data))
 
 
 async def _running_session(repo: FakeSessionRepository, session_id: str) -> None:
@@ -58,7 +77,9 @@ async def test_handler_persists_the_operation() -> None:
     repo = FakeSessionRepository()
     await _running_session(repo, "sess-record-1")
 
-    await RecordOperationHandler(repository=repo).handle(_tool_completed("sess-record-1"))
+    await RecordOperationHandler(repository=repo, observations=_FakeObservations()).handle(
+        _tool_completed("sess-record-1")
+    )
 
     persisted = await repo.get_by_id("sess-record-1")
     assert persisted is not None
@@ -78,7 +99,9 @@ async def test_handler_emits_the_event_for_downstream_readers() -> None:
     repo = FakeSessionRepository()
     await _running_session(repo, "sess-record-2")
 
-    await RecordOperationHandler(repository=repo).handle(_tool_completed("sess-record-2"))
+    await RecordOperationHandler(repository=repo, observations=_FakeObservations()).handle(
+        _tool_completed("sess-record-2")
+    )
 
     events = repo.recorded_events("sess-record-2")
     assert [type(e).__name__ for e in events] == ["SessionStartedEvent", "OperationRecordedEvent"]
@@ -94,7 +117,9 @@ async def test_unknown_session_is_an_error_not_a_silent_no_op() -> None:
     repo = FakeSessionRepository()
 
     with pytest.raises(ValueError, match="not found"):
-        await RecordOperationHandler(repository=repo).handle(_tool_completed("sess-missing"))
+        await RecordOperationHandler(repository=repo, observations=_FakeObservations()).handle(
+            _tool_completed("sess-missing")
+        )
 
     assert repo.streams == {}
 
@@ -115,8 +140,90 @@ async def test_aggregate_still_owns_the_rules() -> None:
     await repo.save(completed)
 
     with pytest.raises(ValueError, match="session is completed"):
-        await RecordOperationHandler(repository=repo).handle(_tool_completed("sess-record-3"))
+        await RecordOperationHandler(repository=repo, observations=_FakeObservations()).handle(
+            _tool_completed("sess-record-3")
+        )
 
     reread = await repo.get_by_id("sess-record-3")
     assert reread is not None
     assert reread.operation_count == 0
+
+
+@pytest.mark.unit
+async def test_the_operation_also_reaches_the_lane_the_read_path_serves() -> None:
+    """Persisting and emitting are both Lane 1. ``GET /sessions/{id}`` builds
+    ``operations`` from the observation lane alone (#1034), so an operation
+    that never lands there is unreadable however correctly it was stored.
+    """
+    repo = FakeSessionRepository()
+    await _running_session(repo, "sess-record-4")
+    observations = _FakeObservations()
+
+    await RecordOperationHandler(repository=repo, observations=observations).handle(
+        _tool_completed("sess-record-4")
+    )
+
+    assert len(observations.recorded) == 1
+    session_id, observation_type, data = observations.recorded[0]
+    assert session_id == "sess-record-4"
+    assert observation_type == ObservationType.TOOL_EXECUTION_COMPLETED
+    assert data["tool_use_id"] == "toolu_slice_1034"
+    assert data["output_preview"] == "slice-1034-output"
+    assert data["duration_ms"] == 1500
+
+
+@pytest.mark.unit
+async def test_a_token_roll_up_is_not_a_timeline_row() -> None:
+    """MESSAGE_RESPONSE carries a phase's token totals, and the agent's own
+    stream has already written those tokens to the observation lane as
+    ``token_usage``. Copying them there again would not add an operation - it
+    would double the session's cost, which is priced off that lane.
+    """
+    repo = FakeSessionRepository()
+    await _running_session(repo, "sess-record-5")
+    observations = _FakeObservations()
+
+    await RecordOperationHandler(repository=repo, observations=observations).handle(
+        RecordOperationCommand(
+            aggregate_id="sess-record-5",
+            operation_type=OperationType.MESSAGE_RESPONSE,
+            input_tokens=4000,
+            output_tokens=321,
+            total_tokens=4321,
+        )
+    )
+
+    persisted = await repo.get_by_id("sess-record-5")
+    assert persisted is not None
+    assert persisted.tokens.total_tokens == 4321
+    assert observations.recorded == []
+
+
+@pytest.mark.unit
+def test_every_operation_type_states_where_it_lands() -> None:
+    """A missing entry would read as "not on the timeline" - the silence this
+    change exists to remove. The map is total so an omission is a loud error.
+    """
+    assert set(_OBSERVATION_TYPES) == set(OperationType)
+
+
+@pytest.mark.unit
+async def test_a_telemetry_failure_does_not_lose_the_domain_write() -> None:
+    """The aggregate has already committed when the lane is written. Failing
+    the command afterwards would trade a visible operation for a lost one.
+    """
+
+    class _Broken(_FakeObservations):
+        async def record_observation(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("timescale is down")
+
+    repo = FakeSessionRepository()
+    await _running_session(repo, "sess-record-6")
+
+    await RecordOperationHandler(repository=repo, observations=_Broken()).handle(
+        _tool_completed("sess-record-6")
+    )
+
+    persisted = await repo.get_by_id("sess-record-6")
+    assert persisted is not None
+    assert persisted.operation_count == 1

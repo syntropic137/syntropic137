@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re as _re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.projections.session_tools_verdict import observation_id, read_verdict
@@ -20,7 +21,7 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
-    import asyncpg
+    from datetime import datetime
 
     from syn_adapters.projections.session_tools import ToolOperation
 
@@ -44,10 +45,8 @@ def extract_agent_label(data: dict[str, Any]) -> str:
     return str(data.get("tool_name", ""))
 
 
-def row_to_subagent_operation(
-    row: asyncpg.Record, data: dict[str, Any], event_type: str
-) -> ToolOperation:
-    """Convert a tool event row for an Agent/Task tool into a subagent operation."""
+def to_subagent_operation(when: datetime, data: dict[str, Any], event_type: str) -> ToolOperation:
+    """Convert an Agent/Task tool observation into a subagent operation."""
     from syn_adapters.projections.session_tools import ToolOperation
 
     tool_use_id = data.get("tool_use_id", "")
@@ -59,13 +58,11 @@ def row_to_subagent_operation(
     # relabelled type is what every reader downstream sees.
     verdict = read_verdict(subagent_op, data)
     return ToolOperation(
-        observation_id=observation_id(
-            "subagent", subagent_op, tool_use_id, row["time"].isoformat()
-        ),
+        observation_id=observation_id("subagent", subagent_op, tool_use_id, when.isoformat()),
         tool_name=agent_label,
         tool_use_id=tool_use_id or None,
         operation_type=subagent_op,
-        timestamp=row["time"],
+        timestamp=when,
         success=verdict.success,
         error_message=verdict.error_message,
         input_preview=data.get("input_preview") or json.dumps(data),
@@ -74,91 +71,79 @@ def row_to_subagent_operation(
     )
 
 
-def _git_sub(data: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the structured ``git`` sub-object if present (v2 events)."""
-    git = data.get("git")
-    return git if isinstance(git, dict) else None
+@dataclass(frozen=True)
+class GitFacts:
+    """The git facts one timeline observation carries, in either payload shape.
+
+    v2 events nest them under ``git``; legacy events spread them across the top
+    level and a ``context`` sub-object, under several spellings each. Both
+    shapes answer the same four questions, so they are read once, here, rather
+    than re-derived per field with the shape test repeated four times.
+    """
+
+    sha: str | None
+    message: str | None
+    branch: str | None
+    repo: str | None
+    structured: dict[str, Any] | None
+    """The v2 ``git`` sub-object verbatim, or None for a legacy payload.
+
+    Passed through to the read model untouched: the dashboard renders fields
+    this class has no opinion about, and inventing one for a legacy payload
+    would report a shape that was never recorded.
+    """
+
+    @classmethod
+    def read(cls, data: dict[str, Any], event_type: str) -> GitFacts:
+        """Read the git facts out of an observation payload."""
+        git = data.get("git")
+        if isinstance(git, dict):
+            return cls(
+                sha=git.get("sha") or None,
+                message=git.get("message") or None,
+                branch=git.get("branch") or git.get("to_branch") or None,
+                repo=git.get("repo") or None,
+                structured=git,
+            )
+
+        ctx = data.get("context")
+        ctx = ctx if isinstance(ctx, dict) else {}
+        branch = data.get("branch") or ctx.get("branch") or data.get("to_branch") or None
+        if not branch and event_type == "git_operation":
+            _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", data.get("command", ""))
+            branch = _m.group(1) if _m else None
+
+        return cls(
+            sha=(
+                data.get("sha")
+                or ctx.get("sha")
+                or data.get("commit_hash")
+                or data.get("merge_sha")
+                or None
+            ),
+            # The engine renames "message" to "commit_message" during ingestion
+            # to avoid a RESERVED_OBSERVATION_KEYS collision, so both spellings
+            # reach this point and both are read.
+            message=(
+                data.get("commit_message")
+                or ctx.get("message")
+                or data.get("message")
+                or data.get("message_preview")
+                or None
+            ),
+            branch=branch,
+            repo=data.get("repo") or ctx.get("repo") or None,
+            structured=None,
+        )
 
 
-def _resolve_git_branch(data: dict[str, Any], event_type: str) -> str | None:
-    """Extract the git branch from event data."""
-    # v2 structured path
-    git = _git_sub(data)
-    if git is not None:
-        return git.get("branch") or git.get("to_branch") or None
-
-    # Legacy flat fallback
-    ctx = _ctx(data)
-    branch = data.get("branch") or ctx.get("branch") or data.get("to_branch") or None
-    if branch or event_type != "git_operation":
-        return branch
-    cmd = data.get("command", "")
-    _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
-    return _m.group(1) if _m else None
-
-
-def _ctx(data: dict[str, Any]) -> dict[str, Any]:
-    """Return the context sub-dict if present (legacy flat events)."""
-    ctx = data.get("context")
-    return ctx if isinstance(ctx, dict) else {}
-
-
-def _resolve_git_sha(data: dict[str, Any]) -> str | None:
-    """Extract git SHA from event data."""
-    # v2 structured path
-    git = _git_sub(data)
-    if git is not None:
-        return git.get("sha") or None
-
-    # Legacy flat fallback
-    ctx = _ctx(data)
-    return (
-        data.get("sha")
-        or ctx.get("sha")
-        or data.get("commit_hash")
-        or data.get("merge_sha")
-        or None
-    )
-
-
-def _resolve_git_message(data: dict[str, Any]) -> str | None:
-    """Extract git commit message from event data."""
-    # v2 structured path
-    git = _git_sub(data)
-    if git is not None:
-        return git.get("message") or None
-
-    # Legacy flat fallback - engine renames "message" to "commit_message"
-    # during ingestion to avoid RESERVED_OBSERVATION_KEYS collision.
-    ctx = _ctx(data)
-    return (
-        data.get("commit_message")
-        or ctx.get("message")
-        or data.get("message")
-        or data.get("message_preview")
-        or None
-    )
-
-
-def _resolve_git_repo(data: dict[str, Any]) -> str | None:
-    """Extract git repo from event data."""
-    # v2 structured path
-    git = _git_sub(data)
-    if git is not None:
-        return git.get("repo") or None
-
-    # Legacy flat fallback
-    return data.get("repo") or _ctx(data).get("repo") or None
-
-
-def row_to_git_operation(
-    row: asyncpg.Record, data: dict[str, Any], event_type: str
-) -> ToolOperation:
-    """Convert a git event row into a ToolOperation."""
+def to_git_operation(when: datetime, data: dict[str, Any], event_type: str) -> ToolOperation:
+    """Convert a git observation into a ToolOperation."""
     from syn_adapters.projections.session_tools import ToolOperation
 
     # Extract git subcommand (operation name)
-    git = _git_sub(data)
+    facts = GitFacts.read(data, event_type)
+    git = facts.structured
     git_subcmd = git.get("operation", "") if git is not None else data.get("operation", "")
     if event_type == GIT_REWRITE and not git_subcmd:
         git_subcmd = "rebase"
@@ -170,19 +155,19 @@ def row_to_git_operation(
     verdict = read_verdict(event_type, data, unrecorded=True)
 
     return ToolOperation(
-        observation_id=observation_id("git", event_type, row["time"].isoformat()),
+        observation_id=observation_id("git", event_type, when.isoformat()),
         tool_name=git_subcmd,
         tool_use_id=None,
         operation_type=event_type,
-        timestamp=row["time"],
+        timestamp=when,
         success=verdict.success,
         error_message=verdict.error_message,
         input_preview=None,
         output_preview=None,
         duration_ms=None,
-        git_sha=_resolve_git_sha(data),
-        git_message=_resolve_git_message(data),
-        git_branch=_resolve_git_branch(data, event_type),
-        git_repo=_resolve_git_repo(data),
-        git_data=git,
+        git_sha=facts.sha,
+        git_message=facts.message,
+        git_branch=facts.branch,
+        git_repo=facts.repo,
+        git_data=facts.structured,
     )

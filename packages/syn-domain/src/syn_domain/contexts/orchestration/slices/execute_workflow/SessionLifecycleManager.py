@@ -206,6 +206,11 @@ class SessionLifecycleManager:
         ``RecordOperationHandler`` sit unimplemented and unnoticed (#1034);
         the handler is now the only way a session records an operation.
 
+        The recorder this manager already holds is handed to it, because an
+        operation has to land on the observation lane to be readable at
+        ``GET /sessions/{id}``. A manager built without one records the
+        session's tokens and no timeline row, and the handler says so.
+
         The handlers load their own copy of the session, so they must run
         against a stored aggregate that is up to date, and they must run in
         sequence - a second write against the pre-record version would be a
@@ -234,7 +239,9 @@ class SessionLifecycleManager:
                 duration_seconds=duration_seconds,
                 metadata={"phase_id": self._phase_id, "source": source},
             )
-            await RecordOperationHandler(repository=self._repo).handle(record_cmd)
+            await RecordOperationHandler(
+                repository=self._repo, observations=self._observability
+            ).handle(record_cmd)
 
         complete_cmd = CompleteSessionCommand(
             aggregate_id=self._session_id,

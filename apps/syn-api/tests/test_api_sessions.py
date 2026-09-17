@@ -123,12 +123,21 @@ async def test_recorded_operation_reaches_the_session_read_path():
     """An operation recorded through RecordOperationHandler must be visible
     to the API that serves session detail (#1034).
 
-    The handler was a no-op, so nothing it was handed ever reached the event
-    store, the projection, or this endpoint. 4321 is deliberately a number
-    no other writer in this system produces: no default, no sum of defaults,
-    and the only Lane 1 token writer for a session is the operation stream.
+    ``operations`` is the assertion that matters, and it is the one the first
+    version of this test did not make: it checked ``total_tokens`` only, which
+    reaches the endpoint by a different route entirely (Lane 1 ->
+    SessionListProjection -> _lane1_tokens). So it passed with the operations
+    read path replaced by ``return []`` - green while the bug it is named for
+    was fully present.
+
+    ``toolu_record_op_1034`` is written by nothing else in this system, so the
+    row read back here can only be the one recorded above.
     """
-    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
     from syn_api.routes.sessions import get_session, start_session
     from syn_domain.contexts.agent_sessions import (
         RecordOperationCommand,
@@ -143,14 +152,19 @@ async def test_recorded_operation_reaches_the_session_read_path():
     before = await get_session(session_id)
     assert isinstance(before, Ok)
     assert before.value.total_tokens == 0
+    assert before.value.operations == []
 
-    await RecordOperationHandler(repository=get_session_repo()).handle(
+    await RecordOperationHandler(
+        repository=get_session_repo(), observations=get_session_observations()
+    ).handle(
         RecordOperationCommand(
             aggregate_id=session_id,
             operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
             tool_name="Bash",
             tool_use_id="toolu_record_op_1034",
+            tool_input={"command": "echo 1034"},
             tool_output="ran",
+            duration_seconds=1.5,
             input_tokens=4000,
             output_tokens=321,
             total_tokens=4321,
@@ -160,6 +174,13 @@ async def test_recorded_operation_reaches_the_session_read_path():
 
     after = await get_session(session_id)
     assert isinstance(after, Ok)
+    assert [op.tool_use_id for op in after.value.operations] == ["toolu_record_op_1034"]
+    operation = after.value.operations[0]
+    assert operation.tool_name == "Bash"
+    assert operation.operation_type == "tool_execution_completed"
+    assert operation.output_preview == "ran"
+    assert operation.duration_ms == 1500
+    # Tokens travel the other lane and must keep working while operations do.
     assert after.value.total_tokens == 4321
 
 
@@ -266,7 +287,11 @@ async def test_session_detail_operations_come_only_from_the_lane2_timeline():
 
     from syn_adapters.projections.manager import get_projection_manager
     from syn_adapters.projections.session_tools import ToolOperation
-    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
     from syn_api.routes.sessions import get_session, start_session
     from syn_domain.contexts.agent_sessions import (
         RecordOperationCommand,
@@ -278,13 +303,17 @@ async def test_session_detail_operations_come_only_from_the_lane2_timeline():
     assert isinstance(start_result, Ok)
     session_id = start_result.value
 
-    await RecordOperationHandler(repository=get_session_repo()).handle(
+    await RecordOperationHandler(
+        repository=get_session_repo(), observations=get_session_observations()
+    ).handle(
         RecordOperationCommand(
             aggregate_id=session_id,
-            operation_type=OperationType.MESSAGE_RESPONSE,
+            operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+            tool_name="Bash",
+            tool_use_id="toolu_lane1_1034",
+            total_tokens=4321,
             input_tokens=4000,
             output_tokens=321,
-            total_tokens=4321,
         )
     )
     await sync_published_events_to_projections()
@@ -311,6 +340,8 @@ async def test_session_detail_operations_come_only_from_the_lane2_timeline():
 
     detail = await get_session(session_id)
     assert isinstance(detail, Ok)
+    # Only what the timeline returned - the recorded operation is on the real
+    # timeline, which this stand-in has replaced, so it must not appear too.
     assert [op.tool_use_id for op in detail.value.operations] == ["toolu_lane2_1034"]
     # The Lane 1 operation is still real - it is where the tokens came from.
     assert detail.value.total_tokens == 4321
