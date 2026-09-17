@@ -122,6 +122,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
@@ -155,6 +158,8 @@ __all__ = [
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
+    # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
+    "AgentVerdict",
     # Commands
     "ArchiveWorkflowTemplateCommand",
     # Handlers

@@ -64,7 +64,6 @@ class TestAgentExecutionHandler:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             conversation_lines=["line1"],
         )
 
@@ -114,7 +113,6 @@ class TestAgentExecutionHandler:
             line_count=5,
             interrupt_requested=True,
             interrupt_reason="User cancelled",
-            agent_task_result=None,
         )
 
         with patch(
@@ -156,7 +154,6 @@ class TestAgentExecutionHandler:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             total_cost_usd=0.0319,
             reported_usage=ReportedUsage(
                 input_tokens=685,
@@ -205,7 +202,6 @@ class TestAgentExecutionHandler:
             line_count=5,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             total_cost_usd=0.0319,
             reported_usage=ReportedUsage(
                 input_tokens=685,
@@ -266,7 +262,6 @@ class TestAgentExecutionHandler:
             line_count=3,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             reported_usage=ReportedUsage(
                 input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
             ),
@@ -324,7 +319,6 @@ class TestAgentExecutionHandler:
             line_count=1,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             error_reason=MISSING_TERMINAL_TURN_REASON,
         )
 
@@ -365,7 +359,6 @@ class TestAgentExecutionHandler:
             line_count=43,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             error_reason=error_reason,
         )
         with patch(
@@ -473,7 +466,6 @@ class TestAgentExecutionHandler:
             line_count=3,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             reported_usage=ReportedUsage(
                 input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
             ),
@@ -670,7 +662,6 @@ class TestDetectExitCode:
             line_count=5,
             interrupt_requested=True,
             interrupt_reason="cancel",
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = None
@@ -688,7 +679,6 @@ class TestDetectExitCode:
             line_count=5,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 42
@@ -706,7 +696,6 @@ class TestDetectExitCode:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0

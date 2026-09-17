@@ -162,10 +162,28 @@ class PhaseRuntime:
         self._tokens: dict[str, TokenAccumulator] = {}
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
-        self._said: dict[str, str] = {}  # last agent message, for #1195 recovery
+        #: The last thing each phase's agent said, which is where its
+        #: conclusion is recovered from when the file it wrote came back empty
+        #: (#1195).
+        #:
+        #: Keyed by (execution_id, phase_id) for the same reason as
+        #: `_leader_native_ids` above, and this one decides an OUTCOME: two
+        #: concurrent runs of a workflow share a phase id, so a phase-only key
+        #: let the second run's message overwrite the first's, and the first
+        #: then recovered its deliverable from a report that was not its own -
+        #: including, when the second said it had succeeded, in place of its
+        #: own failure report (#1256).
+        self._said: dict[tuple[str, str], str] = {}
         #: The model each phase's harness announced on its own stream (#1284).
         #: Held here rather than re-read at collection time because the stream
         #: is gone by then; absent means the harness announced nothing.
+        #:
+        #: NOTE: keyed by phase id alone, unlike `_said` directly above. The
+        #: collision argument in that comment applies here too - two concurrent
+        #: runs share a phase id - so run B can overwrite run A's model. Left as
+        #: it merged rather than changed here: it is a different bug from the
+        #: one this branch fixes, and a silent widening of scope during a
+        #: conflict resolution is how one side of a merge gets lost.
         self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
@@ -234,10 +252,12 @@ class PhaseRuntime:
         """Note the id this phase's own harness announced, for the delegate sweep."""
         remember_leader_native_id(self._leader_native_ids, (execution_id, phase_id), stream_result)
 
-    def record_agent_run(self, phase_id: str, result: AgentExecutionResult) -> None:
+    def record_agent_run(
+        self, phase_id: str, *, execution_id: str, result: AgentExecutionResult
+    ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
-        self._said[phase_id] = result.stream_result.last_agent_message or ""
+        self._said[execution_id, phase_id] = result.stream_result.last_agent_message or ""
         announced = result.stream_result.announced_model
         if announced is not None:
             self._announced_models[phase_id] = announced
@@ -254,9 +274,14 @@ class PhaseRuntime:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
 
-    def take_last_message(self, phase_id: str) -> str | None:
-        """What the agent said last, read once and forgotten (#1195)."""
-        return self._said.pop(phase_id, None)
+    def take_last_message(self, phase_id: str, *, execution_id: str) -> str | None:
+        """What THIS execution's agent said last, read once and forgotten (#1195).
+
+        `execution_id` is not optional and has no default: a caller that could
+        omit it would be back to reading whichever run wrote last, which is
+        the defect (#1256).
+        """
+        return self._said.pop((execution_id, phase_id), None)
 
     def agent_for(self, phase_id: str, *, provider: str | None) -> AgentIdentity:
         """Who ran this phase: the harness launched, and the model it announced.

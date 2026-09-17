@@ -10,6 +10,9 @@ from typing import Any
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.phase_entry import (
+    PhaseMetricsEntry,
+)
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection import (
     WorkflowPhaseMetricsProjection,
 )
@@ -458,3 +461,118 @@ class TestQueryAndClear:
         await projection.clear_all_data()
         phases = await projection.get_phase_metrics("wf-1")
         assert phases == {}
+
+
+@pytest.mark.unit
+class TestAnUnreportedVerdictIsNotACompletion:
+    """#1256's shape at this hop: absence resolving to the success value.
+
+    A phase's outcome reached this projection through
+    ``event_data.get("success", True)``, so a PhaseCompleted that carried no
+    verdict - or carried one that was not a bool - was written down as
+    ``completed``. An operator reading phase metrics then sees a green phase
+    that nothing ever vouched for, which is the same defect as completing a
+    phase whose report could not be read.
+    """
+
+    async def test_a_completion_with_no_verdict_is_recorded_as_failed(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "failed"
+
+    async def test_a_verdict_that_is_not_a_bool_is_recorded_as_failed(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        """``"false"`` is a truthy string, and used to read as a success."""
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {
+                "workflow_id": "wf-1",
+                "execution_id": "exec-A",
+                "phase_id": "p-1",
+                "success": "false",
+            }
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "failed"
+
+    async def test_a_reported_success_still_completes(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        """The regression guard: healthy phases must be unaffected."""
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1"}
+        )
+
+        await projection.on_phase_completed(
+            {"workflow_id": "wf-1", "execution_id": "exec-A", "phase_id": "p-1", "success": True}
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].status == "completed"
+
+    async def test_a_stored_entry_with_no_settled_status_reads_back_as_failed(self) -> None:
+        """The same absence, one hop later: reading our own store back."""
+        entry = PhaseMetricsEntry.from_stored("p-1", {"phase_name": "Build"})
+
+        assert entry.status == "failed"
+
+
+@pytest.mark.unit
+class TestRowsWrittenBeforeTheRenameKeepTheirOutcome:
+    """A stored row whose terminal state is under `status`, not `settled_status`.
+
+    The projection wrote `status` until 37a1d86a renamed it to
+    `settled_status`, and the rename shipped without a migration - so rows in
+    that older shape are still in the store. Reading only the new key sends
+    every one of them to the default, and this slice's default is "failed".
+    A deploy would then reclassify every previously COMPLETED phase as failed,
+    silently and for all of history.
+
+    Found by cross-model review. No existing test covered it, because the ones
+    that exercise `from_stored` build their rows with the current writer and
+    so can never produce the old shape.
+    """
+
+    def test_a_legacy_completed_row_is_still_completed(self) -> None:
+        entry = PhaseMetricsEntry.from_stored(
+            "implement", {"phase_name": "implement", "status": "completed"}
+        )
+
+        assert entry.settled_status == "completed"
+
+    def test_a_legacy_failed_row_is_still_failed(self) -> None:
+        """The other direction, so the fix cannot be "always say completed"."""
+        entry = PhaseMetricsEntry.from_stored(
+            "implement", {"phase_name": "implement", "status": "failed"}
+        )
+
+        assert entry.settled_status == "failed"
+
+    def test_the_current_key_wins_when_both_are_present(self) -> None:
+        """Order matters: a row rewritten by the current writer is current."""
+        entry = PhaseMetricsEntry.from_stored(
+            "implement",
+            {"phase_name": "implement", "status": "failed", "settled_status": "completed"},
+        )
+
+        assert entry.settled_status == "completed"
+
+    def test_a_row_carrying_neither_key_is_failed(self) -> None:
+        """Nobody recorded an outcome, so it must not read as a pass."""
+        entry = PhaseMetricsEntry.from_stored("implement", {"phase_name": "implement"})
+
+        assert entry.settled_status == "failed"

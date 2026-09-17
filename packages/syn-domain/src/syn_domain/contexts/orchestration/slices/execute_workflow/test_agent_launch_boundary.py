@@ -102,7 +102,6 @@ class _ConsumingStreamProcessor:
             line_count=len(self.lines),
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
         )
 
 
@@ -360,7 +359,6 @@ async def test_a_cancelled_phase_keeps_the_launch_its_agent_earned() -> None:
                 line_count=len(self.lines),
                 interrupt_requested=True,
                 interrupt_reason="cancelled",
-                agent_task_result=None,
             )
 
     await _run_phase(
