@@ -44,6 +44,7 @@ SELECT
     data->>'model' as agent_model,
     (data->>'num_turns')::int as num_turns,
     (data->>'tool_count')::int as tool_count,
+    data->>'workspace_id' as workspace_id,
     time as completed_at,
     execution_id,
     phase_id
@@ -74,6 +75,7 @@ SELECT
     MIN(time) as started_at,
     MAX(time) as last_observation,
     COUNT(*) as observation_count,
+    MAX(data->>'workspace_id') as workspace_id,
     MAX(execution_id) as execution_id,
     MAX(phase_id) as phase_id
 FROM agent_events
@@ -250,6 +252,7 @@ class SessionCostQueryService:
         sc.duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
         sc.execution_id = row["execution_id"]  # type: ignore[index]
         sc.phase_id = row["phase_id"]  # type: ignore[index]
+        sc.workspace_id = row["workspace_id"]  # type: ignore[index]
         sc.started_at = started_map.get(sid)  # type: ignore[arg-type]
         sc.completed_at = row["completed_at"]  # type: ignore[index]
         sc.is_finalized = True
@@ -289,6 +292,7 @@ class SessionCostQueryService:
         sc.tool_calls = tool_counts.get(session_id, 0)
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
+        sc.workspace_id = totals.workspace_id
         sc.started_at = started_map.get(session_id) or totals.started_at  # type: ignore[assignment]
         sc.unpriced_observation_count = totals.unpriced_observation_count
         sc.cost_by_model = dict(totals.cost_by_model)

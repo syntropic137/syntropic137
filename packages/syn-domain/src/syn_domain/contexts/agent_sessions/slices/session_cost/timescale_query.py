@@ -47,6 +47,7 @@ SELECT DISTINCT ON (session_id)
     (data->>'total_cost_usd')::numeric as sdk_cost,
     (data->>'duration_ms')::bigint as duration_ms_val,
     data->>'model' as agent_model,
+    data->>'workspace_id' as workspace_id,
     time as completed_at,
     execution_id,
     phase_id
