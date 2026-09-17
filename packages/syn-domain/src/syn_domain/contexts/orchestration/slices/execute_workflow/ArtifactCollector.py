@@ -16,8 +16,10 @@ from uuid import uuid4
 
 from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+    RECOVERED_SOURCE_PATH,
+    RecoveredArtifact,
     is_storable,
-    recover_empty_artifact,
+    recover_deliverable,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
@@ -134,6 +136,29 @@ class CollectedArtifacts:
     artifact_ids: list[str]
     first_content: str | None
     files: list[PhaseOutputFile] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _Deliverable:
+    """One thing a phase delivered, ready to store, whatever route it came by.
+
+    Exists so the storage loop cannot tell a written file from a recovered one
+    and therefore cannot treat them differently by accident. Every field it
+    needs is decided before the loop begins.
+    """
+
+    source_path: str
+    content: str
+    title: str
+
+    @classmethod
+    def of(cls, recovered: RecoveredArtifact) -> _Deliverable:
+        """The recovered artifact as something to store, with nothing reworded."""
+        return cls(
+            source_path=recovered.source_path,
+            content=recovered.content,
+            title=recovered.title,
+        )
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -455,23 +480,24 @@ class ArtifactCollector:
         aggregates. `output_artifact_types` is what the phase's workflow
         definition PROMISED it would produce.
 
-        A phase that promised output and delivered none does not return - it
-        raises. Before #1167 it returned empty here and the execution advanced
-        as though the phase had succeeded, so a `verify` phase could drop out
-        of a run while every surface still reported completed. The signal was
-        already present and simply nothing consumed it.
+        A phase that promised output and delivered none does not advance on
+        silence. Before #1167 it returned empty here and the execution carried
+        on as though the phase had succeeded, so a `verify` phase could drop
+        out of a run while every surface still reported completed.
 
-        A phase that wrote a file and left it EMPTY is a different incident and
-        gets a different answer (#1195). `last_agent_message` is the last thing
-        the phase's agent said on its own stream; when the file is empty this
-        falls back to it rather than letting the store's refusal fail the run,
-        because the conclusion the phase reached is worth more than the route
-        it took to get here. Omitted or empty means no fallback is available
-        and the phase fails - saying so, in those words.
+        But "delivered none" is about the deliverable, not about the file.
+        `last_agent_message` is the last thing the phase's agent said on its
+        own stream, and it is consulted whenever the deliverable is not
+        readable from disk - the file was empty (#1195) or no collectable file
+        was written at all (#1300). Both salvage the same way and both say so
+        in the stored artifact's title and first line. Only when BOTH routes
+        are empty does the phase fail, and then it fails naming which route was
+        missing.
 
         Raises:
             PhaseProducedNoDeclaredOutputError: the phase declared output
-                artifact types and produced none of them.
+                artifact types, produced none of them, and said nothing on its
+                stream to recover either.
             EmptyPhaseArtifactError: the phase wrote a file with no content and
                 nothing could be recovered from its transcript either.
 
@@ -483,33 +509,21 @@ class ArtifactCollector:
         )
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
-        # Judged on COLLECTABLE files, not on what the glob returned: a phase
-        # whose entire output tree was build junk produced no deliverable, and
-        # that is the same failure as writing nothing at all.
-        if output_artifact_types and not artifacts:
-            raise PhaseProducedNoDeclaredOutputError(
-                phase_id=phase_id,
-                phase_name=phase_name,
-                declared=output_artifact_types,
-            )
+        deliverables = self._deliverables(
+            artifacts=artifacts,
+            output_artifact_types=output_artifact_types,
+            phase_id=phase_id,
+            phase_name=phase_name,
+            last_agent_message=last_agent_message,
+        )
 
         artifact_type = _primary_type(output_artifact_types)
         artifact_ids: list[str] = []
         files: list[PhaseOutputFile] = []
         first_content: str | None = None
 
-        for index, (artifact_path, artifact_content) in enumerate(artifacts):
+        for index, deliverable in enumerate(deliverables):
             artifact_id = str(uuid4())
-            content_str = artifact_content.decode("utf-8", errors="replace")
-            title = f"{phase_name}: {artifact_path}"
-            if not is_storable(content_str):
-                content_str, title = self._recover_or_fail(
-                    last_agent_message=last_agent_message,
-                    phase_id=phase_id,
-                    phase_name=phase_name,
-                    artifact_path=artifact_path,
-                    title=title,
-                )
             await self.create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=workflow_id,
@@ -517,17 +531,22 @@ class ArtifactCollector:
                 execution_id=execution_id,
                 session_id=session_id,
                 artifact_type=artifact_type,
-                content=content_str,
-                title=title,
-                source_path=artifact_path,
+                content=deliverable.content,
+                title=deliverable.title,
+                source_path=deliverable.source_path,
                 # The flat `<phase-id>.md` alias reads this after a restart,
                 # so it must name the file the live path injects (#997).
                 is_primary_deliverable=index == 0,
             )
             artifact_ids.append(artifact_id)
-            files.append(PhaseOutputFile(source_path=artifact_path, content=content_str))
+            files.append(
+                PhaseOutputFile(
+                    source_path=deliverable.source_path,
+                    content=deliverable.content,
+                )
+            )
             if first_content is None:
-                first_content = content_str
+                first_content = deliverable.content
 
         return CollectedArtifacts(
             artifact_ids=artifact_ids,
@@ -536,40 +555,86 @@ class ArtifactCollector:
         )
 
     @staticmethod
-    def _recover_or_fail(
+    def _deliverables(
         *,
-        last_agent_message: str | None,
+        artifacts: list[tuple[str, bytes]],
+        output_artifact_types: tuple[str, ...],
         phase_id: str,
         phase_name: str,
-        artifact_path: str,
-        title: str,
-    ) -> tuple[str, str]:
-        """The content and title to store for a file that came back empty (#1195).
+        last_agent_message: str | None,
+    ) -> list[_Deliverable]:
+        """What this phase actually delivered, whatever route it arrived by.
 
-        Deliberately raises rather than skipping the file. Skipping would put
-        the execution back where #1167 found it - advancing past a phase whose
-        declared output never materialised - and the whole value of failing
-        here is that it is now a NAMED incident rather than a schema complaint.
+        The single place that decides between the three states a phase can be
+        in; the caller above only stores what comes back. Splitting the
+        decision across the storage loop is what let #1300 exist: the empty
+        file was salvaged inside the loop and "no file" was refused before the
+        loop was ever reached, so the two incidents were answered by different
+        code that had no reason to agree.
+
+        Whichever route the content came by, a recovered deliverable is stored
+        marked - `recover_deliverable` owns the title, the banner and the path,
+        so there is one description of "recovered" and not two.
         """
-        recovered = recover_empty_artifact(
-            last_agent_message=last_agent_message,
-            source_path=artifact_path,
-            title=title,
-        )
-        if recovered is None:
-            raise EmptyPhaseArtifactError(
-                phase_id=phase_id,
-                phase_name=phase_name,
-                source_path=artifact_path,
+        # Judged on COLLECTABLE files, not on what the glob returned: a phase
+        # whose entire output tree was build junk produced no deliverable, and
+        # that is the same incident as writing nothing at all.
+        if output_artifact_types and not artifacts:
+            recovered = recover_deliverable(
+                last_agent_message=last_agent_message,
+                wrote=None,
+                title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
             )
-        logger.warning(
-            "Phase %s (%s) wrote an empty %s; recovered its content from the "
-            "session transcript instead of failing the execution (#1195)",
-            phase_id,
-            phase_name,
-            artifact_path,
-        )
-        return recovered.content, recovered.title
+            if recovered is None:
+                raise PhaseProducedNoDeclaredOutputError(
+                    phase_id=phase_id,
+                    phase_name=phase_name,
+                    declared=output_artifact_types,
+                )
+            logger.warning(
+                "Phase %s (%s) declared %s and wrote no collectable file; recovered "
+                "its conclusion from the session transcript instead of discarding "
+                "the execution (#1300)",
+                phase_id,
+                phase_name,
+                ", ".join(output_artifact_types),
+            )
+            return [_Deliverable.of(recovered)]
+
+        deliverables: list[_Deliverable] = []
+        for artifact_path, artifact_content in artifacts:
+            content_str = artifact_content.decode("utf-8", errors="replace")
+            title = f"{phase_name}: {artifact_path}"
+            if is_storable(content_str):
+                deliverables.append(
+                    _Deliverable(source_path=artifact_path, content=content_str, title=title)
+                )
+                continue
+            recovered = recover_deliverable(
+                last_agent_message=last_agent_message,
+                wrote=artifact_path,
+                title=title,
+            )
+            # Deliberately raises rather than skipping the file. Skipping would
+            # put the execution back where #1167 found it - advancing past a
+            # phase whose declared output never materialised - and the whole
+            # value of failing here is that it is now a NAMED incident rather
+            # than a schema complaint.
+            if recovered is None:
+                raise EmptyPhaseArtifactError(
+                    phase_id=phase_id,
+                    phase_name=phase_name,
+                    source_path=artifact_path,
+                )
+            logger.warning(
+                "Phase %s (%s) wrote an empty %s; recovered its content from the "
+                "session transcript instead of failing the execution (#1195)",
+                phase_id,
+                phase_name,
+                artifact_path,
+            )
+            deliverables.append(_Deliverable.of(recovered))
+        return deliverables
 
     async def collect_partial(
         self,

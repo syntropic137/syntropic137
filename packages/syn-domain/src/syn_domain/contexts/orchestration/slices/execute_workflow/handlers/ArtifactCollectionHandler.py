@@ -79,9 +79,11 @@ class ArtifactCollectionHandler:
                 produce nothing; non-empty and unproduced is a failure the
                 collector raises on (#1167).
             last_agent_message: The last thing this phase's agent said on its
-                stream. Used only when a file it wrote turns out to be empty,
-                as the fallback that stops a lost write failing the whole
-                execution (#1195).
+                stream. The fallback deliverable whenever the declared one is
+                not readable from disk - the file was written empty (#1195) or
+                no collectable file was written at all (#1300) - so that a
+                finished phase is not discarded over a missing report. Stored
+                marked as recovered, never silently.
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
