@@ -322,27 +322,31 @@ class StreamResult:
     announced_model: str | None = None
 
 
-def _announced_model(cli_event: Mapping[str, Any]) -> str | None:
+def _announced_model(*candidates: object) -> str | None:
     """The model this line says is running, or None if it does not say (#1284).
 
     Claude states it in two places and both are the harness speaking about
     itself: the ``system``/``init`` line carries it at the top level, and every
-    ``assistant`` line repeats it under ``message``. Read together rather than
-    picking one, so a recording that begins mid-stream still yields an answer
-    instead of none.
+    ``assistant`` line repeats it under ``message``. Both are offered here
+    rather than picking one, so a recording that begins mid-stream still yields
+    an answer instead of none.
+
+    The candidates are passed as values rather than the line itself: the
+    parameter would otherwise be one more ``Mapping[str, Any]``, which spends
+    ratchet budget to say nothing (#673).
 
     Returns None for a line that carries no model at all, which is most of
     them, and for a blank one - "" is not an identity and must not displace the
     real value that a later line may carry.
     """
-    for candidate in (cli_event.get("model"), _message_model(cli_event)):
+    for candidate in candidates:
         if isinstance(candidate, str) and candidate.strip():
             return candidate
     return None
 
 
-def _message_model(cli_event: Mapping[str, Any]) -> object:
-    message = cli_event.get("message")
+def _model_under_message(message: object) -> object:
+    """``model`` as an assistant line carries it, under ``message``."""
     return message.get("model") if isinstance(message, Mapping) else None
 
 
@@ -630,7 +634,9 @@ class EventStreamProcessor:
                 self._leader_native_session_id = announced
 
         if self._announced_model is None:
-            self._announced_model = _announced_model(cli_event)
+            self._announced_model = _announced_model(
+                cli_event.get("model"), _model_under_message(cli_event.get("message"))
+            )
 
         task_result: dict[str, Any] | None = None
 

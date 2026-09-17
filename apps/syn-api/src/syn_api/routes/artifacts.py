@@ -206,6 +206,11 @@ async def list_artifacts(
                         created_at=datetime.fromisoformat(a.created_at)
                         if isinstance(a.created_at, str)
                         else a.created_at,
+                        # Named here or the list answers null for an artifact
+                        # whose detail answers correctly - see the comment on
+                        # excluded_undated below, which is this same hop (#1284).
+                        agent_provider=a.agent_provider,
+                        agent_model=a.agent_model,
                     )
                     for a in domain_page.rows
                 ],

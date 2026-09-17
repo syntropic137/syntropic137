@@ -161,3 +161,32 @@ async def test_an_artifact_created_through_the_write_api_reports_nothing():
 
     assert response.agent_provider is None
     assert response.agent_model is None
+
+
+async def test_the_list_endpoint_names_them_on_the_wire():
+    """The list has the same two hops the detail has, and the second one -
+    rebuilding every row as a response model field by field - is where the
+    field was in fact dropped: `list_artifacts` restated ten fields and not
+    these two, so `GET /artifacts` answered null for an artifact whose
+    `GET /artifacts/{id}` answered correctly, in the same process.
+    """
+    from syn_api.routes.artifacts import list_artifacts_endpoint
+
+    await _store_artifact("art-1284-e", agent_provider=PROVIDER, agent_model=ANNOUNCED_MODEL)
+
+    response = await list_artifacts_endpoint(
+        workflow_id="wf-1284",
+        phase_id=None,
+        session_id=None,
+        artifact_type=None,
+        created_after=None,
+        created_before=None,
+        q=None,
+        page=1,
+        page_size=50,
+        limit=None,
+    )
+
+    assert [(r.id, r.agent_provider, r.agent_model) for r in response.artifacts] == [
+        ("art-1284-e", PROVIDER, ANNOUNCED_MODEL)
+    ]
