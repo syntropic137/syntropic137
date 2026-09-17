@@ -356,7 +356,11 @@ async def test_the_production_completion_path_reaches_the_session_read_path():
     serves session detail. 4321/4000/321 is a split no default or sum of
     defaults produces.
     """
-    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
     from syn_api.routes.sessions import get_session, start_session
     from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
         SessionLifecycleManager,
@@ -375,6 +379,12 @@ async def test_the_production_completion_path_reaches_the_session_read_path():
         phase_id="phase-1",
         agent_provider="claude",
         agent_model="claude-sonnet-4-20250514",
+        # WorkflowExecutionProcessor passes its observability writer here
+        # (WorkflowExecutionProcessor.py, `observability=self._observability_writer`).
+        # Omitting it is what made the first version of this test vacuous: with
+        # no lane there is no timeline row to miss, so the assertion below
+        # could not have failed however broken the write path was.
+        observability=get_session_observations(),
     )
     manager._session = await repo.get_by_id(session_id)
 
@@ -395,3 +405,81 @@ async def test_the_production_completion_path_reaches_the_session_read_path():
     assert detail.value.total_tokens == 4321
     assert detail.value.input_tokens == 4000
     assert detail.value.output_tokens == 321
+
+    # The assertion this test exists for. `total_tokens` above reaches the
+    # endpoint through Lane 1 and says nothing about the timeline - it was
+    # already 4321 while `operations` was empty, which is the exact signature
+    # of #1034 and what this test used to stop at.
+    assert [op.operation_type for op in detail.value.operations] == ["session_completed"]
+    completion = detail.value.operations[0]
+    assert completion.success is True
+    assert completion.duration_ms == 1500
+
+
+async def test_the_production_path_reports_a_lost_timeline_row(caplog):
+    """A timeline write that fails is reported, not discarded (#1034).
+
+    The two writes `complete_success` makes go to different stores with no
+    transaction spanning them, so the domain write can commit while the
+    timeline write does not. That gap used to be caught and logged inside the
+    handler and nothing else - invisible to the caller, and so invisible at
+    exactly the moment it mattered. This drives the real caller with a lane
+    that refuses the write and asserts BOTH halves: the domain write survives,
+    and the divergence is announced against this execution and phase.
+    """
+    import logging
+
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
+    )
+
+    class _RefusingLane:
+        async def record_observation(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("timescale is down")
+
+    start_result = await start_session(workflow_id="wf-diverged", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    repo = get_session_repo()
+    manager = SessionLifecycleManager(
+        repository=repo,
+        session_id=session_id,
+        workflow_id="wf-diverged",
+        execution_id="exec-diverged",
+        phase_id="phase-1",
+        agent_provider="claude",
+        agent_model="claude-sonnet-4-20250514",
+        observability=_RefusingLane(),
+    )
+    manager._session = await repo.get_by_id(session_id)
+
+    with caplog.at_level(logging.ERROR):
+        await manager.complete_success(
+            input_tokens=4000,
+            output_tokens=321,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            total_tokens=4321,
+            duration_seconds=1.5,
+            source="test-1034",
+        )
+    await sync_published_events_to_projections()
+
+    # Lane 2 being down must not cost us the domain write.
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    assert detail.value.status == "completed"
+    assert detail.value.total_tokens == 4321
+
+    # The divergence is announced, and names the run that lost the row -
+    # `exec-diverged` appears in no other message this path can emit.
+    reports = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.ERROR and "exec-diverged" in r.getMessage()
+    ]
+    assert reports, f"no divergence reported; saw {[r.getMessage() for r in caplog.records]}"
+    assert "timescale is down" in reports[0]

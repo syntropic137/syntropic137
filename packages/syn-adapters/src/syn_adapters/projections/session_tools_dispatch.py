@@ -21,6 +21,7 @@ from syn_adapters.projections.session_tools_converters import (
 )
 from syn_adapters.projections.session_tools_verdict import observation_id, read_verdict
 from syn_shared.events import (
+    SESSION_COMPLETED,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
     TOOL_EXECUTION_COMPLETED,
@@ -28,6 +29,15 @@ from syn_shared.events import (
 )
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
+
+#: Row types that report a FINISHED subject, and so are the ones whose
+#: `output_preview` and `duration_ms` mean anything. This was spelled
+#: `event_type == TOOL_EXECUTION_COMPLETED`, which made `is_completed` narrower
+#: than its own name: `session_completed` carries the phase's wall-clock
+#: duration and was having it dropped one hop after the writer computed it.
+_COMPLETION_EVENT_TYPES: frozenset[str] = frozenset(
+    {TOOL_EXECUTION_COMPLETED, SESSION_COMPLETED},
+)
 
 
 def _parse_row_data(row: asyncpg.Record) -> dict[str, Any]:
@@ -57,7 +67,7 @@ def build_standard_operation(
     """
     from syn_adapters.projections.session_tools import ToolOperation
 
-    is_completed = event_type == TOOL_EXECUTION_COMPLETED
+    is_completed = event_type in _COMPLETION_EVENT_TYPES
     verdict = read_verdict(event_type, data)
     # `event_type` is always present, so this is never empty. The old
     # `or str(uuid4())` tail could therefore never fire either - and a uuid

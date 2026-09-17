@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
-from syn_shared.events import SESSION_ERROR, SESSION_SUMMARY
+from syn_shared.events import SESSION_COMPLETED, SESSION_ERROR, SESSION_SUMMARY
 
 
 @dataclass(frozen=True)
@@ -114,8 +114,24 @@ async def test_cancelled_session_records_a_summary_observation() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_successful_session_gets_no_synthetic_observation() -> None:
-    """The stream processors already wrote the real summary."""
+async def test_successful_session_records_a_completion_but_never_a_summary() -> None:
+    """A successful phase leaves the same kind of trace a failed one does.
+
+    THIS TEST CHANGED MEANING (#1034). It asserted `writer.observations == []`
+    - no observation at all - under the name "no synthetic observation". The
+    invariant it is named for, and the one the two tests above defend, is
+    narrower than that: never a synthetic SESSION_SUMMARY, because
+    TimescaleSessionCostQuery selects the latest summary and a second one
+    would misprice the session. The blanket assertion also pinned the absence
+    of the readable completion row, which is the bug: `complete_success` wrote
+    its roll-up to Lane 1 under a name mapped to no observation type, so a
+    successful session was countable in the domain lane and invisible on the
+    timeline - the exact condition this module's docstring describes for
+    failed sessions, left in place for successful ones.
+
+    So the summary half is kept and tightened, and the absence half is
+    replaced by the positive assertion it was hiding.
+    """
     writer = _RecordingWriter()
     manager = _manager(writer)
     await manager.start()
@@ -130,7 +146,16 @@ async def test_successful_session_gets_no_synthetic_observation() -> None:
         source="test",
     )
 
-    assert writer.observations == []
+    # The invariant this test exists for, unchanged: nothing priceable is
+    # synthesised here. The stream processors already wrote the real summary.
+    assert [o for o in writer.observations if o.observation_type == SESSION_SUMMARY] == []
+
+    # ...and the session is now visible on the timeline it ended on.
+    completions = [o for o in writer.observations if o.observation_type == SESSION_COMPLETED]
+    assert len(completions) == 1, "a successful session must leave an observable trace too"
+    assert completions[0].execution_id == "exec-1"
+    assert completions[0].phase_id == "setup"
+    assert completions[0].data["duration_ms"] == 1000
 
 
 @pytest.mark.unit

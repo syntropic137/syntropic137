@@ -220,10 +220,61 @@ async def test_a_telemetry_failure_does_not_lose_the_domain_write() -> None:
     repo = FakeSessionRepository()
     await _running_session(repo, "sess-record-6")
 
-    await RecordOperationHandler(repository=repo, observations=_Broken()).handle(
+    recorded = await RecordOperationHandler(repository=repo, observations=_Broken()).handle(
         _tool_completed("sess-record-6")
     )
 
     persisted = await repo.get_by_id("sess-record-6")
     assert persisted is not None
     assert persisted.operation_count == 1
+
+    # ...and the caller is TOLD the lanes disagree. This is the half that did
+    # not exist: the exception was caught and logged and nothing else, so a
+    # caller could not tell this session from a healthy one and the only
+    # evidence was a log line nobody reads until the row is already missing.
+    assert recorded.diverged is True
+    assert recorded.reason is not None
+    assert "timescale is down" in recorded.reason
+
+
+@pytest.mark.unit
+async def test_a_lane_that_accepts_the_write_reports_no_divergence() -> None:
+    """The counterpart of the test above, and the reason it can fail.
+
+    `diverged` has to be False on the happy path for True to mean anything -
+    a flag that is always True is not a report, it is a constant.
+    """
+    repo = FakeSessionRepository()
+    await _running_session(repo, "sess-record-7")
+
+    recorded = await RecordOperationHandler(
+        repository=repo, observations=_FakeObservations()
+    ).handle(_tool_completed("sess-record-7"))
+
+    assert recorded.diverged is False
+    assert recorded.reason is None
+    assert recorded.operation_id
+
+
+@pytest.mark.unit
+async def test_an_operation_with_no_timeline_row_is_not_a_divergence() -> None:
+    """A stated `None` in the mapping is a decision, not a failure.
+
+    MESSAGE_RESPONSE is deliberately Lane 1 only. Reporting that as a
+    divergence would make the flag fire on every healthy per-turn reply and
+    train its reader to ignore it.
+    """
+    repo = FakeSessionRepository()
+    await _running_session(repo, "sess-record-8")
+    observations = _FakeObservations()
+
+    recorded = await RecordOperationHandler(repository=repo, observations=observations).handle(
+        RecordOperationCommand(
+            aggregate_id="sess-record-8",
+            operation_type=OperationType.MESSAGE_RESPONSE,
+            total_tokens=4321,
+        )
+    )
+
+    assert recorded.diverged is False
+    assert observations.recorded == []
