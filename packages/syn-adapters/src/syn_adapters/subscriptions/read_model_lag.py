@@ -9,8 +9,10 @@ that took 8m46s, during which every freshly dispatched execution was invisible:
 normally.
 
 That blackout is fixed upstream (#1318): ``SubscriptionCoordinator._plan_tracks``
-now puts a replaying projection on its own subscription, so the projections
-already at head keep consuming live events throughout. The signals below are
+now puts each replaying projection on its own subscription - each, not all of
+them on one, because that deploy bumped two versions at once and two rebuilds
+sharing a cursor pace each other just as a rebuild and a live projection do -
+so the projections already at head keep consuming live events throughout. The signals below are
 still needed, and for the same reason - a rebuild still makes the projection
 being rebuilt return stale or missing rows, it just no longer takes the other
 two dozen down with it. What changed is the blast radius, not the question an
