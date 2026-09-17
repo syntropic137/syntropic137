@@ -672,8 +672,9 @@ class CodexStreamProcessor:
         """Handle ``item.started``: only ``command_execution`` starts a tool op.
 
         ``file_change`` items only carry useful data on ``item.completed``
-        (the change list), so they are recorded as a synthetic
-        started+completed pair there instead (see ``_handle_item_completed``).
+        (the change list), so they are recorded there instead, as a completion
+        alone (see ``_handle_file_change_completed`` for why no start is
+        synthesized for them).
         """
         item = event.get("item")
         if not isinstance(item, dict) or item.get("type") != CodexItemType.COMMAND_EXECUTION:
@@ -744,6 +745,30 @@ class CodexStreamProcessor:
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:
+        """Record the completion of a ``file_change``, and nothing else (#1064).
+
+        Codex announces a file change only once it has happened: the
+        ``item.started`` for it carries no change list, so there is no start
+        worth recording and this handler used to write a synthetic one here,
+        microseconds before the completion.
+
+        That start was not an observation of anything. It said "this call
+        began" at a time the call had already ended, and the duration rule
+        (`session_tools_dispatch._resolve_durations`) then measured the gap
+        between the two writes and reported it as how long the edit took - a
+        number produced entirely by this method's own two lines, which would
+        be a few milliseconds or zero depending on how fast the store answered.
+
+        A duration that is only knowable from a pair of rows is only reportable
+        when the pair exists. Writing one row leaves it `None`, which is what
+        this producer actually knows, and `None` is already the answer
+        every reader downstream gets for a completion with no start
+        (`test_a_completion_with_no_start_in_the_result_reports_no_duration`).
+        Nothing is lost with the start row: it carried the changed paths as
+        `input_preview`, and the completion carries the same string as
+        `output_preview`, while `_accumulate_tool_stats` counts the call from
+        its `tool_use_id`, not from a start row.
+        """
         tool_use_id = str(item.get("id", "unknown"))
         changes = item.get("changes")
         paths = (
@@ -754,11 +779,6 @@ class CodexStreamProcessor:
         preview = ", ".join(paths)[:_MAX_PREVIEW_LEN]
         success = item.get("status") != "failed"
 
-        await self._collector.record_tool_started(
-            tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
-            tool_use_id=tool_use_id,
-            input_preview=preview,
-        )
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
             tool_use_id=tool_use_id,

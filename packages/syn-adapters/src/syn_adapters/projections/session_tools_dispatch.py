@@ -144,10 +144,28 @@ def _resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
     source, which is closer to the truth than the gap between two writes. This
     only supplies the value for the producers that record none.
 
+    One start pairs with ONE completion, and is consumed by it. Delivery here
+    is at-least-once and `agent_events` has no uniqueness constraint, so the
+    same completion can be stored twice; the second copy is re-stamped with
+    `datetime.now(UTC)` when it is re-recorded (`store_helpers.record_observation`),
+    so it lands later than the first. Paired against the start that is still
+    open, it reported the whole gap from the call's start to its own
+    redelivery - a call that took 1.5s shown as having taken 30s, with nothing
+    to mark the number as an artefact of delivery. Consuming the start leaves
+    the repeat with nothing to measure from, so it reports `None`: the same
+    answer a completion whose start never arrived already gets, and the same
+    rule this projection applies everywhere - a duration is reported only
+    where two rows genuinely bracket the call.
+
+    A duplicate START needs no such handling and gets none. Redelivered with
+    its own timestamp it is identical to the first and last-wins is a no-op;
+    re-stamped at a new time it is indistinguishable from a genuine retry of
+    the same id, which is the case last-wins exists to serve.
+
     Operations must arrive in `time` order, which both query paths guarantee
     with `ORDER BY time ASC`.
     """
-    started_at: dict[str, datetime] = {}
+    open_starts: dict[str, datetime] = {}
 
     for op in operations:
         if op.tool_use_id is None:
@@ -155,9 +173,9 @@ def _resolve_durations(operations: list[ToolOperation]) -> list[ToolOperation]:
         if op.operation_type in _CALL_STARTED_TYPES:
             # Last start wins: a retried id measures from the attempt that is
             # actually still open, not the one that already finished.
-            started_at[op.tool_use_id] = op.timestamp
+            open_starts[op.tool_use_id] = op.timestamp
         elif op.operation_type in _CALL_COMPLETED_TYPES and op.duration_ms is None:
-            started = started_at.get(op.tool_use_id)
+            started = open_starts.pop(op.tool_use_id, None)
             if started is not None:
                 op.duration_ms = _elapsed_ms(started, op.timestamp)
 
