@@ -224,8 +224,15 @@ async def test_codex_recording_carries_its_harness_ids_to_the_aggregation() -> N
 
     The recording contains six items; `item_1` and `item_3` are `file_change`,
     `item_2` and `item_4` are `command_execution`, and `item_0`/`item_5` are
-    `agent_message` and are not tool calls. So four logical calls, eight rows,
-    each row carrying the item id codex assigned it.
+    `agent_message` and are not tool calls. So four logical calls, each row
+    carrying the item id codex assigned it.
+
+    Eight rows, because in this capture codex announces both ends of all four
+    - including the two `file_change` items, whose `item.started` carries the
+    change list. The other capture shape sends a `file_change` as a completion
+    alone, and no start is synthesized for it (#1064); `call_count` is what
+    covers that here, since it is read from `tool_use_id` and not from the
+    presence of a start row.
     """
     writer = _CapturingWriter()
     processor = CodexStreamProcessor(
@@ -250,15 +257,15 @@ async def test_codex_recording_carries_its_harness_ids_to_the_aggregation() -> N
     )
     operations = _tool_operations(writer.observations)
 
-    assert [op.tool_use_id for op in operations] == [
-        "item_1",
-        "item_1",
-        "item_2",
-        "item_2",
-        "item_3",
-        "item_3",
-        "item_4",
-        "item_4",
+    assert [(op.tool_use_id, op.operation_type) for op in operations] == [
+        ("item_1", TOOL_EXECUTION_STARTED),
+        ("item_1", TOOL_EXECUTION_COMPLETED),
+        ("item_2", TOOL_EXECUTION_STARTED),
+        ("item_2", TOOL_EXECUTION_COMPLETED),
+        ("item_3", TOOL_EXECUTION_STARTED),
+        ("item_3", TOOL_EXECUTION_COMPLETED),
+        ("item_4", TOOL_EXECUTION_STARTED),
+        ("item_4", TOOL_EXECUTION_COMPLETED),
     ]
 
     stats = _accumulate_tool_stats(operations)

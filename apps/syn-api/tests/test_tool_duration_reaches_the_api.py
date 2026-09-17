@@ -11,18 +11,35 @@ stores (no `duration_ms` key at all) and assert on the JSON the HTTP endpoints
 return, with only asyncpg replaced. Asserting on `ToolOperation` instead would
 pass with the projection fixed and the API still reporting zero, which is the
 hop this issue is about.
+
+The reverse also has to hold, and the rest of the file is that: a number the
+rows do not support must not be reported. A codex `file_change` used to be
+recorded as a start and a completion written back-to-back from the single
+event that says the change has already happened, so the "duration" was the gap
+between our own two writes; and a redelivered completion used to be paired
+against a start already consumed by the first delivery. Both produced a
+number with the shape of a measurement and none of the content, which is the
+same defect as the constant zero, wearing a plausible value.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from syn_adapters.projections.session_tools import SessionToolsProjection
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    CodexStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
+from syn_shared.codex_stream import CODEX_TOOL_NAME_FILE_CHANGE
 from syn_shared.events import (
     SUBAGENT_STOPPED,
     TOOL_EXECUTION_COMPLETED,
@@ -30,7 +47,7 @@ from syn_shared.events import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
     from httpx import Response
 
@@ -273,3 +290,206 @@ async def test_a_subagent_call_is_timed_under_the_name_it_is_relabelled_to(api: 
         if entry["operation_type"] == SUBAGENT_STOPPED
     ]
     assert stopped["duration_ms"] == 1500
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_completion_reports_nothing_rather_than_the_wait(
+    api: ApiGet,
+) -> None:
+    """The same completion, stored twice, must not report the gap to its repeat.
+
+    Delivery is at-least-once and `agent_events` has no uniqueness constraint,
+    so a redelivered completion becomes a second row; re-recording re-stamps
+    it with `datetime.now(UTC)`, so it lands whenever the redelivery happened -
+    here 30s after the call started, for a call that took 1.5s. Paired against
+    the start that was still open, the repeat claimed 30000ms: not a missing
+    number a reader has to handle, but a wrong one they have no way to doubt.
+
+    A start belongs to one completion and is consumed by it, so the repeat has
+    nothing to measure from and says so.
+    """
+    call = _a_tool_call_that_took(TOOK)
+    redelivered = _Row(
+        call[1].event_type,
+        STARTED_AT + timedelta(seconds=30),
+        call[1].payload,
+    )
+
+    response = await api(f"/observability/sessions/{SESSION_ID}/tools", [*call, redelivered])
+
+    timed = [
+        entry["duration_ms"]
+        for entry in response.json()["executions"]
+        if entry["operation_type"] == TOOL_EXECUTION_COMPLETED
+    ]
+    assert timed == [1500, None]
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_completion_does_not_inflate_the_summary(api: ApiGet) -> None:
+    """The same rows through the summary endpoint: 1.5s of Bash, once.
+
+    `_accumulate_tool_stats` adds a call's duration once, so the repeat could
+    only have been counted if it arrived first - but it is the number on the
+    row that a dashboard shows next to the call, and this pins that the two
+    endpoints agree about it.
+    """
+    call = _a_tool_call_that_took(TOOK)
+    redelivered = _Row(call[1].event_type, STARTED_AT + timedelta(seconds=30), call[1].payload)
+
+    response = await api(f"/events/sessions/{SESSION_ID}/tools", [*call, redelivered])
+
+    (bash,) = [tool for tool in response.json() if tool["tool_name"] == "Bash"]
+    assert bash["call_count"] == 1
+    assert bash["total_duration_ms"] == 1500
+
+
+#: Real `codex exec --json` captures, shared with the processor's own tests
+#: rather than hand-rolled: what a producer records is only worth asserting
+#: against input the harness really emitted.
+_CODEX_FIXTURES = Path(__file__).resolve().parents[3] / "packages/syn-domain/tests/fixtures/codex"
+
+
+class _CodexRows:
+    """The rows the codex processor writes, in the order it writes them.
+
+    Implements the recorder protocol `CodexStreamProcessor` records through,
+    and stores each call in the shape `ObservabilityCollector` gives it - so
+    what reaches the projection here is the producer's own decision about
+    which rows a call produces, which is the subject of the `file_change` half
+    of #1064. (`test_tool_execution_identity.py` drives the real
+    `ObservabilityCollector` over the same captures, so that hop is pinned
+    too.)
+
+    Rows are stamped `TOOK` apart in write order. That is deliberately far
+    apart: a pair written from a single event is microseconds apart in
+    production, which rounds to a number small enough to be mistaken for a
+    fast call. Spacing the rows makes the difference between a real pair and a
+    manufactured one impossible to miss - a manufactured one reports 1500ms
+    here.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[_Row] = []
+
+    async def record_tool_started(
+        self, tool_name: str, tool_use_id: str, input_preview: str
+    ) -> None:
+        self._append(
+            TOOL_EXECUTION_STARTED,
+            _Payload(tool_name=tool_name, tool_use_id=tool_use_id, input_preview=input_preview),
+        )
+
+    async def record_tool_completed(
+        self, tool_name: str, tool_use_id: str, success: bool, output_preview: str | None
+    ) -> None:
+        self._append(
+            TOOL_EXECUTION_COMPLETED,
+            _Payload(
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                success=success,
+                output_preview=output_preview,
+            ),
+        )
+
+    async def record_token_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int = 0,
+        cache_read: int = 0,
+    ) -> None:
+        """Lane-2 telemetry the timeline query excludes; not a row here."""
+
+    async def record_session_summary(
+        self,
+        total_cost_usd: float | None,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int,
+        cache_read: int,
+        num_turns: int | None,
+        duration_ms: int | None,
+        totals_are_authoritative: bool = True,
+    ) -> None:
+        """Same - a session-level summary is not a tool row."""
+
+    def _append(self, event_type: str, payload: _Payload) -> None:
+        self.rows.append(_Row(event_type, STARTED_AT + len(self.rows) * TOOK, payload))
+
+
+class _NoopWorkspace:
+    last_stream_exit_code = 0
+
+    async def interrupt(self) -> bool:
+        return True
+
+
+async def _rows_codex_wrote(capture: str) -> list[_Row]:
+    """Run the real processor over a real capture and keep the rows it wrote."""
+    recorder = _CodexRows()
+    processor = CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=recorder,
+        controller=None,
+        execution_id="exec-1",
+        phase_id="phase-1",
+        session_id=SESSION_ID,
+        agent_model="gpt-5.6",
+    )
+
+    async def lines() -> AsyncIterator[str]:
+        for line in (_CODEX_FIXTURES / capture).read_text().splitlines():
+            yield line
+
+    await processor.process_stream(lines(), _NoopWorkspace())
+    return recorder.rows
+
+
+@pytest.mark.asyncio
+async def test_a_file_change_codex_never_opened_reports_no_duration(api: ApiGet) -> None:
+    """`codex_brace_echo_clean.jsonl`: the change arrives already finished.
+
+    Codex sends no `item.started` for that `file_change` - its
+    `item.completed` is the first and only thing it says about the change. The
+    processor used to answer that single event with two rows, a start and a
+    completion written back-to-back, and the duration rule then measured the
+    distance between them. Here that would report 1500ms of editing, from a
+    stream that never said when the edit began.
+
+    One row is written now, so there is no pair and no duration - the same
+    answer a truncated stream's orphan completion already gets.
+    """
+    rows = await _rows_codex_wrote("codex_brace_echo_clean.jsonl")
+
+    response = await api(f"/observability/sessions/{SESSION_ID}/tools", rows)
+
+    edits = [
+        entry
+        for entry in response.json()["executions"]
+        if entry["tool_name"] == CODEX_TOOL_NAME_FILE_CHANGE
+    ]
+    assert [entry["operation_type"] for entry in edits] == [TOOL_EXECUTION_COMPLETED]
+    assert edits[0]["duration_ms"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_file_change_a_codex_did_open_is_timed_from_its_own_rows(
+    api: ApiGet,
+) -> None:
+    """`codex_exec_recording.jsonl`: the other capture shape, which does open one.
+
+    Its `item.started` for a `file_change` carries the change list, so both
+    ends of the change are things codex said, 1.5s apart in this stamping, and
+    the pair is timed like any other call. Dropping that start to be rid of
+    the synthetic one would have thrown away a real measurement, and this is
+    what refuses that fix.
+    """
+    rows = await _rows_codex_wrote("codex_exec_recording.jsonl")
+
+    response = await api(f"/events/sessions/{SESSION_ID}/tools", rows)
+
+    (edit,) = [tool for tool in response.json() if tool["tool_name"] == CODEX_TOOL_NAME_FILE_CHANGE]
+    assert edit["call_count"] == 2  # item_1 (one.txt), item_3 (two.txt)
+    assert edit["total_duration_ms"] == 3000
