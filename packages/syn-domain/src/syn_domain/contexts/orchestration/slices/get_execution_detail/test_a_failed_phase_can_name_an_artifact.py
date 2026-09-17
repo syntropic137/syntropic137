@@ -46,15 +46,18 @@ def _running_execution() -> dict[str, Any]:
     }
 
 
-def _failure(**extra: Any) -> dict[str, Any]:
-    event = {
+def _failure(kept: list[str] | None = None) -> dict[str, Any]:
+    """A WorkflowFailed event. ``kept=None`` omits the field entirely, which is
+    every event written before #1321 existed."""
+    event: dict[str, Any] = {
         "execution_id": "exec-1321",
         "workflow_id": "wf-1321",
         "failed_phase_id": "research",
         "error_message": "Phase research reported an unreadable TASK_RESULT",
         "failed_at": "2026-09-17T10:00:00Z",
     }
-    event.update(extra)
+    if kept is not None:
+        event["failed_phase_artifact_ids"] = kept
     return event
 
 
@@ -69,9 +72,7 @@ async def _project(event: dict[str, Any], stored: dict[str, Any] | None) -> dict
 
 class TestAFailedPhaseNamesWhatWasKept:
     async def test_the_failed_phase_carries_the_artifact_id(self) -> None:
-        saved = await _project(
-            _failure(failed_phase_artifact_ids=["art-1"]), _running_execution()
-        )
+        saved = await _project(_failure(["art-1"]), _running_execution())
 
         assert saved["phases"][0]["artifact_id"] == "art-1", (
             "The failed phase's record must name what was kept from it; None "
@@ -81,9 +82,7 @@ class TestAFailedPhaseNamesWhatWasKept:
 
     async def test_the_execution_lists_the_artifact(self) -> None:
         """``artifact_ids: []`` on a failed execution is the line in the issue."""
-        saved = await _project(
-            _failure(failed_phase_artifact_ids=["art-1", "art-2"]), _running_execution()
-        )
+        saved = await _project(_failure(["art-1", "art-2"]), _running_execution())
 
         assert saved["artifact_ids"] == ["art-1", "art-2"]
 
@@ -91,7 +90,7 @@ class TestAFailedPhaseNamesWhatWasKept:
         """No stored execution to attach a phase to (#598) - the ids are still
         real, and dropping them here would lose exactly the artifacts nothing
         else records."""
-        saved = await _project(_failure(failed_phase_artifact_ids=["art-1"]), None)
+        saved = await _project(_failure(["art-1"]), None)
 
         assert saved["artifact_ids"] == ["art-1"]
 

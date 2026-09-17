@@ -477,9 +477,6 @@ class TestTheVerdictSurvivesEveryHop:
         from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             WorkflowExecutionAggregate,
         )
-        from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
-            _DispatchContext,
-        )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
             ArtifactCollectionResult,
         )
@@ -488,6 +485,9 @@ class TestTheVerdictSurvivesEveryHop:
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.test_workflow_execution_processor import (
             _make_processor,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+            _DispatchContext,
         )
 
         processor = _make_processor()

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
+from pydantic import Field
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001
@@ -65,7 +66,7 @@ class WorkflowFailedEvent(DomainEvent):
     # on the failure event, not through `ArtifactsCollectedEvent`, because
     # collecting artifacts is what a phase that finished does and emitting it
     # would tell the stream the next phase is ready in a run being failed.
-    failed_phase_artifact_ids: list[str] = []
+    failed_phase_artifact_ids: list[str] = Field(default_factory=list)
 
     # Partial progress
     completed_phases: int

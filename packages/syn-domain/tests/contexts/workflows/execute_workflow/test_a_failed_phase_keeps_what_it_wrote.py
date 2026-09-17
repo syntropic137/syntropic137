@@ -103,9 +103,7 @@ class TestAnUnreadableReportStillRefusesThePhase:
     async def test_the_execution_still_fails(self) -> None:
         repo = RecordingArtifactRepository()
         processor = _make_processor(
-            FakeAgentExecutionHandler.success(
-                produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES
-            ),
+            FakeAgentExecutionHandler.success(produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES),
             artifact_repository=repo,
         )
 
@@ -127,9 +125,7 @@ class TestAnUnreadableReportStillRefusesThePhase:
         """The record, not just the return value: a phase whose artifact is
         kept must still read as FAILED to everything downstream."""
         processor = _make_processor(
-            FakeAgentExecutionHandler.success(
-                produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES
-            ),
+            FakeAgentExecutionHandler.success(produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES),
             artifact_repository=RecordingArtifactRepository(),
         )
 
@@ -153,9 +149,7 @@ class TestTheDeliverableSurvivesTheRefusal:
         nothing."""
         repo = RecordingArtifactRepository()
         processor = _make_processor(
-            FakeAgentExecutionHandler.success(
-                produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES
-            ),
+            FakeAgentExecutionHandler.success(produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES),
             artifact_repository=repo,
         )
 
@@ -180,9 +174,7 @@ class TestTheDeliverableSurvivesTheRefusal:
         find the file from the failure."""
         repo = RecordingArtifactRepository()
         processor = _make_processor(
-            FakeAgentExecutionHandler.success(
-                produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES
-            ),
+            FakeAgentExecutionHandler.success(produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES),
             artifact_repository=repo,
         )
 
@@ -206,9 +198,7 @@ class TestTheDeliverableSurvivesTheRefusal:
         must not read as an interrupted fragment either."""
         repo = RecordingArtifactRepository()
         processor = _make_processor(
-            FakeAgentExecutionHandler.success(
-                produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES
-            ),
+            FakeAgentExecutionHandler.success(produces=[RESEARCH], says=PROSE_WHERE_THE_JSON_GOES),
             artifact_repository=repo,
         )
 
