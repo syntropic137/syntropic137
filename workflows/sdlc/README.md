@@ -116,6 +116,42 @@ recorded as ~one run in three. Removing the clone did not necessarily fix
 them, because the clone was never inside the budget that expired. If that
 phase still times out, look at the agent's own work.
 
+## `delivers_repo_changes`: which phases own a branch
+
+Every phase ends with the unpushed-work gate asking whether its workspace is
+holding anything that dying would erase (#1184). `git status` is the only
+evidence git has, and it cannot tell an agent's edit from a file a build tool
+rewrote: on exec-e7e34af42553 a `bootstrap` phase ran `cargo check`, `Cargo.lock`
+was rewritten, and the phase - which had done its job correctly, and whose
+deliverable was a markdown report - was failed, its lockfile churn quarantined,
+and a run resuming an hour of already-pushed work discarded (#1308).
+
+So the phase declares it, and the gate reads the declaration instead of
+guessing:
+
+    delivers_repo_changes: false   # my deliverable is a report
+    delivers_repo_changes: true    # my deliverable is a branch (the default)
+
+**Declare `false` on any phase whose output artifact is the deliverable** - a
+bootstrap, a premise check, a review, a verify, a plan, an `open_pr` phase that
+only reads a ref. Across the workflows here that is every phase except
+`implement` and `quickfix`, which are the two that commit and push.
+
+**It does not exempt commits.** A phase that declares `false` and commits
+anyway still fails and is still quarantined: no build tool runs `git commit`,
+so a commit is an authoring act under any declaration. The declaration decides
+only what an UNCOMMITTED change means.
+
+**Do not reach for it to quiet a phase that legitimately edits.** A
+dependency-bump phase's lockfile churn IS its deliverable, and declaring `false`
+there is how that work gets silently destroyed - which is the failure #1184
+exists to prevent, arrived at from the other side.
+
+The default is `true`, so a phase that says nothing keeps being judged
+strictly. The cost of forgetting is a phase failed for a lockfile; the cost of
+defaulting the other way would be every phase anyone ever writes losing the
+gate.
+
 ## Naming
 
     sdlc-<purpose>-v<N>        id

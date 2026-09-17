@@ -386,6 +386,14 @@ class ExecutablePhase:
     # made somewhere the agent cannot decline it.
     can_open_pr: bool = False
 
+    # Whether a change to the repositories is part of what this phase delivers
+    # (#1308). Unlike clone_repos and can_open_pr this decides nothing about
+    # the workspace - it decides how the unpushed-work gate READS the workspace
+    # at the end. `git status` cannot tell an agent's edit from a rewrite
+    # `cargo check` made while inspecting the toolchain, so the phase says
+    # which of the two its working tree can possibly hold.
+    delivers_repo_changes: bool = True
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.

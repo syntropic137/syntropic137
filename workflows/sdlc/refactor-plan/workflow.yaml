@@ -57,6 +57,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     model: opus
     allowed_tools:
       - Read
@@ -75,6 +78,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     model: opus
     allowed_tools:
       - Read
@@ -92,6 +98,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     model: opus
     allowed_tools:
       - Read
@@ -112,6 +121,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
     prompt_file: phases/cross-model-review.md
@@ -125,6 +137,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     model: opus
     allowed_tools:
       - Read

@@ -49,6 +49,9 @@ phases:
       - markdown
     # Larger than the control's 2400s: this phase does N reviews, not one.
     timeout_seconds: 3300
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools:
       - Read
       - Grep
@@ -80,6 +83,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
       model: gpt-5.6-sol
@@ -94,6 +100,9 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 900
+    # Its deliverable is a report, not a branch, so an uncommitted change here
+    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools:
       - Read
       - Grep

@@ -59,6 +59,30 @@ inside the gate against it. ``_checked`` is the single point where a result
 becomes readable output, so the discipline holds for commands nobody has
 written yet.
 
+WHAT COUNTS AS WORK IS THE PHASE'S ANSWER, NOT GIT'S (#1308). Git records who
+wrote a file and nothing else: a half-finished feature and a ``Cargo.lock``
+that ``cargo check`` rewrote while merely inspecting the toolchain arrive here
+as the same single line of ``status --porcelain``. Reading that line as work
+failed a bootstrap phase that had done its job correctly, quarantined the
+lockfile churn, and threw away an hour of already-pushed work behind it.
+
+There is no reading of the diff that fixes this, and a rule about filenames
+would be a guess in both directions - lockfile churn IS the deliverable of a
+dependency-bump phase, and a tool can dirty anything. So the question is asked
+of the phase instead: ``delivers_repo_changes`` says whether a change to the
+repositories is part of what this phase delivers, and it is DECLARED in the
+workflow definition, beside ``clone_repos`` and ``can_open_pr``, where the
+agent cannot decline it.
+
+A COMMIT IS AN AUTHORING ACT AND IS ALWAYS WORK. No build tool writes one, so
+``delivers_repo_changes`` does not reach unpushed commits at all: a phase that
+declares False and commits anyway still fails, still quarantines, and still
+says where the work went. What the declaration decides is narrower - whether an
+UNCOMMITTED change, by itself, is evidence of anything. False does not exempt a
+path and does not make the files invisible: when a phase holds commits too, the
+quarantine still captures the whole working tree, because by then the phase has
+demonstrably authored something and every byte beside it is worth keeping.
+
 SCOPE, stated because it is a real limit. Repositories are the ones cloned
 directly under ``/workspace/repos``. Work committed inside a SUBMODULE of one
 of those is DETECTED - the superproject reports a modified gitlink, so the
@@ -150,6 +174,8 @@ class GitWorkspace(Protocol):
 async def refuse_to_complete_unsaved_phase(
     workspaces: Mapping[str, GitWorkspace],
     todo: TodoItem,
+    *,
+    delivers_repo_changes: bool,
 ) -> None:
     """Refuse to complete a phase that is holding work its teardown would erase.
 
@@ -160,13 +186,23 @@ async def refuse_to_complete_unsaved_phase(
     path downstream, from any other phase failure (#1184). Called after either,
     the guard can still detect the loss but can no longer prevent it.
 
-    The caller hands over the live workspace map and the to-do item and needs
-    to know nothing else - which workspace belongs to the phase, and what an
-    absent one means, are decided here. ABSENCE IS NOT A FAILURE, and that is a
-    verdict rather than an oversight: a phase with no workspace is holding
-    nothing that dying could erase, so there is nothing to save and nothing to
-    refuse. Contrast a workspace that is present but will not answer, which
+    The caller hands over the live workspace map, the to-do item and the
+    completing phase's own declaration, and needs to know nothing else - which
+    workspace belongs to the phase, and what an absent one means, are decided
+    here. ABSENCE IS NOT A FAILURE, and that is a verdict rather than an
+    oversight: a phase with no workspace is holding nothing that dying could
+    erase, so there is nothing to save and nothing to refuse. Contrast a
+    workspace that is present but will not answer, which
     `quarantine_unpushed_work` treats as the failure it is.
+
+    Args:
+        workspaces: Live workspaces, by phase id.
+        todo: The COMPLETE_PHASE item naming the phase at stake.
+        delivers_repo_changes: What that phase's definition declares about
+            repository changes. Required rather than defaulted, because a hop
+            that forgot it would silently restore #1308 - and a gate whose
+            caller can omit the only thing distinguishing authored work from
+            build-tool churn has not got that distinction at all.
 
     Raises:
         UnpushedWorkQuarantinedError: as `quarantine_unpushed_work`.
@@ -176,7 +212,12 @@ async def refuse_to_complete_unsaved_phase(
     workspace = workspaces.get(phase_id) if phase_id is not None else None
     if phase_id is None or workspace is None:
         return
-    await quarantine_unpushed_work(workspace, execution_id=todo.execution_id, phase_id=phase_id)
+    await quarantine_unpushed_work(
+        workspace,
+        execution_id=todo.execution_id,
+        phase_id=phase_id,
+        delivers_repo_changes=delivers_repo_changes,
+    )
 
 
 async def quarantine_unpushed_work(
@@ -184,6 +225,7 @@ async def quarantine_unpushed_work(
     *,
     execution_id: str,
     phase_id: str,
+    delivers_repo_changes: bool,
 ) -> None:
     """Fail the phase if it is holding work the workspace's death would erase.
 
@@ -192,6 +234,11 @@ async def quarantine_unpushed_work(
     at all (a bootstrap that only reports, a verify that only reads). Silence
     here means "nothing is being lost", and - because every command it relies
     on is checked - never "nothing was checked".
+
+    ``delivers_repo_changes`` is what "nothing" means for THIS phase: with it
+    False an uncommitted change is a build tool's side effect rather than a
+    deliverable, so a dirty tree alone is still silence (#1308). Unpushed
+    commits are work under either declaration - see the module docstring.
 
     Raises:
         UnpushedWorkQuarantinedError: work was found. It has already been
@@ -208,7 +255,9 @@ async def quarantine_unpushed_work(
     quarantined: list[QuarantinedWork] = []
     try:
         for repo in await _repositories(workspace):
-            work = await _unsaved_work(workspace, repo)
+            work = await _unsaved_work(
+                workspace, repo, delivers_repo_changes=delivers_repo_changes
+            )
             if work is not None:
                 quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
     except WorkspaceInspectionFailedError as unreadable:
@@ -638,7 +687,9 @@ async def _repositories(workspace: GitWorkspace) -> list[str]:
     return sorted(line.strip()[: -len(suffix)] for line in found.splitlines() if line.strip())
 
 
-async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | None:
+async def _unsaved_work(
+    workspace: GitWorkspace, repo: str, *, delivers_repo_changes: bool
+) -> _UnsavedWork | None:
     """What this repository holds that the remote does not, or None if nothing."""
     status = await _git(workspace, repo, "status", "--porcelain")
     tips = await _git(
@@ -666,9 +717,32 @@ async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | No
         unpushed = set(reachable.split())
 
     files = tuple(line.rstrip() for line in status.splitlines() if line.strip())
-    if not unpushed and not files:
+    # THE ONE LINE THE DECLARATION DECIDES (#1308). An uncommitted change is
+    # evidence of work only from a phase that said it delivers any; from one
+    # that did not, the same line is a build tool writing a file while it
+    # inspected the toolchain. Commits are untouched by this and are read as
+    # work either way - see the module docstring.
+    unsaved_files = files if delivers_repo_changes else ()
+    if not unpushed and not unsaved_files:
+        if files:
+            # Said out loud rather than dropped: the tree IS about to be
+            # destroyed, and an operator reading this phase's logs after a
+            # surprising rebuild deserves to see which paths the phase's own
+            # tooling had rewritten.
+            logger.info(
+                "Leaving %d uncommitted path(s) in %s to the workspace: this phase "
+                "declares it delivers no repository changes, so its working tree "
+                "holds no deliverable. Paths: %s",
+                len(files),
+                repo,
+                ", ".join(files),
+            )
         return None
 
+    # `files`, NOT `unsaved_files`. Reaching here means the phase is holding
+    # commits, so it authored something and the whole tree goes into the
+    # quarantine `git add --all` builds; reporting a subset of what was saved
+    # would describe a commit nobody could then read.
     # HEAD is a parent whenever it exists, even when it is fully pushed: it is
     # what makes an uncommitted-changes-only snapshot diffable against the
     # branch it came from.

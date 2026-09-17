@@ -31,6 +31,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -240,9 +243,19 @@ class _Clone:
             == 0
         )
 
-    async def run_gate(self) -> None:
+    async def run_gate(self, *, delivers_repo_changes: bool = True) -> None:
+        """Run the gate as `_PHASE_ID` - `implement`, which owns a branch.
+
+        True is the default here because it is what `implement` declares, and
+        because it is the reading every test above this line is about. The
+        tests that pass False say so at the call, where the declaration is the
+        thing under test (#1308).
+        """
         await quarantine_unpushed_work(
-            self.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+            self.workspace,
+            execution_id=_EXECUTION_ID,
+            phase_id=_PHASE_ID,
+            delivers_repo_changes=delivers_repo_changes,
         )
 
 
@@ -413,48 +426,14 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
     ``completed`` with its work gone. So this asserts against the aggregate the
     processor would have told, not against the guard's return value.
     """
-    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-        ExecutionTodoProjection,
-    )
-
     clone.commit("never-pushed.py", "work the workspace was about to eat\n")
-    processor = WorkflowExecutionProcessor(
-        execution_repository=AsyncMock(),
-        session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
-        artifact_content_storage=None,
-        artifact_query=None,
-        conversation_storage=None,
-        observability_writer=None,
-        controller=None,
-        prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
-    )
-    processor._runtime._workspaces[_PHASE_ID] = clone.workspace  # type: ignore[assignment]
-    aggregate = MagicMock(workflow_id="wf-1")
-    completed_phase_ids: list[str] = []
-
-    async def complete() -> None:
-        await processor._handle_complete_phase(
-            TodoItem(
-                execution_id=_EXECUTION_ID,
-                action=TodoAction.COMPLETE_PHASE,
-                phase_id=_PHASE_ID,
-                session_id="sess-1",
-            ),
-            aggregate,
-            [],
-            completed_phase_ids,
-        )
+    run = _PhaseRun(clone.workspace)
 
     with pytest.raises(UnpushedWorkQuarantinedError):
-        await complete()
+        await run.complete()
 
-    aggregate.complete_phase.assert_not_called()
-    assert completed_phase_ids == []
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
 
 
 # --------------------------------------------------------------------------
@@ -500,6 +479,7 @@ async def test_the_ref_is_named_from_the_todo_the_hop_was_handed(tmp_path: Path)
         await refuse_to_complete_unsaved_phase(
             {"verify": clone.workspace},
             _completing("verify", execution_id="exec-a-different-run"),
+            delivers_repo_changes=True,
         )
 
     refs = clone.origin_refs()
@@ -524,6 +504,7 @@ async def test_the_hop_inspects_the_phase_its_todo_names_and_no_other(tmp_path: 
     await refuse_to_complete_unsaved_phase(
         {"implement": running.workspace, "verify": completing.workspace},
         _completing("verify"),
+        delivers_repo_changes=True,
     )
 
     saved = [ref for ref in running.origin_refs() if ref.startswith("refs/syn/lost/")]
@@ -537,7 +518,9 @@ async def test_a_phase_whose_workspace_is_already_gone_is_holding_nothing() -> N
     the phase completes - and the gate must not go looking in some other
     phase's workspace for something to say about this one.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing("verify"))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing("verify"), delivers_repo_changes=True
+    )
 
 
 async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() -> None:
@@ -547,7 +530,9 @@ async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() ->
     hop has one answer for "no workspace to inspect" however it arises, rather
     than a `None` key that quietly matches nothing.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing(None))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing(None), delivers_repo_changes=True
+    )
 
 
 # --------------------------------------------------------------------------
@@ -678,13 +663,30 @@ class _PhaseRun:
     def workspace_still_held(self) -> bool:
         return _PHASE_ID in self.processor._runtime.live_workspaces
 
-    async def complete(self) -> None:
+    async def complete(self, *, delivers_repo_changes: bool = True) -> None:
+        """Complete the phase, as a phase declaring ``delivers_repo_changes``.
+
+        The declaration is carried on a real `ExecutablePhase`, which is what
+        `_dispatch` hands this handler, rather than passed to the handler as a
+        boolean: what has to survive the hop is the FIELD BEING READ off that
+        object, and a test that passed the boolean itself would stay green
+        with the read deleted (#1308).
+
+        True by default because `_PHASE_ID` is `implement`, which owns a
+        branch; the tests about the declaration itself say so at the call.
+        """
         await self.processor._handle_complete_phase(
             TodoItem(
                 execution_id=_EXECUTION_ID,
                 action=TodoAction.COMPLETE_PHASE,
                 phase_id=_PHASE_ID,
                 session_id="sess-1",
+            ),
+            ExecutablePhase(
+                phase_id=_PHASE_ID,
+                name="Make the change",
+                order=1,
+                delivers_repo_changes=delivers_repo_changes,
             ),
             self.aggregate,
             self.phase_results,
@@ -826,7 +828,10 @@ async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone)
 async def test_e_at_the_gate_an_empty_but_reachable_workspace_is_silence() -> None:
     """(e) The same true negative one hop down, at the gate itself."""
     await quarantine_unpushed_work(
-        _NoRepositories(), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        _NoRepositories(),
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        delivers_repo_changes=True,
     )
 
 
