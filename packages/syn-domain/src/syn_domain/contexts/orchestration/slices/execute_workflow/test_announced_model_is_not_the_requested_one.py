@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -41,6 +42,10 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoActio
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
@@ -55,6 +60,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
     AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
@@ -78,6 +86,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_event_stream
     MockWorkspace,
     _lines_to_stream,
     _make_processor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_workflow_execution_processor import (
+    _make_processor as _make_workflow_processor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
@@ -597,4 +608,111 @@ class TestACodexPhasesArtifactNamesWhoRanIt:
         """
         agent = await self._agent_after_running(_codex_thread_started(), _codex_turn_completed())
         repo = await self._collect(agent)
+        assert [a.agent for a in repo.saved] == [AgentIdentity(provider="codex", model=None)]
+
+
+class TestTheProcessorAssemblesTheIdentityItself:
+    """The same claim as the class above, DRIVEN instead of reproduced.
+
+    `TestACodexPhasesArtifactNamesWhoRanIt` calls `runtime.agent_for(...)` and
+    `ArtifactCollector.collect_from_workspace(...)` itself, in that order, with
+    the provider the phase configured. That is precisely what
+    `WorkflowExecutionProcessor._handle_collect_artifacts` does - which makes it
+    a copy of the assembly, not a run of it. A copy tests production only for as
+    long as the two agree, and nothing anywhere makes them agree: change the
+    real method to pass `provider=None`, to read the model for a different
+    phase, or to drop the `agent=` keyword, and every test above stays green
+    while every artifact in production loses the identity.
+
+    `test_collecting_artifacts_records_the_files_it_collected`
+    (test_workflow_execution_processor.py) does call the real method, but swaps
+    `ArtifactCollectionHandler` for a `MagicMock` and asserts on the cache, so
+    the `agent=` it assembles is handed to a double that never looks at it.
+
+    So this drives the processor's own method with the real handler, the real
+    collector and a repository that keeps what was saved, and reads the identity
+    back off the saved artifact. The model is `gpt-5.6-sol` out of the captured
+    rollout, arriving through the real codex stream processor: it is not written
+    down anywhere in this class, so it cannot reach the artifact by any route
+    other than the one under test.
+    """
+
+    async def _artifacts_collected_by_the_processor(
+        self, *lines: str, rollout: _RolloutOnDisk | None = None
+    ) -> MockArtifactRepo:
+        """Run a codex phase's stream, then let the PROCESSOR collect it."""
+        repo = MockArtifactRepo()
+        processor = _make_workflow_processor(artifact_repository=repo)
+        processor._journal.append = AsyncMock()
+        processor._runtime.attach_workspace(
+            "verify",
+            workspace=CollectedWorkspace(
+                collected_files=[("artifacts/output/deliverable.md", b"# Verified")]
+            ),  # type: ignore[arg-type]
+            workspace_cm=AsyncMock(),
+            agent_env={},
+            claude_cmd=[],
+        )
+        processor._runtime.record_agent_run(
+            "verify",
+            AgentExecutionResult(
+                stream_result=await _codex_result(*lines, rollout=rollout),
+                tokens=TokenAccumulator(),
+                subagents=SubagentTracker(),
+                command=AgentExecutionCompletedCommand(
+                    execution_id="exec-1", phase_id="verify", session_id="sess-1"
+                ),
+            ),
+        )
+        await processor._handle_collect_artifacts(
+            TodoItem(
+                execution_id="exec-1",
+                action=TodoAction.COLLECT_ARTIFACTS,
+                phase_id="verify",
+                session_id="sess-1",
+            ),
+            ExecutablePhase(
+                phase_id="verify",
+                name="Verify",
+                order=1,
+                prompt_template="x",
+                # The requested model is in scope at exactly this point, on
+                # this object, one attribute away from the provider the method
+                # legitimately reads. That is what makes it the value a
+                # regression here would reach for.
+                agent_config=AgentConfiguration(
+                    provider="codex", model=REQUESTED_BY_A_CODEX_PHASE
+                ),
+                output_artifact_types=("markdown",),
+            ),
+            MagicMock(workflow_id="w1"),
+            [],
+            PhaseOutputCache(),
+        )
+        return repo
+
+    async def test_the_processor_stamps_the_model_the_rollout_named(self) -> None:
+        """Both halves of the identity, off the artifact the processor saved."""
+        repo = await self._artifacts_collected_by_the_processor(
+            _codex_thread_started(),
+            _codex_turn_completed(),
+            rollout=_RolloutOnDisk(_real_rollout()),
+        )
+        assert [a.agent for a in repo.saved] == [
+            AgentIdentity(provider="codex", model=CODEX_ANNOUNCED)
+        ]
+
+    async def test_the_processor_does_not_substitute_the_requested_model(self) -> None:
+        """Nothing announced anything, and the phase's own config is right
+        there. The harness is still named; the model is reported absent.
+
+        Pinned separately from the case above because the two fail to different
+        mutations: this one is what catches the processor reading
+        `agent_config.model` instead of the runtime's observation, which the
+        rollout case cannot see - there, the two values differ and either one
+        arriving looks like a value arriving.
+        """
+        repo = await self._artifacts_collected_by_the_processor(
+            _codex_thread_started(), _codex_turn_completed()
+        )
         assert [a.agent for a in repo.saved] == [AgentIdentity(provider="codex", model=None)]
