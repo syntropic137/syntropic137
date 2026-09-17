@@ -715,24 +715,32 @@ class CodexStreamProcessor:
         elif event_type in (CodexStreamType.TURN_FAILED, CodexStreamType.ERROR):
             self._note_stream_fault(event)
         elif event_type == CodexStreamType.THREAD_STARTED:
-            # Codex announces its OWN session id here, and it is the same id
-            # the rollout file on disk is keyed by - verified same-run, not
-            # inferred from both being uuidv7. That identity is what lets the
-            # delegate import dedup the leader by lookup instead of guessing
-            # it from agent names (#895).
-            #
-            # FIRST wins, for the same reason as the claude side: a rebind
-            # late in a run would make the real leader look like a delegate
-            # and bill it a second time.
-            announced = event.get("thread_id")
-            if (
-                self._leader_native_session_id is None
-                and isinstance(announced, str)
-                and announced.strip()
-            ):
-                self._leader_native_session_id = announced
+            self._note_leader_session_id(event)
 
         # "turn.started": no observability call needed.
+
+    def _note_leader_session_id(self, event: _CodexEvent) -> None:
+        """Record the session id codex announced for itself on ``thread.started``.
+
+        It is the same id the rollout file on disk is keyed by - verified
+        same-run, not inferred from both being uuidv7. That identity is what
+        lets the delegate import dedup the leader by lookup instead of guessing
+        it from agent names (#895), and it is the key
+        `_name_the_model_from_disk` asks the rollout with (#1284).
+
+        FIRST wins, for the same reason as the claude side: a rebind late in a
+        run would make the real leader look like a delegate and bill it a
+        second time. A blank or non-string announcement is not an id and is
+        left unset, so the import refuses rather than deriving one shared
+        platform id for every delegate.
+        """
+        announced = event.get("thread_id")
+        if (
+            self._leader_native_session_id is None
+            and isinstance(announced, str)
+            and announced.strip()
+        ):
+            self._leader_native_session_id = announced
 
     def _note_stream_fault(self, event: _CodexEvent) -> None:
         """Record the reason codex itself gave for ending the turn.
