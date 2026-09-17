@@ -65,6 +65,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     InterruptibleWorkspace,
     ReportedUsage,
     StreamResult,
+    announced_model_from,
     api_error_label,
 )
 from syn_shared.agents import AgentProvider
@@ -239,6 +240,10 @@ class _CodexEvent(TypedDict, total=False):
     usage: _CodexUsage
     error: _CodexError
     message: str
+    #: Declared but NOT observed: no captured codex stream carries it (see
+    #: `_process_line`). Declared anyway because the parser reads it, and a key
+    #: the parser reads should be in the shape a reader consults.
+    model: str
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -366,6 +371,18 @@ class CodexStreamProcessor:
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
         self._leader_native_session_id: str | None = None
+        #: The model codex NAMED on its own stream, or None if it named none
+        #: (#1284). FIRST wins, the rule and reason of
+        #: `_leader_native_session_id` directly above.
+        #:
+        #: `_agent_model` (the REQUESTED model) is deliberately not a fallback
+        #: here. It is frequently a Claude alias that was never forwarded to
+        #: `codex exec` at all (see `_is_codex_model` in
+        #: `apps/syn-api/_codex_command.py`), so copying it in would record
+        #: "claude ran the codex phase" - a false statement that reads as
+        #: evidence. None is the honest answer and the one `AgentIdentity`
+        #: already defines as "not reported".
+        self._announced_model: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
         # so the candidate is only promoted at end-of-stream and only when no
@@ -495,6 +512,12 @@ class CodexStreamProcessor:
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
+            # Stated, not defaulted. The value is None for every codex stream
+            # observed so far, but arriving by omission is what left a codex
+            # artifact unable to say whether it had no model or had never been
+            # asked - and the codex phase is the OTHER half of every
+            # cross-model claim this platform makes (#1284).
+            announced_model=self._announced_model,
         )
 
     def _estimate_cost(self) -> float | None:
@@ -589,6 +612,19 @@ class CodexStreamProcessor:
         event = self._parse_event(line)
         if event is None:
             return
+
+        # Checked on EVERY event rather than one chosen type. No codex version
+        # captured here emits a model anywhere on stdout - not the golden
+        # recording, not any fixture - so there is no observed event to key
+        # this to, and guessing one would be a schema we invented. Codex does
+        # name its model on disk (`turn_context.payload.model` in the rollout,
+        # which is where `transcript_usage` reads it), so the wire is where it
+        # is missing, not the harness. Reading a top-level `model` off whatever
+        # line carries it costs one lookup and needs no such guess: if codex
+        # starts naming it, the identity is carried instead of dropped, and
+        # until then this is None and every reader is told so.
+        if self._announced_model is None:
+            self._announced_model = announced_model_from(event.get("model"))
 
         event_type = event.get("type", "")
         if event_type == CodexStreamType.ITEM_STARTED:

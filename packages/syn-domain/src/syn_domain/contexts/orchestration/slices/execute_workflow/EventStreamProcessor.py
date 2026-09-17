@@ -322,8 +322,13 @@ class StreamResult:
     announced_model: str | None = None
 
 
-def _announced_model(*candidates: object) -> str | None:
+def announced_model_from(*candidates: object) -> str | None:
     """The model this line says is running, or None if it does not say (#1284).
+
+    Shared by both stream processors, because the RULE is harness-neutral even
+    though the places to look are not: the first candidate that is a non-blank
+    string wins. ``CodexStreamProcessor`` imports it rather than restating it,
+    so "" and a late rebind are rejected identically on both streams.
 
     Claude states it in two places and both are the harness speaking about
     itself: the ``system``/``init`` line carries it at the top level, and every
@@ -634,7 +639,7 @@ class EventStreamProcessor:
                 self._leader_native_session_id = announced
 
         if self._announced_model is None:
-            self._announced_model = _announced_model(
+            self._announced_model = announced_model_from(
                 cli_event.get("model"), _model_under_message(cli_event.get("message"))
             )
 
