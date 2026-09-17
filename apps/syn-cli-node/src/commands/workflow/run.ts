@@ -17,19 +17,36 @@ import type { components } from "../../generated/api-types.js";
 type InputDeclaration = components["schemas"]["InputDeclarationModel"];
 type PhaseDefinition = components["schemas"]["PhaseDefinitionResponse"];
 
+/** The one name the task travels under, whichever flag supplied it. */
+const TASK_INPUT_KEY = "task";
+
 /**
- * Names referenced via `{{name}}` in any phase's prompt template. An -i key
- * outside this set is substituted into nothing and silently discarded
- * (issue #1081).
+ * Names the workflow's phase prompts actually consume at substitution time.
+ *
+ * A supplied value whose name is outside this set is substituted into nothing
+ * and silently discarded: the execution runs, the phases complete, and the
+ * result is confidently about something the caller did not ask for
+ * (issues #1081, #1280).
+ *
+ * The task has two spellings and both land here as `task`. The server merges
+ * the top-level `task` field into `inputs.task` and then substitutes it for
+ * both `{{task}}` (layer 2a) and the bare `$ARGUMENTS` token (layer 2d) --
+ * documented as equivalent in docs/api/v1/workflows.md. Callers therefore ask
+ * one question, "does any phase consume this name", and never have to know
+ * that one of the answers involves a token with no braces.
  */
-function referencedInputNames(phases: PhaseDefinition[] | undefined): Set<string> {
-  const referenced = new Set<string>();
+function consumedInputNames(phases: PhaseDefinition[] | undefined): Set<string> {
+  const consumed = new Set<string>();
   for (const phase of phases ?? []) {
-    for (const match of (phase.prompt_template ?? "").matchAll(/\{\{(\w+)\}\}/g)) {
-      referenced.add(match[1]!);
+    const template = phase.prompt_template ?? "";
+    for (const match of template.matchAll(/\{\{(\w+)\}\}/g)) {
+      consumed.add(match[1]!);
+    }
+    if (template.includes("$ARGUMENTS")) {
+      consumed.add(TASK_INPUT_KEY);
     }
   }
-  return referenced;
+  return consumed;
 }
 
 /**
@@ -155,13 +172,17 @@ export const runCommand: CommandDef = {
       throw new CLIError("Missing required inputs", 1);
     }
 
-    // Dispatch-time deliverability warnings (issue #1081): both checks are
-    // purely local — the workflow detail already fetched above has
+    // Dispatch-time deliverability checks (issues #1081, #1280): all of these
+    // are purely local — the workflow detail already fetched above has
     // everything needed — and must fire on the --dry-run path too, since
     // dry-run's job is to answer "will this do what I typed?".
-    const referenced = referencedInputNames(detail.phases);
+    const consumed = consumedInputNames(detail.phases);
     for (const key of Object.keys(parsedInputs)) {
-      if (!referenced.has(key)) {
+      // `task` is excluded deliberately: it is the one input with a second
+      // spelling and a second flag, so it gets the stronger check below
+      // instead of this warning.
+      if (key === TASK_INPUT_KEY) continue;
+      if (!consumed.has(key)) {
         print(
           style("Warning:", YELLOW) +
             ` --input '${key}' is not referenced by any phase prompt in '${wf.name}' — it will be discarded.`,
@@ -173,6 +194,35 @@ export const runCommand: CommandDef = {
         style("Warning:", YELLOW) +
           ` '${wf.name}' has requires_repos: false — -R repos will not be cloned.`,
       );
+    }
+
+    // The task refuses rather than warns, in both directions (#1280). An
+    // unreferenced -i leaves the requested run intact — it is the run you
+    // asked for, carrying one surplus argument — so a warning is proportionate
+    // there. A task that reaches nothing is not a surplus argument: it is the
+    // whole of what you asked for, and the execution proceeds to spend real
+    // time and money answering a different question convincingly. #1280
+    // records two such dispatches; both reported success.
+    //
+    // The refusal also costs the caller nothing they could otherwise have had.
+    // Dropping -t from a workflow that never consumes it yields a byte-
+    // identical dispatch, and the empty case has -t "" as an explicit opt-in,
+    // so neither refusal blocks a run that can be expressed any other way.
+    const taskSupplied = task !== undefined || Object.hasOwn(parsedInputs, TASK_INPUT_KEY);
+    const taskConsumed = consumed.has(TASK_INPUT_KEY);
+    if (taskSupplied && !taskConsumed) {
+      printError(
+        `No phase in '${wf.name}' references $ARGUMENTS or {{task}} — the task would be discarded.`,
+      );
+      printDim("Pick a workflow that consumes a task, or drop --task: the dispatch is identical without it.");
+      throw new CLIError("Task has no consumer", 1);
+    }
+    if (taskConsumed && !taskSupplied) {
+      printError(
+        `'${wf.name}' substitutes a task into its phase prompts, but no task was supplied.`,
+      );
+      printDim('Pass --task "<task>" — or --task "" to run it deliberately empty.');
+      throw new CLIError("Missing task", 1);
     }
 
     if (!quiet) {

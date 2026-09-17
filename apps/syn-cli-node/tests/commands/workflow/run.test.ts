@@ -30,6 +30,38 @@ describe("workflow run commands", () => {
       .join("");
   }
 
+  function stderr(): string {
+    return (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  /**
+   * Queue the three GETs every run does (resolveWorkflow's 404 probe, the list
+   * fallback, then the detail) for a one-phase workflow with `prompt`. No
+   * execute response is queued: a test that expects the dispatch to be refused
+   * would otherwise pass just as well against a fourth mock it never reaches.
+   */
+  function mockWorkflow(name: string, prompt: string, id = "wf-task-123456789"): void {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          workflows: [{ id, name, workflow_type: "custom", phase_count: 1 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id,
+          name,
+          workflow_type: "custom",
+          classification: "standard",
+          phases: [{ phase_id: "p1", name: "work", prompt_template: prompt }],
+          input_declarations: [],
+        }),
+      );
+  }
+
   describe("run", () => {
     it("starts a workflow execution", async () => {
       // First call resolves the workflow, second fetches detail, third triggers execution
@@ -55,7 +87,9 @@ describe("workflow run commands", () => {
             name: "Build Pipeline",
             workflow_type: "implementation",
             classification: "standard",
-            phases: [],
+            // The phase has to consume the task for a -t dispatch to be
+            // deliverable at all (#1280); phases: [] here used to pass.
+            phases: [{ phase_id: "p1", name: "build", prompt_template: "Do: $ARGUMENTS" }],
             input_declarations: [],
           }),
         )
@@ -423,7 +457,8 @@ describe("workflow run commands", () => {
 
       await runCommand.handler({
         positionals: ["wf-unref"],
-        values: { input: ["issue=syntropic137/syntropic137#993"] },
+        // -t is required here now: the phase consumes $ARGUMENTS (#1280).
+        values: { input: ["issue=syntropic137/syntropic137#993"], task: "Do the work" },
       });
 
       const out = stdout();
@@ -527,6 +562,103 @@ describe("workflow run commands", () => {
       });
 
       expect(stdout()).not.toContain("Warning:");
+    });
+
+    // -------------------------------------------------------------------
+    // #1280: a task that reaches no phase, and a phase whose task is absent.
+    // Both refuse rather than warn -- see the rationale beside the check in
+    // run.ts. The assertion that matters in each is the fetch count: the
+    // execute POST is the hop where the silent discard actually happened.
+    // -------------------------------------------------------------------
+
+    it("refuses -t when no phase consumes $ARGUMENTS or {{task}} (issue #1280)", async () => {
+      mockWorkflow("QA Ladder", "Run the QA ladder and report.");
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-task"],
+          values: { task: "Audit the retry path" },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stderr()).toContain("the task would be discarded");
+      expect(stderr()).toContain("QA Ladder");
+      // Three GETs and no POST: the dispatch that #1280 reported as "started"
+      // never leaves the CLI.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("refuses -t with no consumer under --dry-run too (issue #1280)", async () => {
+      mockWorkflow("QA Ladder", "Run the QA ladder and report.");
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-task"],
+          values: { task: "Audit the retry path", "dry-run": true },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      // dry-run must not answer "valid and ready to execute" for a dispatch
+      // that would discard the whole of what was typed.
+      expect(stdout()).not.toContain("ready to execute");
+    });
+
+    it("accepts -t when a phase consumes the task as {{task}} (issue #1280)", async () => {
+      // {{task}} and $ARGUMENTS are equivalent server-side (the task is merged
+      // into inputs.task before substitution, docs/api/v1/workflows.md). A
+      // check that only looked for $ARGUMENTS would refuse this valid dispatch.
+      mockWorkflow("Templated WF", "Work on {{task}} and stop.");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-tt1" }));
+
+      await runCommand.handler({
+        positionals: ["wf-task"],
+        values: { task: "Audit the retry path" },
+      });
+
+      expect(stdout()).toContain("exec-tt1");
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it("refuses when a phase consumes $ARGUMENTS but no task was supplied (issue #1280)", async () => {
+      mockWorkflow("Parameterised WF", "Your task: $ARGUMENTS");
+
+      await expect(
+        runCommand.handler({ positionals: ["wf-task"], values: {} }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stderr()).toContain("no task was supplied");
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('accepts --task "" as the explicit opt-in to an empty $ARGUMENTS (issue #1280)', async () => {
+      // Supplied-ness is "was the flag given", not "is the value truthy" --
+      // an empty task is a deliberate choice the caller is allowed to make.
+      mockWorkflow("Parameterised WF", "Your task: $ARGUMENTS");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-tt2" }));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: { task: "" } });
+
+      expect(stdout()).toContain("exec-tt2");
+      const body = JSON.parse(
+        await (mockFetch.mock.calls[3]![0] as Request).text(),
+      ) as { task: unknown };
+      expect(body.task).toBe("");
+    });
+
+    it("treats -i task= as delivering the task, and never warns it is unreferenced (issue #1280)", async () => {
+      // `-i task=` is a documented, in-use channel (workflows/validation/README.md)
+      // that lands in the same inputs.task the server reads for $ARGUMENTS. The
+      // -i warning used to fire on it because it only looked for {{task}}.
+      mockWorkflow("Parameterised WF", "Your task: $ARGUMENTS");
+      mockFetch.mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-tt3" }));
+
+      await runCommand.handler({
+        positionals: ["wf-task"],
+        values: { input: ["task=Audit the retry path"] },
+      });
+
+      expect(stdout()).not.toContain("Warning:");
+      expect(stdout()).toContain("exec-tt3");
     });
 
     it("fails loud when API returns status!=started", async () => {
