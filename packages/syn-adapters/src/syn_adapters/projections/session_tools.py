@@ -49,12 +49,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Exclude high-volume, non-activity events from the session timeline.
+# Public because the lane has a second implementation - the in-memory
+# timeline used in test and offline runs - and a timeline that answers a
+# different set of event types than production's is not a stand-in for it.
 # All other event types — including any new ones added to agentic-primitives —
 # appear automatically without requiring changes here.
-_TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
+TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
-_SUBAGENT_TOOL_NAMES = {str(ClaudeToolName.SUBAGENT), str(ClaudeToolName.SUBAGENT_LEGACY)}
-_GIT_EVENT_TYPES = (
+SUBAGENT_TOOL_NAMES = {str(ClaudeToolName.SUBAGENT), str(ClaudeToolName.SUBAGENT_LEGACY)}
+GIT_EVENT_TYPES = (
     GIT_COMMIT,
     GIT_PUSH,
     GIT_BRANCH_CHANGED,
@@ -145,11 +148,11 @@ class SessionToolsProjection:
         return await _get_session_tools_impl(
             self,
             session_id,
-            _TIMELINE_EXCLUDE,
+            TIMELINE_EXCLUDE,
             TOOL_EXECUTION_STARTED,
             TOOL_EXECUTION_COMPLETED,
-            _SUBAGENT_TOOL_NAMES,
-            _GIT_EVENT_TYPES,
+            SUBAGENT_TOOL_NAMES,
+            GIT_EVENT_TYPES,
         )
 
     async def query(
@@ -173,9 +176,9 @@ class SessionToolsProjection:
         """
         return await _query_session_tools_impl(
             self,
-            _TIMELINE_EXCLUDE,
-            _SUBAGENT_TOOL_NAMES,
-            _GIT_EVENT_TYPES,
+            TIMELINE_EXCLUDE,
+            SUBAGENT_TOOL_NAMES,
+            GIT_EVENT_TYPES,
             execution_id=execution_id,
             phase_id=phase_id,
             tool_name=tool_name,
@@ -188,4 +191,4 @@ class SessionToolsProjection:
         Dispatches to specialized handlers based on event type.
         Returns None if the row should be skipped.
         """
-        return _row_to_operation_impl(row, _SUBAGENT_TOOL_NAMES, _GIT_EVENT_TYPES)
+        return _row_to_operation_impl(row, SUBAGENT_TOOL_NAMES, GIT_EVENT_TYPES)

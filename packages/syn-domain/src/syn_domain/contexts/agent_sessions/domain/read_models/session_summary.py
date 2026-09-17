@@ -2,11 +2,16 @@
 
 Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the session_cost projection (#695).
+
+The per-operation timeline is Lane 2 as well, and lives only there
+(``SessionToolsProjection``). This model used to carry an ``operations`` list
+of its own, written by ``on_operation_recorded`` and read by nobody: the
+endpoint that serves session detail has always read the Lane 2 timeline. Two
+lanes for one question is how #1034 happened, so there is now one (#1034).
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 
@@ -73,94 +78,6 @@ class SubagentRecord:
 
 
 @dataclass(frozen=True)
-class OperationRecord:
-    """Individual operation recorded during a session.
-
-    Supports multiple operation types for full observability:
-    - MESSAGE_REQUEST/RESPONSE: LLM API calls
-    - TOOL_EXECUTION_STARTED/COMPLETED/BLOCKED: Tool lifecycle
-    - THINKING: Extended thinking content
-    - ERROR: Error information
-    """
-
-    operation_id: str
-    operation_type: str
-    timestamp: str | datetime | None
-    duration_seconds: float | None = None
-    success: bool = True
-
-    # Token metrics (for MESSAGE_* types)
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    total_tokens: int | None = None
-
-    # Tool details (for TOOL_* types)
-    tool_name: str | None = None
-    tool_use_id: str | None = None
-    tool_input: dict[str, Any] | None = None
-    tool_output: str | None = None
-
-    # Message details (for MESSAGE_* types)
-    message_role: str | None = None
-    message_content: str | None = None
-
-    # Thinking details (for THINKING type)
-    thinking_content: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "OperationRecord":
-        """Create from dictionary. Handles both v1 and v2 event formats."""
-        return cls(
-            operation_id=data.get("operation_id", ""),
-            operation_type=data.get("operation_type", ""),
-            timestamp=data.get("timestamp"),
-            duration_seconds=data.get("duration_seconds"),
-            success=data.get("success", True),
-            # Token metrics
-            input_tokens=data.get("input_tokens"),
-            output_tokens=data.get("output_tokens"),
-            total_tokens=data.get("total_tokens"),
-            # Tool details
-            tool_name=data.get("tool_name"),
-            tool_use_id=data.get("tool_use_id"),
-            tool_input=data.get("tool_input"),
-            tool_output=data.get("tool_output"),
-            # Message details
-            message_role=data.get("message_role"),
-            message_content=data.get("message_content"),
-            # Thinking details
-            thinking_content=data.get("thinking_content"),
-        )
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        ts = self.timestamp
-        if isinstance(ts, datetime):
-            ts = ts.isoformat()
-        return {
-            "operation_id": self.operation_id,
-            "operation_type": self.operation_type,
-            "timestamp": ts,
-            "duration_seconds": self.duration_seconds,
-            "success": self.success,
-            # Token metrics
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "total_tokens": self.total_tokens,
-            # Tool details
-            "tool_name": self.tool_name,
-            "tool_use_id": self.tool_use_id,
-            "tool_input": self.tool_input,
-            "tool_output": self.tool_output,
-            # Message details
-            "message_role": self.message_role,
-            "message_content": self.message_content,
-            # Thinking details
-            "thinking_content": self.thinking_content,
-        }
-
-
-@dataclass(frozen=True)
 class SessionSummary:
     """Read model for session list view.
 
@@ -219,9 +136,6 @@ class SessionSummary:
     repos: tuple[str, ...] = ()
     """Repository slugs (owner/repo) this session has access to."""
 
-    operations: tuple[OperationRecord, ...] = ()
-    """Operations recorded during this session."""
-
     # Subagent metrics (from agentic_isolation v0.3.0)
     subagent_count: int = 0
     """Number of subagents spawned during this session."""
@@ -255,10 +169,6 @@ class SessionSummary:
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
-        # Parse operations list
-        ops_data = data.get("operations", [])
-        operations = tuple(OperationRecord.from_dict(op) for op in ops_data)
-
         # Parse subagents list
         subagents_data = data.get("subagents", [])
         subagents = tuple(SubagentRecord.from_dict(s) for s in subagents_data)
@@ -281,7 +191,6 @@ class SessionSummary:
             parent_session_id=data.get("parent_session_id"),
             root_session_id=data.get("root_session_id"),
             repos=tuple(data.get("repos", ())),
-            operations=operations,
             # Subagent metrics
             subagent_count=data.get("subagent_count", 0),
             subagents=subagents,
@@ -331,7 +240,6 @@ class SessionSummary:
             "parent_session_id": self.parent_session_id,
             "root_session_id": self.root_session_id,
             "repos": list(self.repos),
-            "operations": [op.to_dict() for op in self.operations],
             # Subagent metrics
             "subagent_count": self.subagent_count,
             "subagents": [s.to_dict() for s in self.subagents],

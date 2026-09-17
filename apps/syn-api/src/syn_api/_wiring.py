@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from syn_api.services.skill_resolution_service import SkillResolutionService
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
+        SessionObservationPort,
+    )
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -79,6 +82,7 @@ if TYPE_CHECKING:
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
+from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
 
 # Re-exported, not defined here: joining the event publisher to the projection
 # manager needs neither half of this app, and the artifact backfill migration
@@ -1003,6 +1007,26 @@ class _NullSignalQueueAdapter:
 
 def get_event_store_instance() -> AgentEventStore:
     """Return the AgentEventStore for TimescaleDB queries."""
+    return get_event_store()
+
+
+def get_session_observations() -> SessionObservationPort:
+    """Return the recorder a session's operations are written to (Lane 2).
+
+    Production: the AgentEventStore that owns the ``agent_events`` hypertable,
+    which ``SessionToolsProjection`` then queries. Test and offline: the
+    in-memory timeline, which IS that projection there.
+
+    Either way this returns the same object the read path reads, and that is
+    the whole point of the function existing. #1034 was a write and a read
+    wired to two different lanes with nothing connecting them, so the one
+    decision worth hiding behind a name is which lane a session operation
+    lives on.
+    """
+    from syn_shared.settings import get_settings
+
+    if get_settings().uses_in_memory_stores:
+        return get_in_memory_session_timeline()
     return get_event_store()
 
 
