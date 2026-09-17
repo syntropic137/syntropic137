@@ -46,6 +46,7 @@ reader has to be able to tell.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Final, Protocol
 
@@ -57,6 +58,7 @@ __all__ = [
     "DescribeWork",
     "RecoveredArtifact",
     "is_storable",
+    "is_usable_conclusion",
     "recover_deliverable",
 ]
 
@@ -126,6 +128,127 @@ _CAVEAT: Final[str] = (
 _WHERE_THE_WORK_IS: Final[str] = "\n\n---\n\n## Where this phase's work stands\n\n{work}\n"
 
 
+#: How much a salvaged message has to REPORT before it can stand in for a
+#: deliverable, counted in words that survive `_reporting_words` below.
+#:
+#: The floor is the weakest half of the bar and is calibrated, not guessed. The
+#: shortest message this repository already treats as a genuine conclusion is
+#: #1195's verify verdict - "VERDICT: the implementation is sound and the gates
+#: are green", ten words - and the shapes #1300's review refuses ("Done.", a
+#: one-line refusal) leave nothing at all once ceremony and stance are removed.
+#: Eight sits below the first and above the second, deliberately nearer the
+#: permissive end: a false accept produces a title-marked, banner-wrapped
+#: artifact that every reader can see arrived by transcript, while a false
+#: reject discards a finished run, which is the $38.62 #1300 measured.
+_MIN_CONCLUSION_WORDS: Final[int] = 8
+
+#: Sentence, clause and line ends - what splits a message into things it says.
+_SEGMENT_BOUNDARY: Final[re.Pattern[str]] = re.compile(r"[.!?;\n]+")
+
+#: A segment that only announces that the phase finished.
+#:
+#: Matched on the whole normalised segment, never as a substring, so "Done."
+#: is ceremony and "Done replacing the retry loop" is not.
+_CEREMONY: Final[frozenset[str]] = frozenset(
+    {
+        "",
+        "ok",
+        "okay",
+        "done",
+        "all done",
+        "complete",
+        "completed",
+        "task complete",
+        "task completed",
+        "finished",
+        "all finished",
+        "task finished",
+        "success",
+        "all set",
+        "thanks",
+        "thank you",
+        "im done",
+        "i am done",
+        "ive finished",
+        "i have finished",
+        "ive finished the task",
+        "i have finished the task",
+    }
+)
+
+#: A segment is a STANCE when it says what the agent would or could do.
+_STANCE: Final[re.Pattern[str]] = re.compile(
+    r"\b(refus\w*|decline[ds]?|declining|will not|wont|cannot|can not|cant|"
+    r"could not|couldnt|unable to|not going to|not permitted to|not allowed to)\b"
+)
+
+#: What turns a stance back into a report: the reason behind it.
+_GIVES_A_REASON: Final[re.Pattern[str]] = re.compile(
+    r"\b(because|since|due to|owing to|as the|as it|the reason|without which)\b"
+)
+
+_NOT_WORDS: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9 ]+")
+
+
+def _reporting_words(message: str) -> int:
+    """How many words of `message` say something about the phase's work.
+
+    Ceremony and bare stance are both excluded, for the same reason: neither
+    tells the next phase anything it can act on. "Done." announces only that
+    the message has ended, and "I refuse to modify production auth code
+    without explicit sign-off" announces only where the agent stood - a
+    downstream phase reading either as its input has a report in name and
+    nothing in hand.
+
+    A stance WITH its reasons is not excluded, and that asymmetry is the point.
+    "I could not push the branch because the credential rejects workflow
+    changes" is a finding: it says what was attempted, what stopped it, and
+    what a human has to change. Refusals are first-class deliverables in this
+    system; unexplained ones are not deliverables at all.
+
+    Exclusion is per segment, never whole-message, so one "I could not" inside
+    a long report costs that clause and nothing else.
+    """
+    words = 0
+    for segment in _SEGMENT_BOUNDARY.split(message):
+        normalised = _NOT_WORDS.sub("", segment.lower().replace("'", "")).strip()
+        normalised = " ".join(normalised.split())
+        if normalised in _CEREMONY:
+            continue
+        if _STANCE.search(normalised) and not _GIVES_A_REASON.search(normalised):
+            continue
+        words += len(normalised.split())
+    return words
+
+
+def is_usable_conclusion(message: str) -> bool:
+    """Whether `message` is a conclusion a downstream phase can act on.
+
+    THE QUESTION THIS ANSWERS, and why it is not "is this non-empty". The
+    salvage stores what the agent said as the phase's deliverable, and the next
+    phase reads that artifact as its INPUT and acts on it. A stored artifact
+    reading "Done." therefore does something strictly worse than the failure it
+    replaced: the run advances, the next phase believes it has been handed a
+    report, and it builds on nothing. Salvage is for rescuing work that was
+    done, not for laundering a phase that did none.
+
+    WHAT WAS CHOSEN. A message is usable when at least
+    `_MIN_CONCLUSION_WORDS` of it REPORT - words left after dropping the
+    segments that announce completion and the segments that state a position
+    without a reason for it. Length alone would not do: the genuine verdict
+    #1195 rescues and the bare refusal #1300 refuses are both ten words, so
+    any floor that keeps the first admits the second. What separates them is
+    not size but subject - one is about the work, the other is about the
+    agent - and that is what is measured here.
+
+    WHAT IT CANNOT DO. It cannot tell a true report from a plausible-sounding
+    false one; nothing static can. It is a floor on substance, not a check on
+    honesty, and the artifact stays marked as recovered precisely because that
+    remains the reader's job.
+    """
+    return _reporting_words(message) >= _MIN_CONCLUSION_WORDS
+
+
 def is_storable(content: str) -> bool:
     """Whether the artifact store will accept `content` as it stands.
 
@@ -174,16 +297,18 @@ def recover_deliverable(
     versus what the agent claimed - and a reader picking the work up needs the
     first even when the second is a sign-off line.
 
-    None means the transcript is empty too - the agent genuinely said nothing -
-    and the caller should fail the phase rather than invent a deliverable. That
+    None means there is no conclusion to salvage - the agent said nothing, or
+    said nothing a downstream phase could act on (`is_usable_conclusion`) - and
+    the caller should fail the phase rather than invent a deliverable. That
     distinction is the point of the whole module: "we lost what it said" and
-    "it said nothing" are different incidents and must not share an outcome.
+    "it said nothing worth having" are different incidents from "it reported",
+    and must not share an outcome with it.
     A `work` report alone is NOT a conclusion and does not make one: a phase
     that pushed a branch and said nothing about it still reached no verdict,
     and that failure is reported where failures are reported.
     """
     said = (last_agent_message or "").strip()
-    if not said:
+    if not is_usable_conclusion(said):
         return None
     reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote) if wrote is not None else _WROTE_NOTHING
     where = _WHERE_THE_WORK_IS.format(work=work) if work else ""
