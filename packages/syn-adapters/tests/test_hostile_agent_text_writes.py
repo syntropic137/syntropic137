@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 from syn_adapters.postgres_text import pg_safe  # noqa: E402
+from syn_domain import tool_call_counts  # noqa: E402
 
 # The actual characters. Written via chr() so no editor, formatter or copy-paste
 # can quietly turn them into their harmless six-character text spelling - which
@@ -112,6 +113,18 @@ class FakeConn:
         self._calls.append((table, (kwargs.get("source"),)))
         return "COPY 1"
 
+    def transaction(self) -> FakeTransaction:
+        """The write path wraps the row and its tool-call tally in one (#1322)."""
+        return FakeTransaction()
+
+
+class FakeTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
 
 class FakeAcquire:
     def __init__(self, conn: FakeConn) -> None:
@@ -134,8 +147,17 @@ class FakePool:
 
     @property
     def args(self) -> tuple[object, ...]:
-        assert self.calls, "the boundary never wrote anything"
-        return self.calls[-1][1]
+        """Arguments of the last call, ignoring the tool-call tally.
+
+        Every write path also updates ``agent_tool_call_counts`` in the same
+        transaction (#1322). That is a derived number, never agent text, and
+        these tests are about what the row itself carries - so it is skipped
+        rather than allowed to shadow the write under inspection.
+        """
+        for query, args in reversed(self.calls):
+            if tool_call_counts.TABLE not in query:
+                return args
+        raise AssertionError("the boundary never wrote anything")
 
 
 # --------------------------------------------------------------------------
@@ -242,7 +264,7 @@ async def test_insert_batch_buffer_is_encodable() -> None:
     )
 
     assert count == 1
-    source = pool.calls[-1][1][0]
+    source = pool.args[0]
     assert source is not None
     body = source.read().decode("utf-8")  # type: ignore[union-attr]  # io.BytesIO
     assert CLEANED_PREFIX in body
@@ -442,8 +464,8 @@ def copy_row_for(**event: object) -> list[str | None]:
     """
     from syn_adapters.events.store_helpers import _build_copy_buffer
 
-    buffer = _build_copy_buffer([event], None, None)  # type: ignore[list-item]  # an event payload is arbitrary agent JSON
-    return read_copy_row(buffer.read().decode("utf-8"))
+    payload = _build_copy_buffer([event], None, None)  # type: ignore[list-item]  # an event payload is arbitrary agent JSON
+    return read_copy_row(payload.buffer.read().decode("utf-8"))
 
 
 #: Column order of the COPY, from store_write.insert_batch.

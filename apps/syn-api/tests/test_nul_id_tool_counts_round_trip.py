@@ -1,4 +1,4 @@
-"""The executions list must count tools under the id agent_events holds (#1241).
+"""The executions list must count tools under the id the tally holds (#1241).
 
 ``_fetch_tool_counts`` binds execution ids into ``execution_id = ANY($1)`` and
 then RETURNS A MAPPING KEYED BY THOSE IDS, so it has two ways to lose the
@@ -7,7 +7,10 @@ looks up. Either shows the same thing on the dashboard - an execution with 0
 tool calls, which is a perfectly ordinary number.
 
 The double holds its rows under the spelling the writer produced and serves
-them only to a query that asks for it, which is all Postgres does here.
+them only to a query that asks for it, which is all Postgres does here. The
+table behind it changed in #1322 - from ``agent_events`` to the tally - and
+the round trip this pins is the reason that move had to preserve the spelling:
+the tally is keyed by the same sanitised id the events were.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ def _stored_spelling() -> str:
     return event.execution_id
 
 
-class _AgentEvents:
+class _Tally:
     def __init__(self) -> None:
         self.binds: list[tuple[object, ...]] = []
 
@@ -54,10 +57,10 @@ class _AgentEvents:
 
 
 class _Acquire:
-    def __init__(self, conn: _AgentEvents) -> None:
+    def __init__(self, conn: _Tally) -> None:
         self._conn = conn
 
-    async def __aenter__(self) -> _AgentEvents:
+    async def __aenter__(self) -> _Tally:
         return self._conn
 
     async def __aexit__(self, *_exc: object) -> bool:
@@ -65,7 +68,7 @@ class _Acquire:
 
 
 class _Pool:
-    def __init__(self, conn: _AgentEvents) -> None:
+    def __init__(self, conn: _Tally) -> None:
         self.conn = conn
 
     def acquire(self) -> _Acquire:
@@ -84,7 +87,7 @@ async def test_tool_counts_round_trip_for_a_nul_bearing_execution_id(
     from syn_api.routes.executions.queries import _fetch_tool_counts
 
     assert _stored_spelling() == STORED_ID
-    store = _EventStore(_Pool(_AgentEvents()))
+    store = _EventStore(_Pool(_Tally()))
     monkeypatch.setattr(_wiring, "get_event_store_instance", lambda: store)
 
     counts = await _fetch_tool_counts([RAW_ID])
