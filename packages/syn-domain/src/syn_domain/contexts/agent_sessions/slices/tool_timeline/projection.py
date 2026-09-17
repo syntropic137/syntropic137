@@ -10,7 +10,6 @@ Subscribes to observation events from syn-collector:
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -20,39 +19,6 @@ from syn_domain.contexts.agent_sessions.domain.read_models.tool_execution import
     ToolExecution,
     ToolTimeline,
 )
-
-
-def _as_datetime(stamp: object) -> datetime | None:
-    """A recorded stamp as a datetime, whether it was stored as one or as ISO text."""
-    if isinstance(stamp, datetime):
-        return stamp
-    if isinstance(stamp, str):
-        try:
-            return datetime.fromisoformat(stamp)
-        except ValueError:
-            return None
-    return None
-
-
-def _elapsed_ms(started: object, completed: object) -> int | None:
-    """How long the call took, from the two stamps the record already holds (#1064).
-
-    The completion observation carries no duration - its producer never
-    measured one - so the only place the number exists is the gap between
-    the start this record was created from and the completion updating it.
-    Anything that makes that gap meaningless (an unparseable stamp, one side
-    naive and the other aware, a negative result) yields None: a wrong
-    duration is worse than a missing one, because nothing downstream can tell
-    it apart.
-    """
-    start = _as_datetime(started)
-    end = _as_datetime(completed)
-    if start is None or end is None:
-        return None
-    if (start.tzinfo is None) != (end.tzinfo is None):
-        return None
-    elapsed = (end - start).total_seconds() * 1000
-    return round(elapsed) if elapsed >= 0 else None
 
 
 class ToolTimelineProjection:
@@ -120,15 +86,16 @@ class ToolTimelineProjection:
         key = f"{session_id}#{tool_use_id}"
         existing = await self._store.get(self.PROJECTION_NAME, key)
 
-        completed_at = event_data.get("timestamp")
-
         if existing:
             # Update existing record
             existing["status"] = "completed"
-            existing["completed_at"] = completed_at
-            existing["duration_ms"] = event_data.get("duration_ms") or _elapsed_ms(
-                existing.get("started_at"), completed_at
-            )
+            existing["completed_at"] = event_data.get("timestamp")
+            # Only what the producer measured. Deriving a duration from this
+            # record's own two stamps would be a second copy of the rule in
+            # `syn_adapters.projections.session_tools_dispatch._resolve_durations`,
+            # which is the one the API reads through (#1064); a copy here has no
+            # reader to serve and would drift from that one unnoticed.
+            existing["duration_ms"] = event_data.get("duration_ms")
             existing["success"] = event_data.get("success", True)
             existing["tool_output"] = event_data.get("tool_output")
             await self._store.save(self.PROJECTION_NAME, key, existing)
@@ -140,10 +107,8 @@ class ToolTimelineProjection:
                 "tool_name": event_data.get("tool_name", "unknown"),
                 "tool_use_id": tool_use_id,
                 "status": "completed",
-                # Best effort: with no start row there is nothing to measure
-                # from, so this record reports no duration rather than zero.
-                "started_at": completed_at,
-                "completed_at": completed_at,
+                "started_at": event_data.get("timestamp"),  # Best effort
+                "completed_at": event_data.get("timestamp"),
                 "duration_ms": event_data.get("duration_ms"),
                 "success": event_data.get("success", True),
                 "tool_output": event_data.get("tool_output"),
