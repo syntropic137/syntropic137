@@ -145,6 +145,8 @@ def row_to_operation(
         subagent_tool_names,
         git_event_types,
     )
+
+
 def _elapsed_ms(started: datetime, completed: datetime) -> int | None:
     """Milliseconds from `started` to `completed`, or None if that is backwards.
 
