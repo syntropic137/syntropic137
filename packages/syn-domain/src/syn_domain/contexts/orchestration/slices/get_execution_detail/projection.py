@@ -98,32 +98,6 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             await self._store.delete_all(self.PROJECTION_NAME)
 
     @staticmethod
-    def _phase_budgets(event_data: dict) -> dict[str, int]:
-        """Each phase's wall-clock budget, keyed by phase id, from the run's start.
-
-        The budget is stated once, on ``WorkflowExecutionStarted``, and the
-        phase that later consumes it does not restate it. So it is read here
-        and held on the execution record until ``on_phase_started`` has a
-        phase to attach it to - the projection's store IS its memory, and a
-        map on the instance would not survive a restart mid-run.
-
-        Phases with no stated budget are simply absent, so an unknown budget
-        stays ``None`` downstream rather than becoming a number nobody set.
-        """
-        raw = event_data.get("phase_definitions")
-        if not isinstance(raw, list):
-            return {}
-        budgets: dict[str, int] = {}
-        for definition in raw:
-            if not isinstance(definition, dict):
-                continue
-            phase_id = definition.get("phase_id")
-            timeout = definition.get("timeout_seconds")
-            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
-                budgets[phase_id] = timeout
-        return budgets
-
-    @staticmethod
     def _find_phase(
         phases: list[dict[str, Any]], phase_id: str
     ) -> tuple[int, dict[str, Any]] | None:
@@ -179,6 +153,37 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         repos_raw = event_data.get("inputs", {}).get("repos", "")
         repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
 
+        # Each phase's wall-clock budget, keyed by phase id. Stated once, on
+        # this event, and not restated by the phase that later consumes it, so
+        # it is read here and held on the execution record until
+        # `on_phase_started` has a phase to attach it to (#1262). The store IS
+        # this projection's memory; a map on the instance would not survive a
+        # restart mid-run.
+        #
+        # DELIBERATELY NOT A HELPER, and please do not extract it. A function a
+        # handler hands its payload to must declare a typed payload
+        # (test_typed_projection_handlers.py, #1268), and there is no narrower
+        # type to give this one: `event_data` is a `model_dump()` of an event
+        # whose `phase_definitions` is itself `list[dict[str, Any]]`. Extracting
+        # it adds a new untyped site to a table that only ever shrinks, so the
+        # tidier-looking version is the one that fails the gate. It moves out of
+        # here when the dispatch hands handlers the event itself.
+        #
+        # Every value is checked because none of them are validated: the field
+        # is a list of `dict[str, Any]`, so a definition can carry anything at
+        # all. A phase with no stated budget is absent rather than 0, which is
+        # what keeps an unknown budget reading as None downstream instead of as
+        # a number nobody set.
+        definitions = event_data.get("phase_definitions")
+        phase_budgets: dict[str, int] = {}
+        for definition in definitions if isinstance(definitions, list) else []:
+            if not isinstance(definition, dict):
+                continue
+            phase_id = definition.get("phase_id")
+            timeout = definition.get("timeout_seconds")
+            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
+                phase_budgets[phase_id] = timeout
+
         # Create initial phases from workflow definition (all pending)
         # Note: In a full implementation, we'd get phase names from workflow
         # For now, phases are populated as they start/complete
@@ -208,7 +213,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # Held here, not served from here: `on_phase_started` moves each
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).
-            "phase_budgets": self._phase_budgets(event_data),
+            "phase_budgets": phase_budgets,
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
