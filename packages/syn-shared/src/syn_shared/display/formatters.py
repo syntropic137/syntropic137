@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import signal
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -307,3 +308,27 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     if len(items) == 1:
         return first
     return f"{first} +{len(items) - 1}"
+
+
+def describe_exit_code(code: int) -> str:
+    """Render an exit code so that a death by signal says so by name.
+
+    A NEGATIVE exit code is not a number the program chose. It is the negated
+    number of the signal that killed it, which most readers do not know, so
+    every such failure was reported as a bare ``-11`` that said nothing and
+    could not be searched for. Naming it ``SIGSEGV (signal 11)`` makes the
+    whole class greppable in logs, in issues and across executions (#1295).
+
+    Positive codes are returned unchanged, deliberately. A shell reports the
+    same death as ``139`` under the 128+N convention, but a program is equally
+    free to exit 139 of its own accord, and there is nothing in an exit code
+    to say which happened - so this names only the case that is unambiguous.
+    """
+    if code >= 0:
+        return str(code)
+    try:
+        return f"{signal.Signals(-code).name} (signal {-code})"
+    except ValueError:
+        # A signal number this platform does not name. "signal 60" is still
+        # the one fact worth having: it was killed, it did not choose to exit.
+        return f"signal {-code}"

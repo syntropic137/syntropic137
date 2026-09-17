@@ -69,6 +69,7 @@ submodule's commits are recoverable only if the phase pushed them itself.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
@@ -83,6 +84,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
+from syn_shared.display import describe_exit_code
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
@@ -139,6 +141,22 @@ _REMOTE_KILL_AFTER_SECONDS: Final[int] = 5
 #: say that 124 means the command was cut off rather than that it answered
 #: 124. Without it an operator reads "exited 124" and has to go and look it up.
 _BOUND_FIRED_EXIT_CODE: Final[int] = 124
+
+#: Waits BETWEEN attempts, so there is one more attempt than there are entries.
+#: Deliberately the same bound and the same waits as the credential guard's
+#: (#1293), because it is the same mistake being fixed in the same shape and
+#: two sets of numbers would only invite a reader to look for a difference
+#: that is not there.
+#:
+#: A probe that did not answer has established NOTHING, and one such
+#: non-answer was being read as the final word: a `rev-parse` killed by
+#: SIGSEGV failed a phase that had already done its work and pushed nothing
+#: to quarantine (#1295: exec-09ed636a570d, $12.40). Every command this
+#: module runs is a read or a content-addressed write, so a second attempt
+#: risks nothing and costs milliseconds. Exhausting them still fails closed -
+#: the gate never decides it is clean because it got tired of asking.
+_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
+_MAX_ATTEMPTS: Final[int] = len(_RETRY_BACKOFF_SECONDS) + 1
 
 
 class GitWorkspace(Protocol):
@@ -782,31 +800,68 @@ async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -
     and a command that was killed part-way printed a prefix of an answer, not
     an answer.
 
+    AND THEREFORE IT IS ALSO THE ONE PLACE THAT ASKS TWICE. A command that did
+    not answer established nothing, so the first non-answer is not the answer;
+    treating it as one failed a phase that had finished its work, over a
+    `rev-parse` killed by a signal (#1295). Every command routed here is a
+    read or a content-addressed write, so running one again is free of
+    consequence and costs milliseconds. Callers are told nothing about this
+    and have nothing to do about it: they still get stdout or the same
+    exception, which is the point of the retry living here and not in each of
+    them.
+
+    Being cut off by a BOUND is the one non-answer not retried. That is not a
+    softer rule, it is the same one: the bound is this module's own choice of
+    how long a remote may take, made because teardown is queued behind this
+    call, and a bound that fired will fire again. Three more of them would
+    spend a minute and a half to learn what the first one said.
+
+    FAILING CLOSED IS UNCHANGED. Exhausting the attempts raises exactly as one
+    failure used to, saying the same thing about what was not verified and
+    what was not quarantined. The only difference is how many times the
+    workspace was given the chance to say it.
+
     Returns:
         stdout. Never the ExecutionResult - handing that back would put the
         unchecked value in reach again.
 
     Raises:
-        WorkspaceInspectionFailedError: the command failed, so it produced no
-            verdict and this module refuses to invent one.
+        WorkspaceInspectionFailedError: the command failed every attempt, so
+            it produced no verdict and this module refuses to invent one.
     """
-    result = await workspace.execute(command)
-    if result.success and result.exit_code == 0 and not result.timed_out:
-        return result.stdout
-    raise WorkspaceInspectionFailedError(
-        doing=doing,
-        failure=FailedWorkspaceCommand(
-            command=tuple(command),
-            exit_code=result.exit_code,
-            stderr=result.stderr,
-            # Two ways to be cut off and one word for it: the BACKEND says so
-            # when it enforced its own limit, and `timeout` says so with an
-            # exit code when the bound this module put in the argv fired. A
-            # reader needs "it did not finish" either way, not a number.
-            timed_out=result.timed_out
-            or (command[0] == "timeout" and result.exit_code == _BOUND_FIRED_EXIT_CODE),
-        ),
-    )
+    attempt = 0
+    while True:
+        attempt += 1
+        result = await workspace.execute(command)
+        if result.success and result.exit_code == 0 and not result.timed_out:
+            return result.stdout
+        # Two ways to be cut off and one word for it: the BACKEND says so when
+        # it enforced its own limit, and `timeout` says so with an exit code
+        # when the bound this module put in the argv fired. A reader needs "it
+        # did not finish" either way, not a number.
+        cut_off = result.timed_out or (
+            command[0] == "timeout" and result.exit_code == _BOUND_FIRED_EXIT_CODE
+        )
+        if cut_off or attempt == _MAX_ATTEMPTS:
+            raise WorkspaceInspectionFailedError(
+                doing=doing,
+                failure=FailedWorkspaceCommand(
+                    command=tuple(command),
+                    exit_code=result.exit_code,
+                    stderr=result.stderr,
+                    timed_out=cut_off,
+                    attempts=attempt,
+                ),
+            )
+        logger.warning(
+            "Workspace probe did not answer while %s (attempt %d of %d, exited %s); retrying: %s",
+            doing,
+            attempt,
+            _MAX_ATTEMPTS,
+            describe_exit_code(result.exit_code),
+            result.stderr.strip() or "(no stderr output)",
+        )
+        await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
 
 
 def _git_argv(

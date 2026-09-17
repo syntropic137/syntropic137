@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_shared.display import describe_exit_code
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
@@ -278,6 +280,12 @@ class FailedWorkspaceCommand:
     exit_code: int
     stderr: str
     timed_out: bool = False
+    #: How many times it was asked before this was accepted as the answer. The
+    #: gate retries a command that did not answer (#1295), so "it failed" and
+    #: "it failed four times running" are different facts about a workspace,
+    #: and only the second one rules out a one-off. Defaults to the single
+    #: attempt a caller that does not retry makes.
+    attempts: int = 1
 
 
 @dataclass(frozen=True)
@@ -492,8 +500,21 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 
 def _why(failure: FailedWorkspaceCommand) -> str:
-    """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    """Why a command produced no answer, said the same way wherever it is said.
+
+    Two facts an operator cannot get anywhere else. The exit code is NAMED
+    when it is a signal, because ``-11`` is not a number any program chose and
+    reads as noise, while ``SIGSEGV (signal 11)`` says what happened and can
+    be searched for across executions (#1295). And a failure that was retried
+    says so, because one failure and four in a row are different diagnoses:
+    the first invites "run it again", the second rules it out.
+    """
+    if failure.timed_out:
+        return "timed out, so it did not finish"
+    exited = f"exited {describe_exit_code(failure.exit_code)}"
+    if failure.attempts <= 1:
+        return exited
+    return f"{exited}, and did not answer on any of {failure.attempts} attempts"
 
 
 def _render_inspection_failure(

@@ -34,15 +34,20 @@ from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoActio
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     QuarantinedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    _MAX_ATTEMPTS,
+    _RETRY_BACKOFF_SECONDS,
     _SCRATCH_INDEX,
     GitWorkspace,
+    observe_branches,
     quarantine_unpushed_work,
+    record_phase_starting_point,
     refuse_to_complete_unsaved_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
@@ -56,6 +61,27 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+
+@pytest.fixture(autouse=True)
+def _no_real_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve the retry waits instantly, everywhere except where they are the subject.
+
+    A dozen tests here drive a command that never answers, and each one now
+    exhausts the retries before failing closed. The waits between those
+    attempts are real seconds, which turned this file from seconds into a
+    minute and a half of sleeping - a cost paid on every run to assert
+    nothing, because not one of these tests is about how long the gate waits.
+
+    The two that ARE about that record the waits instead of serving them, and
+    set their own recorder over this one.
+    """
+    monkeypatch.setattr(unpushed_work_guard.asyncio, "sleep", _instantly)
+
+
+async def _instantly(_seconds: float) -> None:
+    """A wait that is over."""
+
 
 _EXECUTION_ID = "exec-5497fb20005b"
 _PHASE_ID = "implement"
@@ -1240,3 +1266,239 @@ def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
                 pushed_ref=pushed_ref,
                 push_error=push_error,
             )
+
+
+# --------------------------------------------------------------------------
+# A probe that did not answer is not an answer (#1295)
+# --------------------------------------------------------------------------
+
+#: What the workspace returned in exec-09ed636a570d: `git rev-parse` killed by
+#: SIGSEGV, after the phase had done its work. Python reports a death by
+#: signal as the NEGATED signal number, so the operator was shown "-11".
+_SEGFAULTED = ExecutionResult(
+    exit_code=-11,
+    success=False,
+    duration_ms=0.0,
+    stdout="",
+    stderr="",
+)
+
+#: What `timeout` returns when the bound this module put in the argv fired.
+_BOUND_FIRED = ExecutionResult(
+    exit_code=124,
+    success=False,
+    duration_ms=0.0,
+    stdout="",
+    stderr="",
+)
+
+
+class _FlakesOn:
+    """The real workspace, except one command fails its first ``times`` runs.
+
+    `_BreaksOn` breaks a command FOREVER, so it can only ever show the gate
+    failing closed - it cannot stage the shape #1295 actually produced, which
+    is a single command dying in a container that was otherwise healthy and
+    would have answered the very next time it was asked. That difference is
+    the whole of the fix, so it needs a double that can recover.
+    """
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        times: int,
+        returning: ExecutionResult = _UNREACHABLE,
+    ) -> None:
+        self._inner = inner
+        self._failing = failing
+        self._times = times
+        self._returning = returning
+        #: How many times the command under test was asked, retries included.
+        self.asked = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != self._failing:
+            return await self._inner.execute(command)
+        self.asked += 1
+        if self.asked <= self._times:
+            return self._returning
+        return await self._inner.execute(command)
+
+
+async def test_a_probe_that_dies_once_no_longer_destroys_a_finished_phase(
+    clone: _Clone,
+) -> None:
+    """THE INCIDENT (#1295): exec-09ed636a570d, $12.40, lost to one segfault.
+
+    The phase had done its work and pushed it. Then `rev-parse` exited -11
+    inside the gate, the gate had no second attempt, and an execution that was
+    finished was failed instead. Everything about this workspace is healthy -
+    the same command answers correctly the moment it is asked again.
+
+    The assertion is on the aggregate, not on the guard: what was lost was a
+    phase REPORTED completed, so that is what has to come back.
+    """
+    clone.commit("shipped.py", "work that reached the remote\n")
+    clone.git("push", "origin", _BRANCH)
+    workspace = _FlakesOn(clone.workspace, "rev-parse", times=1, returning=_SEGFAULTED)
+    run = _PhaseRun(workspace)
+
+    await run.complete()
+
+    assert workspace.asked == 2, "the segfaulted probe was never asked a second time"
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+
+
+async def test_a_probe_that_recovers_still_reports_the_work_it_then_finds(
+    clone: _Clone,
+) -> None:
+    """Recovering must not cost the ANSWER, only the first attempt at it.
+
+    A retry that resumed from the wrong place - skipping the repository, or
+    reading a half-built result - would turn a $12.40 loss into a silent
+    false ``completed``, which is the defect the gate exists to stop. So the
+    repository below is holding an unpushed commit the whole time, and the
+    recovered probe still has to find it and quarantine it.
+    """
+    clone.commit("never-pushed.py", "work the workspace was about to eat\n")
+    workspace = _FlakesOn(clone.workspace, "status", times=_MAX_ATTEMPTS - 1)
+    run = _PhaseRun(workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert workspace.asked == _MAX_ATTEMPTS
+    run.aggregate.complete_phase.assert_not_called()
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert "recoverable" in str(raised.value)
+
+
+async def test_every_attempt_failing_still_fails_closed_and_says_so(clone: _Clone) -> None:
+    """EXHAUSTING THE RETRIES CHANGES NOTHING ABOUT THE VERDICT.
+
+    The one thing this fix must not buy is a gate that gets tired of asking
+    and calls the workspace clean. A container that never answers is still a
+    container that never answered: the phase fails, the message still says the
+    work is unverified, and it still says nothing was quarantined - because
+    nothing was. All that changed is how many times it was asked first.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    workspace = _FlakesOn(clone.workspace, "find", times=_MAX_ATTEMPTS, returning=_SEGFAULTED)
+    run = _PhaseRun(workspace)
+
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    assert workspace.asked == _MAX_ATTEMPTS, "the gate gave up before its own bound"
+    run.aggregate.complete_phase.assert_not_called()
+    message = str(raised.value)
+    assert "NOTHING WAS QUARANTINED" in message
+    assert "this phase's work is unverified" in message
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_operator_is_told_how_many_times_it_was_asked(clone: _Clone) -> None:
+    """One failure and four in a row are different diagnoses.
+
+    Without the count, an operator reading the failure cannot tell a workspace
+    that stumbled from one that is gone, and the first advice - "just run it
+    again" - is wrong in the second case and wastes another execution.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    run = _PhaseRun(_FlakesOn(clone.workspace, "find", times=_MAX_ATTEMPTS, returning=_SEGFAULTED))
+
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    assert f"did not answer on any of {_MAX_ATTEMPTS} attempts" in str(raised.value)
+
+
+async def test_a_death_by_signal_is_reported_by_name_not_as_a_negative_number(
+    clone: _Clone,
+) -> None:
+    """ "-11" is not a number any program chose, and reads as noise (#1295).
+
+    The incident report said "exited -11". A negative exit code IS a signal
+    number, negated, and most readers do not know that - so the one fact that
+    would have pointed at the container image went unread. Naming it also
+    makes the class searchable across executions, which a bare number that
+    collides with every other -11 in a log is not.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    run = _PhaseRun(_FlakesOn(clone.workspace, "find", times=_MAX_ATTEMPTS, returning=_SEGFAULTED))
+
+    with pytest.raises(WorkspaceInspectionFailedError) as raised:
+        await run.complete()
+
+    message = str(raised.value)
+    assert "SIGSEGV (signal 11)" in message
+    assert "exited -11" not in message
+
+
+async def test_the_waits_go_between_the_attempts_and_then_stop(clone: _Clone) -> None:
+    """Hammering a workspace that is struggling is how you keep it struggling.
+
+    Recorded rather than served: the point is the schedule, and waiting it out
+    would assert the same thing while costing every future run the seconds.
+    """
+    waited: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waited.append(seconds)
+
+    unpushed_work_guard.asyncio.sleep = _record  # type: ignore[assignment]
+    try:
+        run = _PhaseRun(_FlakesOn(clone.workspace, "find", times=_MAX_ATTEMPTS))
+        with pytest.raises(WorkspaceInspectionFailedError):
+            await run.complete()
+    finally:
+        unpushed_work_guard.asyncio.sleep = _instantly  # type: ignore[assignment]
+
+    # One fewer wait than there are attempts: nothing is waited for after the
+    # last one, because nothing follows it.
+    assert waited == list(_RETRY_BACKOFF_SECONDS)
+
+
+async def test_a_probe_that_recovers_pays_only_the_waits_it_used(clone: _Clone) -> None:
+    """The ordinary case - one stumble - must not cost the whole schedule."""
+    waited: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waited.append(seconds)
+
+    clone.commit("shipped.py", "work\n")
+    clone.git("push", "origin", _BRANCH)
+    unpushed_work_guard.asyncio.sleep = _record  # type: ignore[assignment]
+    try:
+        run = _PhaseRun(_FlakesOn(clone.workspace, "rev-parse", times=1, returning=_SEGFAULTED))
+        await run.complete()
+    finally:
+        unpushed_work_guard.asyncio.sleep = _instantly  # type: ignore[assignment]
+
+    assert waited == [_RETRY_BACKOFF_SECONDS[0]]
+
+
+async def test_a_bound_that_fired_is_not_asked_to_fire_three_more_times(
+    clone: _Clone,
+) -> None:
+    """A TIMEOUT IS THE ONE NON-ANSWER NOT RETRIED, and for the bound's own reason.
+
+    The 20s ceiling on `ls-remote` exists because this path runs with teardown
+    queued behind it. A bound that fired will fire again, so retrying it would
+    spend a minute and a half to be told what the first twenty seconds said -
+    which is the cost the bound was chosen to avoid, paid four times over.
+    """
+    workspace = _FlakesOn(clone.workspace, "ls-remote", times=_MAX_ATTEMPTS, returning=_BOUND_FIRED)
+    start = await record_phase_starting_point(workspace)
+    clone.commit("pushed-then-failed.py", "work\n")
+    clone.git("push", "origin", _BRANCH)
+
+    observed = await observe_branches({_PHASE_ID: start}, _PHASE_ID)
+
+    assert workspace.asked == 1, "a bound that fired was asked to fire again"
+    assert observed is not None
+    assert observed.unreadable is not None
+    assert "timed out, so it did not finish" in observed.unreadable
