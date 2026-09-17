@@ -291,12 +291,24 @@ class TestTheBranchIsNotLost:
     async def test_it_is_named_even_when_the_agent_never_mentioned_it(self, clone: _Clone) -> None:
         """The message is the agent's claim; the branch report is git's reading.
 
-        A sign-off line is a real and common last message, and one that says
-        nothing about where the work went. If the branch were only ever named
-        because the agent happened to name it, this feature would be a
-        coincidence rather than a guarantee.
+        A conclusion that never mentions the branch is a real and common last
+        message. If the branch were only ever named because the agent happened
+        to name it, this feature would be a coincidence rather than a
+        guarantee.
+
+        The message here is deliberately a usable conclusion that is silent
+        about WHERE the work went - not a bare sign-off, which since #1300's
+        review reports nothing and correctly fails the phase instead of being
+        salvaged (`is_usable_conclusion`).
         """
-        run = await _run_writing_nothing(clone, says="Done.")
+        run = await _run_writing_nothing(
+            clone,
+            says=(
+                "Replaced the hand-rolled retry with tenacity and the unit "
+                "suite is green; I left the integration suite alone because "
+                "it needs the test stack."
+            ),
+        )
 
         on_remote = clone.origin_refs()[f"refs/heads/{_BRANCH}"]
         ((_, content),) = run.stored

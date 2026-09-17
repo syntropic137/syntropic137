@@ -448,10 +448,25 @@ class TestTheVerdictSurvivesEveryHop:
     async def test_the_processor_carries_it_from_the_agent_run_to_collection(self) -> None:
         """The hop with no natural test at either end: `_handle_run_agent`
         remembers it and `_handle_collect_artifacts`, a separate dispatch,
-        hands it to the collector."""
+        hands it to the collector.
+
+        The AGGREGATE is what remembers, and is real here for that reason:
+        since #1300's review the processor holds nothing between the two
+        dispatches, so a double in its place would assert the hop against
+        something that does not carry the value in production."""
         from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
             TodoAction,
             TodoItem,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            AgentExecutionCompletedCommand,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            ArtifactsCollectedCommand,
+            StartExecutionCommand,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+            WorkflowExecutionAggregate,
         )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutablePhase,
@@ -477,10 +492,26 @@ class TestTheVerdictSurvivesEveryHop:
             claude_cmd=["agent"],
         )
 
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(
+            StartExecutionCommand(
+                execution_id="exec-0bac0e1ed2b2",
+                workflow_id="w1",
+                workflow_name="W",
+                total_phases=1,
+                inputs={},
+            )
+        )
         agent_result = MagicMock()
         agent_result.stream_result.last_agent_message = SAID
         agent_result.stream_result.interrupt_requested = False
-        agent_result.command.exit_code = 0
+        agent_result.command = AgentExecutionCompletedCommand(
+            execution_id="exec-0bac0e1ed2b2",
+            phase_id="verify",
+            session_id="s1",
+            exit_code=0,
+            last_agent_message=SAID,
+        )
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)
         processor._agent_handler = agent_handler
@@ -488,7 +519,15 @@ class TestTheVerdictSurvivesEveryHop:
         collection_handler = MagicMock()
         collection_handler.handle = AsyncMock(
             return_value=ArtifactCollectionResult(
-                artifact_ids=["a1"], first_content="x", command=MagicMock(), files=[]
+                artifact_ids=["a1"],
+                first_content="x",
+                command=ArtifactsCollectedCommand(
+                    execution_id="exec-0bac0e1ed2b2",
+                    phase_id="verify",
+                    artifact_ids=["a1"],
+                    session_id="s1",
+                ),
+                files=[],
             )
         )
 
@@ -513,14 +552,14 @@ class TestTheVerdictSurvivesEveryHop:
             ".WorkflowExecutionProcessor.record_phase_conversation",
             new=AsyncMock(),
         ):
-            await processor._handle_run_agent(run_todo, phase, MagicMock())
+            await processor._handle_run_agent(run_todo, phase, aggregate)
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
             ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
             await processor._handle_collect_artifacts(
-                collect_todo, phase, MagicMock(), [], PhaseOutputCache()
+                collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 
         assert collection_handler.handle.await_args.kwargs["last_agent_message"] == SAID

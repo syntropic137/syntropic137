@@ -155,6 +155,11 @@ class CollectedArtifacts:
     artifact_ids: list[str]
     first_content: str | None
     files: list[PhaseOutputFile] = field(default_factory=list)
+    #: True when any of what was stored came from the agent's transcript
+    #: instead of from disk. The title marker and the banner tell a HUMAN
+    #: reading the artifact; this tells the execution record (#1195, #1300),
+    #: which is what anyone counting salvages across many runs reads.
+    deliverable_recovered: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,6 +174,11 @@ class _Deliverable:
     source_path: str
     content: str
     title: str
+    #: How this one arrived. The storage loop still cannot treat a recovered
+    #: deliverable differently - it never reads this - but the caller has to
+    #: report the fact, and the alternative was re-deriving it from the title
+    #: marker, which would make a display string load-bearing.
+    recovered: bool = False
 
     @classmethod
     def of(cls, recovered: RecoveredArtifact) -> _Deliverable:
@@ -177,6 +187,7 @@ class _Deliverable:
             source_path=recovered.source_path,
             content=recovered.content,
             title=recovered.title,
+            recovered=True,
         )
 
 
@@ -579,6 +590,7 @@ class ArtifactCollector:
             artifact_ids=artifact_ids,
             first_content=first_content,
             files=files,
+            deliverable_recovered=any(d.recovered for d in deliverables),
         )
 
     @staticmethod

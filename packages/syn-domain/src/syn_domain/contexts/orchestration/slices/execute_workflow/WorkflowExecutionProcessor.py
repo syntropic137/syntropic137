@@ -660,7 +660,11 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
-            last_agent_message=self._runtime.take_last_message(todo.phase_id),
+            # From the AGGREGATE, which rebuilt it from the event stream, and
+            # not from anything this process was holding: a restart between
+            # the agent finishing and this point is the commonest form of the
+            # "something went wrong" that the salvage exists for (#1300).
+            last_agent_message=aggregate.last_agent_message_for(todo.phase_id),
             # Asked only if the collector actually has to salvage. The reading
             # costs a git inspection, and it has to happen HERE rather than on
             # the failure path because a salvaged phase does not fail (#1300).

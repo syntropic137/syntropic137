@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class ArtifactCollectionResult:
     """Result of artifact collection."""
 
-    __slots__ = ("artifact_ids", "command", "files", "first_content")
+    __slots__ = ("artifact_ids", "command", "deliverable_recovered", "files", "first_content")
 
     def __init__(
         self,
@@ -41,10 +41,15 @@ class ArtifactCollectionResult:
         first_content: str | None,
         command: ArtifactsCollectedCommand,
         files: list[PhaseOutputFile] | None = None,
+        deliverable_recovered: bool = False,
     ) -> None:
         self.artifact_ids = artifact_ids
         self.first_content = first_content
         self.command = command
+        #: Whether the deliverable was salvaged from the transcript (#1300).
+        #: Already on `command`, and repeated here because the processor
+        #: reports collection and phase outcome from this object.
+        self.deliverable_recovered = deliverable_recovered
         #: Every file the phase produced, with its path (#988). The next
         #: phase's workspace is built from this, not from first_content.
         self.files: list[PhaseOutputFile] = files if files is not None else []
@@ -119,6 +124,7 @@ class ArtifactCollectionHandler:
             if collected.first_content
             else None,
             session_id=session_id,
+            deliverable_recovered=collected.deliverable_recovered,
         )
 
         return ArtifactCollectionResult(
@@ -126,4 +132,5 @@ class ArtifactCollectionHandler:
             first_content=collected.first_content,
             command=command,
             files=collected.files,
+            deliverable_recovered=collected.deliverable_recovered,
         )

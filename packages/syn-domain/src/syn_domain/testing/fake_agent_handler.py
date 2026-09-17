@@ -129,6 +129,12 @@ class FakeAgentExecutionHandler:
             phase_id=todo.phase_id or "",
             session_id=session_id,
             exit_code=self._exit_code,
+            # The real handler puts it here as well as on the stream result,
+            # because the command is what reaches the event store and the
+            # event store is what a restart reads (#1195, #1300). A double
+            # that set only the stream result would leave every processor
+            # test salvaging from a value production no longer uses.
+            last_agent_message=self._says,
         )
         return AgentExecutionResult(
             stream_result=stream_result,

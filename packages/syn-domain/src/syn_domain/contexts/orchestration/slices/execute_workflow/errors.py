@@ -143,6 +143,13 @@ class PhaseProducedNoDeclaredOutputError(Exception):
     disk and nothing said on the stream - which is a phase that really did
     produce nothing.
 
+    "Nothing said on the stream" means nothing a downstream phase could act
+    on, not merely nothing at all (`is_usable_conclusion`). A phase whose only
+    closing message is "Done." or an unexplained refusal has reported nothing,
+    and storing that as its deliverable would hand the NEXT phase an artifact
+    it believes is a report and can build nothing on - a quieter failure than
+    this one, arriving one phase later.
+
     Raised from ArtifactCollector.collect_from_workspace, which is the one
     place holding both halves of the comparison: what the phase promised and
     what it actually wrote.
@@ -159,8 +166,10 @@ class PhaseProducedNoDeclaredOutputError(Exception):
             f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
             f"({', '.join(declared)}) but produced none: nothing collectable "
             f"was written under artifacts/output/, and its agent's last "
-            f"message was empty too, so there was nothing to recover from the "
-            f"transcript either (#1300). The phase's contract is unmet, so the "
+            f"message reported nothing a later phase could act on, so there "
+            f"was nothing to recover from the transcript either (#1300). It "
+            f"was either empty or pure sign-off - check the session "
+            f"transcript for what it did say. The phase's contract is unmet, so the "
             f"execution fails here rather than advancing as though it had "
             f"succeeded."
         )
@@ -225,7 +234,8 @@ class EmptyPhaseArtifactError(Exception):
             f"Phase '{phase_id}' ({phase_name}): THE ARTIFACT WAS EMPTY. It "
             f"wrote '{source_path}' and the file had no content, and nothing "
             f"could be recovered from the session transcript either - the "
-            f"agent's last message was empty too. The phase's conclusion, if "
+            f"agent's last message reported nothing a later phase could act "
+            f"on, being empty or pure sign-off. The phase's conclusion, if "
             f"it reached one, was not captured anywhere, so there is nothing "
             f"to store and the execution fails here."
         )

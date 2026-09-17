@@ -164,7 +164,6 @@ class PhaseRuntime:
         self._tokens: dict[str, TokenAccumulator] = {}
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
-        self._said: dict[str, str] = {}  # last agent message, for #1195 recovery
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -235,7 +234,11 @@ class PhaseRuntime:
     def record_agent_run(self, phase_id: str, result: AgentExecutionResult) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
-        self._said[phase_id] = result.stream_result.last_agent_message or ""
+        # What the agent SAID is deliberately not held here. It is the salvage
+        # input (#1195, #1300) and is read by a LATER to-do item, so anything
+        # this object remembers about it is lost to a restart in between. It
+        # rides `AgentExecutionCompletedCommand` onto the event stream instead
+        # and is read back off the aggregate.
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
         self._auth_tokens[phase_id] = (
@@ -248,10 +251,6 @@ class PhaseRuntime:
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
-
-    def take_last_message(self, phase_id: str) -> str | None:
-        """What the agent said last, read once and forgotten (#1195)."""
-        return self._said.pop(phase_id, None)
 
     def record_artifacts(self, phase_id: str, artifact_ids: list[str]) -> None:
         """Hold what this phase collected until it reports."""

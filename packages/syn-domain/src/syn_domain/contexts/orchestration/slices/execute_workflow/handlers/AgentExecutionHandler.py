@@ -392,6 +392,10 @@ class AgentExecutionHandler:
             output_tokens=usage.output_tokens,
             cache_creation_tokens=usage.cache_creation,
             cache_read_tokens=usage.cache_read,
+            # Onto the command, and from there onto the event, so a restart
+            # between here and artifact collection cannot lose the salvage
+            # input (#1195, #1300).
+            last_agent_message=stream_result.last_agent_message,
         )
 
         return AgentExecutionResult(

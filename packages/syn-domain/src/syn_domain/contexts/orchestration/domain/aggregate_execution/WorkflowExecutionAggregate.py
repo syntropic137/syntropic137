@@ -136,6 +136,25 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
+        #: What each RUNNING phase's agent said as it finished, keyed by phase.
+        #:
+        #: Replayed state, not a cache. The salvage (#1195, #1300) turns this
+        #: into the phase's deliverable when nothing was written to
+        #: `artifacts/output/`, and the decision it feeds - complete or fail -
+        #: is a domain outcome. Held in the processor, as it was until #1300's
+        #: review, it was destroyed by any restart between the agent finishing
+        #: and its artifacts being collected: the rescue then worked only for
+        #: runs where nothing much had gone wrong. Entries are dropped as each
+        #: phase's artifacts are collected, so this never grows past the phases
+        #: currently in flight.
+        self._last_agent_messages: dict[str, str] = {}
+        #: Phases whose deliverable was salvaged rather than written.
+        #:
+        #: Decided at collection and needed at completion, which are two
+        #: different to-do items and therefore two possible processes - the
+        #: same restart hazard as the message above, and here for the same
+        #: reason rather than because the value is expensive to recompute.
+        self._recovered_phases: set[str] = set()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -154,6 +173,15 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         state, so it survives a restart - which is the case that needs it.
         """
         return self._running_phase_id
+
+    def last_agent_message_for(self, phase_id: str) -> str | None:
+        """What this phase's agent said as it finished, or None.
+
+        The input to the #1195/#1300 salvage, answered from the event stream
+        so the answer is the same in the process that heard it and in one that
+        started afterwards.
+        """
+        return self._last_agent_messages.get(phase_id)
 
     @property
     def status(self) -> ExecutionStatus:
@@ -305,6 +333,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             success=True,
             artifact_id=command.artifact_id,
             session_id=command.session_id,
+            # Read off replayed state rather than taken from the command: the
+            # salvage is decided at COLLECT_ARTIFACTS and reported here, a
+            # different to-do item and possibly a different process, so the
+            # only honest source is the stream. It also keeps
+            # CompletePhaseCommand - and every caller of it - unchanged.
+            deliverable_recovered=command.phase_id in self._recovered_phases,
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             cache_creation_tokens=command.cache_creation_tokens,
@@ -355,6 +389,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             exit_code=command.exit_code,
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
+            last_agent_message=command.last_agent_message,
         )
         self._apply(event)
 
@@ -380,6 +415,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             collected_at=datetime.now(UTC),
             first_content_preview=command.first_content_preview,
             session_id=command.session_id,
+            deliverable_recovered=command.deliverable_recovered,
         )
         self._apply(event)
 
@@ -538,13 +574,23 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._current_phase_workspace_id = _evt(event, "workspace_id")
 
     @event_sourcing_handler("AgentExecutionCompleted")
-    def on_agent_execution_completed(self, _event: AgentExecutionCompletedEvent) -> None:
-        """Apply AgentExecutionCompletedEvent — no state change needed."""
+    def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
+        """Apply AgentExecutionCompletedEvent — keep what the agent said."""
+        said = _evt(event, "last_agent_message")
+        if said:
+            self._last_agent_messages[_evt(event, "phase_id")] = said
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
     def on_artifacts_collected_for_phase(self, event: ArtifactsCollectedForPhaseEvent) -> None:
         """Apply ArtifactsCollectedForPhaseEvent."""
         self._artifact_ids.extend(_evt(event, "artifact_ids", []))
+        phase_id = _evt(event, "phase_id")
+        if _evt(event, "deliverable_recovered", False):
+            self._recovered_phases.add(phase_id)
+        # The salvage input has done its job for this phase and stops being
+        # replayed state: a later to-do item for the same phase must re-read
+        # the deliverable, never re-salvage from a stale message.
+        self._last_agent_messages.pop(phase_id, None)
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:
