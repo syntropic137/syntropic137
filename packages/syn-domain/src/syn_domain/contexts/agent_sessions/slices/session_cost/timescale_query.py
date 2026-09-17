@@ -18,11 +18,11 @@ if TYPE_CHECKING:
 
     import asyncpg
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
+from syn_domain import tool_call_counts
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 
 # --- The four queries, all keyed by a session-id ARRAY -----------------------
@@ -93,13 +93,6 @@ SELECT
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
 GROUP BY session_id, execution_id, phase_id, data->>'model'
-"""
-
-_COUNT_BATCH_QUERY = """
-SELECT session_id, COUNT(*) as cnt
-FROM agent_events
-WHERE session_id = ANY($1::text[]) AND event_type = $2
-GROUP BY session_id
 """
 
 _MIN_TIME_BATCH_QUERY = """
@@ -464,7 +457,7 @@ class TimescaleSessionCostQuery:
         return results
 
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
-        """The four queries, once, for the whole page."""
+        """The three ``agent_events`` queries, once, plus the tool-call tally."""
         async with self._pool.acquire() as conn:
             summary_rows = await conn.fetch(_SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY)
             summaries = {row["session_id"]: row for row in summary_rows}
@@ -482,10 +475,12 @@ class TimescaleSessionCostQuery:
                 ):
                     fallback.setdefault(row["session_id"], []).append(row)
 
-            tool_counts = {
-                row["session_id"]: row["cnt"]
-                for row in await conn.fetch(_COUNT_BATCH_QUERY, ids, TOOL_EXECUTION_COMPLETED)
-            }
+            # The tally, not a COUNT(*) over agent_events. Counting
+            # tool_execution_completed rows there meant decompressing every
+            # segment of every session on the page, because event_type is in
+            # neither compress_segmentby nor compress_orderby: 60,562 buffer
+            # hits and 905ms for sixteen sessions at 219,140 rows (#1322).
+            tool_counts = await tool_call_counts.by_session(conn, ids)
             started = {
                 row["session_id"]: row["started_at"]
                 for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)

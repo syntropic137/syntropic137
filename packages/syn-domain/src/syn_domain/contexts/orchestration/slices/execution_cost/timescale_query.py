@@ -26,11 +26,11 @@ from syn_domain.contexts.orchestration.domain.read_models.execution_cost import 
     UNATTRIBUTED_PHASE_ID,
     ExecutionCost,
 )
+from syn_domain import tool_call_counts
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 
 # Prefer session_summary rows (authoritative totals from Claude CLI).
@@ -124,12 +124,6 @@ WHERE execution_id = $1
 # seen, never for phases that have not started. The dashboard renders this field
 # as a Complete/In Progress badge, so a confidently-wrong value is worse than an
 # unset one. Fixing it properly means reading the lifecycle projection.
-
-_TOOL_COUNT_QUERY = """
-SELECT COUNT(*)
-FROM agent_events
-WHERE execution_id = $1 AND event_type = $2
-"""
 
 _TURN_COUNT_QUERY = """
 SELECT COUNT(*)
@@ -703,8 +697,12 @@ class TimescaleExecutionCostQuery:
             if not token_rows:
                 return None
 
-            tool_count = (
-                await conn.fetchval(_TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED) or 0
+            # From the tally, not from a COUNT(*) over agent_events (#1322).
+            # One execution rather than a page, but the same scan: event_type
+            # is not in the hypertable's compression keys, so the count could
+            # only be reached by decompressing this execution's segments.
+            tool_count = (await tool_call_counts.by_execution(conn, [execution_id])).get(
+                execution_id, 0
             )
             execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
 

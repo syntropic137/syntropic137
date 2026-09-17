@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from syn_adapters.events.models import AgentEvent
 from syn_adapters.events.store_helpers import _build_copy_buffer
+from syn_domain import tool_call_counts
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
@@ -69,7 +70,7 @@ async def insert_one(
     # Get insert tuple from validated model
     time, event_type, session_id, exec_id, ph_id, data_json = validated.to_insert_tuple()
 
-    async with store.pool.acquire() as conn:
+    async with store.pool.acquire() as conn, conn.transaction():
         await conn.execute(
             """
             INSERT INTO agent_events
@@ -82,6 +83,19 @@ async def insert_one(
             exec_id,
             ph_id,
             data_json,
+        )
+        # In the SAME transaction as the row it counts. The tally is what the
+        # list endpoints read instead of counting compressed chunks (#1322), so
+        # a tally that can be written without its event - or an event without
+        # its tally - is a number that drifts and never comes back.
+        #
+        # WHY assert: session_id is NOT NULL, so the INSERT above has already
+        # raised for a None. Unlike the COPY path there is no whole batch to
+        # save by substituting a name, and inventing one here would record a
+        # tool call against a session that never existed.
+        assert session_id is not None
+        await tool_call_counts.record(
+            conn, tool_call_counts.tally([(event_type, session_id, exec_id)])
         )
 
 
@@ -111,15 +125,17 @@ async def insert_batch(
     if store.pool is None:
         raise RuntimeError("AgentEventStore pool is not initialized")
 
-    buffer = _build_copy_buffer(events, execution_id, phase_id)
+    payload = _build_copy_buffer(events, execution_id, phase_id)
 
-    async with store.pool.acquire() as conn:
+    async with store.pool.acquire() as conn, conn.transaction():
         result = await conn.copy_to_table(
             "agent_events",
-            source=buffer,
+            source=payload.buffer,
             columns=["time", "event_type", "session_id", "execution_id", "phase_id", "data"],
             format="text",
         )
+        # Same transaction as the COPY, for the same reason as in insert_one.
+        await tool_call_counts.record(conn, payload.tool_calls)
 
     if isinstance(result, str) and result.startswith("COPY"):
         count = int(result.split()[1])
