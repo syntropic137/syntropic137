@@ -71,6 +71,28 @@ def to_subagent_operation(when: datetime, data: dict[str, Any], event_type: str)
     )
 
 
+def _first_spelling(*candidates: object) -> str | None:
+    """The first candidate that is a non-empty string, or None if none is.
+
+    A legacy payload spells the same fact several ways and the reader takes
+    whichever one arrived. Saying that once, as a call, keeps the choice in a
+    single place instead of an ``or`` chain per field - and an ``or`` chain is
+    a branch per spelling to everyone who later reads the function.
+    """
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+def _branch_from_checkout(command: object) -> str | None:
+    """The branch named by a legacy ``git_operation``'s command line, if any."""
+    if not isinstance(command, str):
+        return None
+    match = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", command)
+    return match.group(1) if match else None
+
+
 @dataclass(frozen=True)
 class GitFacts:
     """The git facts one timeline observation carries, in either payload shape.
@@ -95,44 +117,51 @@ class GitFacts:
 
     @classmethod
     def read(cls, data: dict[str, Any], event_type: str) -> GitFacts:
-        """Read the git facts out of an observation payload."""
+        """Read the git facts out of an observation payload, in either shape."""
         git = data.get("git")
         if isinstance(git, dict):
-            return cls(
-                sha=git.get("sha") or None,
-                message=git.get("message") or None,
-                branch=git.get("branch") or git.get("to_branch") or None,
-                repo=git.get("repo") or None,
-                structured=git,
-            )
+            return cls._from_v2(git)
+        return cls._from_legacy(data, event_type)
 
+    @classmethod
+    def _from_v2(cls, git: dict[str, Any]) -> GitFacts:
+        """Read the facts a v2 event nests under ``git``."""
+        return cls(
+            sha=_first_spelling(git.get("sha")),
+            message=_first_spelling(git.get("message")),
+            branch=_first_spelling(git.get("branch"), git.get("to_branch")),
+            repo=_first_spelling(git.get("repo")),
+            structured=git,
+        )
+
+    @classmethod
+    def _from_legacy(cls, data: dict[str, Any], event_type: str) -> GitFacts:
+        """Read the facts a legacy event spreads over the top level and ``context``."""
         ctx = data.get("context")
         ctx = ctx if isinstance(ctx, dict) else {}
-        branch = data.get("branch") or ctx.get("branch") or data.get("to_branch") or None
-        if not branch and event_type == "git_operation":
-            _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", data.get("command", ""))
-            branch = _m.group(1) if _m else None
+
+        branch = _first_spelling(data.get("branch"), ctx.get("branch"), data.get("to_branch"))
+        if branch is None and event_type == "git_operation":
+            branch = _branch_from_checkout(data.get("command"))
 
         return cls(
-            sha=(
-                data.get("sha")
-                or ctx.get("sha")
-                or data.get("commit_hash")
-                or data.get("merge_sha")
-                or None
+            sha=_first_spelling(
+                data.get("sha"),
+                ctx.get("sha"),
+                data.get("commit_hash"),
+                data.get("merge_sha"),
             ),
             # The engine renames "message" to "commit_message" during ingestion
             # to avoid a RESERVED_OBSERVATION_KEYS collision, so both spellings
             # reach this point and both are read.
-            message=(
-                data.get("commit_message")
-                or ctx.get("message")
-                or data.get("message")
-                or data.get("message_preview")
-                or None
+            message=_first_spelling(
+                data.get("commit_message"),
+                ctx.get("message"),
+                data.get("message"),
+                data.get("message_preview"),
             ),
             branch=branch,
-            repo=data.get("repo") or ctx.get("repo") or None,
+            repo=_first_spelling(data.get("repo"), ctx.get("repo")),
             structured=None,
         )
 

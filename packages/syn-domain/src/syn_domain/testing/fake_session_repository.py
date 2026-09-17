@@ -16,9 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-    AgentSessionAggregate,
-)
+from syn_domain.contexts.agent_sessions import AgentSessionAggregate
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
