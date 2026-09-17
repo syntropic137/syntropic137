@@ -21,9 +21,22 @@ actually matters would have produced commits with no trailer and no error. It
 was caught in review, not by a test, because the test that existed knew about
 one feature rather than about the shape of the mistake.
 
+**2026-09-17, session-store deployment identity (#1089).** A third instance,
+and the first caught by dogfooding rather than review. The setting, the code
+paths, the docs and the unit tests all shipped; no compose file named the
+variable, so it could never reach a container and the feature was inert in
+every containerised deployment. `SYN_SESSION_STORE_READ_TOKEN` turned out to
+have the same gap, and `SYN_SESSION_STORE_LABEL` was missing from the selfhost
+stack specifically. The contract listed two of the five variables that the
+session-capture feature actually reads, so it certified a group it only
+partially knew.
+
 So this module is written per CONTRACT rather than per feature. Adding a new
-group to ``_CONTRACTS`` gets it every check below. The fix in both cases is the
-same: declare it once in ``docker-compose.yaml``, which every stack layers on.
+group to ``_CONTRACTS`` gets it every check below. The fix in all three cases is
+the same: declare it once in ``docker-compose.yaml``, which every stack layers
+on. When a feature gains a variable, add it to the existing contract - a
+contract that lists a subset of its feature's variables is worse than no
+contract, because it reports green over the gap.
 """
 
 from __future__ import annotations
@@ -52,11 +65,23 @@ class EnvContract:
 _CONTRACTS: tuple[EnvContract, ...] = (
     EnvContract(
         name="session capture",
-        variables=("SYN_SESSION_STORE_URL", "SYN_SESSION_STORE_AUTH_TOKEN"),
+        variables=(
+            "SYN_SESSION_STORE_URL",
+            "SYN_SESSION_STORE_AUTH_TOKEN",
+            "SYN_SESSION_STORE_LABEL",
+            "SYN_SESSION_STORE_READ_TOKEN",
+            "SYN_SESSION_STORE_DEPLOYMENT",
+        ),
         consequence=(
             "session capture is off on that stack, and an empty URL reads as "
             "'capture deliberately disabled', so the misconfiguration is "
-            "indistinguishable from the intended state"
+            "indistinguishable from the intended state. The same applies "
+            "per-variable: an unpassed READ_TOKEN makes every delegate look "
+            "like a transient store outage rather than an auth failure, and an "
+            "unpassed DEPLOYMENT silently stamps the derived "
+            "syntropic137__<APP_ENVIRONMENT>, so two installs sharing a tier "
+            "stay indistinguishable in the corpus - which is the exact thing "
+            "the operator set it to prevent (#1089)"
         ),
     ),
     EnvContract(

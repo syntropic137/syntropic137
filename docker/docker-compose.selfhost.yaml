@@ -229,6 +229,9 @@ services:
       # these allow a non-1Password deployment to set them directly.
       - SYN_SESSION_STORE_URL=${SYN_SESSION_STORE_URL:-}
       - SYN_SESSION_STORE_AUTH_TOKEN=${SYN_SESSION_STORE_AUTH_TOKEN:-}
+      - SYN_SESSION_STORE_LABEL=${SYN_SESSION_STORE_LABEL:-}
+      - SYN_SESSION_STORE_READ_TOKEN=${SYN_SESSION_STORE_READ_TOKEN:-}
+      - SYN_SESSION_STORE_DEPLOYMENT=${SYN_SESSION_STORE_DEPLOYMENT:-}
       # MinIO (artifact storage) — password read from Docker secret in entrypoint
       - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
