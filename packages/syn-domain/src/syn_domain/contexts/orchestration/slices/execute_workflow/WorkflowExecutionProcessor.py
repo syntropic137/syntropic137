@@ -29,6 +29,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     ArtifactCollector,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
     PhaseReportedFailureError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
@@ -618,7 +619,14 @@ class WorkflowExecutionProcessor:
             )
             msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
             logger.error(msg)
-            raise RuntimeError(msg)
+            # The status goes with the exception, not only into its message.
+            # This is the ONLY frame that holds it: the aggregate is never told
+            # the run completed on this path, so `AgentExecutionCompletedEvent`
+            # - the one event carrying `exit_code` - is never written for a
+            # phase that exited non-zero. Which is to say every status that
+            # actually distinguishes the outcomes (124, -11) was durably
+            # recorded nowhere, and only 0 ever survived (#1319).
+            raise NonZeroExitError(msg, exit_code=result.command.exit_code)
 
         aggregate.agent_execution_completed(result.command)
         await self._journal.append(aggregate)

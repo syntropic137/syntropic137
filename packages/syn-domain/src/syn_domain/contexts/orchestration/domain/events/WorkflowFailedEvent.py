@@ -52,6 +52,29 @@ class WorkflowFailedEvent(DomainEvent):
     # location, including the phase that did nothing at all.
     observed_branches: list[BranchObservation] | None = None
 
+    # What failed_phase_id's process exited with (#1319).
+    #
+    # THE DURABLE COPY, and for a failed phase the only one. The status is
+    # known inside the execution and nowhere else afterwards: the platform
+    # REMOVES the workspace container when it reaps, so a watcher polling
+    # `docker inspect` later finds nothing, and the container's own PID 1 is
+    # `sleep infinity` anyway - its status would report the stop signal, not
+    # what the agent did. Meanwhile `AgentExecutionCompleted`, the only other
+    # event carrying a status, is written exclusively on the zero-exit path,
+    # so every value that actually distinguishes the outcomes reached no
+    # durable record at all until this field.
+    #
+    # It is on the EVENT rather than the read model on purpose: a frozen
+    # projection (#1318) is exactly the circumstance in which someone needs
+    # this, and Lane 1 is what an outage does not touch.
+    #
+    # None means nothing observed a status, which is not 0. 0 is a process
+    # that ran and exited cleanly; None covers a phase stranded by a restart,
+    # a failure with no process behind it, and every event written before this
+    # field existed. 124 (budget reached) and -11 (killed) call for different
+    # responses again, which is why the number is kept rather than a flag.
+    exit_code: int | None = None
+
     # Partial progress
     completed_phases: int
     total_phases: int

@@ -81,6 +81,7 @@ class FailExecutionCommand:
         total_phases: int,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -99,6 +100,12 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
 
 
 class StartPhaseCommand:

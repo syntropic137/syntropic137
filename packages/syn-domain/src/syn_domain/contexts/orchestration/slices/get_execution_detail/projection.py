@@ -391,6 +391,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                     # field, which is null: correct, because nothing looked.
                     phase["observed_branches"] = event_data.get("observed_branches")
 
+                    # What its process exited with (#1319). Copied verbatim
+                    # INCLUDING None, which means nothing observed a status -
+                    # not a clean exit. This is the only surface that can
+                    # answer "did it hit its budget (124) or get killed (-11)"
+                    # after the workspace has been reaped.
+                    phase["exit_code"] = event_data.get("exit_code")
+
                     # The failed phase never gets a PhaseCompleted event, so
                     # without this its duration_seconds is stuck at the 0.0
                     # PhaseDetail.running() seeded it with -- reporting a

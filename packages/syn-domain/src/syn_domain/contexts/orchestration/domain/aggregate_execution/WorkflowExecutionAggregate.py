@@ -331,6 +331,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             observed_branches=(
                 None if command.observed_branches is None else list(command.observed_branches)
             ),
+            # Straight through, None included: "nothing observed a status" is
+            # a fact about the failure and coercing it to 0 would report a
+            # clean exit for a phase nobody watched (#1319).
+            exit_code=command.exit_code,
         )
         self._apply(event)
 

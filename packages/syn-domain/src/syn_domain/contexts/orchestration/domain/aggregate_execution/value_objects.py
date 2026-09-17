@@ -186,6 +186,20 @@ class PhaseResult:
     cache_read_tokens: int = 0
     total_tokens: int = 0
     error_message: str | None = None
+    exit_code: int | None = None
+    """What killed this phase, when a process status said so (#1319).
+
+    None means nothing observed a status, and that includes every phase that
+    did NOT fail - the same contract `observed_branches` keeps on the events
+    below. A phase that succeeded has its 0 recorded durably already, on the
+    `AgentExecutionCompleted` event written on the zero-exit branch; restating
+    it here would be a second source for one fact, derived rather than read.
+
+    What had no record at all was the other direction. 124 (the phase reached
+    its time budget) and -11 (it was killed) each call for a different
+    response, and neither reached any durable store, because the exception
+    raised for a non-zero exit stops the run before that event is ever written.
+    """
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
