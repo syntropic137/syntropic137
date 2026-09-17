@@ -43,6 +43,7 @@ def _summary_row(session_id: str, *, total_input: int | None = 1_000) -> _FakeRo
         "sdk_cost": Decimal("0.25"),
         "duration_ms_val": 4_000,
         "agent_model": _MODEL,
+        "workspace_id": "ws-from-summary",
         "completed_at": datetime(2026, 9, 3, 6, 0, tzinfo=UTC),
         "execution_id": "exec-1",
         "phase_id": "verify",

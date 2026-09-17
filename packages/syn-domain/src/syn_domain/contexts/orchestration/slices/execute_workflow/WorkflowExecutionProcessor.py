@@ -660,10 +660,16 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
+            # The provider is the phase's because we launched it; the model is
+            # the runtime's because only the agent's own stream said it (#1284).
+            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
             # From the AGGREGATE, which rebuilt it from the event stream, and
             # not from anything this process was holding: a restart between
             # the agent finishing and this point is the commonest form of the
-            # "something went wrong" that the salvage exists for (#1300).
+            # "something went wrong" that the salvage exists for (#1300). This
+            # replaces `self._runtime.take_last_message(...)`, which read the
+            # same value out of process memory and lost it to exactly that
+            # restart.
             last_agent_message=aggregate.last_agent_message_for(todo.phase_id),
             # Asked only if the collector actually has to salvage. The reading
             # costs a git inspection, and it has to happen HERE rather than on

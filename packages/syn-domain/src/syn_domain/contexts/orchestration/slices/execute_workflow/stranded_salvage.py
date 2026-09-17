@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     ArtifactsCollectedCommand,
     CompletePhaseCommand,
@@ -112,6 +113,14 @@ async def salvage_stranded_phase(
         content=recovered.content,
         title=recovered.title,
         source_path=recovered.source_path,
+        # Nobody looked, and that is the honest record (#1284). This runs
+        # after a restart, so the process holds none of the phase's runtime
+        # state: the stream that was the only thing to ever name the model is
+        # gone, and the provider lived beside it. Naming the CONFIGURED model
+        # here would be the exact failure `AgentIdentity` exists to prevent -
+        # the requested model wearing the name of the one that ran, which
+        # reads as proof of a cross-model check and is not any.
+        agent=AgentIdentity(provider=None, model=None),
     )
 
     aggregate.artifacts_collected(

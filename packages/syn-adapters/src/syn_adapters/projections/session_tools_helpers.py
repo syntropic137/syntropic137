@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
-from syn_adapters.projections.session_tools_dispatch import row_to_operation
+from syn_adapters.projections.session_tools_dispatch import row_to_operation, rows_to_operations
 from syn_adapters.projections.session_tools_queries import query_session_tools
 from syn_shared.events import (
     SUBAGENT_STARTED,
@@ -25,7 +25,13 @@ logger = logging.getLogger(__name__)
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
-__all__ = ["get_pool", "get_session_tools", "query_session_tools", "row_to_operation"]
+__all__ = [
+    "get_pool",
+    "get_session_tools",
+    "query_session_tools",
+    "row_to_operation",
+    "rows_to_operations",
+]
 
 
 def get_pool(proj: SessionToolsProjection) -> asyncpg.Pool | None:
@@ -122,11 +128,7 @@ async def get_session_tools(
             )
 
             logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
-            return [
-                op
-                for row in rows
-                if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
-            ]
+            return rows_to_operations(rows, subagent_tool_names, git_event_types)
     except Exception as e:
         logger.error("Failed to query tool operations for %s: %s", session_id, e)
         return []

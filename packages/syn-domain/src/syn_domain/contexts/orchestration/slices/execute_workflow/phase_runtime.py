@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_observed_branches,
 )
@@ -164,6 +165,17 @@ class PhaseRuntime:
         self._tokens: dict[str, TokenAccumulator] = {}
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
+        #: The model each phase's harness announced on its own stream (#1284).
+        #: Held here rather than re-read at collection time because the stream
+        #: is gone by then; absent means the harness announced nothing.
+        #:
+        #: NOTE: keyed by phase id alone, so two concurrent runs of the same
+        #: workflow overwrite each other, and a restart loses it entirely -
+        #: the same two hazards that moved `last_agent_message` onto the event
+        #: stream in #1300. Left as it is here because widening this merge to
+        #: fix it is how one side of a merge gets lost; tracked as its own
+        #: problem.
+        self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -239,6 +251,9 @@ class PhaseRuntime:
         # this object remembers about it is lost to a restart in between. It
         # rides `AgentExecutionCompletedCommand` onto the event stream instead
         # and is read back off the aggregate.
+        announced = result.stream_result.announced_model
+        if announced is not None:
+            self._announced_models[phase_id] = announced
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
         self._auth_tokens[phase_id] = (
@@ -251,6 +266,20 @@ class PhaseRuntime:
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
+
+    def agent_for(self, phase_id: str, *, provider: str | None) -> AgentIdentity:
+        """Who ran this phase: the harness launched, and the model it announced.
+
+        ``provider`` is the caller's because the platform CHOSE it - it picked
+        the binary and started it, so there is no observation to make. The
+        model is this runtime's because only the stream ever said it, and the
+        stream is gone by the time artifacts are collected.
+
+        A phase whose harness announced nothing yields a None model rather than
+        the configured one. That is the point: the requested model wearing the
+        name of the one that ran would read as proof and not be any (#1284).
+        """
+        return AgentIdentity(provider=provider, model=self._announced_models.get(phase_id))
 
     def record_artifacts(self, phase_id: str, artifact_ids: list[str]) -> None:
         """Hold what this phase collected until it reports."""
@@ -305,6 +334,7 @@ class PhaseRuntime:
         session_id = self._session_ids.pop(phase_id, "")
         self._envs.pop(phase_id, None)
         self._cmds.pop(phase_id, None)
+        self._announced_models.pop(phase_id, None)
         workspace_cm = self._workspace_cms.pop(phase_id, None)
 
         # BEFORE teardown: once the container is gone so is the spool, and a

@@ -22,8 +22,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 )
 
 
-def _make_processor() -> WorkflowExecutionProcessor:
-    """Create a processor with mocked dependencies."""
+def _make_processor(artifact_repository: object | None = None) -> WorkflowExecutionProcessor:
+    """Create a processor with mocked dependencies.
+
+    ``artifact_repository`` is a parameter rather than something a caller pokes
+    in afterwards because a test that wants to read what the processor SAVED
+    needs a repository that keeps it, and the processor decides at construction
+    which one its collector gets.
+    """
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
@@ -32,7 +38,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
         workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
+        artifact_repository=artifact_repository or AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,

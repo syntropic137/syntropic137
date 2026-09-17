@@ -44,6 +44,9 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
     ClaudePluginStoragePort,
     StoredClaudePluginTree,
 )
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
+    CodexRolloutPort,
+)
 from syn_domain.contexts.orchestration.ports.ConversationStoragePort import (
     ConversationStoragePort,
 )
@@ -73,6 +76,7 @@ __all__ = [
     "ClaudePluginFile",
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
+    "CodexRolloutPort",
     "ConversationStoragePort",
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",

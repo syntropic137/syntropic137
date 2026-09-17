@@ -70,6 +70,24 @@ class ArtifactSummary:
     fall back to the flat ``artifacts/input/<phase-id>.md`` name in that case.
     """
 
+    agent_provider: str | None = None
+    """Harness that ran the phase which produced this artifact (issue #1284).
+
+    None for an artifact no phase produced, and for every artifact written
+    before ArtifactCreated v6.
+    """
+
+    agent_model: str | None = None
+    """Model that harness ANNOUNCED on its own stream, never the model the phase
+    requested (issue #1284).
+
+    None means the harness reported none - true of every codex phase today.
+    Consumers MUST render that as "not reported" rather than substituting the
+    phase's configured model: the field exists so a cross-model review can
+    PROVE a different model checked the work, and a requested value standing in
+    for an observed one would be evidence of nothing.
+    """
+
     @classmethod
     def from_dict(cls, data: dict) -> "ArtifactSummary":
         """Create from dictionary data."""
@@ -87,6 +105,8 @@ class ArtifactSummary:
             content_hash=data.get("content_hash"),
             is_primary_deliverable=read_primary_flag(data.get("is_primary_deliverable")),
             source_path=data.get("source_path"),
+            agent_provider=data.get("agent_provider"),
+            agent_model=data.get("agent_model"),
         )
 
     def to_dict(self) -> dict:
@@ -113,4 +133,6 @@ class ArtifactSummary:
             "content_hash": self.content_hash,
             "is_primary_deliverable": self.is_primary_deliverable,
             "source_path": self.source_path,
+            "agent_provider": self.agent_provider,
+            "agent_model": self.agent_model,
         }

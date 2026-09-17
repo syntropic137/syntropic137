@@ -111,9 +111,7 @@ async def _salvage_before_failing(
 
     Returns the salvaged phase's name, or None.
     """
-    from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
-        salvage_stranded_phase,
-    )
+    from syn_domain.contexts.orchestration import salvage_stranded_phase
 
     try:
         collector = await _artifact_collector()

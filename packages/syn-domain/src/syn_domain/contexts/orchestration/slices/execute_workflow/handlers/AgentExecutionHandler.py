@@ -257,6 +257,13 @@ class AgentExecutionHandler:
                 phase_id=todo.phase_id,
                 session_id=session_id,
                 agent_model=agent_model,
+                # The workspace IS the rollout source: codex wrote the file
+                # inside this container, so the thing that can still reach it
+                # is the thing that still holds the container (#1284). Passing
+                # it here rather than reading the model later is what keeps the
+                # read inside the container's lifetime - by collection time the
+                # workspace is torn down and the only copy is gone.
+                rollout=workspace,
             )
         return EventStreamProcessor(
             tokens=tokens,

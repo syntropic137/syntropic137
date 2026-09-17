@@ -122,6 +122,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    salvage_stranded_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
@@ -231,6 +234,7 @@ __all__ = [
     "mint_wrapper_name",
     "render_workspace_prompt",
     "require_supported_execution_type",
+    "salvage_stranded_phase",
     "validate_phase_declarations",
     "validate_workflow_yaml",
 ]
