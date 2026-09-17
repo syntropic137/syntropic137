@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
@@ -130,7 +130,10 @@ def reject_unknown_query_params(request: Request) -> None:
     accepted_listing = ", ".join(sorted(accepted)) if accepted else "(none)"
     context = UnknownQueryParameterContext(accepted=sorted(accepted))
     raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        # Literal 422, as everywhere else in this app: Starlette has renamed
+        # its constant for this code once already, and the number has not
+        # moved. See syn_api.services.skill_error_mapping for the same choice.
+        status_code=422,
         detail=[
             UnknownQueryParameterDetail(
                 loc=("query", key),
