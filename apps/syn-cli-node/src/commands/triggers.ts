@@ -8,6 +8,7 @@ import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim, printSuccess } from "../output/console.js";
+import { printStarted } from "../output/started.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
@@ -75,7 +76,14 @@ const registerCommand: CommandDef = {
         created_by: "cli",
       },
     }), "Register trigger");
-    printSuccess(`Trigger registered: ${d.trigger_id}`);
+    // A trigger is a standing instruction to start workflow `workflow`, and
+    // `workflow` only resolves on the deployment it was registered against —
+    // so the report has to name both, or the ambiguity outlives the command
+    // and fires later (issue #1264).
+    printStarted(api, `Trigger registered: ${d.trigger_id}`, [
+      { label: "Workflow", value: workflow },
+      { label: "Event", value: event },
+    ]);
   },
 };
 
@@ -101,7 +109,11 @@ const enablePresetCommand: CommandDef = {
       }),
       "Enable preset",
     );
-    printSuccess(`Preset "${preset}" enabled: ${d.trigger_id}`);
+    printStarted(api, `Preset "${preset}" enabled: ${d.trigger_id}`, [
+      // Omitted rather than shown empty when the preset picks its own default:
+      // there is no workflow ID here to be ambiguous about.
+      ...(workflow ? [{ label: "Workflow", value: workflow }] : []),
+    ]);
   },
 };
 
@@ -273,7 +285,11 @@ const resumeCommand: CommandDef = {
       }),
       "Resume trigger",
     );
-    printSuccess(`Trigger ${id} resumed.`);
+    // Not enumerated by the review, but the same class as `register` and
+    // `enable`: resuming re-arms a standing instruction to start workflows, so
+    // the deployment it will fire on belongs in the report (issue #1264).
+    // `pause` and `delete` stay bare — they disarm rather than arm.
+    printStarted(api, `Trigger ${id} resumed.`);
   },
 };
 

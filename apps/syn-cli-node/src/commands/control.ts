@@ -8,6 +8,7 @@ import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
+import { printStarted } from "../output/started.js";
 import { style, GREEN, YELLOW } from "../output/ansi.js";
 import { formatStatus } from "../output/format.js";
 
@@ -57,8 +58,12 @@ const resumeCommand: CommandDef = {
       }),
       "Resume execution",
     );
-    print(style(`Resume signal sent for execution ${id}`, GREEN));
-    print(`  State: ${data.state}`);
+    // Resuming restarts work on a specific deployment, so it reports like the
+    // other start/activate commands — the execution ID alone names a different
+    // run on a different host (issue #1264).
+    printStarted(api, `Resume signal sent for execution ${id}`, [
+      { label: "State", value: data.state },
+    ]);
   },
 };
 
