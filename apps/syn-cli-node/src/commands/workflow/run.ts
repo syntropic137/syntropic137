@@ -18,18 +18,44 @@ type InputDeclaration = components["schemas"]["InputDeclarationModel"];
 type PhaseDefinition = components["schemas"]["PhaseDefinitionResponse"];
 
 /**
- * Names referenced via `{{name}}` in any phase's prompt template. An -i key
- * outside this set is substituted into nothing and silently discarded
- * (issue #1081).
+ * The input name `-t` supplies. The API merges the top-level `task` field into
+ * `inputs` as `inputs["task"]`, so `$ARGUMENTS` and `{{task}}` are two
+ * spellings of one value (docs/api/v1/workflows.md "Prompt Substitution";
+ * `_substitute_inputs` layers 2a and 2d). Both directions of this file's
+ * deliverability checks depend on knowing that, so the name is written once.
  */
-function referencedInputNames(phases: PhaseDefinition[] | undefined): Set<string> {
-  const referenced = new Set<string>();
+const TASK_INPUT_NAME = "task";
+
+/**
+ * Input names any phase prompt in this workflow can actually consume, in either
+ * spelling: `{{name}}` for any name, plus `$ARGUMENTS` for `task`. A supplied
+ * name outside this set is substituted into nothing and silently discarded
+ * (issues #1081, #1280).
+ *
+ * Callers ask whether the workflow consumes a name; which spelling answered is
+ * not their business.
+ */
+function consumedInputNames(phases: PhaseDefinition[] | undefined): Set<string> {
+  const consumed = new Set<string>();
   for (const phase of phases ?? []) {
-    for (const match of (phase.prompt_template ?? "").matchAll(/\{\{(\w+)\}\}/g)) {
-      referenced.add(match[1]!);
+    const template = phase.prompt_template ?? "";
+    for (const match of template.matchAll(/\{\{(\w+)\}\}/g)) {
+      consumed.add(match[1]!);
+    }
+    if (template.includes("$ARGUMENTS")) {
+      consumed.add(TASK_INPUT_NAME);
     }
   }
-  return referenced;
+  return consumed;
+}
+
+/**
+ * Whether the workflow declares a default for `name`, which the API applies when
+ * the dispatch supplies no value of its own (`_merge_inputs`). Such a name is
+ * never empty at render time, so it needs no warning.
+ */
+function declaredDefault(declarations: InputDeclaration[], name: string): boolean {
+  return declarations.some((d) => d.name === name && d.default != null);
 }
 
 /**
@@ -141,8 +167,18 @@ export const runCommand: CommandDef = {
     );
 
     const declarations: InputDeclaration[] = detail.input_declarations ?? [];
+
+    // Input names this dispatch supplies a value for. `-t` supplies
+    // TASK_INPUT_NAME just as surely as `-i task=...` does, so a workflow that
+    // declares `task` as a required input must not be reported as missing it
+    // when the caller typed `-t` (#1280).
+    const supplied = new Set(Object.keys(parsedInputs));
+    if (task !== undefined) {
+      supplied.add(TASK_INPUT_NAME);
+    }
+
     const missingRequired = declarations.filter(
-      (d) => d.required && d.default == null && !Object.hasOwn(parsedInputs, d.name),
+      (d) => d.required && d.default == null && !supplied.has(d.name),
     );
     if (missingRequired.length > 0) {
       printError("Missing required inputs:");
@@ -155,13 +191,13 @@ export const runCommand: CommandDef = {
       throw new CLIError("Missing required inputs", 1);
     }
 
-    // Dispatch-time deliverability warnings (issue #1081): both checks are
+    // Dispatch-time deliverability checks (issues #1081, #1280): all of them are
     // purely local — the workflow detail already fetched above has
     // everything needed — and must fire on the --dry-run path too, since
     // dry-run's job is to answer "will this do what I typed?".
-    const referenced = referencedInputNames(detail.phases);
+    const consumed = consumedInputNames(detail.phases);
     for (const key of Object.keys(parsedInputs)) {
-      if (!referenced.has(key)) {
+      if (!consumed.has(key)) {
         print(
           style("Warning:", YELLOW) +
             ` --input '${key}' is not referenced by any phase prompt in '${wf.name}' — it will be discarded.`,
@@ -173,6 +209,41 @@ export const runCommand: CommandDef = {
         style("Warning:", YELLOW) +
           ` '${wf.name}' has requires_repos: false — -R repos will not be cloned.`,
       );
+    }
+
+    // A prompt that consumes `task` and a dispatch that supplies one are two
+    // independent facts, and either one alone used to dispatch silently (#1280).
+    // They are not equally bad, which is why one refuses and the one above it
+    // only warns:
+    //
+    //   -t with nothing to consume it REFUSES. An unreferenced --input is one
+    //   parameter of several going missing; a discarded -t is the entire
+    //   instruction going missing, and what runs instead is the workflow's own
+    //   hardcoded prompt. The run then costs full money and time and reports
+    //   success for work nobody asked for. There is no dispatch for which that
+    //   is the intended outcome, so there is nothing to preserve by continuing.
+    //   The remedy is in the caller's hands either way: drop -t, or make a phase
+    //   consume it.
+    //
+    //   `$ARGUMENTS` with no task WARNS. It renders empty, which is degraded but
+    //   can be deliberate — `$ARGUMENTS` as an optional addendum to a prompt
+    //   that stands on its own is a legitimate template, and refusing would make
+    //   such a workflow unrunnable without a dummy task.
+    const consumesTask = consumed.has(TASK_INPUT_NAME);
+    if (consumesTask && !supplied.has(TASK_INPUT_NAME) && !declaredDefault(declarations, TASK_INPUT_NAME)) {
+      print(
+        style("Warning:", YELLOW) +
+          ` a phase prompt in '${wf.name}' consumes the task, but none was supplied — it will render empty.` +
+          ` Pass -t "<task>".`,
+      );
+    }
+    if (task !== undefined && !consumesTask) {
+      printError(
+        `no phase prompt in '${wf.name}' consumes the task — -t would be discarded and the workflow` +
+          ` would run its own prompt instead.`,
+      );
+      printDim('Add $ARGUMENTS (or {{task}}) to a phase prompt, or drop -t to run the workflow as written.');
+      throw new CLIError("Task not consumed by workflow", 1);
     }
 
     if (!quiet) {
