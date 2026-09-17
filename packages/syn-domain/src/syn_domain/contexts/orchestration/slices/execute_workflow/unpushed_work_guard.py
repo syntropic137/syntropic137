@@ -255,9 +255,7 @@ async def quarantine_unpushed_work(
     quarantined: list[QuarantinedWork] = []
     try:
         for repo in await _repositories(workspace):
-            work = await _unsaved_work(
-                workspace, repo, delivers_repo_changes=delivers_repo_changes
-            )
+            work = await _unsaved_work(workspace, repo, delivers_repo_changes=delivers_repo_changes)
             if work is not None:
                 quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
     except WorkspaceInspectionFailedError as unreadable:
