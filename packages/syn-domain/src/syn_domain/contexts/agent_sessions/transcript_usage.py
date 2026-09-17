@@ -311,6 +311,30 @@ def _codex_model(record: RolloutRecord) -> str | None:
     return model if isinstance(model, str) else None
 
 
+def model_from_rollout(document: RolloutDocument) -> str | None:
+    """Which model a codex rollout says ran, or None if it does not say one.
+
+    Codex names its model on disk and NOWHERE on its stdout stream, so this is
+    the only place a codex phase's model can be observed at all (#1284). It is
+    ``_codex_model``'s reader, not a second one: a rollout field with two
+    readers drifts the moment codex moves it, and the failure is silent - both
+    the price and the identity would go quietly unknown.
+
+    None is returned for a rollout that names no model AND for one that names
+    several. The second is the refusal ``_codex_usage`` already makes for
+    pricing, for the same reason: a session that spanned models cannot be
+    attributed to one of them, and naming whichever came first would read as
+    evidence. The caller cannot tell those two apart, and does not need to -
+    both mean "the rollout does not establish a model".
+    """
+    models = {
+        model
+        for record in document
+        if isinstance(record, Mapping) and (model := _codex_model(record)) is not None
+    }
+    return next(iter(models)) if len(models) == 1 else None
+
+
 def _codex_invariant_broken(snapshots: Sequence[_CodexSnapshot]) -> str | None:
     """Why this rollout cannot be trusted, or None if it holds together.
 
