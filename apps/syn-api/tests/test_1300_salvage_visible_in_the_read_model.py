@@ -17,9 +17,12 @@ value is put in as an event and read out of the model an API client receives.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
+
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_api.routes.executions.queries import _map_phase_detail, _map_phase_to_response
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -27,27 +30,12 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
     WorkflowExecutionDetailProjection,
 )
 
-from syn_api.routes.executions.queries import _map_phase_detail, _map_phase_to_response
-
 if TYPE_CHECKING:
     from syn_api.routes.executions.models import PhaseExecutionInfo
 
 EXECUTION_ID = "exec-1300-readmodel"
 PHASE_ID = "phase-implement"
 SESSION_ID = "sess-1300"
-
-
-class _Store:
-    """The projection store, as small as the projection's use of it allows."""
-
-    def __init__(self) -> None:
-        self.records: dict[str, Any] = {}
-
-    async def get(self, _projection: str, key: str) -> Any:
-        return self.records.get(key)
-
-    async def save(self, _projection: str, key: str, value: Any) -> None:
-        self.records[key] = value
 
 
 class _NoProjections:
@@ -68,8 +56,8 @@ async def _phase_as_an_api_client_sees_it(
     whose PhaseStarted never arrived builds the record from scratch instead of
     updating one, and that branch re-lists its fields somewhere else entirely.
     """
-    store = _Store()
-    projection = WorkflowExecutionDetailProjection(store)  # pyright: ignore[reportArgumentType]
+    store = InMemoryProjectionStore()
+    projection = WorkflowExecutionDetailProjection(store)
 
     await projection.on_workflow_execution_started(
         {
@@ -105,7 +93,9 @@ async def _phase_as_an_api_client_sees_it(
         }
     )
 
-    detail = WorkflowExecutionDetail.from_dict(store.records[EXECUTION_ID])
+    record = await store.get(WorkflowExecutionDetailProjection.PROJECTION_NAME, EXECUTION_ID)
+    assert record is not None, "the projection must have stored the execution"
+    detail = WorkflowExecutionDetail.from_dict(record)
     mapped = await _map_phase_detail(
         detail.phases[0],
         _NoProjections(),  # pyright: ignore[reportArgumentType]

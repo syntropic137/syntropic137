@@ -207,6 +207,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """
         if self._status != ExecutionStatus.RUNNING:
             return None
+        execution_id = self.aggregate_id
+        if execution_id is None:
+            return None
         phase_id = self._running_phase_id
         if phase_id is None:
             return None
@@ -214,6 +217,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if run is None:
             return None
         return StrandedDeliverable(
+            execution_id=execution_id,
+            workflow_id=self._workflow_id or "",
             phase_id=run.phase_id,
             phase_name=run.phase_name,
             session_id=run.session_id,
@@ -619,7 +624,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         said = _evt(event, "last_agent_message")
         if not said:
             return
-        phase_id = _evt(event, "phase_id")
+        phase_id: str = _evt(event, "phase_id") or ""
+        if not phase_id:
+            return
         self._finished_agent_runs[phase_id] = FinishedAgentRun(
             phase_id=phase_id,
             phase_name=self._phase_names.get(phase_id, phase_id),

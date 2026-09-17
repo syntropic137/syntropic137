@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
     ProvisionWorkspaceCompletedCommand,
@@ -34,12 +36,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     WorkflowExecutionAggregate,
 )
 
-from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from event_sourcing import DomainEvent, EventEnvelope
+
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
 
 _REAPED = CleanupResult(fully_reaped=True)
 _CUTOFF = datetime(2030, 1, 1, tzinfo=UTC)
@@ -120,12 +124,12 @@ class _ArtifactRepository:
     """Where a salvaged deliverable lands, kept so the test can read it back."""
 
     def __init__(self) -> None:
-        self.saved: list[Any] = []
+        self.saved: list[ArtifactAggregate] = []
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: ArtifactAggregate) -> None:
         self.saved.append(aggregate)
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: ArtifactAggregate) -> None:
         await self.save(aggregate)
 
 

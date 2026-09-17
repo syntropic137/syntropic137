@@ -101,13 +101,12 @@ async def salvage_stranded_phase(
     if recovered is None:
         return None
 
-    execution_id = aggregate.aggregate_id
     artifact_id = str(uuid4())
     await collector.create_artifact(
         artifact_id=artifact_id,
-        workflow_id=aggregate.workflow_id or "",
+        workflow_id=stranded.workflow_id,
         phase_id=stranded.phase_id,
-        execution_id=execution_id,
+        execution_id=stranded.execution_id,
         session_id=stranded.session_id,
         artifact_type=_RECOVERED_ARTIFACT_TYPE,
         content=recovered.content,
@@ -117,7 +116,7 @@ async def salvage_stranded_phase(
 
     aggregate.artifacts_collected(
         ArtifactsCollectedCommand(
-            execution_id=execution_id,
+            execution_id=stranded.execution_id,
             phase_id=stranded.phase_id,
             artifact_ids=[artifact_id],
             first_content_preview=recovered.content,
@@ -127,8 +126,8 @@ async def salvage_stranded_phase(
     )
     aggregate.complete_phase(
         CompletePhaseCommand(
-            execution_id=execution_id,
-            workflow_id=aggregate.workflow_id or "",
+            execution_id=stranded.execution_id,
+            workflow_id=stranded.workflow_id,
             phase_id=stranded.phase_id,
             session_id=stranded.session_id,
             artifact_id=artifact_id,
@@ -150,7 +149,7 @@ async def salvage_stranded_phase(
         "the finished work would have been discarded with the execution (#1300)",
         stranded.phase_id,
         stranded.phase_name,
-        execution_id,
+        stranded.execution_id,
     )
     return SalvagedPhase(
         phase_id=stranded.phase_id,

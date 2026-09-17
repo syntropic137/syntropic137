@@ -58,8 +58,15 @@ class StrandedDeliverable:
 
     Produced only when there IS something to salvage: a phase whose agent said
     nothing leaves nothing behind and is not stranded, it is simply lost.
+
+    It carries the execution and workflow ids too, so that a caller holding one
+    of these needs nothing else from the aggregate. That is not convenience: an
+    aggregate that has never been hydrated has no id, and resolving that here
+    keeps "does this execution exist" from becoming the salvage's problem.
     """
 
+    execution_id: str
+    workflow_id: str
     phase_id: str
     phase_name: str
     session_id: str
