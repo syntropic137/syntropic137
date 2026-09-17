@@ -48,6 +48,20 @@ class PhaseMetricsEntry:
     output_tokens: int = 0
     total_tokens: int = 0
     artifact_count: int = 0
+    recovered_runs: int = 0
+    """How many runs of this phase completed on a SALVAGED deliverable.
+
+    A count, not a flag, because this entry is keyed by workflow_id and every
+    field beside it is a sum across runs: "three of this phase's runs stood on
+    a transcript recovery" is the question a workflow owner has at this level,
+    and a boolean could not tell three from one. The per-run answer lives on
+    the execution detail record.
+
+    This is the surface the salvage (#1195, #1300) is measured on. The salvage
+    lets a phase complete when it wrote no deliverable, which is the right
+    trade for one run and a defect worth fixing if it is happening every run -
+    and the two are indistinguishable unless somebody is counting.
+    """
 
     completed_seconds: float | None = None
     """Seconds accumulated by the runs of this phase that FINISHED.
@@ -91,6 +105,7 @@ class PhaseMetricsEntry:
             output_tokens=data.get("output_tokens", 0),
             total_tokens=data.get("total_tokens", 0),
             artifact_count=data.get("artifact_count", 0),
+            recovered_runs=data.get("recovered_runs", 0),
             completed_seconds=data.get("duration_seconds"),
             settled_status=data.get("settled_status", "completed"),
             active_runs=data.get("active_runs") or {},
@@ -111,6 +126,7 @@ class PhaseMetricsEntry:
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
             "artifact_count": self.artifact_count,
+            "recovered_runs": self.recovered_runs,
             "duration_seconds": self.completed_seconds,
             "active_runs": {
                 execution_id: _as_stored_text(started_at)

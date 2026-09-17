@@ -187,6 +187,8 @@ class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
             output_tokens=entry.output_tokens + event_data.get("output_tokens", 0),
             total_tokens=entry.total_tokens + event_data.get("total_tokens", 0),
             artifact_count=entry.artifact_count + (1 if event_data.get("artifact_id") else 0),
+            recovered_runs=entry.recovered_runs
+            + (1 if event_data.get("deliverable_recovered") else 0),
         )
 
         await self._save_phases(workflow_id, phases)
