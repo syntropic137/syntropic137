@@ -187,6 +187,24 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # Create initial phases from workflow definition (all pending)
         # Note: In a full implementation, we'd get phase names from workflow
         # For now, phases are populated as they start/complete
+        # Each phase's wall-clock budget, keyed by phase id. Stated once, on
+        # this event, and the phase that later consumes it does not restate
+        # it - so it is read here and held on the execution record until
+        # `on_phase_started` has a phase to attach it to. The projection's
+        # store IS its memory; a map on the instance would not survive a
+        # restart mid-run. Phases with no stated budget are simply absent, so
+        # an unknown budget stays None downstream rather than becoming a
+        # number nobody set.
+        raw_definitions = event_data.get("phase_definitions")
+        phase_budgets: dict[str, int] = {}
+        for definition in raw_definitions if isinstance(raw_definitions, list) else ():
+            if not isinstance(definition, dict):
+                continue
+            phase_id = definition.get("phase_id")
+            timeout = definition.get("timeout_seconds")
+            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
+                phase_budgets[phase_id] = timeout
+
         detail = {
             "execution_id": execution_id,
             "workflow_id": event_data.get("workflow_id", ""),
