@@ -173,6 +173,34 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
     }
 
 
+def _build_workspace_operator_env() -> dict[str, str]:
+    """Build the operator co-authorship env for workspace containers.
+
+    agentic-primitives ships a ``prepare-commit-msg`` hook and installs it into
+    every workspace at container start, but the hook reads SYN_OPERATOR_NAME and
+    SYN_OPERATOR_EMAIL and exits immediately when either is missing. Nothing
+    here set them, so the hook has been shipping and no-opping: every agent
+    commit was authored by the bot alone and the sponsoring human got no GitHub
+    contribution for it.
+
+    Kept separate from the telemetry env rather than folded into it. They answer
+    different questions and are configured independently; a single builder would
+    make a telemetry misconfiguration able to drop attribution, and vice versa.
+
+    Returns an empty dict when attribution is not fully configured.
+    """
+    from syn_shared.settings.git_identity import OperatorSettings
+
+    return OperatorSettings().attribution_env
+
+
+def _build_workspace_env() -> dict[str, str]:
+    """Compose the full non-secret environment for workspace containers."""
+    env = _build_workspace_telemetry_env()
+    env.update(_build_workspace_operator_env())
+    return env
+
+
 async def get_execution_processor() -> WorkflowExecutionProcessor:
     """Wire up WorkflowExecutionProcessor with all dependencies (ISS-196).
 
@@ -236,7 +264,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         session_repository=get_session_repository(),
         workspace_service=WorkspaceService.create(
             config=ws_config,
-            environment=_build_workspace_telemetry_env(),
+            environment=_build_workspace_env(),
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,

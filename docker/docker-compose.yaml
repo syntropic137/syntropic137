@@ -154,6 +154,13 @@ services:
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
+      # Operator co-authorship on agent commits (#1265). Same reasoning as the
+      # session-store trio directly above, and the same failure if omitted: the
+      # workspace image's prepare-commit-msg hook exits silently when either is
+      # missing, so a stack that does not pass them produces commits with no
+      # trailer and no error. Declared here so every overlay inherits it.
+      SYN_OPERATOR_NAME: ${SYN_OPERATOR_NAME:-}
+      SYN_OPERATOR_EMAIL: ${SYN_OPERATOR_EMAIL:-}
       # Operator escape hatch for pinning a different workspace image (#954).
       # Declared WITHOUT a value on purpose. Compose removes an unresolved
       # bare key from the container environment, but preserves an explicitly

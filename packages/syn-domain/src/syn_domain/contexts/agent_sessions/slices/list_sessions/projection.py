@@ -58,11 +58,14 @@ def _build_query_filters(
     status_filter: str | None,
     statuses: list[str] | None,
     parent_session_id: str | None = None,
+    execution_id: str | None = None,
 ) -> dict[str, str]:
     """Build the equality filter map for store.query()."""
     filters: dict[str, str] = {}
     if workflow_id:
         filters["workflow_id"] = workflow_id
+    if execution_id:
+        filters["execution_id"] = execution_id
     if status_filter and not statuses:
         filters["status"] = status_filter
     if parent_session_id:
@@ -406,6 +409,7 @@ class SessionListProjection(AutoDispatchProjection):
         self,
         *,
         workflow_id: str | None = None,
+        execution_id: str | None = None,
         parent_session_id: str | None = None,
         statuses: Collection[str] | None = None,
         started_after: datetime | None = None,
@@ -431,7 +435,7 @@ class SessionListProjection(AutoDispatchProjection):
         ``search`` matches case-insensitively against the session id and the
         workflow id.
         """
-        filters = _build_query_filters(workflow_id, None, None, parent_session_id)
+        filters = _build_query_filters(workflow_id, None, None, parent_session_id, execution_id)
 
         def base(record: ProjectionRecord) -> bool:
             return matches_search(search, record.get("id"), record.get("workflow_id"))

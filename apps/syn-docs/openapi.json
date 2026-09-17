@@ -1236,6 +1236,24 @@
             "description": "Filter by workflow ID"
           },
           {
+            "name": "execution_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263).",
+              "title": "Execution Id"
+            },
+            "description": "Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263)."
+          },
+          {
             "name": "status",
             "in": "query",
             "required": false,

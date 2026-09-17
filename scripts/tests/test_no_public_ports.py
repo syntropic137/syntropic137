@@ -52,6 +52,7 @@ act on, and asserting on the helper would not notice.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,7 @@ from scripts.no_public_ports import (
     evaluate,
     publishes_in_compose,
     publishes_in_shell,
+    tracked_files,
 )
 
 pytestmark = pytest.mark.unit
@@ -380,3 +382,41 @@ class TestTheCompactPublishFlag:
         code, flagged = verdict("safe.sh")
         assert flagged == {}
         assert code == 0
+
+
+class TestScopeCannotBeSilentlyEmptied:
+    """An empty scope passes this gate, so an empty scope has to be earned.
+
+    `tracked_files` shells out to `git ls-files` and used to read only its
+    stdout. Every way that command can fail - not a repository, git missing, a
+    pathspec git rejects - produces empty stdout and a non-zero status, so the
+    gate would scan zero files, find zero public ports and report ok. Run
+    against the version that preceded this class, `tracked_files(Path("/tmp"))`
+    returned `([], [])` and `main()` printed
+    "no_public_ports: ok (0 publishes bind loopback...)" and exited 0.
+
+    The distinguishing case is below it: a real repository with none of these
+    files in it says nothing too, and that one is honest.
+    """
+
+    def test_a_directory_that_is_not_a_repository_stops_the_gate(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit) as raised:
+            tracked_files(tmp_path)
+
+        assert "exit 128" in str(raised.value), (
+            "the failing status is the whole signal; without it an empty scope "
+            "is indistinguishable from a clean one"
+        )
+
+    def test_a_repository_with_nothing_in_scope_is_a_legitimate_empty(self, tmp_path: Path) -> None:
+        """Exit 0 with no output means there is genuinely nothing to judge."""
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+        assert tracked_files(tmp_path) == ([], [])
+
+    def test_the_real_repository_still_has_files_in_scope(self) -> None:
+        """The refusal must not have shrunk the scope it was added to protect."""
+        compose, shell = tracked_files(Path(__file__).resolve().parents[2])
+
+        assert compose, "no compose files in scope - the gate is judging nothing"
+        assert shell, "no shell files in scope - the gate is judging nothing"
