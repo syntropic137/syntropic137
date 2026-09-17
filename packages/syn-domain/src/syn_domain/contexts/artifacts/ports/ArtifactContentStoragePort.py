@@ -62,7 +62,9 @@ class ArtifactContentStoragePort(Protocol):
     The domain doesn't know about MinIO, S3, or filesystem details.
 
     Contract:
-        - upload() stores content and returns a StorageResult
+        - upload() stores content and returns a StorageResult, only once that
+          content is readable at its full size - callers publish the returned
+          storage_uri and consumers fetch it immediately (#700)
         - download() retrieves content by artifact_id
         - delete() removes content (for cleanup)
         - All operations are async

@@ -17,12 +17,86 @@ from syn_adapters.object_storage.protocol import (
     DownloadError,
     ObjectNotFoundError,
     StorageObject,
+    UploadError,
 )
 
 if TYPE_CHECKING:
     from minio import Minio
 
 logger = logging.getLogger(__name__)
+
+#: How long a write may take to become readable before we call the upload failed.
+#: MinIO itself is read-after-write consistent, so in practice the first stat
+#: answers; the budget is here for S3-compatible backends that are not, and for
+#: a bucket that is briefly serving a stale index.
+READABLE_TIMEOUT_SECONDS = 10.0
+
+_POLL_INITIAL_SECONDS = 0.05
+_POLL_MAX_SECONDS = 1.0
+
+
+def _is_missing(exc: Exception) -> bool:
+    """Whether a stat failure means "not there yet" rather than "broken"."""
+    error_msg = str(exc).lower()
+    return "nosuchkey" in error_msg or "not found" in error_msg
+
+
+async def _readable_size(client: Minio, bucket_name: str, key: str) -> int | None:
+    """Size the backend will currently serve for `key`, or None if it has none."""
+    loop = asyncio.get_event_loop()
+    try:
+        stat = await loop.run_in_executor(
+            None,
+            partial(client.stat_object, bucket_name, key),
+        )
+    except Exception as exc:
+        if _is_missing(exc):
+            return None
+        raise UploadError(f"Failed to confirm upload of {key}: {exc}", key=key) from exc
+    return stat.size
+
+
+async def await_object_readable(
+    client: Minio,
+    bucket_name: str,
+    key: str,
+    expected_size: int,
+    *,
+    timeout_seconds: float = READABLE_TIMEOUT_SECONDS,
+) -> None:
+    """Block until `key` serves `expected_size` bytes to a reader.
+
+    `put_object` returning means the backend accepted the write, not that the
+    next reader can see it. Anything that publishes a pointer to the object
+    needs the stronger fact - `ArtifactCreatedEvent` carries a `storage_uri`,
+    and a consumer that reacts to it and fetches immediately was getting a 404
+    or a short object (#700). Confirming here is what lets every caller treat a
+    returned upload as durable without knowing how that was established.
+
+    Size is checked, not just existence, because a short read is the same
+    failure as a missing one to the consumer and is far harder to spot.
+
+    Raises:
+        UploadError: If `key` is not readable at `expected_size` within
+            `timeout_seconds`, or if the backend fails the check outright.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout_seconds
+    delay = _POLL_INITIAL_SECONDS
+
+    while True:
+        size = await _readable_size(client, bucket_name, key)
+        if size == expected_size:
+            return
+        if loop.time() + delay > deadline:
+            seen = "missing" if size is None else f"{size} bytes"
+            raise UploadError(
+                f"Upload of {key} was accepted but is still {seen} after "
+                f"{timeout_seconds}s (expected {expected_size} bytes)",
+                key=key,
+            )
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, _POLL_MAX_SECONDS)
 
 
 async def get_object_info(

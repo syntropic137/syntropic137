@@ -35,6 +35,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.minio_helpers import (
+    await_object_readable as _await_object_readable,
+)
+from syn_adapters.object_storage.minio_helpers import (
     do_download as _do_download,
 )
 from syn_adapters.object_storage.minio_helpers import (
@@ -245,19 +248,25 @@ class MinioStorage:
             content_type: MIME type. Auto-detected if not provided.
             metadata: Custom metadata.
 
+        Returns when the content is readable, not merely accepted - see
+        `await_object_readable` for why the difference matters (#700).
+
         Returns:
             UploadResult with key, size, and ETag.
 
         Raises:
-            UploadError: If upload fails.
+            UploadError: If the upload fails, or if the written object does not
+                become readable at its full size.
         """
         await self._ensure_bucket()
         client = self._get_client()
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
             partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
         )
+        await _await_object_readable(client, self._bucket_name, key, len(content))
+        return result
 
     async def download(self, key: str) -> bytes:
         """Download content from MinIO.

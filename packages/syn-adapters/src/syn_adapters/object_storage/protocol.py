@@ -133,11 +133,18 @@ class StorageProtocol(Protocol):
             content_type: MIME type. Auto-detected if not provided.
             metadata: Custom metadata to attach.
 
+        Implementations MUST NOT return until the content is readable at its
+        full size. Callers publish pointers to uploaded objects, so "accepted"
+        is not a fact any of them can use - only "a reader can see it" is
+        (#700). Backends that are read-after-write consistent satisfy this for
+        free; the rest have to confirm.
+
         Returns:
             UploadResult with key, size, and optional URL.
 
         Raises:
-            StorageError: If upload fails.
+            StorageError: If upload fails, or if the content does not become
+                readable.
         """
         ...
 

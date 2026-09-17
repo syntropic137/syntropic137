@@ -793,7 +793,16 @@ class ArtifactCollector:
 
         artifact_type_enum = map_artifact_type(artifact_type)
 
-        # Upload content to object storage if configured (ADR-012)
+        # Upload content to object storage if configured (ADR-012).
+        #
+        # The event below carries this storage_uri, and a consumer that reacts
+        # to it fetches the bytes straight away - so the upload has to be
+        # readable, not just accepted, before we get here (#700). That is the
+        # port's contract rather than a step in this method: the domain should
+        # not know how a backend establishes readability, only that a returned
+        # URI can be read. A backend that cannot confirm it raises, which lands
+        # in the except below and leaves storage_uri None - the artifact is
+        # still whole, because the event embeds the content either way.
         storage_uri: str | None = None
         if self._content_storage is not None:
             try:
@@ -821,8 +830,8 @@ class ArtifactCollector:
                 )
             except Exception as e:
                 logger.warning(
-                    "Failed to upload artifact to object storage, "
-                    "content will be stored in event store only",
+                    "Artifact content is not durably readable in object "
+                    "storage, content will be stored in event store only",
                     extra={"artifact_id": artifact_id, "error": str(e)},
                 )
 

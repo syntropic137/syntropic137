@@ -47,6 +47,13 @@ class ArtifactContentStoragePort(Protocol):
             content_type: MIME type of the content.
             metadata: Optional metadata to store with the object.
 
+        Returns once the content is readable at ``storage_uri``, never merely
+        once the backend accepted it. ``ArtifactCreatedEvent`` carries that URI,
+        so a consumer reacting to the event fetches immediately; an
+        implementation that returns early hands out a pointer to bytes that are
+        not there (#700). An implementation that cannot confirm readability must
+        raise rather than return a URI it cannot stand behind.
+
         Returns:
             ArtifactUploadResult with storage_uri and size_bytes.
 
