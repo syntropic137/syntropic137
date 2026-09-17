@@ -6,17 +6,21 @@ import type {
 import { API_BASE, fetchJSON } from './base'
 import { listQueryParams, type ListQuery } from './listQuery'
 
+/**
+ * Every run of one workflow.
+ *
+ * This used to accept `page`/`page_size` and put them on the query string, but
+ * `/workflows/{id}/runs` declares neither and returns the full list, so paging
+ * here selected nothing - no caller ever passed them. Removed rather than
+ * honoured: the server now refuses a parameter it does not declare (#1313), so
+ * the dead argument was a 422 waiting for its first user. Paging this endpoint
+ * is a server-side change first.
+ */
 export async function listExecutions(
-  workflowId: string,
-  params?: { page?: number; page_size?: number }
+  workflowId: string
 ): Promise<WorkflowExecutionSummary[]> {
-  const searchParams = new URLSearchParams()
-  if (params?.page) searchParams.set('page', String(params.page))
-  if (params?.page_size) searchParams.set('page_size', String(params.page_size))
-
-  const query = searchParams.toString()
   const response = await fetchJSON<{ runs: WorkflowExecutionSummary[] }>(
-    `${API_BASE}/workflows/${workflowId}/runs${query ? `?${query}` : ''}`
+    `${API_BASE}/workflows/${workflowId}/runs`
   )
   return response.runs ?? []
 }
