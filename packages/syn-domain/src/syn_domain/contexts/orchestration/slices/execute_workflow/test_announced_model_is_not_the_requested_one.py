@@ -615,32 +615,39 @@ class TestTheProcessorAssemblesTheIdentityItself:
     """The same claim as the class above, DRIVEN instead of reproduced.
 
     `TestACodexPhasesArtifactNamesWhoRanIt` calls `runtime.agent_for(...)` and
-    `ArtifactCollector.collect_from_workspace(...)` itself, in that order, with
-    the provider the phase configured. That is precisely what
-    `WorkflowExecutionProcessor._handle_collect_artifacts` does - which makes it
-    a copy of the assembly, not a run of it. A copy tests production only for as
-    long as the two agree, and nothing anywhere makes them agree: change the
-    real method to pass `provider=None`, to read the model for a different
-    phase, or to drop the `agent=` keyword, and every test above stays green
-    while every artifact in production loses the identity.
+    `ArtifactCollector.collect_from_workspace(...)` itself, in the same order
+    and with the same arguments `_handle_collect_artifacts` uses. That makes it
+    a COPY of the assembly rather than a run of it, and nothing anywhere makes
+    the copy and the original agree. Change the real method to pass
+    `provider=None`, to read the model under a different phase id, or to build
+    the identity from the phase's config instead of the runtime's observation,
+    and every test in that class stays green while every artifact in production
+    loses the identity. All three were run as mutations; all three left it
+    green, and all three fail here.
 
     `test_collecting_artifacts_records_the_files_it_collected`
     (test_workflow_execution_processor.py) does call the real method, but swaps
-    `ArtifactCollectionHandler` for a `MagicMock` and asserts on the cache, so
-    the `agent=` it assembles is handed to a double that never looks at it.
+    `ArtifactCollectionHandler` for a `MagicMock` and asserts on the output
+    cache, so the `agent=` the method assembles goes to a double that never
+    looks at it. It stayed green under all three mutations too.
 
-    So this drives the processor's own method with the real handler, the real
-    collector and a repository that keeps what was saved, and reads the identity
-    back off the saved artifact. The model is `gpt-5.6-sol` out of the captured
-    rollout, arriving through the real codex stream processor: it is not written
-    down anywhere in this class, so it cannot reach the artifact by any route
-    other than the one under test.
+    So this drives `_handle_collect_artifacts` with the real handler, the real
+    collector and a repository that keeps what was saved, and reads
+    `AgentIdentity` back off the saved artifact. Both harnesses, for the reason
+    given at the top of this file, and because the two halves of the identity
+    fail differently on each.
     """
 
-    async def _artifacts_collected_by_the_processor(
-        self, *lines: str, rollout: _RolloutOnDisk | None = None
+    async def _collected_by_the_processor(
+        self, *, ran: StreamResult, agent_config: AgentConfiguration
     ) -> MockArtifactRepo:
-        """Run a codex phase's stream, then let the PROCESSOR collect it."""
+        """Hand a finished phase to the processor and let IT collect.
+
+        Everything up to `_handle_collect_artifacts` is production code with
+        production wiring: the stream result comes from the real stream
+        processor, the runtime is the processor's own, and the collector and
+        handler are the ones the method constructs for itself.
+        """
         repo = MockArtifactRepo()
         processor = _make_workflow_processor(artifact_repository=repo)
         processor._journal.append = AsyncMock()
@@ -656,7 +663,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
         processor._runtime.record_agent_run(
             "verify",
             AgentExecutionResult(
-                stream_result=await _codex_result(*lines, rollout=rollout),
+                stream_result=ran,
                 tokens=TokenAccumulator(),
                 subagents=SubagentTracker(),
                 command=AgentExecutionCompletedCommand(
@@ -676,13 +683,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
                 name="Verify",
                 order=1,
                 prompt_template="x",
-                # The requested model is in scope at exactly this point, on
-                # this object, one attribute away from the provider the method
-                # legitimately reads. That is what makes it the value a
-                # regression here would reach for.
-                agent_config=AgentConfiguration(
-                    provider="codex", model=REQUESTED_BY_A_CODEX_PHASE
-                ),
+                agent_config=agent_config,
                 output_artifact_types=("markdown",),
             ),
             MagicMock(workflow_id="w1"),
@@ -692,27 +693,54 @@ class TestTheProcessorAssemblesTheIdentityItself:
         return repo
 
     async def test_the_processor_stamps_the_model_the_rollout_named(self) -> None:
-        """Both halves of the identity, off the artifact the processor saved."""
-        repo = await self._artifacts_collected_by_the_processor(
-            _codex_thread_started(),
-            _codex_turn_completed(),
-            rollout=_RolloutOnDisk(_real_rollout()),
+        """Both halves of the identity, off the artifact the processor saved.
+
+        `gpt-5.6-sol` is not written down in this class. It reaches the artifact
+        from the captured rollout through the real codex stream processor, so
+        there is no route to this assertion that does not go through the
+        assembly under test.
+        """
+        repo = await self._collected_by_the_processor(
+            ran=await _codex_result(
+                _codex_thread_started(),
+                _codex_turn_completed(),
+                rollout=_RolloutOnDisk(_real_rollout()),
+            ),
+            agent_config=AgentConfiguration(provider="codex"),
         )
         assert [a.agent for a in repo.saved] == [
             AgentIdentity(provider="codex", model=CODEX_ANNOUNCED)
         ]
 
     async def test_the_processor_does_not_substitute_the_requested_model(self) -> None:
-        """Nothing announced anything, and the phase's own config is right
-        there. The harness is still named; the model is reported absent.
+        """A claude phase, because only a claude phase can express the hazard.
 
-        Pinned separately from the case above because the two fail to different
-        mutations: this one is what catches the processor reading
-        `agent_config.model` instead of the runtime's observation, which the
-        rollout case cannot see - there, the two values differ and either one
-        arriving looks like a value arriving.
+        `AgentConfiguration` blanks the model for codex (#788), so on the test
+        above `agent_config.model` is already None and a processor reading it
+        instead of the runtime would be indistinguishable from one reading
+        nothing. Here the phase asked for `claude-sonnet`, its stream announced
+        `claude-sonnet-4-5-20250929`, and the two differ - so the value that
+        comes out says which of them the processor read.
         """
-        repo = await self._artifacts_collected_by_the_processor(
-            _codex_thread_started(), _codex_turn_completed()
+        assert REQUESTED != ANNOUNCED, "the requested and announced models must differ"
+        repo = await self._collected_by_the_processor(
+            ran=await _make_processor().process_stream(
+                _lines_to_stream(_system_line(ANNOUNCED)), MockWorkspace()
+            ),
+            agent_config=AgentConfiguration(provider="claude", model=REQUESTED),
+        )
+        assert [a.agent for a in repo.saved] == [AgentIdentity(provider="claude", model=ANNOUNCED)]
+
+    async def test_a_phase_that_announced_nothing_is_still_stamped_with_its_harness(
+        self,
+    ) -> None:
+        """The case where the model is legitimately absent, which is today's
+        real codex case and the one where only the provider carries any
+        information at all. An identity dropped here looks exactly like an
+        honest "the harness never said" unless the provider is asserted.
+        """
+        repo = await self._collected_by_the_processor(
+            ran=await _codex_result(_codex_thread_started(), _codex_turn_completed()),
+            agent_config=AgentConfiguration(provider="codex"),
         )
         assert [a.agent for a in repo.saved] == [AgentIdentity(provider="codex", model=None)]
