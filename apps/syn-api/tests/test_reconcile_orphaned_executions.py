@@ -63,6 +63,10 @@ class _StubAggregate:
         self._raises = raises
         self.running_phase_id = running_phase_id
         self.failed_with: object | None = None
+        # Nothing to salvage: these stubs exercise the closing of orphans, not
+        # the rescue of a stranded deliverable (#1300, covered separately in
+        # test_1300_restart_salvage_at_the_entry_point.py).
+        self.stranded_deliverable = None
 
     def fail_execution(self, command: object) -> None:
         if self._raises:

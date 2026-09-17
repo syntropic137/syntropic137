@@ -6,7 +6,15 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+        ArtifactCollector,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +50,13 @@ _ORPHAN_REASON: Final[str] = (
     "workspace container was reaped on startup"
 )
 
+_ORPHAN_REASON_AFTER_SALVAGE: Final[str] = (
+    _ORPHAN_REASON + ". Phase '{phase_name}' had already finished its agent run, so its "
+    "deliverable was recovered from the transcript and stored (#1300) before "
+    "this execution was closed; the run did not survive, that phase's output "
+    "did"
+)
+
 
 def _started_before(summary: object, cutoff: datetime) -> bool:
     """Whether this execution demonstrably started before `cutoff`.
@@ -62,6 +77,55 @@ def _started_before(summary: object, cutoff: datetime) -> bool:
     if raw.tzinfo is None:
         raw = raw.replace(tzinfo=UTC)
     return raw < cutoff
+
+
+async def _artifact_collector() -> ArtifactCollector:
+    """The collector a startup salvage stores through.
+
+    Built here rather than passed in because reconciliation runs before the
+    processor exists - that is the whole situation it is reconciling - and it
+    needs only the storing half. `query_service` is None on purpose: that half
+    injects a previous phase's outputs into a workspace, and there is no
+    workspace here.
+    """
+    from syn_adapters.storage.artifact_storage import get_artifact_storage
+    from syn_adapters.storage.repositories import get_artifact_repository
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+        ArtifactCollector,
+    )
+
+    return ArtifactCollector(get_artifact_repository(), await get_artifact_storage(), None)
+
+
+async def _salvage_before_failing(
+    aggregate: WorkflowExecutionAggregate, execution_id: str
+) -> str | None:
+    """Rescue a stranded phase's deliverable, or report that none was rescued.
+
+    Best-effort ON PURPOSE, and narrower than the caller's own guard: closing
+    an execution a restart stranded is the guarantee this whole function
+    exists for, and it must not be lost because object storage was unreachable
+    or a transcript held nothing worth keeping. A salvage that cannot happen
+    leaves things exactly where they were before #1300 - which is the state
+    every one of these executions was in until now.
+
+    Returns the salvaged phase's name, or None.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+        salvage_stranded_phase,
+    )
+
+    try:
+        collector = await _artifact_collector()
+        rescued = await salvage_stranded_phase(aggregate, collector=collector)
+    except Exception:
+        logger.exception(
+            "Could not salvage the stranded deliverable of execution %s; "
+            "failing it as before (continuing)",
+            execution_id,
+        )
+        return None
+    return None if rescued is None else rescued.phase_name
 
 
 async def reconcile_orphaned_executions(
@@ -106,6 +170,15 @@ async def reconcile_orphaned_executions(
     pollers can dispatch work in this same event loop, so the race does not need
     a second process, which is what the first version's "single-writer
     assumption" note got wrong.
+
+    AND IT SALVAGES FIRST (#1300). This is the only thing in production that
+    ever reaches an execution a restart stranded, so it is where the transcript
+    recovery has to be reachable from: a phase caught between its agent
+    finishing and its artifacts being collected has a deliverable, and until
+    this function looked for one, every restart destroyed it along with the
+    run. The run still ends - nothing can execute its remaining phases - but it
+    ends with the finished phase's output stored and marked recovered rather
+    than with nothing at all.
     """
     if not cleanup.fully_reaped:
         logger.warning(
@@ -137,6 +210,7 @@ async def reconcile_orphaned_executions(
 
     repository = get_workflow_execution_repository()
     failed = 0
+    salvaged = 0
     for summary in stranded:
         execution_id = summary.workflow_execution_id
         try:
@@ -148,10 +222,23 @@ async def reconcile_orphaned_executions(
                     execution_id,
                 )
                 continue
+            # BEFORE the failure, because the failure is terminal: a phase
+            # whose agent finished and whose artifacts nobody collected still
+            # has a deliverable, and this is the only place in production that
+            # ever reaches such an execution again (#1300). Everything the
+            # recovery needs came off the event stream, so it works precisely
+            # when the workspace, the container and the processor are gone.
+            salvaged_phase = await _salvage_before_failing(aggregate, execution_id)
+            if salvaged_phase is not None:
+                salvaged += 1
             aggregate.fail_execution(
                 FailExecutionCommand(
                     execution_id=execution_id,
-                    error=_ORPHAN_REASON,
+                    error=(
+                        _ORPHAN_REASON
+                        if salvaged_phase is None
+                        else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
+                    ),
                     error_type="OrphanedByRestart",
                     # The phase that was mid-flight, so both phase read models
                     # terminalise it. With None they skip phase mutation
@@ -169,7 +256,11 @@ async def reconcile_orphaned_executions(
             logger.exception("Could not reconcile stranded execution %s (continuing)", execution_id)
 
     logger.warning(
-        "Reconciled %d of %d stranded execution(s) -> marked as failed", failed, len(stranded)
+        "Reconciled %d of %d stranded execution(s) -> marked as failed; "
+        "%d had a finished phase whose deliverable was recovered rather than discarded",
+        failed,
+        len(stranded),
+        salvaged,
     )
     if len(stranded) == _MAX_ORPHANS_PER_STARTUP:
         logger.warning(

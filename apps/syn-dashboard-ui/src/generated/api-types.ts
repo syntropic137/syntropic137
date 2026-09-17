@@ -3468,6 +3468,11 @@ export interface components {
             completed_at?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /**
+             * Deliverable Recovered
+             * @default false
+             */
+            deliverable_recovered: boolean;
             /** Model */
             model?: string | null;
             /** Cost By Model */

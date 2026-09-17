@@ -9144,6 +9144,11 @@
             ],
             "title": "Error Message"
           },
+          "deliverable_recovered": {
+            "type": "boolean",
+            "title": "Deliverable Recovered",
+            "default": false
+          },
           "model": {
             "anyOf": [
               {
