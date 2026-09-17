@@ -391,6 +391,16 @@ allowed_prefixes = [
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore._deserialize.param:data" = { annotation = "str | dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore.query.param:filters" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:ManagedWorkspace.stream.param:environment" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+# Process environment, same as the entry above, and the same reason: env IS a
+# string-to-string map, so `dict[str, str]` is the honest type rather than a
+# payload re-derived by string key. `exec_fn` also satisfies the external
+# `ExecFn` calling convention, so its signature is not ours to change.
+#
+# Added because main went red on the interaction between two PRs that were each
+# green alone: #1281 landed this gate and #1299 landed codex_rollout.py, and
+# neither CI run could see the other. Not a relaxed ratchet - a false positive
+# on the same shape already excepted one line up.
+"packages/syn-adapters/src/syn_adapters/workspace_backends/service/codex_rollout.py:_exec_fn_for.exec_fn.param:env" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py:TriggerRuleAggregate._parse_trigger_config.param:config_raw" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_run.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_suite.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
