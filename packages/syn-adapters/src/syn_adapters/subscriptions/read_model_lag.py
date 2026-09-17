@@ -1,12 +1,20 @@
 """How far the read models are behind the event store, and which one is holding it up.
 
 WHY THIS EXISTS. When a deploy changes any projection's version, the coordinator
-clears that projection, deletes its checkpoint, and restarts the ONE shared
-subscription from global nonce 0 (``SubscriptionCoordinator._get_minimum_position``).
-Until that replay finishes, no projection advances. On the v0.28.0-beta.6 deploy
+clears that projection, deletes its checkpoint, and replays it from global nonce
+0. It used to do that on the ONE shared subscription that fed every projection,
+so until the replay finished no projection advanced. On the v0.28.0-beta.6 deploy
 that took 8m46s, during which every freshly dispatched execution was invisible:
 ``GET /api/v1/executions/{id}`` returned 404 while the workspace container ran
 normally.
+
+That blackout is fixed upstream (#1318): ``SubscriptionCoordinator._plan_tracks``
+now puts a replaying projection on its own subscription, so the projections
+already at head keep consuming live events throughout. The signals below are
+still needed, and for the same reason - a rebuild still makes the projection
+being rebuilt return stale or missing rows, it just no longer takes the other
+two dozen down with it. What changed is the blast radius, not the question an
+operator is asking.
 
 Throughout all of it ``/health`` said ``status: healthy`` and
 ``subscription.status: healthy``, because the only thing the subscription block
@@ -73,11 +81,11 @@ fails in both directions here, which is why this measures time instead:
   store's WRITE RATE, not at the rate at which it is broken. On a quiet
   deployment it sits three events behind forever and never reaches any N worth
   setting, while every read of it is stale.
-- It fires on healthy bursts. ``_dispatch_event`` walks all projections
-  sequentially per event, so during a write burst every projection trails the
-  head together by however far the writer got ahead of the subscriber. That
-  distance is bounded by write volume, not by health, so any N is a false
-  positive waiting for a big enough execution.
+- It fires on healthy bursts. ``_dispatch_to_track`` walks a track's
+  projections sequentially per event, so during a write burst the projections on
+  a track trail the head together by however far the writer got ahead of the
+  subscriber. That distance is bounded by write volume, not by health, so any N
+  is a false positive waiting for a big enough execution.
 
 Staleness is scale-free in both directions. A checkpoint is written for EVERY
 event a projection is handed - processed, or skipped via
