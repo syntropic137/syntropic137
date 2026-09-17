@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     CostField,
     SessionCost,
@@ -26,7 +27,6 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
     TimescaleSessionCostQuery,
     price_session_rows,
 )
-from syn_domain import tool_call_counts
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
@@ -168,7 +168,7 @@ class SessionCostQueryService:
             summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             # From the tally, not from a COUNT(*) over agent_events (#1322).
-            tool_counts = await tool_call_counts.by_session(conn)
+            tool_counts = await tool_call_counts.by_session(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started_map = await self._fetch_started_map(conn)
 
             results: list[SessionCost] = []

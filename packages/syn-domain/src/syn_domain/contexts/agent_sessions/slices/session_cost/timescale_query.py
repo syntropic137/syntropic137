@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     import asyncpg
-from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain import tool_call_counts
+from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
@@ -480,7 +480,7 @@ class TimescaleSessionCostQuery:
             # segment of every session on the page, because event_type is in
             # neither compress_segmentby nor compress_orderby: 60,562 buffer
             # hits and 905ms for sixteen sessions at 219,140 rows (#1322).
-            tool_counts = await tool_call_counts.by_session(conn, ids)
+            tool_counts = await tool_call_counts.by_session(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started = {
                 row["session_id"]: row["started_at"]
                 for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)

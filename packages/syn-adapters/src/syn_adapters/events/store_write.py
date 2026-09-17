@@ -95,7 +95,8 @@ async def insert_one(
         # tool call against a session that never existed.
         assert session_id is not None
         await tool_call_counts.record(
-            conn, tool_call_counts.tally([(event_type, session_id, exec_id)])
+            conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            tool_call_counts.tally([(event_type, session_id, exec_id)]),
         )
 
 
@@ -135,7 +136,7 @@ async def insert_batch(
             format="text",
         )
         # Same transaction as the COPY, for the same reason as in insert_one.
-        await tool_call_counts.record(conn, payload.tool_calls)
+        await tool_call_counts.record(conn, payload.tool_calls)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
 
     if isinstance(result, str) and result.startswith("COPY"):
         count = int(result.split()[1])

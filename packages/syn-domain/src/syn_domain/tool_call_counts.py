@@ -46,11 +46,12 @@ time to prove that.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from syn_shared.events import TOOL_EXECUTION_COMPLETED
 
-from collections.abc import Iterable, Sequence
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 #: The table this module owns. Created by ``ensure_ready`` and mirrored, for
 #: installs that apply migrations by hand, in

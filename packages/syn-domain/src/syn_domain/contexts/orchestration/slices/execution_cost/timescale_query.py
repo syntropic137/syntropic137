@@ -20,13 +20,13 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
     UNATTRIBUTED_MODEL,
     UNATTRIBUTED_PHASE_ID,
     ExecutionCost,
 )
-from syn_domain import tool_call_counts
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
@@ -701,9 +701,12 @@ class TimescaleExecutionCostQuery:
             # One execution rather than a page, but the same scan: event_type
             # is not in the hypertable's compression keys, so the count could
             # only be reached by decompressing this execution's segments.
-            tool_count = (await tool_call_counts.by_execution(conn, [execution_id])).get(
-                execution_id, 0
-            )
+            tool_count = (
+                await tool_call_counts.by_execution(
+                    conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+                    [execution_id],
+                )
+            ).get(execution_id, 0)
             execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
 
             if has_summary:

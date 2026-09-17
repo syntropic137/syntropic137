@@ -30,6 +30,7 @@ from syn_api.types import (
     Result,
     ToolOperation,
 )
+from syn_domain import tool_call_counts
 from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
@@ -504,12 +505,18 @@ async def _load_execution_enrichment(
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Query tool_execution_completed counts from agent_events.
+    """Tool calls per execution, read from the tally.
 
-    Keyed by the execution id AS agent_events holds it: the table's writer
-    sanitises the id (AgentEvent's validator), so both the ids bound here and
-    the keys of the returned mapping have to be in that spelling, or a caller
-    looks its count up under a name the result never carries (#1241).
+    This used to be a ``COUNT(*)`` over ``agent_events`` filtered on
+    ``event_type``, which is in neither of that hypertable's compression keys
+    and so could only be answered by decompressing every segment of every
+    execution on the page - 4-30s for one page of the list this serves
+    (#1322). ``tool_call_counts`` keeps the number instead of deriving it.
+
+    Keyed by the execution id AS the tally holds it: the writer sanitises the
+    id (AgentEvent's validator), so both the ids bound here and the keys of the
+    returned mapping have to be in that spelling, or a caller looks its count
+    up under a name the result never carries (#1241).
     """
     try:
         from syn_adapters.postgres_text import pg_safe
@@ -521,17 +528,9 @@ async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
         if pool is None:
             return {}
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT execution_id, COUNT(*) AS cnt "
-                "FROM agent_events "
-                "WHERE execution_id = ANY($1) "
-                "  AND event_type = 'tool_execution_completed' "
-                "GROUP BY execution_id",
-                execution_ids,
-            )
-        return {row["execution_id"]: row["cnt"] for row in rows}
+            return await tool_call_counts.by_execution(conn, execution_ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
     except Exception:
-        logger.debug("Could not query tool counts from agent_events", exc_info=True)
+        logger.debug("Could not read tool counts from the tally", exc_info=True)
         return {}
 
 

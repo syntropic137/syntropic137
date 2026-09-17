@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
@@ -25,7 +26,6 @@ from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query imp
     price_grouped_token_usage,
     price_phase_rows,
 )
-from syn_domain import tool_call_counts
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
@@ -222,7 +222,7 @@ class ExecutionCostQueryService:
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             # From the tally, not from a COUNT(*) over agent_events (#1322).
-            tool_counts = await tool_call_counts.by_execution(conn)
+            tool_counts = await tool_call_counts.by_execution(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             return await self._assemble(conn, summary_rows, token_rows, tool_counts)
 
     async def list_for_ids(self, execution_ids: Iterable[str]) -> list[ExecutionCost]:
@@ -250,7 +250,7 @@ class ExecutionCostQueryService:
             # because event_type is in neither compress_segmentby nor
             # compress_orderby - the same defect as on the sessions list, and
             # the reason /executions took 4-30s (#1322).
-            tool_counts = await tool_call_counts.by_execution(conn, ids)
+            tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             return await self._assemble(conn, summary_rows, token_rows, tool_counts)
 
     async def _assemble(
