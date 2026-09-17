@@ -394,7 +394,8 @@ def _delimited_reports(text: str) -> list[_Report]:
             unclosed_at = payload_at
             search_from = payload_at
             continue
-        if not text.startswith(TASK_RESULT_TERMINATOR, _payload_starts(text, payload_ends)):
+        terminator_at = _payload_starts(text, payload_ends)
+        if not _terminates_at(text, terminator_at):
             unclosed_at = payload_at
             search_from = payload_ends
             continue
@@ -405,6 +406,27 @@ def _delimited_reports(text: str) -> list[_Report]:
     if unclosed_at is None:
         return []
     return [_Report(payload=text[unclosed_at:], decoded=None)]
+
+
+def _terminates_at(text: str, at: int) -> bool:
+    """Whether the terminator, and not merely something starting with it, is here.
+
+    `startswith` alone accepted `TASK_RESULT_ENDoops` and `TASK_RESULT_ENDING`,
+    closing the block on a token the agent never wrote. The grammar this module
+    documents is a marker, one JSON value and `TASK_RESULT_END`; a longer word
+    that happens to share that prefix is not the terminator, and treating it as
+    one completes a phase on a report nobody can be said to have terminated.
+
+    The boundary is end-of-input or a non-word character. Word characters are
+    the only ones that could have been part of an identifier the writer meant,
+    so anything else - whitespace, punctuation, a newline - genuinely ends it.
+    """
+    if not text.startswith(TASK_RESULT_TERMINATOR, at):
+        return False
+    after = at + len(TASK_RESULT_TERMINATOR)
+    if after >= len(text):
+        return True
+    return not (text[after].isalnum() or text[after] == "_")
 
 
 def _excerpt(raw: str) -> str:

@@ -225,6 +225,62 @@ class TestTheReportIsReadAsJson:
         "text",
         [
             pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_ENDoops',
+                id="terminator-with-a-suffix",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_ENDING',
+                id="terminator-is-a-prefix-of-a-longer-word",
+            ),
+        ],
+    )
+    def test_a_word_starting_with_the_terminator_is_not_the_terminator(self, text: str) -> None:
+        """`TASK_RESULT_ENDING` does not close a block, and used to.
+
+        The check was `str.startswith`, so any word sharing the terminator's
+        prefix closed the block. The grammar this module documents is a marker,
+        one JSON value and `TASK_RESULT_END` exactly; accepting a longer word
+        completes a phase on a report nobody terminated. Found by cross-model
+        review, not by the suite.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END',
+                id="at-end-of-input",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END\nsigning off',
+                id="followed-by-more-text",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "comments": "x"} TASK_RESULT_END.',
+                id="followed-by-punctuation",
+            ),
+        ],
+    )
+    def test_the_terminator_still_closes_a_block_at_a_real_boundary(self, text: str) -> None:
+        """The other half of the fix: tightening must not reject valid reports.
+
+        Without these the boundary rule could be made arbitrarily strict and
+        still pass - a test that only checks the rejections cannot see a fix
+        that rejects everything.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
                 'TASK_RESULT: {"success": "true", "comments": "done"} TASK_RESULT_END',
                 id="success-is-the-string-true",
             ),

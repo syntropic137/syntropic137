@@ -529,3 +529,50 @@ class TestAnUnreportedVerdictIsNotACompletion:
         entry = PhaseMetricsEntry.from_stored("p-1", {"phase_name": "Build"})
 
         assert entry.status == "failed"
+
+
+@pytest.mark.unit
+class TestRowsWrittenBeforeTheRenameKeepTheirOutcome:
+    """A stored row whose terminal state is under `status`, not `settled_status`.
+
+    The projection wrote `status` until 37a1d86a renamed it to
+    `settled_status`, and the rename shipped without a migration - so rows in
+    that older shape are still in the store. Reading only the new key sends
+    every one of them to the default, and this slice's default is "failed".
+    A deploy would then reclassify every previously COMPLETED phase as failed,
+    silently and for all of history.
+
+    Found by cross-model review. No existing test covered it, because the ones
+    that exercise `from_stored` build their rows with the current writer and
+    so can never produce the old shape.
+    """
+
+    def test_a_legacy_completed_row_is_still_completed(self) -> None:
+        entry = PhaseMetricsEntry.from_stored(
+            "implement", {"phase_name": "implement", "status": "completed"}
+        )
+
+        assert entry.settled_status == "completed"
+
+    def test_a_legacy_failed_row_is_still_failed(self) -> None:
+        """The other direction, so the fix cannot be "always say completed"."""
+        entry = PhaseMetricsEntry.from_stored(
+            "implement", {"phase_name": "implement", "status": "failed"}
+        )
+
+        assert entry.settled_status == "failed"
+
+    def test_the_current_key_wins_when_both_are_present(self) -> None:
+        """Order matters: a row rewritten by the current writer is current."""
+        entry = PhaseMetricsEntry.from_stored(
+            "implement",
+            {"phase_name": "implement", "status": "failed", "settled_status": "completed"},
+        )
+
+        assert entry.settled_status == "completed"
+
+    def test_a_row_carrying_neither_key_is_failed(self) -> None:
+        """Nobody recorded an outcome, so it must not read as a pass."""
+        entry = PhaseMetricsEntry.from_stored("implement", {"phase_name": "implement"})
+
+        assert entry.settled_status == "failed"

@@ -99,7 +99,20 @@ class PhaseMetricsEntry:
             total_tokens=data.get("total_tokens", 0),
             artifact_count=data.get("artifact_count", 0),
             completed_seconds=data.get("duration_seconds"),
-            settled_status=data.get("settled_status") or "failed",
+            # Three sources, in order of how much they know.
+            #
+            # `settled_status` is the current key. `status` is what this
+            # projection wrote before 37a1d86a renamed it, and rows written by
+            # that version are still in the store: reading only the new key
+            # would send every one of them to the `or` branch and reclassify a
+            # COMPLETED phase as failed. The rename shipped without a
+            # migration, so the old key has to be read here or the history is
+            # rewritten on deploy.
+            #
+            # "failed" is the last resort and is deliberately the pessimistic
+            # one: a row carrying neither key recorded no outcome, and a phase
+            # whose outcome nobody recorded must not read as a pass.
+            settled_status=(data.get("settled_status") or data.get("status") or "failed"),
             active_runs=data.get("active_runs") or {},
         )
 
