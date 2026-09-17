@@ -60,7 +60,13 @@ of the image, not of the task, and they are the same on every run:
 the image changed and these instructions are stale. Report the deviation and
 carry on; do not treat it as your main task.
 
-## Output
+## Write to `artifacts/output/premise.md`
+
+**This phase declares a markdown output artifact, so a run that writes
+nothing under `artifacts/output/` FAILS - after the work is done, and the
+work is lost with the workspace.** Write the file before you finish, even
+if the outcome was a refusal: a refusal is a deliverable and is often the
+most valuable one.
 
 Short. Four things:
 

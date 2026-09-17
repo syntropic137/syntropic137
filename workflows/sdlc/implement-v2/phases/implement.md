@@ -142,7 +142,14 @@ and the final phase would have nothing to open a PR from.
 pushed. The next phase checks out that SHA by name. If it is missing or wrong,
 verification silently runs against the wrong code.
 
-## Output
+## Write to `artifacts/output/implement.md`
 
+**This phase declares a markdown output artifact, so a run that writes
+nothing under `artifacts/output/` FAILS - after the work is done, and the
+work is lost with the workspace.** Write the file before you finish, even
+if the outcome was a refusal: a refusal is a deliverable and is often the
+most valuable one.
+
+What you changed and why, the full diff, which hops you touched, what you deliberately did not do, and THE BRANCH NAME AND FULL COMMIT SHA you pushed.
 What you changed and why, the full diff, which hops you touched, and what you
 deliberately did not do.
