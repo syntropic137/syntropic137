@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts import AgentIdentity, ArtifactType, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     is_storable,
     recover_empty_artifact,
@@ -447,6 +447,7 @@ class ArtifactCollector:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
         last_agent_message: str | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
@@ -460,6 +461,9 @@ class ArtifactCollector:
         as though the phase had succeeded, so a `verify` phase could drop out
         of a run while every surface still reported completed. The signal was
         already present and simply nothing consumed it.
+
+        `agent` is who ran the phase, recorded on every artifact so a later
+        phase can show that a DIFFERENT model checked the work (#1284).
 
         A phase that wrote a file and left it EMPTY is a different incident and
         gets a different answer (#1195). `last_agent_message` is the last thing
@@ -520,6 +524,7 @@ class ArtifactCollector:
                 content=content_str,
                 title=title,
                 source_path=artifact_path,
+                agent=agent,
                 # The flat `<phase-id>.md` alias reads this after a restart,
                 # so it must name the file the live path injects (#997).
                 is_primary_deliverable=index == 0,
@@ -580,6 +585,7 @@ class ArtifactCollector:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
     ) -> list[str]:
         """Collect whatever an interrupted phase managed to write. Never raises.
 
@@ -628,6 +634,7 @@ class ArtifactCollector:
                     content=content_str,
                     title=f"{phase_name} (partial): {artifact_path}",
                     source_path=artifact_path,
+                    agent=agent,
                 )
                 artifact_ids.append(artifact_id)
             return artifact_ids
@@ -649,6 +656,7 @@ class ArtifactCollector:
         artifact_type: str,
         content: str,
         title: str,
+        agent: AgentIdentity,
         source_path: str | None = None,
         is_primary_deliverable: bool = True,
     ) -> None:
@@ -657,6 +665,12 @@ class ArtifactCollector:
         ``source_path`` is where the file sat under ``artifacts/output/``. It is
         recorded as a field rather than left implicit in ``title`` so the
         handoff can rebuild the tree without parsing a display string (#988).
+
+        ``agent`` is who produced it - the harness the platform launched and the
+        model that harness announced (#1284). Required rather than defaulted,
+        because a caller that forgets it would write an artifact whose producer
+        is unprovable, and the whole point of the field is that it cannot be
+        silently absent. Pass ``UNREPORTED_AGENT`` when no phase ran.
         """
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
@@ -709,6 +723,8 @@ class ArtifactCollector:
             content=content,
             title=title,
             source_path=source_path,
+            agent_provider=agent.provider,
+            agent_model=agent.model,
             storage_uri=storage_uri,
             is_primary_deliverable=is_primary_deliverable,
         )

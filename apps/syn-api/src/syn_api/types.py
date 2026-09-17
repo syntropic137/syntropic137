@@ -996,6 +996,20 @@ class ArtifactDetail(BaseModel):
     content_hash: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    agent_provider: str | None = None
+    """Harness that ran the phase which produced this artifact (issue #1284).
+
+    None means no phase produced it, or it predates ArtifactCreated v6.
+    """
+    agent_model: str | None = None
+    """Model that harness ANNOUNCED while running, never the one requested.
+
+    This is the field a cross-model review reads to prove a DIFFERENT model
+    checked the work (#1284). None means the harness reported no model - true of
+    every codex phase today - and a client MUST render it as "not reported"
+    rather than falling back to the phase's configured model, which would look
+    like evidence and be none.
+    """
 
 
 # ---------------------------------------------------------------------------

@@ -100,3 +100,45 @@ class PhaseOutputFile:
 
     source_path: str | None
     content: str
+
+
+@dataclass(frozen=True)
+class AgentIdentity:
+    """Who produced a phase's output: the harness that ran, and the model it
+    announced while running (issue #1284).
+
+    A cross-model review's entire value is that a DIFFERENT model checked the
+    work, and nothing in the artifact record used to say which one did. Every
+    review produced before this existed opened by stating it could not
+    determine the models that ran its own phases.
+
+    THE TWO FIELDS ARE NOT THE SAME KIND OF FACT, which is the whole reason
+    this is one type rather than two loose strings:
+
+    * ``provider`` is what the platform LAUNCHED. We chose the binary and ran
+      it, so config and reality cannot diverge - there is no path by which a
+      claude launch becomes a codex process.
+    * ``model`` is what the running harness ANNOUNCED on its own stream, and it
+      is deliberately NOT the model the phase requested. Those differ in
+      practice: a codex phase ignores a forwarded claude model, and a harness
+      may serve a different model than the one asked for. Writing the requested
+      value here would make the field worse than absent, because a reader would
+      take it as evidence of what ran.
+
+    ``None`` on either therefore means "not reported", never "same as
+    requested" and never "unknown, so assume the default". ``model`` is None
+    for every codex phase today: the codex stream carries no model (the same
+    reason its cost goes unpriced rather than guessed - issue #788). The
+    provider alone still settles whether two phases ran on different harnesses,
+    which is the cross-model question; the model adds precision where the
+    harness reports it.
+    """
+
+    provider: str | None = None
+    model: str | None = None
+
+
+#: What an artifact created outside a phase run carries: no harness ran it, so
+#: there is nothing to report. Distinct from a phase whose harness announced
+#: nothing only in how it got here, which is why both read as None.
+UNREPORTED_AGENT: AgentIdentity = AgentIdentity()

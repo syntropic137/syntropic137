@@ -16,7 +16,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-    from syn_domain.contexts.artifacts import PhaseOutputFile
+    from syn_domain.contexts.artifacts import AgentIdentity, PhaseOutputFile
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
@@ -64,6 +64,7 @@ class ArtifactCollectionHandler:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
         last_agent_message: str | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
@@ -78,6 +79,9 @@ class ArtifactCollectionHandler:
                 produces. Empty means it declared nothing and may legitimately
                 produce nothing; non-empty and unproduced is a failure the
                 collector raises on (#1167).
+            agent: The harness that ran this phase and the model it announced,
+                stamped on every artifact so a later phase can name who
+                produced its inputs (#1284).
             last_agent_message: The last thing this phase's agent said on its
                 stream. Used only when a file it wrote turns out to be empty,
                 as the fallback that stops a lost write failing the whole
@@ -96,6 +100,7 @@ class ArtifactCollectionHandler:
             session_id=session_id,
             phase_name=phase_name,
             output_artifact_types=output_artifact_types,
+            agent=agent,
             last_agent_message=last_agent_message,
         )
 
