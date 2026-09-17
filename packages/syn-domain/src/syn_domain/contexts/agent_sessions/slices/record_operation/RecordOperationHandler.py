@@ -91,19 +91,16 @@ def _observation_data(command: RecordOperationCommand, operation_id: str) -> dic
     Field names match what ``ObservabilityCollector`` writes for the same kinds
     of observation, because ``session_tools`` reads both through one converter.
     """
-    data: dict[str, Any] = {
+    duration = command.duration_seconds
+    return {
         "observation_id": operation_id,
         "tool_name": command.tool_name or "",
         "tool_use_id": command.tool_use_id,
         "success": command.success,
+        "input_preview": _preview(command.tool_input or command.message_content),
+        "output_preview": _preview(command.tool_output),
+        "duration_ms": None if duration is None else int(duration * 1000),
     }
-    if (input_preview := _preview(command.tool_input or command.message_content)) is not None:
-        data["input_preview"] = input_preview
-    if (output_preview := _preview(command.tool_output)) is not None:
-        data["output_preview"] = output_preview
-    if command.duration_seconds is not None:
-        data["duration_ms"] = int(command.duration_seconds * 1000)
-    return data
 
 
 class RecordOperationHandler:
