@@ -223,7 +223,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_cost_query_separation | Cost routes use query services, not projection stores | 8 |
 | test_prefix_resolver_coverage | GET /{id} endpoints use resolve_or_raise() | 8 |
 | test_cost_ceiling | Dispatch chain has rate limit + budget check wired, config bounded | 7 |
-| test_unknown_query_params_rejected | Every GET route refuses a parameter it does not declare | 12 |
+| test_unknown_query_params_rejected | Every route refuses a query parameter it does not declare | 12 |
 
 ### Infrastructure (`ci/fitness/infrastructure/`)
 

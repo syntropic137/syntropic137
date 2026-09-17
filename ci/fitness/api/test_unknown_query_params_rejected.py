@@ -92,15 +92,27 @@ def _concrete_url(path_template: str) -> str:
     return url
 
 
-def _get_routes(app: FastAPI) -> list[APIRoute]:
-    """Every GET route the app serves, as (path, route) discovered live."""
+#: Methods a client does not send a meaningful query string with. HEAD is GET
+#: without a body and OPTIONS is answered by CORS before routing, so neither
+#: adds a subject this gate does not already cover through GET.
+_UNTESTED_METHODS = frozenset({"HEAD", "OPTIONS"})
+
+
+def _routed_methods(app: FastAPI) -> list[tuple[str, str]]:
+    """Every (method, path) the app serves, discovered live.
+
+    Every method, not just GET. The defect is that an UNDECLARED parameter is
+    dropped, and nothing about that is specific to a route returning a
+    collection -- a POST carrying a misspelled filter is misread the same way.
+    Restricting this to GET would be the carve-out #1263 and #1306 each made,
+    one level up.
+    """
     return sorted(
-        (
-            route
-            for route in app.routes
-            if isinstance(route, APIRoute) and "GET" in (route.methods or set())
-        ),
-        key=lambda route: route.path,
+        (method, route.path)
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for method in (route.methods or set())
+        if method not in _UNTESTED_METHODS
     )
 
 
@@ -126,8 +138,9 @@ def _advertised_query_params(app: FastAPI) -> dict[str, set[str]]:
 
 
 _APP = create_app()
-_ROUTES = _get_routes(_APP)
-_ROUTE_PATHS = [route.path for route in _ROUTES]
+_ROUTED_METHODS = _routed_methods(_APP)
+_ROUTE_PATHS = sorted({path for _, path in _ROUTED_METHODS})
+_GET_PATHS = sorted(path for method, path in _ROUTED_METHODS if method == "GET")
 _ADVERTISED_QUERY_PARAMS = _advertised_query_params(_APP)
 
 
@@ -146,25 +159,28 @@ def test_discovery_found_the_documented_list_endpoints() -> None:
     )
 
 
-@pytest.mark.parametrize("path", _ROUTE_PATHS)
-def test_get_route_rejects_an_invented_query_parameter(client: TestClient, path: str) -> None:
-    """Every GET route refuses a parameter it does not declare.
+@pytest.mark.parametrize(("method", "path"), _ROUTED_METHODS)
+def test_route_rejects_an_invented_query_parameter(
+    client: TestClient, method: str, path: str
+) -> None:
+    """Every route refuses a parameter it does not declare.
 
-    Not just the list endpoints: the defect is that an undeclared parameter is
-    dropped, and nothing about that is specific to a route returning a
-    collection. Covering every GET route is the same assertion with no
-    carve-out for the routes nobody has filed an issue about yet.
+    No body is sent even where one is required: the rejection is raised while
+    dependencies are solved, which happens before body validation, so a route
+    answers this identically whether or not the rest of the request is valid.
+    That is also why this needs no fixture and no database.
     """
-    response = client.get(_concrete_url(path), params={INVENTED_PARAM: "1"})
+    response = client.request(method, _concrete_url(path), params={INVENTED_PARAM: "1"})
 
     assert response.status_code == 422, (
-        f"GET {path} answered {response.status_code} to ?{INVENTED_PARAM}=1. "
-        f"An undeclared parameter must be refused, not dropped -- dropping it "
-        f"returns an unfiltered page that looks like a filtered one (#1313)."
+        f"{method} {path} answered {response.status_code} to "
+        f"?{INVENTED_PARAM}=1. An undeclared parameter must be refused, not "
+        f"dropped -- dropping it returns an unfiltered page that looks like a "
+        f"filtered one (#1313)."
     )
 
 
-@pytest.mark.parametrize("path", _ROUTE_PATHS)
+@pytest.mark.parametrize("path", _GET_PATHS)
 def test_rejection_names_the_unknown_key_and_lists_the_accepted_ones(
     client: TestClient, path: str
 ) -> None:
