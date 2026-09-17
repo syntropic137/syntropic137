@@ -15,13 +15,30 @@ the tally is keyed by the same sanitised id the events were.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields
+
 import pytest
 
 pytestmark = pytest.mark.unit
 
-#: One column value as asyncpg would hand it back - named rather than erased,
-#: because the untyped-dicts ratchet counts test files too.
-type _Cell = str | int
+
+@dataclass(frozen=True)
+class _TallyRow:
+    """One tally row, read by column name the way asyncpg's ``Record`` is.
+
+    Named and typed fields rather than a str-keyed dict: the shape is the two
+    columns the tally read selects, and a row whose ``execution_id`` is a
+    declared ``str`` is one this file's whole point - the spelling that
+    survives the round trip - can be stated about.
+    """
+
+    execution_id: str
+    cnt: int
+
+    def __getitem__(self, column: str) -> object:
+        if column not in {f.name for f in fields(self)}:
+            raise KeyError(column)
+        return getattr(self, column)
 
 NUL = chr(0)
 LONE_SURROGATE = chr(0xDEAD)
@@ -47,13 +64,13 @@ class _Tally:
     def __init__(self) -> None:
         self.binds: list[tuple[object, ...]] = []
 
-    async def fetch(self, _query: str, *args: object) -> list[dict[str, _Cell]]:
+    async def fetch(self, _query: str, *args: object) -> list[_TallyRow]:
         self.binds.append(args)
         wanted = args[0]
         assert isinstance(wanted, list)
         if STORED_ID not in wanted:
             return []
-        return [{"execution_id": STORED_ID, "cnt": 7}]
+        return [_TallyRow(execution_id=STORED_ID, cnt=7)]
 
 
 class _Acquire:

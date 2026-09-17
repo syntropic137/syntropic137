@@ -13,6 +13,8 @@ than one showing a dash.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields
+
 import pytest
 
 from syn_domain import tool_call_counts
@@ -23,17 +25,37 @@ pytestmark = pytest.mark.unit
 _EXECUTION = "exec-1322"
 
 
+@dataclass(frozen=True)
+class _TallyRow:
+    """One tally row, read by column name the way asyncpg's ``Record`` is.
+
+    Named and typed fields rather than a str-keyed dict, because the shape is
+    fixed: it is the two columns ``_BY_EXECUTION_IDS_SQL`` selects. Raising
+    ``KeyError`` for anything else is what a ``Record`` does, so a read path
+    that asks for a column this query never selected fails here rather than
+    being handed a value Postgres would not have had.
+    """
+
+    execution_id: str
+    cnt: int
+
+    def __getitem__(self, column: str) -> object:
+        if column not in {f.name for f in fields(self)}:
+            raise KeyError(column)
+        return getattr(self, column)
+
+
 class _RecordingConnection:
     def __init__(self) -> None:
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
 
-    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+    async def fetch(self, query: str, *args: object) -> list[_TallyRow]:
         self.statements.append(query)
         self.args.append(args)
         if tool_call_counts.TABLE not in query:
             return []
-        return [{"execution_id": _EXECUTION, "cnt": 11}]
+        return [_TallyRow(execution_id=_EXECUTION, cnt=11)]
 
 
 class _Acquire:
