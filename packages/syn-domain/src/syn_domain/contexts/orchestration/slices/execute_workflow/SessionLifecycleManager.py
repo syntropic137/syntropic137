@@ -211,6 +211,15 @@ class SessionLifecycleManager:
         ``GET /sessions/{id}``. A manager built without one records the
         session's tokens and no timeline row, and the handler says so.
 
+        The roll-up is recorded as SESSION_COMPLETED, not MESSAGE_RESPONSE.
+        It is not an LLM reply - it is this phase's terminal fact, with the
+        run's totals on it - and under the old name it was also unreadable:
+        MESSAGE_RESPONSE is mapped to no observation type, deliberately and
+        correctly, so every production call reached the handler and wrote
+        nothing to the lane the read path serves ``operations`` from. That is
+        the counterpart of the ``session_error`` row ``_record_terminal_status``
+        writes when a phase ends badly; only the failure half existed (#1034).
+
         The handlers load their own copy of the session, so they must run
         against a stored aggregate that is up to date, and they must run in
         sequence - a second write against the pre-record version would be a
@@ -229,7 +238,7 @@ class SessionLifecycleManager:
         if total_tokens > 0:
             record_cmd = RecordOperationCommand(
                 aggregate_id=self._session_id,
-                operation_type=OperationType.MESSAGE_RESPONSE,
+                operation_type=OperationType.SESSION_COMPLETED,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cache_creation_tokens=cache_creation_tokens,
@@ -239,9 +248,24 @@ class SessionLifecycleManager:
                 duration_seconds=duration_seconds,
                 metadata={"phase_id": self._phase_id, "source": source},
             )
-            await RecordOperationHandler(
+            recorded = await RecordOperationHandler(
                 repository=self._repo, observations=self._observability
             ).handle(record_cmd)
+            if recorded.diverged:
+                # The handler already logged the failure with its traceback.
+                # This adds what it has no way to know - which execution and
+                # phase lost the row - so the gap can be tied to a run instead
+                # of being inferred later from a timeline that is short by one.
+                logger.error(
+                    "Session %s completed but its timeline row was lost "
+                    "(execution %s, phase %s): %s. Lane 1 has the operation and "
+                    "its tokens; GET /sessions/%s will be missing the completion.",
+                    self._session_id,
+                    self._execution_id,
+                    self._phase_id,
+                    recorded.reason,
+                    self._session_id,
+                )
 
         complete_cmd = CompleteSessionCommand(
             aggregate_id=self._session_id,

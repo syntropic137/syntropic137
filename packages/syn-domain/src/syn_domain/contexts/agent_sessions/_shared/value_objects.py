@@ -82,6 +82,15 @@ class OperationType(StrEnum):
     # Extended thinking
     THINKING = "thinking"  # Extended thinking content
 
+    # Session lifecycle
+    # What `SessionLifecycleManager.complete_success` records when a phase's
+    # agent finishes: the run's token totals and how long it took. It was
+    # recorded as MESSAGE_RESPONSE, which is a per-turn LLM reply - a name that
+    # was wrong about the fact AND unroutable to the timeline, because the only
+    # honest observation for a per-turn reply is `token_usage`, which the cost
+    # query prices and the timeline excludes (#1034).
+    SESSION_COMPLETED = "session_completed"
+
     # Errors
     ERROR = "error"  # Error occurred
 
