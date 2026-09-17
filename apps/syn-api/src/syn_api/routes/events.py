@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
 from syn_adapters.projections.session_tools import call_identity
+from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
 from syn_api.types import (
     Err,
     EventRecord,

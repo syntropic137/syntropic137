@@ -6,8 +6,9 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
-from syn_api.types import BranchObservationInfo, PhaseActivityInfo  # noqa: TC001
+# Runtime import: Pydantic resolves the field annotations below, and
+# `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.types import BranchObservationInfo, PhaseActivityInfo
 from syn_shared.display import EM_DASH
 
 
