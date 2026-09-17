@@ -547,6 +547,12 @@ class ArtifactSummary(BaseModel):
     title: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    #: Who produced it (#1284). Same two facts as on ArtifactDetail, carried on
+    #: the row because the list is where "which models ran this execution's
+    #: phases" is asked. None on either means not reported, never "as
+    #: configured".
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 # ---------------------------------------------------------------------------

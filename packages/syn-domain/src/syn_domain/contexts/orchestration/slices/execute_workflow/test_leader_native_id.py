@@ -35,6 +35,8 @@ class TestClaudeAnnouncesOnEveryLine:
 
         proc = object.__new__(EventStreamProcessor)
         proc._leader_native_session_id = None
+        # The same first-wins capture shape, for the announced model (#1284).
+        proc._announced_model = None
         return proc
 
     async def test_the_first_announced_id_is_kept(self) -> None:
