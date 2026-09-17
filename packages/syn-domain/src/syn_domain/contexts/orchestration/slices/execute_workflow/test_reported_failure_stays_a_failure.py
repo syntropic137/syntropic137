@@ -93,6 +93,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     EventStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    TASK_RESULT_MARKER,
+    TASK_RESULT_TERMINATOR,
     AgentVerdict,
     VerdictReader,
     VerdictStatus,
@@ -486,10 +488,57 @@ class TestTheMarkerInsideAReportIsNotANewReport:
         assert AgentVerdict.from_agent_text(text).status is VerdictStatus.SUCCESS
 
 
-#: The prompt's own failure example, byte for byte as `render_workspace_prompt`
-#: renders it. This is the input the review found: it is syntactically perfect
-#: JSON of exactly the reported-failure shape, every phase is sent it, and an
-#: agent that reports success and then says what the format was reproduces it.
+def _result_fences(prompt: str) -> list[str]:
+    """Every fenced block of ``prompt`` that a reporting agent would copy.
+
+    Found the way an agent finds them - a code fence whose first line is the
+    marker - rather than by line number or by re-deriving the template. So this
+    reads whatever the prompt currently hands out, and a fence that stops
+    carrying its own terminator stops satisfying the tests below rather than
+    quietly still matching a copy of itself.
+    """
+    inside_fences = prompt.split("```")[1::2]
+    return [
+        block.strip() for block in inside_fences if block.strip().startswith(TASK_RESULT_MARKER)
+    ]
+
+
+def _with_the_slot_filled(fence: str, said: str) -> str:
+    """One fence with its ``<...>`` slot replaced the way the prompt says to.
+
+    `json.dumps` rather than a hand-built literal because "your own text in
+    double quotes" IS a JSON string, and what these tests are for is that
+    following that instruction - and nothing more - produces something the
+    production reader accepts.
+
+    Raises `ValueError` when there is no slot, which is the correct outcome: a
+    fence with no slot left in it is a complete report sitting in the prompt,
+    and `test_the_prompt_hands_out_no_block_that_quoting_it_would_obey` is the
+    test that says why that may not happen.
+    """
+    slot_at = fence.index("<")
+    slot_ends = fence.index(">", slot_at) + 1
+    return f"{fence[:slot_at]}{json.dumps(said)}{fence[slot_ends:]}"
+
+
+#: The prompt's failure example AS AN AGENT WRITES IT BACK: the fence filled in
+#: with a real reason and quoted without its terminator. This is the input the
+#: review found - syntactically perfect JSON of exactly the reported-failure
+#: shape, which an agent that reports success and then explains the format
+#: produces on its own.
+#:
+#: NOT derived from `render_workspace_prompt`, deliberately, and it no longer
+#: claims to be its bytes (it said "byte for byte" until #1324, by which time it
+#: was not). Two reasons. It is a HOSTILE SHAPE and not a quotation: what these
+#: tests need is decodable JSON with no terminator, and since #1324 the prompt's
+#: own `comments` is a `<...>` slot that does not decode at all - so the real
+#: bytes are a weaker input here than this, and pinning to them would quietly
+#: weaken three tests. And the live bytes are already read, by
+#: `test_the_whole_reporting_section_pasted_after_a_success_is_not_the_report`,
+#: which feeds the whole rendered section through the reader; that is where
+#: drift is caught. Deriving this as well would have coupled every test in this
+#: module to the prompt's fence shape at IMPORT time, so one prompt edit would
+#: collect zero tests instead of failing the one that governs it.
 THE_PROMPTS_FAILURE_EXAMPLE = (
     'TASK_RESULT: {"success": false, '
     '"comments": "Specific reason why — what was missing or what failed"}'
@@ -624,6 +673,174 @@ class TestTheBlockIsDelimitedNotLocated:
         assert verdict.status not in (VerdictStatus.SUCCESS, VerdictStatus.FAILURE), (
             "the prompt now contains a closed TASK_RESULT block, so an agent "
             "that quotes its own instructions reports whatever the example says"
+        )
+
+
+#: What the agent says about itself in the tests below. It is a sentence no
+#: template contains and no default could produce, so a verdict carrying it can
+#: only have come from the fence this prompt renders, filled in as instructed.
+WHAT_THE_AGENT_DID = "gave the result block one fence that carries its own terminator"
+
+
+class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
+    """THE INSTRUCTION AND THE READER, MADE TO AGREE BY CONSTRUCTION (#1324).
+
+    `test_the_prompt_hands_out_no_block_that_quoting_it_would_obey` above is
+    half a contract. It says the prompt must not hand out a block that PARSES,
+    and a prompt that said nothing at all about reporting would satisfy it
+    perfectly - which is nearly what happened: #1256 made `TASK_RESULT_END`
+    mandatory, the instruction was not updated, and the result was a prompt
+    whose only fence containing the terminator contained no JSON while the two
+    fences containing JSON contained no terminator. Both halves were true. An
+    agent still could not copy a complete block from either, because the parts
+    were in different fences and it had to assemble them. exec-138d516b91e8
+    wrote valid JSON, omitted the terminator, and lost a run that had done the
+    work.
+
+    The missing half is therefore not "the prompt mentions the terminator" -
+    the broken prompt did - but that ONE COPYABLE FENCE, filled in the one way
+    the prompt says to fill it, IS A VERDICT to the production reader. That is
+    asserted here by reading the fences out of the rendered prompt and feeding
+    them to `AgentVerdict`, so neither side can drift: reword the instruction
+    into something unwritable, or change what the reader accepts, and these
+    fail.
+
+    WHY THE FENCES ARE NOT LITERALLY PARSEABLE, since that is the obvious next
+    "fix" and it is the #1256 defect coming back through the emitter. A fence
+    that parses as it stands is a live report inside every phase's prompt: the
+    reader is delimited, not located, and cannot tell a block that was pasted
+    from one that was merely quoted. So `comments` is a `<...>` slot that is not
+    JSON. Filling it is the agent's own words, which it has to write anyway; a
+    fence copied unchanged is UNREADABLE, which refuses the phase - the
+    fail-closed direction, tested below.
+    """
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_success_fence_filled_in_is_a_readable_success(self, clone_repos: bool) -> None:
+        """One fence, copied whole and filled, reports success.
+
+        This is the assertion the broken prompt could not satisfy in any
+        rendering: its terminator-bearing fence held no JSON, so no single
+        fence was a verdict however it was filled in.
+        """
+        success_fence, _failure_fence = _result_fences(
+            render_workspace_prompt(clone_repos=clone_repos)
+        )
+
+        verdict = AgentVerdict.from_agent_text(
+            _with_the_slot_filled(success_fence, WHAT_THE_AGENT_DID)
+        )
+
+        assert verdict.status is VerdictStatus.SUCCESS, (
+            "the success fence the prompt hands out is not a verdict once "
+            "filled in, so an agent that copies it exactly still loses its run"
+        )
+        assert verdict.comments == WHAT_THE_AGENT_DID
+        assert not verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_failure_fence_filled_in_is_a_readable_failure(self, clone_repos: bool) -> None:
+        """And the fence that has to work even when nothing else did.
+
+        The failure fence is the one with teeth: a success that reads as
+        UNREADABLE costs a rerun, whereas a phase that reports failure in a
+        block nobody can read is the defect `phase_verdict` exists to stop,
+        arriving because the prompt taught an unreadable shape.
+        """
+        _success_fence, failure_fence = _result_fences(
+            render_workspace_prompt(clone_repos=clone_repos)
+        )
+
+        verdict = AgentVerdict.from_agent_text(
+            _with_the_slot_filled(failure_fence, "the GitHub App is not installed on the org")
+        )
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.comments == "the GitHub App is not installed on the org"
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_there_is_exactly_one_fence_per_outcome(self, clone_repos: bool) -> None:
+        """Two outcomes, two fences, and nothing to assemble from elsewhere.
+
+        A third fence carrying the marker would mean the block is once again
+        split across places an agent has to combine, which is the defect
+        itself; one would mean an outcome has no copyable form.
+        """
+        fences = _result_fences(render_workspace_prompt(clone_repos=clone_repos))
+
+        assert len(fences) == 2, f"expected one fence per outcome, found {len(fences)}: {fences}"
+        for fence in fences:
+            assert fence.endswith(TASK_RESULT_TERMINATOR), (
+                f"this fence does not carry its own terminator, so copying it "
+                f"cannot produce a readable report: {fence!r}"
+            )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_a_fence_copied_without_filling_the_slot_refuses_rather_than_completing(
+        self, clone_repos: bool
+    ) -> None:
+        """THE PRICE OF THE SLOT, PAID IN THE SAFE DIRECTION.
+
+        The slot has to be unparseable or the prompt is a report. The cost is
+        that an agent which copies a fence and fills in nothing has written no
+        readable verdict - and that must refuse the phase rather than complete
+        it. What it replaces did the opposite: the old example was valid JSON,
+        so a verbatim copy completed the phase while reporting the template's
+        words, "Brief summary of what was accomplished", as if they were the
+        agent's.
+        """
+        success_fence, _failure_fence = _result_fences(
+            render_workspace_prompt(clone_repos=clone_repos)
+        )
+
+        verdict = AgentVerdict.from_agent_text(success_fence)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion, (
+            "a fence copied with its placeholder left in reports the template's "
+            "words rather than the agent's, and completed the phase"
+        )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_fences_are_the_last_instruction_before_the_sign_off(
+        self, clone_repos: bool
+    ) -> None:
+        """The rule is about the LAST thing in the reply, so it is stated last.
+
+        An instruction that arrives after the block it governs is read after
+        the point it applied. Nothing may sit between the final fence and the
+        sign-off - not the failure-reason examples, not the consequence of
+        omitting the terminator, which is why both now come before them.
+        """
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+
+        after_the_last_fence = prompt[prompt.rindex("```") + len("```") :].strip()
+
+        assert TASK_RESULT_MARKER not in after_the_last_fence
+        assert "\n" not in after_the_last_fence, (
+            f"instructions follow the last result fence, so an agent reading in "
+            f"order meets them after the block they govern: {after_the_last_fence!r}"
+        )
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    def test_the_cost_of_omitting_the_terminator_is_stated_before_the_fences(
+        self, clone_repos: bool
+    ) -> None:
+        """Stated where an agent that skims to the code block still reads it.
+
+        The old prompt put it in a paragraph BELOW the examples. An agent that
+        scans for the fence it has to copy never reaches that paragraph, so the
+        one consequence it most needed was in the one place it would not look.
+        """
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+        section = prompt[prompt.index("## Task Result") :]
+        before_the_first_fence = section[: section.index("```")]
+
+        assert TASK_RESULT_TERMINATOR in before_the_first_fence
+        assert "unreadable" in before_the_first_fence.lower(), (
+            "the consequence of dropping the terminator is not stated above the "
+            "fences, where an agent that skims to the code block would see it"
         )
 
 
