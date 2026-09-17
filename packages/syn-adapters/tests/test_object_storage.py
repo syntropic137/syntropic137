@@ -263,6 +263,9 @@ class TestMinioStorage:
         mock_result = MagicMock()
         mock_result.etag = "abc123"
         mock_client.put_object.return_value = mock_result
+        # upload confirms the write is readable before returning (#700), so a
+        # backend that accepted it has to answer stat_object like one.
+        mock_client.stat_object.return_value.size = 11
 
         with patch.object(storage, "_get_client", return_value=mock_client):
             result = await storage.upload("test.txt", b"hello world")
@@ -282,6 +285,7 @@ class TestMinioStorage:
         mock_result = MagicMock()
         mock_result.etag = "xyz789"
         mock_client.put_object.return_value = mock_result
+        mock_client.stat_object.return_value.size = 7  # readable after the put (#700)
 
         with patch.object(storage, "_get_client", return_value=mock_client):
             result = await storage.upload("file.txt", b"content")

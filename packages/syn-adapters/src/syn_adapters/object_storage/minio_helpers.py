@@ -61,8 +61,6 @@ async def await_object_readable(
     bucket_name: str,
     key: str,
     expected_size: int,
-    *,
-    timeout_seconds: float = READABLE_TIMEOUT_SECONDS,
 ) -> None:
     """Block until `key` serves `expected_size` bytes to a reader.
 
@@ -78,9 +76,12 @@ async def await_object_readable(
 
     Raises:
         UploadError: If `key` is not readable at `expected_size` within
-            `timeout_seconds`, or if the backend fails the check outright.
+            `READABLE_TIMEOUT_SECONDS`, or if the backend fails the check
+            outright.
     """
     loop = asyncio.get_event_loop()
+    # Read at call time so the budget is one knob, tunable in one place.
+    timeout_seconds = READABLE_TIMEOUT_SECONDS
     deadline = loop.time() + timeout_seconds
     delay = _POLL_INITIAL_SECONDS
 
