@@ -55,6 +55,13 @@ class ArtifactSummaryResponse(BaseModel):
     title: str | None = None
     size_bytes: int = 0
     created_at: str | None = None
+    #: Who produced it (#1284). On the summary as well as the detail because a
+    #: caller asking "which models produced this execution's phases" asks it of
+    #: the LIST; needing a detail call per row to answer it is the same gap one
+    #: request further out. None on either means not reported, never "as
+    #: configured" - see ArtifactDetail.
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 class ArtifactListResponse(BaseModel):
@@ -118,6 +125,11 @@ class ArtifactResponse(BaseModel):
     created_at: str | None = None
     created_by: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    #: Who produced it (#1284). Carried here as well as on ArtifactDetail
+    #: because THIS is the model `GET /artifacts/{id}` answers with; a field
+    #: added only to the internal one never reaches the wire.
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 # =============================================================================
@@ -194,6 +206,11 @@ async def list_artifacts(
                         created_at=datetime.fromisoformat(a.created_at)
                         if isinstance(a.created_at, str)
                         else a.created_at,
+                        # Named here or the list answers null for an artifact
+                        # whose detail answers correctly - see the comment on
+                        # excluded_undated below, which is this same hop (#1284).
+                        agent_provider=a.agent_provider,
+                        agent_model=a.agent_model,
                     )
                     for a in domain_page.rows
                 ],
@@ -284,6 +301,8 @@ async def get_artifact(
                 content_hash=artifact.content_hash,
                 size_bytes=artifact.size_bytes,
                 created_at=_parse_artifact_created_at(artifact.created_at),
+                agent_provider=artifact.agent_provider,
+                agent_model=artifact.agent_model,
             )
         )
     except Exception as e:
@@ -516,6 +535,8 @@ def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse
         title=a.title,
         size_bytes=a.size_bytes or 0,
         created_at=str(a.created_at) if a.created_at else None,
+        agent_provider=a.agent_provider,
+        agent_model=a.agent_model,
     )
 
 
@@ -621,6 +642,8 @@ async def get_artifact_endpoint(
         created_at=str(a.created_at) if a.created_at else None,
         created_by=None,
         metadata={},
+        agent_provider=a.agent_provider,
+        agent_model=a.agent_model,
     )
 
 

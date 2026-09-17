@@ -109,6 +109,7 @@ def _codex_processor() -> CodexStreamProcessor:
         phase_id="p-1",
         session_id="sess-1",
         agent_model="gpt-5.6",
+        rollout=None,
     )
 
 

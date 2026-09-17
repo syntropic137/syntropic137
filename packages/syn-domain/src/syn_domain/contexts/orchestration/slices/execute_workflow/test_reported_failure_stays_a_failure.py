@@ -564,6 +564,10 @@ def _codex_processor() -> CodexStreamProcessor:
         tokens=TokenAccumulator(),
         collector=_RecordingCollector(),
         controller=None,
+        # See the note on the other construction in this file: no rollout,
+        # because these tests are about the verdict contract and not model
+        # identity (#1284).
+        rollout=None,
         execution_id="exec-A",
         phase_id="implement",
         session_id="s1",
@@ -870,6 +874,11 @@ class TestBothHarnessesReadTheSameContract:
             tokens=TokenAccumulator(),
             collector=_RecordingCollector(),
             controller=None,
+            # No rollout: these tests are about the VERDICT contract, not model
+            # identity (#1284). None is the honest value for a synthetic stream
+            # with nothing on disk, and it exercises the path a phase takes when
+            # the harness announced no model.
+            rollout=None,
             execution_id="exec-A",
             phase_id="implement",
             session_id="s1",

@@ -16,7 +16,16 @@ export interface SyntropicClientConfig {
  * All methods return `ApiResult<T>` — errors are values, never thrown.
  */
 export class SyntropicClient {
-  private readonly baseUrl: string;
+  /**
+   * The deployment this client sends to, without a trailing slash.
+   *
+   * Public because a tool that starts work has to be able to say WHERE it
+   * started it: the same workflow ID names different workflows on different
+   * deployments, so an execution ID alone does not identify the run
+   * (issue #1264). Reading it from the client is what makes the answer the
+   * host the request actually went to.
+   */
+  readonly baseUrl: string;
   private readonly headers: Record<string, string>;
 
   constructor(config: SyntropicClientConfig) {

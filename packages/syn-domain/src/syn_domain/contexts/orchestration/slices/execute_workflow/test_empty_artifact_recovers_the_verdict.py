@@ -37,6 +37,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.artifacts import UNREPORTED_AGENT
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_TITLE_MARKER,
 )
@@ -123,6 +124,7 @@ async def _collect(
         phase_name="Verify",
         output_artifact_types=("analysis_report",),
         last_agent_message=last_agent_message,
+        agent=UNREPORTED_AGENT,
     )
 
 
@@ -300,6 +302,7 @@ class TestTheThreeOutcomesAreTellableApart:
             session_id="s1",
             phase_name="Answer",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.artifact_ids == []
@@ -437,6 +440,7 @@ class TestTheVerdictSurvivesEveryHop:
             phase_id="verify",
             session_id="s1",
             agent_model="gpt-5.6",
+            rollout=None,
         )
 
         result = await processor.process_stream(
@@ -555,6 +559,7 @@ class TestTheVerdictSurvivesEveryHop:
             session_id="s1",
             phase_name="Verify",
             output_artifact_types=("analysis_report",),
+            agent=UNREPORTED_AGENT,
             last_agent_message=SAID,
         )
 
@@ -590,6 +595,7 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
             session_id="s1",
             phase_name="Verify",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(ids) == 1, "the file after the empty one must still be salvaged"

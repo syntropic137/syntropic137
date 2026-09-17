@@ -675,6 +675,9 @@ class WorkflowExecutionProcessor:
             session_id=todo.session_id or "",
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
+            # The provider is the phase's because we launched it; the model is
+            # the runtime's because only the agent's own stream said it (#1284).
+            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
             last_agent_message=self._runtime.take_last_message(
                 todo.phase_id, execution_id=todo.execution_id
             ),

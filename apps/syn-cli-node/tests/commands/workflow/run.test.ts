@@ -15,6 +15,7 @@ describe("workflow run commands", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   function jsonResponse(data: unknown, status = 200): Response {
@@ -55,7 +56,10 @@ describe("workflow run commands", () => {
             name: "Build Pipeline",
             workflow_type: "implementation",
             classification: "standard",
-            phases: [],
+            // A phase that consumes the task -- this test passes -t, and a
+            // workflow that cannot read it is now refused (#1280). The old
+            // fixture had no phases at all, i.e. it asserted the defect.
+            phases: [{ phase_id: "p1", name: "build", prompt_template: "Do: $ARGUMENTS" }],
             input_declarations: [],
           }),
         )
@@ -75,6 +79,87 @@ describe("workflow run commands", () => {
       expect(out).toContain("Build Pipeline");
       expect(out).toContain("execution started");
       expect(out).toContain("exec-001");
+    });
+
+    it("names the deployment it dispatched to, taken from the request and not from the environment (issue #1264)", async () => {
+      // The client resolved its base URL when this file imported it. Pointing
+      // SYN_API_URL somewhere else now is the lived failure in #1264 in
+      // miniature: a handler that re-read the environment here would name the
+      // VPS while the execution is running on localhost.
+      vi.stubEnv("SYN_API_URL", "http://100.114.86.77:8137");
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-host-123456789", name: "Review", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-host-123456789",
+            name: "Review",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-host-1" }),
+        );
+
+      await runCommand.handler({ positionals: ["wf-host"], values: {} });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const dispatchedTo = new URL(executeReq.url).origin;
+
+      const out = stdout();
+      expect(out).toContain(dispatchedTo);
+      expect(out).toContain("exec-host-1");
+      expect(out).not.toContain("100.114.86.77");
+    });
+
+    it("reports the configured deployment, not a default (issue #1264)", async () => {
+      // Same assertion from the other side: with the environment set BEFORE the
+      // client is built, the reported host must move with it. Guards against a
+      // hardcoded or stale value that happens to match the default.
+      vi.stubEnv("SYN_API_URL", "http://100.112.178.5:8137");
+      vi.resetModules();
+      const { runCommand: freshRunCommand } = await import(
+        "../../../src/commands/workflow/run.js"
+      );
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-mini-123456789", name: "Review", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-mini-123456789",
+            name: "Review",
+            workflow_type: "custom",
+            classification: "standard",
+            phases: [],
+            input_declarations: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-mini-1" }),
+        );
+
+      await freshRunCommand.handler({ positionals: ["wf-mini"], values: {} });
+
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      expect(executeReq.url).toContain("100.112.178.5:8137");
+      expect(stdout()).toContain("http://100.112.178.5:8137");
     });
 
     it("supports dry-run mode", async () => {
@@ -527,6 +612,155 @@ describe("workflow run commands", () => {
       });
 
       expect(stdout()).not.toContain("Warning:");
+    });
+
+    // ---- task deliverability, both directions (issue #1280) ----------------
+    //
+    // Each of these asserts what the CLI PRINTS and whether it DISPATCHES,
+    // because a checker that computes the right answer and dispatches anyway is
+    // the exact defect being fixed.
+
+    function taskWorkflow(promptTemplate: string, declarations: unknown[] = []) {
+      return {
+        id: "wf-task-123456789",
+        name: "Selftest WF",
+        workflow_type: "custom",
+        classification: "standard",
+        phases: [{ phase_id: "p1", name: "run", prompt_template: promptTemplate }],
+        input_declarations: declarations,
+      };
+    }
+
+    function mockResolveThen(detail: unknown): void {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [
+              { id: "wf-task-123456789", name: "Selftest WF", workflow_type: "custom", phase_count: 1 },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse(detail))
+        .mockResolvedValueOnce(jsonResponse({ status: "started", execution_id: "exec-task-1" }));
+    }
+
+    function stderrText(): string {
+      return (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .join("");
+    }
+
+    it("refuses -t when no phase prompt consumes the task, and never dispatches (issue #1280)", async () => {
+      // The workflow from the incident report: a fixed QA-ladder prompt with no
+      // $ARGUMENTS anywhere. This dispatch used to print "execution started".
+      mockResolveThen(taskWorkflow("Run the QA ladder: pytest, ruff, just preflight."));
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-task"],
+          values: { task: "Measure how long a cold preflight takes and report the p50." },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      expect(stderrText()).toContain("consumes the task");
+      expect(stderrText()).toContain("Selftest WF");
+      // 3 calls: detail probe, workflows list, detail. Never the execute POST --
+      // the refusal is worthless if the execution starts anyway.
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("refuses an undeliverable -t under --dry-run too (issue #1280)", async () => {
+      mockResolveThen(taskWorkflow("Run the QA ladder."));
+
+      await expect(
+        runCommand.handler({
+          positionals: ["wf-task"],
+          values: { task: "Measure the cold preflight.", "dry-run": true },
+        }),
+      ).rejects.toThrow(CLIError);
+
+      // dry-run's whole job is answering "will this do what I typed?", so it
+      // must not report a valid workflow here.
+      expect(stdout()).not.toContain("DRY RUN");
+    });
+
+    it("accepts -t on a {{task}} workflow and sends the task (issue #1280)", async () => {
+      // $ARGUMENTS and {{task}} are documented as equivalent -- the API merges
+      // the top-level task field as inputs["task"]. A check that only looked for
+      // $ARGUMENTS would refuse this dispatch, which does deliver the task.
+      mockResolveThen(taskWorkflow("Work on {{task}} in the checked-out repo."));
+
+      await runCommand.handler({
+        positionals: ["wf-task"],
+        values: { task: "Close the flaky projection test." },
+      });
+
+      expect(stdout()).not.toContain("Warning:");
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBe("Close the flaky projection test.");
+    });
+
+    it("warns, but still dispatches, when a phase consumes the task and none was supplied (issue #1280)", async () => {
+      mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      expect(stdout()).toContain("Warning:");
+      expect(stdout()).toContain("will render empty");
+      // A prompt may use $ARGUMENTS as an optional addendum, so this one runs.
+      expect(stdout()).toContain("execution started");
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.task).toBeNull();
+    });
+
+    it("does not warn about a missing task when the workflow declares a default for it", async () => {
+      mockResolveThen(
+        taskWorkflow("Your assignment: $ARGUMENTS", [
+          { name: "task", description: null, required: false, default: "run the weekly sweep" },
+        ]),
+      );
+
+      await runCommand.handler({ positionals: ["wf-task"], values: {} });
+
+      // The API fills the declared default, so nothing renders empty.
+      expect(stdout()).not.toContain("Warning:");
+      expect(stdout()).toContain("execution started");
+    });
+
+    it("does not warn about a missing task when -i task= supplied it", async () => {
+      mockResolveThen(taskWorkflow("Your assignment: $ARGUMENTS"));
+
+      await runCommand.handler({
+        positionals: ["wf-task"],
+        values: { input: ["task=Close the flaky projection test."] },
+      });
+
+      // Neither direction fires: the name `task` is both supplied and consumed,
+      // the latter via the $ARGUMENTS spelling.
+      expect(stdout()).not.toContain("Warning:");
+      expect(stdout()).toContain("execution started");
+    });
+
+    it("treats -t as satisfying a required `task` input declaration (issue #1280)", async () => {
+      mockResolveThen(
+        taskWorkflow("Your assignment: $ARGUMENTS", [
+          { name: "task", description: "what to do", required: true, default: null },
+        ]),
+      );
+
+      await runCommand.handler({
+        positionals: ["wf-task"],
+        values: { task: "Close the flaky projection test." },
+      });
+
+      // -t supplies the input named `task`; demanding -i task= as well was the
+      // same gap in the CLI's model of how the task is delivered.
+      expect(stderrText()).not.toContain("Missing required inputs");
+      expect(stdout()).toContain("execution started");
     });
 
     it("fails loud when API returns status!=started", async () => {

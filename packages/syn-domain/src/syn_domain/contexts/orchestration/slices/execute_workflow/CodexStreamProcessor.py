@@ -57,6 +57,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
+from syn_domain.contexts.agent_sessions import model_from_rollout
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -65,6 +66,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     InterruptibleWorkspace,
     ReportedUsage,
     StreamResult,
+    announced_model_from,
     api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
@@ -88,6 +90,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.orchestration.ports import CodexRolloutPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
         TokenAccumulator,
     )
@@ -219,6 +222,22 @@ class _CodexItem(TypedDict, total=False):
     text: str
 
 
+def _changed_paths_preview(item: _CodexItem) -> str:
+    """The paths a ``file_change`` item touched, as one preview string.
+
+    Both ends of a file change carry the same change list, and both record it
+    - the start as its ``input_preview``, the completion as its
+    ``output_preview`` - so the reading of it lives in one place.
+    """
+    changes = item.get("changes")
+    paths = (
+        [str(change.get("path", "")) for change in changes if isinstance(change, dict)]
+        if isinstance(changes, list)
+        else []
+    )
+    return ", ".join(paths)[:_MAX_PREVIEW_LEN]
+
+
 class _CodexUsage(TypedDict, total=False):
     """The ``usage`` block on a codex ``turn.completed`` event."""
 
@@ -242,6 +261,10 @@ class _CodexEvent(TypedDict, total=False):
     usage: _CodexUsage
     error: _CodexError
     message: str
+    #: Declared but NOT observed: no captured codex stream carries it (see
+    #: `_process_line`). Declared anyway because the parser reads it, and a key
+    #: the parser reads should be in the shape a reader consults.
+    model: str
 
 
 class CodexObservabilityRecorder(Protocol):
@@ -354,8 +377,16 @@ class CodexStreamProcessor:
         phase_id: str,
         session_id: str,
         agent_model: str | None,
+        rollout: CodexRolloutPort | None,
     ) -> None:
         self._tokens = tokens
+        #: Where the model comes from when the stream does not name one, which
+        #: so far is every codex run there has ever been (#1284). Stated by
+        #: every caller and given no default on purpose: `None` here means
+        #: NOBODY LOOKED, and that has to be a decision someone made rather
+        #: than a keyword they omitted - the omission is the exact shape of the
+        #: bug this parameter exists to close.
+        self._rollout = rollout
         self._collector = collector
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -373,6 +404,18 @@ class CodexStreamProcessor:
         # report cannot be overwritten before it is parsed (#1256).
         self._verdict_reader = VerdictReader()
         self._leader_native_session_id: str | None = None
+        #: The model codex NAMED, on its own stream or failing that in the
+        #: rollout it wrote (#1284). FIRST wins, the rule and reason of
+        #: `_leader_native_session_id` directly above.
+        #:
+        #: `_agent_model` (the REQUESTED model) is deliberately not a fallback
+        #: here. It is frequently a Claude alias that was never forwarded to
+        #: `codex exec` at all (see `_is_codex_model` in
+        #: `apps/syn-api/_codex_command.py`), so copying it in would record
+        #: "claude ran the codex phase" - a false statement that reads as
+        #: evidence. None is the honest answer and the one `AgentIdentity`
+        #: already defines as "not reported".
+        self._announced_model: str | None = None
         # Held, not applied. An auth error the CLI RECOVERS from (retry, then a
         # normal turn.completed) must not fail an otherwise successful phase,
         # so the candidate is only promoted at end-of-stream and only when no
@@ -445,6 +488,8 @@ class CodexStreamProcessor:
                 or MISSING_TERMINAL_TURN_REASON
             )
 
+        await self._name_the_model_from_disk()
+
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
 
@@ -507,7 +552,80 @@ class CodexStreamProcessor:
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
+            # Stated, not defaulted. The value is None for every codex stream
+            # observed so far, but arriving by omission is what left a codex
+            # artifact unable to say whether it had no model or had never been
+            # asked - and the codex phase is the OTHER half of every
+            # cross-model claim this platform makes (#1284).
+            announced_model=self._announced_model,
         )
+
+    async def _name_the_model_from_disk(self) -> None:
+        """Ask the rollout what ran, because the stream never says.
+
+        THIS IS NOT A FALLBACK IN PRACTICE, it is the path. No codex version
+        captured here puts a model anywhere on stdout, across every fixture and
+        the golden recording, so the check above this one has never once
+        fired - which left every codex artifact reading
+        `provider="codex", model=null` and proving harness diversity where the
+        claim being made was model diversity (#1284). Codex does say what it
+        ran; it says it on disk, in the same `turn_context.payload.model` that
+        prices a codex delegate, read here by that same function.
+
+        Runs at end-of-stream, once, and only when the stream named nothing:
+        the rollout is complete by then and the workspace is still alive, and a
+        stream that DID name a model needs no second opinion.
+
+        Nothing here can fail the phase. A model that cannot be recovered is a
+        gap in what we can say about the run, not a defect in the run, and the
+        three ways of getting there are kept apart in the log because only one
+        of them is an operational fault:
+
+        - no rollout source wired          -> nobody looked;
+        - source read nothing (`None`)     -> looked, could not read;
+        - rollout named no single model    -> read, it does not say.
+
+        All three leave `_announced_model` as None, which is the honest answer
+        and the one `AgentIdentity` already defines as "not reported".
+        """
+        if self._announced_model is not None:
+            return
+        if self._rollout is None:
+            logger.debug(
+                "No codex rollout source wired (phase=%s) - the model this phase "
+                "ran goes unrecorded",
+                self._phase_id,
+            )
+            return
+        if self._leader_native_session_id is None:
+            # The rollout is filed under the id codex announced, and picking
+            # one by any other means is a guess. A phase whose stream never got
+            # as far as `thread.started` has no key, so there is nothing to
+            # ask with.
+            logger.warning(
+                "Codex announced no session id (phase=%s) - cannot match its rollout, "
+                "so the model it ran goes unrecorded",
+                self._phase_id,
+            )
+            return
+
+        document = await self._rollout.codex_rollout(self._leader_native_session_id)
+        if document is None:
+            logger.warning(
+                "Could not read the codex rollout for session %s (phase=%s) - "
+                "the model it ran goes unrecorded",
+                self._leader_native_session_id,
+                self._phase_id,
+            )
+            return
+
+        self._announced_model = model_from_rollout(document)
+        if self._announced_model is None:
+            logger.info(
+                "Codex rollout for session %s (phase=%s) names no single model",
+                self._leader_native_session_id,
+                self._phase_id,
+            )
 
     def _estimate_cost(self) -> float | None:
         """Estimate total cost via the STRICT resolver (never Sonnet default).
@@ -602,6 +720,19 @@ class CodexStreamProcessor:
         if event is None:
             return
 
+        # Checked on EVERY event rather than one chosen type. No codex version
+        # captured here emits a model anywhere on stdout - not the golden
+        # recording, not any fixture - so there is no observed event to key
+        # this to, and guessing one would be a schema we invented. Codex does
+        # name its model on disk (`turn_context.payload.model` in the rollout,
+        # which is where `transcript_usage` reads it), so the wire is where it
+        # is missing, not the harness. Reading a top-level `model` off whatever
+        # line carries it costs one lookup and needs no such guess: if codex
+        # starts naming it, the identity is carried instead of dropped, and
+        # until then this is None and every reader is told so.
+        if self._announced_model is None:
+            self._announced_model = announced_model_from(event.get("model"))
+
         event_type = event.get("type", "")
         if event_type == CodexStreamType.ITEM_STARTED:
             await self._handle_item_started(event)
@@ -612,24 +743,32 @@ class CodexStreamProcessor:
         elif event_type in (CodexStreamType.TURN_FAILED, CodexStreamType.ERROR):
             self._note_stream_fault(event)
         elif event_type == CodexStreamType.THREAD_STARTED:
-            # Codex announces its OWN session id here, and it is the same id
-            # the rollout file on disk is keyed by - verified same-run, not
-            # inferred from both being uuidv7. That identity is what lets the
-            # delegate import dedup the leader by lookup instead of guessing
-            # it from agent names (#895).
-            #
-            # FIRST wins, for the same reason as the claude side: a rebind
-            # late in a run would make the real leader look like a delegate
-            # and bill it a second time.
-            announced = event.get("thread_id")
-            if (
-                self._leader_native_session_id is None
-                and isinstance(announced, str)
-                and announced.strip()
-            ):
-                self._leader_native_session_id = announced
+            self._note_leader_session_id(event)
 
         # "turn.started": no observability call needed.
+
+    def _note_leader_session_id(self, event: _CodexEvent) -> None:
+        """Record the session id codex announced for itself on ``thread.started``.
+
+        It is the same id the rollout file on disk is keyed by - verified
+        same-run, not inferred from both being uuidv7. That identity is what
+        lets the delegate import dedup the leader by lookup instead of guessing
+        it from agent names (#895), and it is the key
+        `_name_the_model_from_disk` asks the rollout with (#1284).
+
+        FIRST wins, for the same reason as the claude side: a rebind late in a
+        run would make the real leader look like a delegate and bill it a
+        second time. A blank or non-string announcement is not an id and is
+        left unset, so the import refuses rather than deriving one shared
+        platform id for every delegate.
+        """
+        announced = event.get("thread_id")
+        if (
+            self._leader_native_session_id is None
+            and isinstance(announced, str)
+            and announced.strip()
+        ):
+            self._leader_native_session_id = announced
 
     def _note_stream_fault(self, event: _CodexEvent) -> None:
         """Record the reason codex itself gave for ending the turn.
@@ -681,24 +820,43 @@ class CodexStreamProcessor:
         self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
-        """Handle ``item.started``: only ``command_execution`` starts a tool op.
+        """Handle ``item.started``: record the start codex announced, if any.
 
-        ``file_change`` items only carry useful data on ``item.completed``
-        (the change list), so they are recorded as a synthetic
-        started+completed pair there instead (see ``_handle_item_completed``).
+        A call is timed from the gap between the row that opens it and the row
+        that closes it (`session_tools_dispatch._resolve_durations`), so what
+        is recorded here decides whether that number means anything. Only what
+        codex actually announces is recorded, and only when it announces it.
+
+        ``command_execution`` is always opened before the command runs.
+        ``file_change`` depends on the CLI version: some emit ``item.started``
+        with the change list already on it and then ``item.completed``
+        (`codex_exec_recording.jsonl`), others emit only ``item.completed``
+        (`codex_brace_echo_clean.jsonl`). Where the start arrives the pair
+        brackets the change and times it; where it does not, the completion
+        stands alone and reports no duration, which is the answer every reader
+        already gets for a completion with no start.
         """
         item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != CodexItemType.COMMAND_EXECUTION:
+        if not isinstance(item, dict):
             return
 
+        item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
-        command = str(item.get("command", ""))
-        self._note_delegation_attempt(tool_use_id, command)
-        await self._collector.record_tool_started(
-            tool_name=CODEX_TOOL_NAME_COMMAND,
-            tool_use_id=tool_use_id,
-            input_preview=command[:_MAX_PREVIEW_LEN],
-        )
+
+        if item_type == CodexItemType.COMMAND_EXECUTION:
+            command = str(item.get("command", ""))
+            self._note_delegation_attempt(tool_use_id, command)
+            await self._collector.record_tool_started(
+                tool_name=CODEX_TOOL_NAME_COMMAND,
+                tool_use_id=tool_use_id,
+                input_preview=command[:_MAX_PREVIEW_LEN],
+            )
+        elif item_type == CodexItemType.FILE_CHANGE:
+            await self._collector.record_tool_started(
+                tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
+                tool_use_id=tool_use_id,
+                input_preview=_changed_paths_preview(item),
+            )
 
     async def _handle_item_completed(self, event: _CodexEvent) -> None:
         """Handle ``item.completed`` for command_execution and file_change items."""
@@ -760,25 +918,29 @@ class CodexStreamProcessor:
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:
-        tool_use_id = str(item.get("id", "unknown"))
-        changes = item.get("changes")
-        paths = (
-            [str(change.get("path", "")) for change in changes if isinstance(change, dict)]
-            if isinstance(changes, list)
-            else []
-        )
-        preview = ", ".join(paths)[:_MAX_PREVIEW_LEN]
-        success = item.get("status") != "failed"
+        """Record the completion of a ``file_change``, and nothing else (#1064).
 
-        await self._collector.record_tool_started(
-            tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
-            tool_use_id=tool_use_id,
-            input_preview=preview,
-        )
+        This used to write a start here too, immediately before the
+        completion, for the versions of codex that announce no
+        ``item.started`` for a file change. That start was not an observation
+        of anything: it said "this call began" from an event that says the
+        call has ended, and the duration rule then measured the gap between
+        this method's own two writes and reported it as how long the edit
+        took - a few milliseconds or zero, depending on how fast the store
+        answered. A number with the shape of a measurement and none of the
+        content.
+
+        A duration is only knowable from a pair of rows, so it is only
+        reportable when the harness produced a pair. `_handle_item_started`
+        records one end when codex announces it; this records the other. When
+        codex announced no start, that leaves the duration `None` - what this
+        producer actually knows.
+        """
+        preview = _changed_paths_preview(item)
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_FILE_CHANGE,
-            tool_use_id=tool_use_id,
-            success=success,
+            tool_use_id=str(item.get("id", "unknown")),
+            success=item.get("status") != "failed",
             output_preview=preview or None,
         )
 

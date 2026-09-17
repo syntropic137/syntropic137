@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts._shared.value_objects import (
+    UNREPORTED_AGENT,
+    ArtifactType,
+    PhaseOutputFile,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     map_artifact_type,
@@ -113,6 +117,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
         assert len(result.artifact_ids) == 2
         assert result.first_content == "# Result"
@@ -147,6 +152,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
         assert result.artifact_ids == []
         assert result.first_content is None
@@ -223,6 +229,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
         assert len(result) == 1
         assert len(repo.saved) == 1
@@ -242,6 +249,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
         assert result == []
 
@@ -280,6 +288,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -307,6 +316,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.first_content == "# Real Result"
@@ -334,6 +344,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(ids) == 1
@@ -360,6 +371,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -390,6 +402,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -420,6 +433,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 4
@@ -453,6 +467,7 @@ class TestExactlyOnePrimaryDeliverable:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True, False, False]
@@ -473,6 +488,7 @@ class TestExactlyOnePrimaryDeliverable:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True]
@@ -500,6 +516,7 @@ class TestADeclaredOutputMustBeProduced:
                 session_id="s1",
                 phase_name="Verify",
                 output_artifact_types=("analysis_report",),
+                agent=UNREPORTED_AGENT,
             )
 
         message = str(excinfo.value)
@@ -529,6 +546,7 @@ class TestADeclaredOutputMustBeProduced:
                 session_id="s1",
                 phase_name="Falsify",
                 output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
             )
 
     @pytest.mark.asyncio
@@ -549,6 +567,7 @@ class TestADeclaredOutputMustBeProduced:
             session_id="s1",
             phase_name="Interrupted",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert ids == []
@@ -573,6 +592,7 @@ class TestADeclaredOutputMustBeProduced:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("plan", "markdown"),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.artifact_type for a in repo.saved] == [ArtifactType.PLAN]
