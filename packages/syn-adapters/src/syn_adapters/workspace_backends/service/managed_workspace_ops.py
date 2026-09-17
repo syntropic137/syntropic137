@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from syn_shared.display import describe_exit_code
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
@@ -46,8 +48,8 @@ async def _send_sigint(container_id: str) -> bool:
         logger.info("interrupt(): SIGINT delivered to agent process in %s", container_id)
     else:
         logger.warning(
-            "interrupt(): no agent process found or SIGINT failed (exit=%d) for container %s",
-            proc.returncode,
+            "interrupt(): no agent process found or SIGINT failed (exit=%s) for container %s",
+            describe_exit_code(proc.returncode),
             container_id,
         )
     return success

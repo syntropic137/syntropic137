@@ -11,6 +11,7 @@ import pytest
 
 from syn_shared.display import (
     compute_duration_seconds,
+    describe_exit_code,
     format_cost,
     format_duration_seconds,
     format_model_compact,
@@ -367,3 +368,42 @@ class TestFormatRepos:
         self, value: list[str] | tuple[str, ...] | None, expected: str | None
     ) -> None:
         assert format_repos(value) == expected
+
+
+@pytest.mark.unit
+class TestDescribeExitCode:
+    """A negative exit code is a signal, and nothing else says so (#1295)."""
+
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            # The incident: a probe killed by SIGSEGV, reported as "-11".
+            (-11, "SIGSEGV (signal 11)"),
+            # What the standard library hands back for a process that has not
+            # exited. Reporting a failure is the worst place to raise one.
+            (None, "unknown"),
+            (-9, "SIGKILL (signal 9)"),
+            (-15, "SIGTERM (signal 15)"),
+            # Chosen by the program, so there is nothing to name.
+            (0, "0"),
+            (1, "1"),
+            # `timeout`'s "the bound fired", and the shell's 128+N spelling of
+            # the very same segfault. Left alone on purpose: a program is free
+            # to exit 139 deliberately and the code cannot say which happened.
+            (124, "124"),
+            (139, "139"),
+        ],
+    )
+    def test_renders_expected_string(self, code: int | None, expected: str) -> None:
+        assert describe_exit_code(code) == expected
+
+    def test_a_signal_this_platform_does_not_name_still_says_it_was_killed(self) -> None:
+        """The fallback keeps the fact worth having when the name is missing.
+
+        Signal numbers above the standard set are platform-specific and
+        ``signal.Signals`` rejects the ones it does not know. Raising there
+        would turn a formatter into a second failure on top of the one being
+        reported, and returning "-60" would put back the number nobody can
+        read. "it was killed" survives either way.
+        """
+        assert describe_exit_code(-60) == "signal 60"

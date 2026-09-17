@@ -93,6 +93,7 @@ import threading
 from dataclasses import dataclass
 
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_shared.display import describe_exit_code
 from syn_shared.env_constants import (
     ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES,
     ENV_SYN_IMAGE_VERIFY_COSIGN_PATH,
@@ -491,7 +492,8 @@ def _run_cosign_verify(
         detail = (completed.stderr or completed.stdout or "").strip()
         msg = (
             f"Signature verification FAILED for {image_ref} "
-            f"(cosign exit {completed.returncode}). Expected a signature from "
+            f"(cosign exit {describe_exit_code(completed.returncode)}). "
+            f"Expected a signature from "
             f"identity matching {settings.certificate_identity_regexp!r} issued by "
             f"{settings.certificate_oidc_issuer}. The image is not run. "
             f"cosign said: {detail}"

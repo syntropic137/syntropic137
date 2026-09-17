@@ -310,7 +310,7 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     return f"{first} +{len(items) - 1}"
 
 
-def describe_exit_code(code: int) -> str:
+def describe_exit_code(code: int | None) -> str:
     """Render an exit code so that a death by signal says so by name.
 
     A NEGATIVE exit code is not a number the program chose. It is the negated
@@ -323,7 +323,16 @@ def describe_exit_code(code: int) -> str:
     same death as ``139`` under the 128+N convention, but a program is equally
     free to exit 139 of its own accord, and there is nothing in an exit code
     to say which happened - so this names only the case that is unambiguous.
+
+    ``None`` is accepted because that is what the standard library hands back:
+    ``Process.returncode`` is ``int | None``, so every caller formatting one
+    would otherwise have to narrow it first, and a narrowing invented at each
+    call site is a decision this function exists to own. It is also the safer
+    default for where these strings are built - a logger reporting a failure
+    is the worst possible place to raise a second one.
     """
+    if code is None:
+        return "unknown"
     if code >= 0:
         return str(code)
     try:

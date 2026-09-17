@@ -36,6 +36,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
+from syn_shared.display import describe_exit_code
 
 __all__ = [
     "LOSS_COUNTERS",
@@ -230,7 +231,7 @@ def _refuse_unreadable(
     """
     if exit_code == _EXIT_USAGE:
         # The host built the command line, so this is our bug, not the store's.
-        return _unknown(f"exporter rejected its arguments (exit {exit_code})")
+        return _unknown(f"exporter rejected its arguments (exit {describe_exit_code(exit_code)})")
 
     if exit_code == _EXIT_NO_BINARY and document is None:
         # This image has no exporter baked in, so capture was never possible
@@ -247,7 +248,8 @@ def _refuse_unreadable(
         # binary is older than --json, which is a configuration problem rather
         # than a capture success.
         return _unknown(
-            f"exporter produced no parseable JSON result (exit {exit_code}); "
+            f"exporter produced no parseable JSON result "
+            f"(exit {describe_exit_code(exit_code)}); "
             "the binary may predate --json"
         )
 
@@ -312,7 +314,8 @@ def _verdict(
         return AuthoritativeCapture(
             state=CaptureState.UNKNOWN,
             reason=(
-                f"exporter exit {exit_code} contradicts captured_everything={captured_everything}"
+                f"exporter exit {describe_exit_code(exit_code)} contradicts "
+                f"captured_everything={captured_everything}"
             ),
             **fields,  # type: ignore[arg-type]
         )
