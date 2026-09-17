@@ -104,3 +104,322 @@ allowed_prefixes = [
 # path = { max_constructions = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/storage/in_memory.py" = { max_constructions = 2, issue = "#197" }
 "packages/syn-adapters/src/syn_adapters/storage/in_memory_workflow_repo_queries.py" = { max_constructions = 2, issue = "#276" }
+
+[typed_projection_handlers]
+# Projection handler parameters that do not declare a typed payload (#1268).
+# Key format: "<file>:<qualname>.param:<name>". Gate:
+# ci/fitness/code_quality/test_typed_projection_handlers.py
+#
+# RATCHET, ONE DIRECTION. This table is the whole budget - there is no number
+# to raise. Adding an entry means adding an untyped handler, and reviewers
+# should refuse it. Removing one means a handler was typed, and
+# test_no_stale_grandfathered_handlers REQUIRES the entry to go with it, so a
+# fixed site cannot leave standing permission to break again.
+#
+# These 173 were never budgeted debt - they were unmeasured. A bare `dict`
+# annotation scores zero against the per-package ratchet in
+# fitness-exceptions.toml by design, so they consumed none of syn-domain's 440.
+#
+# The count went 110 -> 171 when review found the gate narrower than its own
+# claim (PR #1281). Not a relaxed ratchet: 61 sites that were always this
+# defect became visible when the population stopped being a list of name
+# prefixes and the accepted annotation stopped being a list of rejected
+# spellings. Same re-baselining as #1188 and #1248, same rule - the number may
+# only go down from here.
+#
+# 171 -> 173 for the third time in the same shape: the taint walk that decides
+# which helpers a payload REACHES read only `ast.Assign`/`ast.AnnAssign`, so a
+# payload carved out by `for`, a comprehension, `with ... as` or `:=` handed
+# the receiving helper nothing the gate could follow. Those two helpers were
+# never passing this gate - it had never read them. Same rule still: down only.
+#
+# `verdict` is why it fails, and the three are the gate's whole vocabulary:
+#   string-keyed   a mapping at any nesting, whatever its key and value types
+#   undeclared     no annotation at all, or one naming Any/object
+#   no-fields      a type declared in that module that is none of the four
+#                  accepted kinds - every TypedDict lands here
+#
+# Fix with a @dataclass or a Pydantic BaseModel. NOT a TypedDict: it is read by
+# string key and validates nothing at runtime, so it reproduces both halves of
+# the defect under a name that looks typed (AGENTS.md; PR #1246, #1248).
+# `annotation` records what is there now, so a diff shows what changed.
+
+
+# 14 handler parameter(s)
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_workflow_execution_started.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_phase_started.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_phase_completed.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_workflow_completed.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_workflow_failed.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_session_started.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_session_completed.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_operation_recorded.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_artifact_created.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_subagent_started.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.on_subagent_stopped.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection._forward_event.param:event" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.broadcast.param:data" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/realtime.py:RealTimeProjection.broadcast_global.param:data" = { annotation = "dict[str, JsonValue]", verdict = "string-keyed", issue = "#1268" }
+
+# 2 handler parameter(s)
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_helpers.py:on_trigger_registered.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_helpers.py:on_trigger_fired.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 6 handler parameter(s)
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._on_trigger_registered.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._on_trigger_paused.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._on_trigger_resumed.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._on_trigger_deleted.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._dispatch_event.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projections/trigger_query_projection.py:TriggerQueryProjection._on_trigger_fired.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 14 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_session_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_agent_launched.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_operation_recorded.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_subagent_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:SessionListProjection.on_subagent_stopped.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_update_subagent_record.param:subagents" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_update_subagent_record.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_apply_session_completed.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_apply_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_accumulate_tokens.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_accumulate_tokens.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_append_operation.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/list_sessions/projection.py:_append_operation.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 11 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:SessionCostProjection.on_agent_observation.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:SessionCostProjection.on_session_summary.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:SessionCostProjection.on_session_cost_finalized.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_get_or_create_session_cost.param:existing" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_set_linkage.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_apply_finalized_costs.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_apply_finalized_tokens.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_apply_finalized_breakdowns.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_parse_timestamp.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:_update_linkage.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py:SessionCostProjection._handle_tool_execution.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 1 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/token_metrics/projection.py:TokenMetricsProjection.on_token_usage.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 3 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py:ToolTimelineProjection.on_tool_execution_started.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py:ToolTimelineProjection.on_tool_execution_completed.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py:ToolTimelineProjection.on_tool_blocked.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 4 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/artifacts/slices/list_artifacts/projection.py:ArtifactListProjection.on_artifact_created.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/artifacts/slices/list_artifacts/projection.py:ArtifactListProjection.on_artifact_creation_time_recovered.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/artifacts/slices/list_artifacts/projection.py:ArtifactListProjection.on_artifact_updated.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/artifacts/slices/list_artifacts/projection.py:ArtifactListProjection.on_artifact_deleted.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 1 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:WorkflowDispatchProjection._write_dispatch_record.param:event_data" = { annotation = "dict[str, _EventValue]", verdict = "string-keyed", issue = "#1268" }
+
+# 9 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_template_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_execution_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_phase_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_completed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_failed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_artifact_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection._save_metrics.param:metrics" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 7 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:ExecutionCostProjection.on_agent_observation.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:ExecutionCostProjection.on_session_summary.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:ExecutionCostProjection.on_session_cost_finalized.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:_get_or_create.param:existing" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:_apply_token_usage.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:_apply_token_usage.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/projection.py:_apply_tool_execution.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 13 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_workspace_provisioned_for_phase.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_agent_execution_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_artifacts_collected_for_phase.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_phase_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_next_phase_ready.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_workflow_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_workflow_failed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_execution_cancelled.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection.on_workflow_interrupted.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_merge_progress.param:existing" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_merge_progress.param:updates" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:ExecutionTodoProjection._save_state.param:progress" = { annotation = "dict[str, int]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py:_item_from_dict.param:data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 14 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_phase_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_phase_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_workflow_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_workflow_failed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_execution_cancelled.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection.on_workflow_interrupted.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._stamp_terminal_phase.param:existing" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._find_phase.param:phases" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._aggregate_totals.param:detail" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._completed_phases_after.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._track_artifact.param:existing" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._update_phase_metrics.param:phase" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py:WorkflowExecutionDetailProjection._update_phase_metrics.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 7 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:WorkflowDetailProjection.on_workflow_template_created.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:WorkflowDetailProjection.on_workflow_template_updated.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:WorkflowDetailProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:WorkflowDetailProjection.on_workflow_phase_updated.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_find_phase.param:phases" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_apply_phase_fields.param:phase" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_apply_phase_fields.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py:_refs.param:refs" = { annotation = "Iterable[object] | None", verdict = "undeclared", issue = "#1268" }
+
+# 6 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_phase_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_workflow_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_workflow_failed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_execution_cancelled.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.on_workflow_interrupted.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 4 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py:WorkflowListProjection.on_workflow_template_created.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py:WorkflowListProjection.on_workflow_template_updated.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py:WorkflowListProjection.on_workflow_template_archived.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py:WorkflowListProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 3 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/manage_global_claude_plugins/projection.py:GlobalClaudePluginsProjection.on_global_claude_plugin_added.param:event_data" = { annotation = "_GlobalAddedEventData", verdict = "no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/manage_global_claude_plugins/projection.py:GlobalClaudePluginsProjection.on_global_claude_plugin_removed.param:event_data" = { annotation = "_GlobalRemovedEventData", verdict = "no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/manage_global_claude_plugins/projection.py:_coerce_datetime.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+
+# 2 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/register_claude_plugin/projection.py:ClaudePluginLockProjection.on_claude_plugin_registered.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/register_claude_plugin/projection.py:_coerce_datetime.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+
+# 2 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/register_skill/projection.py:SkillLockProjection.on_skill_registered.param:event_data" = { annotation = "_SkillRegisteredEventData", verdict = "no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/register_skill/projection.py:_coerce_datetime.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+
+# 8 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection.on_phase_started.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection.on_phase_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection.on_workflow_failed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection.on_execution_cancelled.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection.on_workflow_interrupted.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection._close_execution.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:_execution_of.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py:WorkflowPhaseMetricsProjection._save_phases.param:phases" = { annotation = "Mapping[str, PhaseMetricsEntry]", verdict = "string-keyed", issue = "#1268" }
+
+# 6 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_creating.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_created.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_command_executed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_destroying.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_destroyed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py:WorkspaceMetricsProjection.on_workspace_error.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+
+# 8 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_organization_created.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_organization_updated.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_organization_deleted.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_system_created_increment.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_system_deleted_decrement.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_repo_registered_increment.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:OrganizationProjection.on_repo_deregistered_decrement.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py:_org_from_dict.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 6 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:RepoProjection.on_repo_registered.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:RepoProjection.on_repo_assigned_to_system.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:RepoProjection.on_repo_unassigned_from_system.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:RepoProjection.on_repo_updated.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:RepoProjection.on_repo_deregistered.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py:_repo_from_dict.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 8 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_system_created.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_system_updated.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_system_deleted.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_repo_registered_increment.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_repo_assigned_increment.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_repo_unassigned_decrement.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:SystemProjection.on_repo_deregistered_decrement.param:event" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py:_sys_from_dict.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 2 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_correlation/projection.py:RepoCorrelationProjection.on_trigger_fired.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_correlation/projection.py:RepoCorrelationProjection.on_workflow_execution_started.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 4 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_cost/projection.py:RepoCostProjection.on_workflow_completed.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_cost/projection.py:RepoCostProjection.on_workflow_failed.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_cost/projection.py:RepoCostProjection._handle_execution_event.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_cost/projection.py:RepoCostProjection._save.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# 6 handler parameter(s)
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:RepoHealthProjection.on_workflow_completed.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:RepoHealthProjection.on_workflow_failed.param:event_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:_update_execution_counts.param:health" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:_update_cost_tokens.param:health" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:_update_trend.param:health" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/organization/slices/repo_health/projection.py:RepoHealthProjection._save.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+
+# Pulled in when the gate stopped deciding scope by filename and started
+# reading the dispatch table's shape (#1281 review). Same debt, measured
+# correctly for the first time - never a relaxed ratchet.
+"apps/syn-api/src/syn_api/_wiring.py:_build_context_appendix.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_counted_loss.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_parsed_time.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_state_of.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_text.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"apps/syn-api/src/syn_api/routes/capture.py:_to_entry.param:event" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/object_storage/minio.py:_do_upload.param:metadata" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/object_storage/minio_queries.py:list_objects.param:get_client" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_helpers.py:json_serializer.param:obj" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore._deserialize.param:data" = { annotation = "str | dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore.query.param:filters" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:ManagedWorkspace.stream.param:environment" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+# Process environment, same as the entry above, and the same reason: env IS a
+# string-to-string map, so `dict[str, str]` is the honest type rather than a
+# payload re-derived by string key. `exec_fn` also satisfies the external
+# `ExecFn` calling convention, so its signature is not ours to change.
+#
+# Added because main went red on the interaction between two PRs that were each
+# green alone: #1281 landed this gate and #1299 landed codex_rollout.py, and
+# neither CI run could see the other. Not a relaxed ratchet - a false positive
+# on the same shape already excepted one line up.
+"packages/syn-adapters/src/syn_adapters/workspace_backends/service/codex_rollout.py:_exec_fn_for.exec_fn.param:env" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py:TriggerRuleAggregate._parse_trigger_config.param:config_raw" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_run.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_suite.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_create.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_delete.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_issue_comment.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_issues.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_pr_review.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_pull_request.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_push.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_repo_name.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_evt.param:default" = { annotation = "Any", verdict = "undeclared", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_parse_phase_definitions.param:raw_defs" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:PhaseStartingPoints.record.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_cached_remote_refs.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_checked.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_git.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_repositories.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:record_phase_starting_point.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }

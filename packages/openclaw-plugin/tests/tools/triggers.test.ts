@@ -13,6 +13,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function jsonResponse(data: unknown): Response {
@@ -55,6 +56,34 @@ describe("synListTriggers", () => {
 });
 
 describe("synCreateTrigger", () => {
+  it("names the deployment the trigger will fire workflows on (issue #1264)", async () => {
+    // A trigger holds a host-relative workflow ID and fires it LATER, so the
+    // ambiguity outlives this call: the result has to pin the workflow ID to
+    // the deployment it was created against. The environment points elsewhere
+    // so a result built from anything but the client is visible.
+    vi.stubEnv("SYNTROPIC_URL", "http://100.114.86.77:8137");
+    const vps = new SyntropicClient({ apiUrl: "http://100.112.178.5:8137" });
+    mockFetch.mockResolvedValueOnce(jsonResponse(triggerCreated));
+
+    const result = await synCreateTrigger(vps, {
+      name: "PR Review Trigger",
+      event: "pull_request.opened",
+      repository: "org/repo",
+      workflow_id: "wf-review-001",
+    });
+
+    const [url, init] = mockFetch.mock.calls[0]!;
+    const createdOn = new URL(url as string).origin;
+    expect(createdOn).toBe("http://100.112.178.5:8137");
+    const posted = JSON.parse((init as RequestInit).body as string) as { workflow_id: string };
+    expect(posted.workflow_id).toBe("wf-review-001");
+
+    expect(result.content).toContain(createdOn);
+    expect(result.content).toContain(posted.workflow_id);
+    expect(result.content).toContain("trig-002");
+    expect(result.content).not.toContain("100.114.86.77");
+  });
+
   it("returns created trigger info", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(triggerCreated));
 

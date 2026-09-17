@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Container, Mapping
+    from collections.abc import Collection, Container, Iterator, Mapping
 
 #: Mapping constructors that erase their value type when parameterised with
 #: ``Any``/``object``. Matched on the trailing name, so the dotted spellings
@@ -170,6 +170,42 @@ def _trailing_name(node: ast.expr) -> str | None:
     return None
 
 
+def _aliased_name(value: ast.expr) -> str | None:
+    """The name a quoted right-hand side renames, if it renames one.
+
+    ``"dict"`` and ``"typing.Dict"`` each reach a constructor and give it a
+    second name; ``"dict[str, Any]"`` reaches a complete type and renames
+    nothing, so it is counted where it stands instead. The string is parsed
+    rather than matched as an identifier because that is what makes the dotted
+    spelling resolve like its unquoted twin - closing ``"dict"`` and leaving
+    ``"typing.Dict"`` open is the #1188 defect exactly, a rename the table
+    never learns and a number that stays still for it.
+    """
+    if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+        return None
+    try:
+        inner = ast.parse(value.value, mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(inner, ast.Name | ast.Attribute):
+        return None
+    return _trailing_name(inner)
+
+
+def _declares_an_alias(node: ast.AST) -> bool:
+    """Whether a statement announces in its syntax that it declares a type.
+
+    ``type D = ...`` and ``D: TypeAlias = ...`` both say so where they stand.
+    A plain ``D = ...`` does not, and at runtime ``D = "dict"`` binds a string
+    rather than a type. That is the line a QUOTED right-hand side turns on: a
+    forward reference is only a type where something declared a type, so the
+    two alias forms may have one and a bare assignment may not.
+    """
+    if isinstance(node, ast.TypeAlias):
+        return True
+    return isinstance(node, ast.AnnAssign) and _trailing_name(node.annotation) == "TypeAlias"
+
+
 def _renamed_shape(node: ast.AST) -> str | None:
     """The name an assignment renames, or ``None`` when it is not a rename.
 
@@ -182,12 +218,28 @@ def _renamed_shape(node: ast.AST) -> str | None:
     already fully spelled out where it stands, and is counted there like any
     other annotation. The dividing line is whether the right-hand side is a
     bare name: a rename copies a name, an alias writes a type.
+
+    An alias may write that name in quotes. ``D: TypeAlias = "dict"`` and
+    ``type D = "dict"`` rename a constructor exactly as their unquoted forms
+    do, and reading only the unquoted ones leaves a rename the table never
+    learns - a number that stays still for a spelling nobody listed, which is
+    the #1188 defect. Only the self-declared alias forms get this: ``D =
+    "dict"`` is a string assignment, not a rename, and stays unrecognised.
     """
     if not isinstance(node, ast.Assign | ast.AnnAssign | ast.TypeAlias):
         return None
-    if not isinstance(node.value, ast.Name | ast.Attribute):
+    value = node.value
+    if value is None:
         return None
-    return _trailing_name(node.value)
+    if isinstance(value, ast.Name | ast.Attribute):
+        return _trailing_name(value)
+    if _declares_an_alias(node):
+        # ``_aliased_name`` answers None for a quoted expression that is not a
+        # name, so ``D: TypeAlias = "dict[str, Any]"`` stays what it is: a
+        # complete type, counted where written by ``visit_AnnAssign`` below,
+        # not a rename.
+        return _aliased_name(value)
+    return None
 
 
 def _origins(name: str, renames: Mapping[str, Collection[str]]) -> frozenset[str]:
@@ -301,6 +353,64 @@ def _subscript_arguments(node: ast.Subscript) -> list[ast.expr]:
     return [node.slice]
 
 
+def _resolves_to(
+    node: ast.expr, names: Container[str], renames: Mapping[str, frozenset[str]]
+) -> bool:
+    """Whether a type expression names one of ``names``, renames undone.
+
+    Asked as a question rather than answered as a name because a name can have
+    more than one binding in a module and this pass does not claim to know
+    which one is in scope - see ``_renames``. Every caller wants to know
+    whether a shape is among a set of them, which is answerable without picking
+    one: any binding landing in ``names`` is a hit.
+    """
+    name = _trailing_name(node)
+    if name is None:
+        return False
+    return any(origin in names for origin in renames.get(name, frozenset({name})))
+
+
+def _written_names(node: ast.expr, renames: Mapping[str, frozenset[str]]) -> Iterator[str]:
+    """Every name a type expression writes, quoted spellings followed.
+
+    The same walk ``_DictShapedStateCollector`` does, reporting names instead
+    of shapes, and skipping the same two constructs for the same reason:
+    ``Literal["dict"]`` holds a value and ``Annotated[str, "dict"]`` holds
+    metadata after its first argument, so neither is a place a type is written.
+
+    An ``Attribute``'s left-hand side is a module path, not a type, so
+    ``typing.Any`` writes ``Any`` and not ``typing``.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        name = _trailing_name(node)
+        if name is not None:
+            yield name
+            return
+        try:
+            inner = ast.parse(node.value, mode="eval")
+        except SyntaxError:
+            return
+        yield from _written_names(inner.body, renames)
+        return
+    if isinstance(node, ast.Name | ast.Attribute):
+        name = _trailing_name(node)
+        if name is not None:
+            yield name
+        return
+    if isinstance(node, ast.Subscript):
+        yield from _written_names(node.value, renames)
+        is_literal = _resolves_to(node.value, LITERAL_NAMES, renames)
+        is_annotated = _resolves_to(node.value, ANNOTATED_NAMES, renames)
+        for index, argument in enumerate(_subscript_arguments(node)):
+            if is_literal or (is_annotated and index > 0):
+                continue
+            yield from _written_names(argument, renames)
+        return
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.expr):
+            yield from _written_names(child, renames)
+
+
 class _DictShapedStateCollector(ast.NodeVisitor):
     """Collects the three declaration shapes, including ones hidden in strings.
 
@@ -338,18 +448,8 @@ class _DictShapedStateCollector(ast.NodeVisitor):
         self.found: list[Occurrence] = []
 
     def _resolves_to(self, node: ast.expr, names: Container[str]) -> bool:
-        """Whether a type expression names one of ``names``, renames undone.
-
-        Asked as a question rather than answered as a name because a name can
-        have more than one binding in a module and this pass does not claim to
-        know which one is in scope - see ``_renames``. Every caller here wants
-        to know whether a shape is among a set of them, which is answerable
-        without picking one: any binding landing in ``names`` is a hit.
-        """
-        name = _trailing_name(node)
-        if name is None:
-            return False
-        return any(origin in names for origin in self.renames.get(name, frozenset({name})))
+        """Whether a type expression names one of ``names``, renames undone."""
+        return _resolves_to(node, names, self.renames)
 
     def _is_untyped_str_mapping(self, node: ast.Subscript) -> bool:
         """Whether ``node`` maps ``str`` to one of ``self.values``."""
@@ -475,6 +575,18 @@ class _DictShapedStateCollector(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self._descend_into_string(node.annotation)
+        # A declared alias writes a type on its right-hand side, so that side
+        # is a type position and a quote hides no more there than it does in
+        # the annotation above it. Without this ``D: TypeAlias = "dict[str,
+        # Any]"`` spends no budget while its unquoted twin spends one, which is
+        # a dodge that moves the number rather than merely hiding from it.
+        if node.value is not None and _declares_an_alias(node):
+            self._descend_into_string(node.value)
+        self.generic_visit(node)
+
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        """``type D = "dict[str, Any]"`` - the other spelling of the same thing."""
+        self._descend_into_string(node.value)
         self.generic_visit(node)
 
     def visit_arg(self, node: ast.arg) -> None:
@@ -587,6 +699,24 @@ class ModuleShapes:
         collector._descend_into_string(node)
         collector.visit(node)
         return bool(collector.found)
+
+    def names_any_of(self, node: ast.expr, names: Container[str]) -> bool:
+        """Whether a type expression writes any of ``names``, renames undone.
+
+        The question ``contains_dict_shaped_state`` answers for one fixed set
+        of shapes, asked for an arbitrary one. A caller that needs to reject a
+        *category* rather than a list of spellings needs this: "does this
+        annotation name a mapping at all" is not expressible as a set of value
+        types, and neither is "does it name ``Any`` or ``object`` anywhere".
+
+        Quoted and nested spellings are followed, and renames are undone, so a
+        caller built on this inherits the same resistance to being spelled
+        around that the ratchet has.
+        """
+        return any(
+            any(origin in names for origin in self.renames.get(written, frozenset({written})))
+            for written in _written_names(node, self.renames)
+        )
 
 
 def module_shapes(tree: ast.Module) -> ModuleShapes:

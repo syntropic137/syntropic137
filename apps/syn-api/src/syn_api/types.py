@@ -547,6 +547,12 @@ class ArtifactSummary(BaseModel):
     title: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    #: Who produced it (#1284). Same two facts as on ArtifactDetail, carried on
+    #: the row because the list is where "which models ran this execution's
+    #: phases" is asked. None on either means not reported, never "as
+    #: configured".
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -996,6 +1002,20 @@ class ArtifactDetail(BaseModel):
     content_hash: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    agent_provider: str | None = None
+    """Harness that ran the phase which produced this artifact (issue #1284).
+
+    None means no phase produced it, or it predates ArtifactCreated v6.
+    """
+    agent_model: str | None = None
+    """Model that harness ANNOUNCED while running, never the one requested.
+
+    This is the field a cross-model review reads to prove a DIFFERENT model
+    checked the work (#1284). None means the harness reported no model - true of
+    every codex phase today - and a client MUST render it as "not reported"
+    rather than falling back to the phase's configured model, which would look
+    like evidence and be none.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -1021,14 +1041,21 @@ class DashboardMetrics(BaseModel):
 
 
 class SessionCostData(BaseModel):
-    """Cost data for a single session."""
+    """Cost data for a single session.
+
+    Every field `SessionCostResponse` declares must appear here, or the
+    response advertises it and always serves its default (#1041). The two
+    field sets are compared in `test_dto_carries_every_response_field.py`.
+    """
 
     session_id: str
     execution_id: str | None = None
     workflow_id: str | None = None
     phase_id: str | None = None
+    workspace_id: str | None = None
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -1045,8 +1072,22 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    tokens_by_tool: dict[str, int] = Field(default_factory=dict)
+    cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
     unpriced_observation_count: int = 0
     """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields ON THIS MODEL whose value was never measured.
+
+    A field listed here holds its default, not a reading. Today that is always
+    ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``: no
+    read path can derive them from ``agent_events``.
+
+    It is a list of names rather than nulls on the fields themselves because a
+    null is as falsy as a zero, and a client writing ``x ?? 0`` erases the
+    distinction exactly the way #1041 erased these fields for a month. A
+    non-empty list is truthy and has to be read.
+    """
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None

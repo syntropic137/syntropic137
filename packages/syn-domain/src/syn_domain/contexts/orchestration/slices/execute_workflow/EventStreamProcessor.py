@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
@@ -36,7 +37,7 @@ from syn_shared.delegation import (
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
@@ -304,6 +305,54 @@ class StreamResult:
     #: different fact from "it said something empty" and the artifact path
     #: needs to be able to tell them apart.
     last_agent_message: str | None = None
+    #: The model the HARNESS announced for this run, read off its own stream
+    #: (#1284). Not the model the phase requested, and not derived from it:
+    #: those two diverge in practice, and a requested value reported as the one
+    #: that ran would be worse than no value at all, because a reader would
+    #: take it as evidence.
+    #:
+    #: FIRST announcement wins, the same rule and the same reason as
+    #: ``leader_native_session_id``: a delegate or subagent line arriving late
+    #: must not rebind the leader's identity at the end of the run.
+    #:
+    #: None means the harness announced none. That is the codex case today -
+    #: its stream carries no model, which is why its cost goes unpriced rather
+    #: than guessed (#788) - and it is also what a stream cut off before its
+    #: first announcement leaves behind.
+    announced_model: str | None = None
+
+
+def announced_model_from(*candidates: object) -> str | None:
+    """The model this line says is running, or None if it does not say (#1284).
+
+    Shared by both stream processors, because the RULE is harness-neutral even
+    though the places to look are not: the first candidate that is a non-blank
+    string wins. ``CodexStreamProcessor`` imports it rather than restating it,
+    so "" and a late rebind are rejected identically on both streams.
+
+    Claude states it in two places and both are the harness speaking about
+    itself: the ``system``/``init`` line carries it at the top level, and every
+    ``assistant`` line repeats it under ``message``. Both are offered here
+    rather than picking one, so a recording that begins mid-stream still yields
+    an answer instead of none.
+
+    The candidates are passed as values rather than the line itself: the
+    parameter would otherwise be one more ``Mapping[str, Any]``, which spends
+    ratchet budget to say nothing (#673).
+
+    Returns None for a line that carries no model at all, which is most of
+    them, and for a blank one - "" is not an identity and must not displace the
+    real value that a later line may carry.
+    """
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    return None
+
+
+def _model_under_message(message: object) -> object:
+    """``model`` as an assistant line carries it, under ``message``."""
+    return message.get("model") if isinstance(message, Mapping) else None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -369,6 +418,7 @@ class EventStreamProcessor:
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
+        self._announced_model: str | None = None
 
         # #894: A claude phase delegates to `codex exec`. Track the tool_use_ids
         # of those invocations so the tool_result can tell "tried and failed"
@@ -471,6 +521,7 @@ class EventStreamProcessor:
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
+            announced_model=self._announced_model,
         )
 
     async def _process_line(
@@ -586,6 +637,11 @@ class EventStreamProcessor:
             announced = cli_event.get("session_id")
             if isinstance(announced, str) and announced.strip():
                 self._leader_native_session_id = announced
+
+        if self._announced_model is None:
+            self._announced_model = announced_model_from(
+                cli_event.get("model"), _model_under_message(cli_event.get("message"))
+            )
 
         task_result: dict[str, Any] | None = None
 
