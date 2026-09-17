@@ -134,6 +134,22 @@ class PhaseProducedNoDeclaredOutputError(Exception):
     question and stop. Only a declared-but-unproduced output is a failure, so
     an empty declaration is silence, not a violation.
 
+    WHAT IT NO LONGER MEANS (#1300). It stopped meaning "no file was written".
+    Three `implement` phases, $38.62, were discarded under this error having
+    already made the change and pushed the branch; they had simply not written
+    the report. `ArtifactCollector` now consults the agent's last message first
+    and stores THAT, marked, when there is one. So reaching this error means
+    both routes to the phase's conclusion were empty - nothing collectable on
+    disk and nothing said on the stream - which is a phase that really did
+    produce nothing.
+
+    "Nothing said on the stream" means nothing a downstream phase could act
+    on, not merely nothing at all (`is_usable_conclusion`). A phase whose only
+    closing message is "Done." or an unexplained refusal has reported nothing,
+    and storing that as its deliverable would hand the NEXT phase an artifact
+    it believes is a report and can build nothing on - a quieter failure than
+    this one, arriving one phase later.
+
     Raised from ArtifactCollector.collect_from_workspace, which is the one
     place holding both halves of the comparison: what the phase promised and
     what it actually wrote.
@@ -149,9 +165,13 @@ class PhaseProducedNoDeclaredOutputError(Exception):
         super().__init__(
             f"Phase '{phase_id}' ({phase_name}) declares output_artifacts "
             f"({', '.join(declared)}) but produced none: nothing collectable "
-            f"was written under artifacts/output/. The phase's contract is "
-            f"unmet, so the execution fails here rather than advancing as "
-            f"though it had succeeded."
+            f"was written under artifacts/output/, and its agent's last "
+            f"message reported nothing a later phase could act on, so there "
+            f"was nothing to recover from the transcript either (#1300). It "
+            f"was either empty or pure sign-off - check the session "
+            f"transcript for what it did say. The phase's contract is unmet, so the "
+            f"execution fails here rather than advancing as though it had "
+            f"succeeded."
         )
         self.phase_id = phase_id
         self.phase_name = phase_name
@@ -195,22 +215,38 @@ class EmptyPhaseArtifactError(Exception):
     that a nine-minute verify phase produced nothing storable, which phase it
     was, and whether anything survived. This says all three.
 
-    Raised only after `recover_empty_artifact` has already declined, so
-    reaching this means BOTH routes to the phase's conclusion were empty: the
-    file it wrote and the last thing it said. That is a real "the agent
-    produced nothing", and failing is right.
+    Raised only after `recover_deliverable` has already declined, so reaching
+    this means BOTH routes to the phase's conclusion were empty: the file it
+    wrote and the last thing it said. That is a real "the agent produced
+    nothing", and failing is right.
 
-    THE THREE OUTCOMES ARE DELIBERATELY DISTINCT, because before #1195 two of
-    them were the same opaque `failed`:
+    THE FOUR OUTCOMES ARE DELIBERATELY DISTINCT, because before #1195 two of
+    them were the same opaque `failed` and before #1300 a third was discarded
+    outright:
 
-    - the phase wrote nothing collectable at all -> `PhaseProducedNoDeclaredOutputError`
+    - the phase wrote nothing collectable AND said nothing
+      -> `PhaseProducedNoDeclaredOutputError`
     - it wrote an empty file and had said nothing -> this
-    - it wrote an empty file but HAD said something -> no error; the phase
-      completes on the recovered content, and the artifact says so in its title
+    - it wrote an empty file but HAD said something -> no error (#1195)
+    - it wrote no file at all but HAD said something -> no error (#1300)
 
-    An operator distinguishes the first two by `phases[].error_message` and the
-    third by following `phases[].artifact_id` to an artifact whose title
+    The last two complete on recovered content and the artifact says so in its
+    title; they are told apart from each other, when it matters, by the banner
+    on the content and by `source_path` (`RECOVERED_SOURCE_PATH` only ever
+    means "no file was written").
+
+    An operator distinguishes the failures by `phases[].error_message` and the
+    recoveries by following `phases[].artifact_id` to an artifact whose title
     carries `RECOVERED_TITLE_MARKER`.
+
+    WHY RECOVERY DOES NOT ALSO FAIL THE PHASE. Failing would keep the declared
+    contract loudly visible, but it discards a run whose work is done and
+    forces it to be redone - which is the entire cost #1300 measured. The
+    contract stays visible in the record instead: the marker is in the title
+    the API serves, the banner is the first line of the content the NEXT phase
+    reads, and the recovery is logged as a warning naming the phase. A phase
+    that reached a conclusion is not a phase that produced nothing, and only
+    the latter is worth throwing a run away for.
     """
 
     def __init__(
@@ -224,7 +260,8 @@ class EmptyPhaseArtifactError(Exception):
             f"Phase '{phase_id}' ({phase_name}): THE ARTIFACT WAS EMPTY. It "
             f"wrote '{source_path}' and the file had no content, and nothing "
             f"could be recovered from the session transcript either - the "
-            f"agent's last message was empty too. The phase's conclusion, if "
+            f"agent's last message reported nothing a later phase could act "
+            f"on, being empty or pure sign-off. The phase's conclusion, if "
             f"it reached one, was not captured anywhere, so there is nothing "
             f"to store and the execution fails here."
         )
@@ -657,9 +694,13 @@ _OBSERVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
         "never reached. What it did read:"
     ),
     # 4. The incident this exists for: something is there, and nothing said so.
+    #    Says "ended", not "failed": since #1300 this same report is also
+    #    carried by a phase that was SALVAGED rather than failed, and a
+    #    heading that announced a failure that did not happen would be the
+    #    misdescribed record #1300 exists to stop.
     (True, False): (
         "  THIS IS WHERE THIS WORKSPACE'S BRANCHES STOOD when the phase "
-        "failed, for {found}. Read from git at failure time and reported as "
+        "ended, for {found}. Read from git at that moment and reported as "
         "observations: nothing below says who moved a ref, because a ref does "
         "not record that. Nothing was pushed or published on the phase's "
         "behalf:"
@@ -746,11 +787,19 @@ def _commits(count: int) -> str:
 
 
 def describe_observed_branches(work: ObservedBranches) -> str:
-    """Say where a failed phase's branches stand, in the words an operator reads.
+    """Say where a phase's branches stand, in the words an operator reads.
 
     Appended to the failure's own message rather than replacing it: WHY the
     phase failed and WHERE its repositories stand are different questions, and
     #1167's answer to the first must stay exactly as loud as it is.
+
+    TWO CALLERS SINCE #1300, and the second is why the wording below says
+    "ended" rather than "failed": a phase that wrote no file but said what it
+    had done is now SALVAGED rather than failed, and carries this report
+    inside its recovered artifact. That is not decoration - `_fail_execution`
+    is the only place the branch report was ever emitted, so a salvaged phase
+    would otherwise be the one case where the work survived and nothing named
+    where it was.
     """
     lines = [
         _OBSERVED_HEADLINE[bool(work.branches), bool(work.unreadable)].format(

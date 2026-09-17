@@ -65,6 +65,14 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it declared (#1195, #1300).
+
+    The end of the chain the flag travels: event -> projection record -> read
+    model -> here. A client auditing which runs stood on a salvage reads this;
+    `status` says `completed` either way.
+    """
     model: str | None = None
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None

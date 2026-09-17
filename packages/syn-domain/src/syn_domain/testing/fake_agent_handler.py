@@ -75,6 +75,11 @@ class FakeAgentExecutionHandler:
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
+        #: The last thing this agent said on its stream, as the real stream
+        #: processors would have captured it. Independent of ``produces``
+        #: because in production the two come apart: #1300 is agents that
+        #: finished, said what they had done, and wrote no file at all.
+        self._says = says
         #: Files this double writes into each phase's workspace before
         #: returning, as (path relative to /workspace, bytes). Empty is the
         #: default and models an agent that produced NOTHING - which is not an
@@ -132,6 +137,12 @@ class FakeAgentExecutionHandler:
             phase_id=todo.phase_id or "",
             session_id=session_id,
             exit_code=self._exit_code,
+            # The real handler puts it here as well as on the stream result,
+            # because the command is what reaches the event store and the
+            # event store is what a restart reads (#1195, #1300). A double
+            # that set only the stream result would leave every processor
+            # test salvaging from a value production no longer uses.
+            last_agent_message=self._says,
         )
         return AgentExecutionResult(
             stream_result=stream_result,
@@ -179,6 +190,12 @@ class FakeAgentExecutionHandler:
         ``says`` is the agent's last message. Exit code 0 with a ``says`` that
         reports ``success: false`` is not a contradiction but the defect
         #1256 is about: the harness ran fine and the AGENT said it had failed.
+
+        ``says`` is its last stream message, and is deliberately a SEPARATE
+        argument rather than derived from ``produces``. Wrote-nothing-but-said-
+        something is the exact shape of #1300 - three implement phases that had
+        pushed their branch and only missed the report - and a double that
+        could not express it left that combination untestable end to end.
         """
         return cls(interrupt=False, exit_code=0, produces=produces, says=says)
 

@@ -576,3 +576,63 @@ class TestRowsWrittenBeforeTheRenameKeepTheirOutcome:
         entry = PhaseMetricsEntry.from_stored("implement", {"phase_name": "implement"})
 
         assert entry.settled_status == "failed"
+
+
+@pytest.mark.unit
+class TestSalvagedRunsAreCounted:
+    """How often a phase completed on a recovered deliverable (#1195, #1300).
+
+    This projection is keyed by workflow_id, so it is the surface that answers
+    "is this phase's salvage a rescue or a habit?" - and it can only answer it
+    if the count survives the round trip through the store, which is where the
+    flag would otherwise be dropped.
+    """
+
+    async def test_a_salvaged_completion_increments_the_count(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        await projection.on_phase_started(
+            {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "implement"}
+        )
+        await projection.on_phase_completed(
+            {
+                "workflow_id": "wf-1",
+                "execution_id": "exec-1",
+                "phase_id": "p-1",
+                "success": True,
+                "deliverable_recovered": True,
+            }
+        )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].recovered_runs == 1
+
+    async def test_the_count_accumulates_across_runs_and_ignores_clean_ones(
+        self, projection: WorkflowPhaseMetricsProjection
+    ) -> None:
+        """Two of three runs salvaged reads as two, not as True.
+
+        A boolean here could not tell one salvage from every run being one,
+        which is the difference between a rescue worth having and a workflow
+        whose phases have stopped writing their deliverables.
+        """
+        for execution_id, recovered in (
+            ("exec-1", True),
+            ("exec-2", False),
+            ("exec-3", True),
+        ):
+            await projection.on_phase_started(
+                {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "implement"}
+            )
+            await projection.on_phase_completed(
+                {
+                    "workflow_id": "wf-1",
+                    "execution_id": execution_id,
+                    "phase_id": "p-1",
+                    "success": True,
+                    "deliverable_recovered": recovered,
+                }
+            )
+
+        phases = await projection.get_phase_metrics("wf-1")
+        assert phases["p-1"].recovered_runs == 2

@@ -75,7 +75,6 @@ which drives `processor.run()`; this file pins the two hops underneath it.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import TYPE_CHECKING
 
@@ -84,17 +83,15 @@ import pytest
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
-    StreamResult,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
-    AgentExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
     VerdictReader,
@@ -872,79 +869,87 @@ class TestTwoReportsSettleByPrecedence:
 
 
 class TestTwoExecutionsCannotOverwrite:
-    """Two runs racing for the same location; the second cannot erase the first."""
+    """Two runs racing for the same phase id; neither can erase the other.
+
+    This used to be a property of a DICT KEY. `PhaseRuntime` held each run's
+    last message in memory, and #1256 fixed a phase-only key that let run B's
+    success report replace run A's failure - so run A recovered its deliverable
+    from a report that was not its own.
+
+    #1300 moved the value onto the event stream instead, and that changes the
+    guarantee from "the key is careful enough" to "there is no shared location
+    at all": the message is read off the EXECUTION'S OWN aggregate, and an
+    aggregate holds one execution's events by construction. A collision is
+    unrepresentable rather than merely avoided.
+
+    It also answers the question the in-memory version could not answer at any
+    key: what a process that did not hear the message reads back.
+    """
 
     @staticmethod
-    def _run(said: str) -> AgentExecutionResult:
-        """A real agent result, built the way the handler builds one."""
-        return AgentExecutionResult(
-            stream_result=StreamResult(
-                line_count=1,
-                interrupt_requested=False,
-                interrupt_reason=None,
-                verdict=AgentVerdict.from_agent_text(said),
-                last_agent_message=said,
-            ),
-            tokens=TokenAccumulator(),
-            subagents=SubagentTracker(),
-            command=AgentExecutionCompletedCommand(
-                execution_id="exec-A", phase_id="implement", session_id="s", exit_code=0
-            ),
+    def _finished(execution_id: str, said: str) -> WorkflowExecutionAggregate:
+        """An execution whose `implement` phase finished having said `said`."""
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            StartExecutionCommand,
         )
 
-    def test_the_second_run_does_not_replace_the_first_report(self) -> None:
-        runtime = PhaseRuntime(capture_port=None, session_store=None, writer=None, ledger=None)
-
-        runtime.record_agent_run(
-            "implement", execution_id="exec-A", result=self._run(REPORTED_FAILURE)
-        )
-        runtime.record_agent_run(
-            "implement",
-            execution_id="exec-B",
-            result=self._run('TASK_RESULT: {"success": true, "comments": "all green"}'),
-        )
-
-        assert runtime.take_last_message("implement", execution_id="exec-A") == REPORTED_FAILURE, (
-            "keyed by phase alone, B's success replaced A's failure report"
-        )
-        assert runtime.take_last_message("implement", execution_id="exec-B") is not None
-
-    def test_a_run_reads_back_its_own_report_under_concurrency(self) -> None:
-        """The interleaving the issue describes, driven concurrently.
-
-        Both runs write and then read at the SAME phase id, with an await
-        between the two halves so the scheduler can interleave them. Each must
-        read back the report it wrote.
-        """
-        runtime = PhaseRuntime(capture_port=None, session_store=None, writer=None, ledger=None)
-
-        async def one_run(execution_id: str, said: str) -> str | None:
-            runtime.record_agent_run("implement", execution_id=execution_id, result=self._run(said))
-            await asyncio.sleep(0)  # let the other run write over the top
-            return runtime.take_last_message("implement", execution_id=execution_id)
-
-        async def race() -> list[str | None]:
-            return await asyncio.gather(
-                one_run("exec-A", REPORTED_FAILURE),
-                one_run("exec-B", 'TASK_RESULT: {"success": true, "comments": "all green"}'),
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(
+            StartExecutionCommand(
+                execution_id=execution_id,
+                workflow_id="wf-1",
+                workflow_name="W",
+                total_phases=1,
+                inputs={},
             )
-
-        a_read, b_read = asyncio.run(race())
-
-        assert a_read == REPORTED_FAILURE, "A recovered B's success report in place of its failure"
-        assert b_read is not None
-
-    def test_taking_a_report_does_not_take_another_execution_s(self) -> None:
-        runtime = PhaseRuntime(capture_port=None, session_store=None, writer=None, ledger=None)
-
-        runtime.record_agent_run(
-            "implement", execution_id="exec-A", result=self._run(REPORTED_FAILURE)
         )
-
-        assert runtime.take_last_message("implement", execution_id="exec-B") is None, (
-            "B read A's report because the key ignored the execution"
+        aggregate.agent_execution_completed(
+            AgentExecutionCompletedCommand(
+                execution_id=execution_id,
+                phase_id="implement",
+                session_id=f"s-{execution_id}",
+                exit_code=0,
+                last_agent_message=said,
+            )
         )
-        assert runtime.take_last_message("implement", execution_id="exec-A") == REPORTED_FAILURE
+        return aggregate
+
+    def test_each_execution_reads_back_its_own_report(self) -> None:
+        a = self._finished("exec-A", REPORTED_FAILURE)
+        b = self._finished("exec-B", 'TASK_RESULT: {"success": true, "comments": "all green"}')
+
+        assert a.last_agent_message_for("implement") == REPORTED_FAILURE, (
+            "A recovered B's success report in place of its own failure"
+        )
+        assert b.last_agent_message_for("implement") != REPORTED_FAILURE
+
+    def test_the_order_the_two_runs_finish_in_does_not_matter(self) -> None:
+        """The interleaving the issue describes. There is no shared slot to race for."""
+        b = self._finished("exec-B", 'TASK_RESULT: {"success": true, "comments": "all green"}')
+        a = self._finished("exec-A", REPORTED_FAILURE)
+
+        assert a.last_agent_message_for("implement") == REPORTED_FAILURE
+        assert b.last_agent_message_for("implement") != REPORTED_FAILURE
+
+    def test_a_process_that_never_heard_the_message_still_reads_it(self) -> None:
+        """The restart case, which no in-memory key could have survived (#1300).
+
+        Rehydrating from the recorded events is what a process started after
+        the agent finished actually does, and it is the commonest form of the
+        "something went wrong" the salvage exists for.
+        """
+        original = self._finished("exec-A", REPORTED_FAILURE)
+
+        rebuilt = WorkflowExecutionAggregate()
+        rebuilt.rehydrate(list(original.get_uncommitted_events()))
+
+        assert rebuilt.last_agent_message_for("implement") == REPORTED_FAILURE
+
+    def test_a_phase_that_said_nothing_reads_back_none(self) -> None:
+        """Absence stays absence - never another phase's words."""
+        aggregate = self._finished("exec-A", REPORTED_FAILURE)
+
+        assert aggregate.last_agent_message_for("verify") is None
 
 
 class TestBothHarnessesReadTheSameContract:

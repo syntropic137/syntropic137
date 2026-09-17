@@ -67,6 +67,17 @@ class PhaseExecutionDetail:
     error_message: str | None = None
     """Error message if phase failed."""
 
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it promised to write (#1195, #1300).
+
+    Carried the whole way to the API boundary for the reason the flag exists at
+    all: a phase that completed on a salvage and one that completed on its own
+    written deliverable are different outcomes, and a reader who cannot tell
+    them apart cannot audit either. Every hop between the event and the HTTP
+    response has to pass it; this is one of them.
+    """
+
     observed_branches: tuple[BranchObservation, ...] | None = None
     """How this failed phase's branches stood when it died (#1200).
 
@@ -106,6 +117,7 @@ class PhaseExecutionDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
+            "deliverable_recovered": self.deliverable_recovered,
             "observed_branches": (
                 None
                 if self.observed_branches is None
@@ -138,6 +150,7 @@ class PhaseExecutionDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
+            deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             observed_branches=_observed_branches(data.get("observed_branches")),
         )
 

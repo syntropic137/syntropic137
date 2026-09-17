@@ -845,6 +845,16 @@ class PhaseExecution(BaseModel):
     # already declares the field. This intermediate model was the one hop that
     # dropped it, so every failed phase surfaced error_message: null.
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase completed on a deliverable recovered from its
+    transcript rather than the file it declared (#1195, #1300).
+
+    A salvaged phase COMPLETES - discarding a finished run over a missing
+    report is the cost #1300 measured - so `status` alone cannot distinguish
+    it, and this is the only field that can. It is here, on the record the API
+    serves, and not only on `PhaseCompletedEvent`, because a fact that reaches
+    no read model reaches no reader.
+    """
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0

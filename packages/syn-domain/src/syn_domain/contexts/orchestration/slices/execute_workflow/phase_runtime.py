@@ -37,6 +37,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.artifacts import AgentIdentity
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    describe_observed_branches,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -162,28 +165,22 @@ class PhaseRuntime:
         self._tokens: dict[str, TokenAccumulator] = {}
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
-        #: The last thing each phase's agent said, which is where its
-        #: conclusion is recovered from when the file it wrote came back empty
-        #: (#1195).
-        #:
-        #: Keyed by (execution_id, phase_id) for the same reason as
-        #: `_leader_native_ids` above, and this one decides an OUTCOME: two
-        #: concurrent runs of a workflow share a phase id, so a phase-only key
-        #: let the second run's message overwrite the first's, and the first
-        #: then recovered its deliverable from a report that was not its own -
-        #: including, when the second said it had succeeded, in place of its
-        #: own failure report (#1256).
-        self._said: dict[tuple[str, str], str] = {}
         #: The model each phase's harness announced on its own stream (#1284).
         #: Held here rather than re-read at collection time because the stream
         #: is gone by then; absent means the harness announced nothing.
         #:
-        #: NOTE: keyed by phase id alone, unlike `_said` directly above. The
-        #: collision argument in that comment applies here too - two concurrent
-        #: runs share a phase id - so run B can overwrite run A's model. Left as
-        #: it merged rather than changed here: it is a different bug from the
-        #: one this branch fixes, and a silent widening of scope during a
-        #: conflict resolution is how one side of a merge gets lost.
+        #: NOTE: keyed by phase id alone, so two concurrent runs of the same
+        #: workflow overwrite each other, and a restart loses it entirely -
+        #: the same two hazards that moved `last_agent_message` onto the event
+        #: stream in #1300.
+        #:
+        #: `record_agent_run` is handed an `execution_id` and does not use it,
+        #: which looks like the fix is one line away. It is not. EVERY map on
+        #: this object is keyed the same way - `_workspaces`, `_envs`,
+        #: `_cmds`, `_session_ids`, `_tokens`, `_artifact_ids`, `_started_at` -
+        #: and `finalize`, which clears them, is not given an execution id at
+        #: all. Fixing this field alone would close one instance of the class
+        #: and leave the rest open while looking settled. Tracked as #1311.
         self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
@@ -253,11 +250,19 @@ class PhaseRuntime:
         remember_leader_native_id(self._leader_native_ids, (execution_id, phase_id), stream_result)
 
     def record_agent_run(
-        self, phase_id: str, *, execution_id: str, result: AgentExecutionResult
+        self,
+        phase_id: str,
+        *,
+        execution_id: str,  # noqa: ARG002 - see the note below
+        result: AgentExecutionResult,
     ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
         self._tokens[phase_id] = result.tokens
-        self._said[execution_id, phase_id] = result.stream_result.last_agent_message or ""
+        # What the agent SAID is deliberately not held here. It is the salvage
+        # input (#1195, #1300) and is read by a LATER to-do item, so anything
+        # this object remembers about it is lost to a restart in between. It
+        # rides `AgentExecutionCompletedCommand` onto the event stream instead
+        # and is read back off the aggregate.
         announced = result.stream_result.announced_model
         if announced is not None:
             self._announced_models[phase_id] = announced
@@ -273,15 +278,6 @@ class PhaseRuntime:
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
         """This phase's workspace, or None once it has been finalised."""
         return self._workspaces.get(phase_id)
-
-    def take_last_message(self, phase_id: str, *, execution_id: str) -> str | None:
-        """What THIS execution's agent said last, read once and forgotten (#1195).
-
-        `execution_id` is not optional and has no default: a caller that could
-        omit it would be back to reading whichever run wrote last, which is
-        the defect (#1256).
-        """
-        return self._said.pop((execution_id, phase_id), None)
 
     def agent_for(self, phase_id: str, *, provider: str | None) -> AgentIdentity:
         """Who ran this phase: the harness launched, and the model it announced.
@@ -382,6 +378,20 @@ class PhaseRuntime:
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""
         return await self._starting_points.observe(phase_id)
+
+    async def describe_work(self, phase_id: str | None) -> str | None:
+        """The same reading as `observe`, in the words an operator reads.
+
+        Two callers need this fact and they need it in two shapes: a failing
+        execution stores the structured `ObservedBranches` on its event, and a
+        SALVAGED phase - which does not fail, so never reaches that path -
+        needs it as prose to put in the artifact it recovered (#1300). Saying
+        it here rather than at either call site keeps one answer to "where does
+        this phase's work stand", and keeps the collector from ever learning
+        what a remote or a starting point is.
+        """
+        observed = await self.observe(phase_id)
+        return describe_observed_branches(observed) if observed is not None else None
 
     async def report_cancelled(self, reason: str) -> None:
         """Close every open session as cancelled."""

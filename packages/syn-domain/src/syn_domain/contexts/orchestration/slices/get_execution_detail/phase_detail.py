@@ -36,6 +36,17 @@ class PhaseDetail:
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it promised to write (#1195, #1300).
+
+    On the RECORD, not only on the event. ``PhaseCompletedEvent`` has carried
+    this since the salvage was written, but an event nobody stores is a fact
+    nobody can query: this projection is what an operator reads, what the API
+    serves and what anyone counting "how often is the salvage firing" counts,
+    and until this field existed a salvaged phase was stored byte-for-byte as a
+    clean one.
+    """
 
     @classmethod
     def running(
@@ -71,6 +82,7 @@ class PhaseDetail:
             total_tokens=event_data.get("total_tokens", 0),
             duration_seconds=event_data.get("duration_seconds"),
             completed_at=event_data.get("completed_at"),
+            deliverable_recovered=bool(event_data.get("deliverable_recovered", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +102,7 @@ class PhaseDetail:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "error_message": self.error_message,
+            "deliverable_recovered": self.deliverable_recovered,
         }
 
     @classmethod
@@ -110,4 +123,5 @@ class PhaseDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
+            deliverable_recovered=bool(data.get("deliverable_recovered", False)),
         )

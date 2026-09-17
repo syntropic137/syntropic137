@@ -45,6 +45,50 @@ class PhaseStatus(StrEnum):
 
 
 @dataclass(frozen=True)
+class StrandedDeliverable:
+    """A phase whose agent finished and whose output nobody ever collected.
+
+    The window between `AgentExecutionCompleted` and
+    `ArtifactsCollectedForPhase` is where a restart destroys a finished run:
+    the work is done - branch pushed, verdict reached - and the only record of
+    what the phase concluded is what its agent said on the way out. Everything
+    needed to turn that into the phase's deliverable is here, so a caller can
+    salvage it without reading the event stream itself or knowing which events
+    open and close the window.
+
+    Produced only when there IS something to salvage: a phase whose agent said
+    nothing leaves nothing behind and is not stranded, it is simply lost.
+
+    It carries the execution and workflow ids too, so that a caller holding one
+    of these needs nothing else from the aggregate. That is not convenience: an
+    aggregate that has never been hydrated has no id, and resolving that here
+    keeps "does this execution exist" from becoming the salvage's problem.
+    """
+
+    execution_id: str
+    workflow_id: str
+    phase_id: str
+    phase_name: str
+    session_id: str
+    last_agent_message: str
+
+
+@dataclass(frozen=True)
+class FinishedAgentRun:
+    """What a phase's agent left behind when its run ended.
+
+    Held per phase until that phase's artifacts are collected. One record
+    rather than three parallel maps keyed by phase, so a phase cannot end up
+    with a message under one key and a session under another.
+    """
+
+    phase_id: str
+    phase_name: str
+    session_id: str
+    last_agent_message: str
+
+
+@dataclass(frozen=True)
 class PhaseDefinition:
     """Immutable definition of a phase for aggregate-level sequencing.
 

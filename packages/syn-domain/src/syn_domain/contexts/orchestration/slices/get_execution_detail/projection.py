@@ -226,6 +226,12 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # made. The API boundary derives one from the timestamps instead.
         phase["duration_seconds"] = event_data.get("duration_seconds")
         phase["completed_at"] = event_data.get("completed_at")
+        # The phase already exists here - started, then completed - so this is
+        # the path virtually every real completion takes, and the path a
+        # salvage takes. `PhaseDetail.completed` below handles the other one;
+        # omitting it here is how the flag would have reached the store only
+        # for phases whose PhaseStarted was never projected (#1300).
+        phase["deliverable_recovered"] = bool(event_data.get("deliverable_recovered", False))
 
     @staticmethod
     def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:

@@ -234,7 +234,13 @@ class ProvisionWorkspaceCompletedCommand:
 
 
 class AgentExecutionCompletedCommand:
-    """Command reported by AgentExecutionHandler after agent finishes."""
+    """Command reported by AgentExecutionHandler after agent finishes.
+
+    `last_agent_message` is the closing message the agent produced on its own
+    stream, and it is on this command - rather than held by the processor -
+    because it is the salvage input (#1195, #1300) and the salvage has to work
+    after a restart. See `AgentExecutionCompletedEvent.last_agent_message`.
+    """
 
     def __init__(
         self,
@@ -246,6 +252,7 @@ class AgentExecutionCompletedCommand:
         output_tokens: int = 0,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
+        last_agent_message: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -255,6 +262,7 @@ class AgentExecutionCompletedCommand:
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
+        self.last_agent_message = last_agent_message
 
 
 class ArtifactsCollectedCommand:
@@ -267,9 +275,15 @@ class ArtifactsCollectedCommand:
         artifact_ids: list[str],
         first_content_preview: str | None = None,
         session_id: str | None = None,
+        deliverable_recovered: bool = False,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
         self.first_content_preview = first_content_preview
         self.session_id = session_id
+        #: Whether what was stored came from the transcript rather than from
+        #: disk. Collection is the only place that knows, and the phase does
+        #: not complete until a later to-do item, so the fact has to be told
+        #: to the aggregate here or be lost (#1195, #1300).
+        self.deliverable_recovered = deliverable_recovered
