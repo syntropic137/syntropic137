@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Final
 
-from pydantic import field_validator
-
 from event_sourcing import DomainEvent, event
+from pydantic import field_validator
 
 #: How much of the agent's closing message this event will carry.
 #:

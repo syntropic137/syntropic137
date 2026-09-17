@@ -55,6 +55,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
+    _Clone,
+    _clone_repository,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     _DispatchContext,
 )
@@ -67,11 +71,12 @@ from .test_1300_a_missing_report_does_not_discard_the_run import (
     _KeepingArtifacts,
     _RecordingAgent,
     _run_writing_nothing,
-    clone,  # noqa: F401 - a fixture, used by name
 )
 from .test_processor_smoke import _make_processor, _two_phase_workflow
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from event_sourcing import DomainEvent, EventEnvelope
 
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
@@ -82,9 +87,14 @@ if TYPE_CHECKING:
         WorkflowExecutionProcessor,
     )
 
-    from .test_1300_a_missing_report_does_not_discard_the_run import _Clone
-
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+
+@pytest.fixture
+def clone(tmp_path: Path) -> _Clone:
+    """A phase's starting point: a clone on a feature branch, pushed and level."""
+    return _clone_repository(tmp_path)
+
 
 EXECUTION_ID = "exec-1300-restart"
 WORKFLOW_ID = "wf-1300-restart"
@@ -222,6 +232,7 @@ class _Process:
             claude_cmd=result.claude_cmd,
         )
 
+
 def _started(phases: list[ExecutablePhase]) -> WorkflowExecutionAggregate:
     """A real aggregate at the start of a real run."""
     aggregate = WorkflowExecutionAggregate()
@@ -233,9 +244,7 @@ def _started(phases: list[ExecutablePhase]) -> WorkflowExecutionAggregate:
             total_phases=len(phases),
             inputs={},
             phase_definitions=[
-                PhaseDefinition(
-                    phase_id=p.phase_id, name=p.name, order=p.order, timeout_seconds=30
-                )
+                PhaseDefinition(phase_id=p.phase_id, name=p.name, order=p.order, timeout_seconds=30)
                 for p in phases
             ],
         )
@@ -369,9 +378,7 @@ class TestARefusalIsNotAConclusion:
         [
             pytest.param("Done.", id="a bare sign-off"),
             pytest.param("Task complete. All done!", id="ceremony and nothing else"),
-            pytest.param(
-                "I cannot complete this task. I will not proceed.", id="a bare refusal"
-            ),
+            pytest.param("I cannot complete this task. I will not proceed.", id="a bare refusal"),
             pytest.param(
                 "I'm sorry, but I'm unable to help with that request.", id="a polite refusal"
             ),

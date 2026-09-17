@@ -460,16 +460,14 @@ class TestTheVerdictSurvivesEveryHop:
         )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
             AgentExecutionCompletedCommand,
-        )
-        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
             ArtifactsCollectedCommand,
             StartExecutionCommand,
         )
-        from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-            WorkflowExecutionAggregate,
-        )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+            WorkflowExecutionAggregate,
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
             ArtifactCollectionResult,
