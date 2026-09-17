@@ -17,6 +17,7 @@ from uuid import uuid4
 from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
+    DescribeWork,
     RecoveredArtifact,
     is_storable,
     recover_deliverable,
@@ -103,6 +104,24 @@ _ARTIFACT_TYPE_MAP: dict[str, ArtifactType] = {
 def map_artifact_type(type_str: str) -> ArtifactType:
     """Map string artifact type to enum."""
     return _ARTIFACT_TYPE_MAP.get(type_str.lower(), ArtifactType.OTHER)
+
+
+async def _where_the_work_is(describe_work: DescribeWork | None) -> str | None:
+    """Ask where this phase's work stands, tolerating an inspection that fails.
+
+    A salvage runs on a phase that has already gone wrong once. An inspection
+    that raised here would turn a recoverable incident into an unrecoverable
+    one - the conclusion was in hand and would be discarded by the very code
+    trying to save it - so a failed reading becomes no reading, which is what
+    `None` already means to the caller.
+    """
+    if describe_work is None:
+        return None
+    try:
+        return await describe_work()
+    except Exception:
+        logger.warning("Could not read where the phase's work stands", exc_info=True)
+        return None
 
 
 #: What an artifact is tagged as when its phase declared no type at all.
@@ -473,6 +492,7 @@ class ArtifactCollector:
         phase_name: str,
         output_artifact_types: tuple[str, ...],
         last_agent_message: str | None = None,
+        describe_work: DescribeWork | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
 
@@ -494,6 +514,12 @@ class ArtifactCollector:
         are empty does the phase fail, and then it fails naming which route was
         missing.
 
+        `describe_work` says where the phase's branches stand and is asked ONLY
+        when salvaging, because a salvaged phase does not fail and so never
+        reaches the failure path that otherwise reports this (#1200). Its
+        answer goes into the artifact, which is then the only record of where
+        the surviving work is.
+
         Raises:
             PhaseProducedNoDeclaredOutputError: the phase declared output
                 artifact types, produced none of them, and said nothing on its
@@ -509,12 +535,13 @@ class ArtifactCollector:
         )
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
-        deliverables = self._deliverables(
+        deliverables = await self._deliverables(
             artifacts=artifacts,
             output_artifact_types=output_artifact_types,
             phase_id=phase_id,
             phase_name=phase_name,
             last_agent_message=last_agent_message,
+            describe_work=describe_work,
         )
 
         artifact_type = _primary_type(output_artifact_types)
@@ -555,13 +582,14 @@ class ArtifactCollector:
         )
 
     @staticmethod
-    def _deliverables(
+    async def _deliverables(
         *,
         artifacts: list[tuple[str, bytes]],
         output_artifact_types: tuple[str, ...],
         phase_id: str,
         phase_name: str,
         last_agent_message: str | None,
+        describe_work: DescribeWork | None,
     ) -> list[_Deliverable]:
         """What this phase actually delivered, whatever route it arrived by.
 
@@ -584,6 +612,7 @@ class ArtifactCollector:
                 last_agent_message=last_agent_message,
                 wrote=None,
                 title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
+                work=await _where_the_work_is(describe_work),
             )
             if recovered is None:
                 raise PhaseProducedNoDeclaredOutputError(
@@ -614,6 +643,7 @@ class ArtifactCollector:
                 last_agent_message=last_agent_message,
                 wrote=artifact_path,
                 title=title,
+                work=await _where_the_work_is(describe_work),
             )
             # Deliberately raises rather than skipping the file. Skipping would
             # put the execution back where #1167 found it - advancing past a

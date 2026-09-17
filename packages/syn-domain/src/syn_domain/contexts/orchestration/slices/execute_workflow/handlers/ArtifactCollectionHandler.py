@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+        DescribeWork,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
     )
@@ -65,6 +68,7 @@ class ArtifactCollectionHandler:
         phase_name: str,
         output_artifact_types: tuple[str, ...],
         last_agent_message: str | None = None,
+        describe_work: DescribeWork | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
 
@@ -84,6 +88,11 @@ class ArtifactCollectionHandler:
                 no collectable file was written at all (#1300) - so that a
                 finished phase is not discarded over a missing report. Stored
                 marked as recovered, never silently.
+            describe_work: Asked where this phase's branches stand, and only
+                when a salvage is actually happening. A salvaged phase does not
+                fail, so it never reaches the failure path that normally
+                reports this (#1200), and the artifact becomes the only place
+                the surviving branch is named.
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
@@ -99,6 +108,7 @@ class ArtifactCollectionHandler:
             phase_name=phase_name,
             output_artifact_types=output_artifact_types,
             last_agent_message=last_agent_message,
+            describe_work=describe_work,
         )
 
         command = ArtifactsCollectedCommand(

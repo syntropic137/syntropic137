@@ -68,11 +68,17 @@ class FakeAgentExecutionHandler:
         interrupt_reason: str | None = "Cancelled by user",
         launches: bool = True,
         produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
+        #: The last thing this agent said on its stream, as the real stream
+        #: processors would have captured it. Independent of ``produces``
+        #: because in production the two come apart: #1300 is agents that
+        #: finished, said what they had done, and wrote no file at all.
+        self._says = says
         #: Files this double writes into each phase's workspace before
         #: returning, as (path relative to /workspace, bytes). Empty is the
         #: default and models an agent that produced NOTHING - which is not an
@@ -116,6 +122,7 @@ class FakeAgentExecutionHandler:
             interrupt_requested=self._interrupt,
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             agent_task_result=None,
+            last_agent_message=self._says,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -156,15 +163,25 @@ class FakeAgentExecutionHandler:
         return cls(interrupt=True, interrupt_reason=reason)
 
     @classmethod
-    def success(cls, produces: Sequence[tuple[str, bytes]] = ()) -> FakeAgentExecutionHandler:
+    def success(
+        cls,
+        produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
+    ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
         ``produces`` are the files the agent leaves in the workspace, normally
         under ``artifacts/output/``. The default writes none: exit code 0 and
         an empty output tree is a real and previously undetected combination,
         so the double must be able to express it.
+
+        ``says`` is its last stream message, and is deliberately a SEPARATE
+        argument rather than derived from ``produces``. Wrote-nothing-but-said-
+        something is the exact shape of #1300 - three implement phases that had
+        pushed their branch and only missed the report - and a double that
+        could not express it left that combination untestable end to end.
         """
-        return cls(interrupt=False, exit_code=0, produces=produces)
+        return cls(interrupt=False, exit_code=0, produces=produces, says=says)
 
     @classmethod
     def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:

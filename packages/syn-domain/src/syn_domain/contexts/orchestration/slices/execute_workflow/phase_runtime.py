@@ -36,6 +36,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    describe_observed_branches,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -334,6 +337,20 @@ class PhaseRuntime:
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""
         return await self._starting_points.observe(phase_id)
+
+    async def describe_work(self, phase_id: str | None) -> str | None:
+        """The same reading as `observe`, in the words an operator reads.
+
+        Two callers need this fact and they need it in two shapes: a failing
+        execution stores the structured `ObservedBranches` on its event, and a
+        SALVAGED phase - which does not fail, so never reaches that path -
+        needs it as prose to put in the artifact it recovered (#1300). Saying
+        it here rather than at either call site keeps one answer to "where does
+        this phase's work stand", and keeps the collector from ever learning
+        what a remote or a starting point is.
+        """
+        observed = await self.observe(phase_id)
+        return describe_observed_branches(observed) if observed is not None else None
 
     async def report_cancelled(self, reason: str) -> None:
         """Close every open session as cancelled."""

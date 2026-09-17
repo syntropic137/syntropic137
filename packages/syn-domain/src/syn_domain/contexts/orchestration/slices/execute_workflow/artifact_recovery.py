@@ -47,17 +47,32 @@ reader has to be able to tell.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
 
 from syn_domain.contexts.artifacts import MIN_ARTIFACT_CONTENT_LENGTH
 
 __all__ = [
     "RECOVERED_SOURCE_PATH",
     "RECOVERED_TITLE_MARKER",
+    "DescribeWork",
     "RecoveredArtifact",
     "is_storable",
     "recover_deliverable",
 ]
+
+
+class DescribeWork(Protocol):
+    """Where the phase's work stands, in the words an operator reads.
+
+    A port, deliberately: the collector must not learn what a remote, a ref or
+    a starting point is, and the answer is expensive enough (it asks git) that
+    it is worth asking only on the rare path that needs it. Returning None
+    means nobody could look - an absent answer, never an answer of "nothing
+    changed".
+    """
+
+    async def __call__(self) -> str | None: ...
+
 
 #: Stamped on the title of any artifact that reached the store by recovery.
 #:
@@ -99,6 +114,17 @@ _CAVEAT: Final[str] = (
     "evidence of what the phase decided, not as the phase's own document.\n\n"
 )
 
+#: Where the branch survived, when anyone could look.
+#:
+#: This is the #1200 branch report, carried into the artifact. On the FAILURE
+#: path that report is appended to the error message and stored on the event,
+#: which is exactly where a reader looks when a run dies. A recovered phase
+#: does not die, so nothing would ever append it - and the one incident #1300
+#: measured is a phase whose real output was a pushed branch. Naming it here
+#: is what makes the salvage a thing the next phase can act on rather than a
+#: transcript to read.
+_WHERE_THE_WORK_IS: Final[str] = "\n\n---\n\n## Where this phase's work stands\n\n{work}\n"
+
 
 def is_storable(content: str) -> bool:
     """Whether the artifact store will accept `content` as it stands.
@@ -132,6 +158,7 @@ def recover_deliverable(
     last_agent_message: str | None,
     wrote: str | None,
     title: str,
+    work: str | None = None,
 ) -> RecoveredArtifact | None:
     """The artifact to store in place of a deliverable that is not on disk.
 
@@ -141,17 +168,27 @@ def recover_deliverable(
     recovery happens, because the question - "did this phase reach a
     conclusion anywhere" - is the same one in both incidents.
 
+    `work` is where the phase's branches stand (`describe_observed_branches`),
+    appended verbatim when it is known. It is a separate argument from the
+    message because it is a separate kind of evidence - what git can see
+    versus what the agent claimed - and a reader picking the work up needs the
+    first even when the second is a sign-off line.
+
     None means the transcript is empty too - the agent genuinely said nothing -
     and the caller should fail the phase rather than invent a deliverable. That
     distinction is the point of the whole module: "we lost what it said" and
     "it said nothing" are different incidents and must not share an outcome.
+    A `work` report alone is NOT a conclusion and does not make one: a phase
+    that pushed a branch and said nothing about it still reached no verdict,
+    and that failure is reported where failures are reported.
     """
     said = (last_agent_message or "").strip()
     if not said:
         return None
     reason = _WROTE_AN_EMPTY_FILE.format(wrote=wrote) if wrote is not None else _WROTE_NOTHING
+    where = _WHERE_THE_WORK_IS.format(work=work) if work else ""
     return RecoveredArtifact(
-        content=_PREAMBLE + reason + _CAVEAT + said,
+        content=_PREAMBLE + reason + _CAVEAT + said + where,
         title=f"{title} {RECOVERED_TITLE_MARKER}",
         source_path=wrote if wrote is not None else RECOVERED_SOURCE_PATH,
     )

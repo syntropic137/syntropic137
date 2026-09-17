@@ -658,9 +658,13 @@ _OBSERVED_HEADLINE: Final[dict[tuple[bool, bool], str]] = {
         "never reached. What it did read:"
     ),
     # 4. The incident this exists for: something is there, and nothing said so.
+    #    Says "ended", not "failed": since #1300 this same report is also
+    #    carried by a phase that was SALVAGED rather than failed, and a
+    #    heading that announced a failure that did not happen would be the
+    #    misdescribed record #1300 exists to stop.
     (True, False): (
         "  THIS IS WHERE THIS WORKSPACE'S BRANCHES STOOD when the phase "
-        "failed, for {found}. Read from git at failure time and reported as "
+        "ended, for {found}. Read from git at that moment and reported as "
         "observations: nothing below says who moved a ref, because a ref does "
         "not record that. Nothing was pushed or published on the phase's "
         "behalf:"
@@ -747,11 +751,19 @@ def _commits(count: int) -> str:
 
 
 def describe_observed_branches(work: ObservedBranches) -> str:
-    """Say where a failed phase's branches stand, in the words an operator reads.
+    """Say where a phase's branches stand, in the words an operator reads.
 
     Appended to the failure's own message rather than replacing it: WHY the
     phase failed and WHERE its repositories stand are different questions, and
     #1167's answer to the first must stay exactly as loud as it is.
+
+    TWO CALLERS SINCE #1300, and the second is why the wording below says
+    "ended" rather than "failed": a phase that wrote no file but said what it
+    had done is now SALVAGED rather than failed, and carries this report
+    inside its recovered artifact. That is not decoration - `_fail_execution`
+    is the only place the branch report was ever emitted, so a salvaged phase
+    would otherwise be the one case where the work survived and nothing named
+    where it was.
     """
     lines = [
         _OBSERVED_HEADLINE[bool(work.branches), bool(work.unreadable)].format(

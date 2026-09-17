@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -660,6 +661,10 @@ class WorkflowExecutionProcessor:
             phase_name=phase.name,
             output_artifact_types=phase.output_artifact_types,
             last_agent_message=self._runtime.take_last_message(todo.phase_id),
+            # Asked only if the collector actually has to salvage. The reading
+            # costs a git inspection, and it has to happen HERE rather than on
+            # the failure path because a salvaged phase does not fail (#1300).
+            describe_work=partial(self._runtime.describe_work, todo.phase_id),
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
