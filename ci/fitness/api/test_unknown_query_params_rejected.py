@@ -32,17 +32,22 @@ Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
+# Set before syn_api is imported: it selects the in-memory adapters, which is
+# what lets this gate boot the real app with no external service running.
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
-from fastapi import FastAPI  # noqa: E402
-from fastapi.routing import APIRoute  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
-from syn_api.main import create_app  # noqa: E402
-from syn_api.strict_query import UNKNOWN_QUERY_PARAMETER  # noqa: E402
+from syn_api.main import create_app
+from syn_api.strict_query import UNKNOWN_QUERY_PARAMETER
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 pytestmark = [pytest.mark.architecture, pytest.mark.unit]
 
@@ -142,9 +147,7 @@ def test_discovery_found_the_documented_list_endpoints() -> None:
 
 
 @pytest.mark.parametrize("path", _ROUTE_PATHS)
-def test_get_route_rejects_an_invented_query_parameter(
-    client: TestClient, path: str
-) -> None:
+def test_get_route_rejects_an_invented_query_parameter(client: TestClient, path: str) -> None:
     """Every GET route refuses a parameter it does not declare.
 
     Not just the list endpoints: the defect is that an undeclared parameter is

@@ -85,8 +85,7 @@ def _declared_query_keys(dependant: Dependant) -> set[str]:
         annotation = field.field_info.annotation
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
             keys.update(
-                model_field.alias or name
-                for name, model_field in annotation.model_fields.items()
+                model_field.alias or name for name, model_field in annotation.model_fields.items()
             )
         else:
             keys.add(field.alias)

@@ -29,11 +29,11 @@ import pytest
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
-from fastapi import APIRouter, Depends, FastAPI, Query  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from fastapi import APIRouter, Depends, FastAPI, Query
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
-from syn_api.strict_query import (  # noqa: E402
+from syn_api.strict_query import (
     UNKNOWN_QUERY_PARAMETER,
     reject_unknown_query_params,
 )
@@ -92,11 +92,7 @@ def _unknown_keys(response: object) -> list[str]:
     detail = response.json().get("detail")  # type: ignore[attr-defined]
     if not isinstance(detail, list):
         return []
-    return [
-        entry["loc"][1]
-        for entry in detail
-        if entry.get("type") == UNKNOWN_QUERY_PARAMETER
-    ]
+    return [entry["loc"][1] for entry in detail if entry.get("type") == UNKNOWN_QUERY_PARAMETER]
 
 
 @pytest.mark.parametrize(

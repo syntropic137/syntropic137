@@ -27,6 +27,7 @@ Run both: `just fitness`
 | 9 | Scalability | test_in_memory_state_audit | fitness_exceptions.toml `[in_memory_state]` | Enforced |
 | 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
+| 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
 
 ### 11. Typed Boundaries (#1268, ADR-063)
 
@@ -125,6 +126,33 @@ version PASSED with #1039 restored, because the command builder mentions
 `allowed_tools` whether or not the handler ever sets it. It now asserts the
 keyword is passed at the constructor call.
 
+### 12. Request Contract Honesty (#1313)
+
+A request that asks for something the server does not implement must be told
+so. FastAPI drops an undeclared query parameter rather than refusing it, so a
+filter that does not exist read as a filter that matched everything: 200 and an
+UNFILTERED page, with nothing in the response to distrust. The failure is
+directional -- always MORE rows than asked for, always looking successful --
+which is why an agent narrowing to one execution silently got every execution.
+
+`syn_api.strict_query.reject_unknown_query_params` is registered once, as a
+global dependency in `create_app()`, and answers 422 naming the unknown key and
+listing the accepted ones.
+
+**Why this is a fitness function and not a test beside the fix.** #1263 and
+#1306 were both this defect, and both were closed by adding the one missing
+parameter to the one endpoint someone had complained about. Neither could catch
+the next endpoint. The property is "every route, including the ones not written
+yet", so the test DISCOVERS its subjects from the live app instead of listing
+them -- a hand-maintained list would have the same half-life as those two
+fixes.
+
+**Why this one boots the app.** Every other gate here is static AST analysis.
+This property is "the running app answers 4xx", and whether a parameter is
+declared is decided by FastAPI's dependency graph at route-construction time,
+not by anything visible in a source file. Reading the source could only
+re-implement `get_dependant` and would drift from it silently.
+
 ## Configuration Surfaces
 
 ### 1. `fitness.toml` (APSS declarative thresholds)
@@ -195,6 +223,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_cost_query_separation | Cost routes use query services, not projection stores | 8 |
 | test_prefix_resolver_coverage | GET /{id} endpoints use resolve_or_raise() | 8 |
 | test_cost_ceiling | Dispatch chain has rate limit + budget check wired, config bounded | 7 |
+| test_unknown_query_params_rejected | Every GET route refuses a parameter it does not declare | 12 |
 
 ### Infrastructure (`ci/fitness/infrastructure/`)
 
