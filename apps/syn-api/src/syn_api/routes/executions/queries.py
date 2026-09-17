@@ -6,20 +6,14 @@ import contextlib
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 
-from syn_adapters.workspace_backends.agentic.capture_observation import (
-    SESSION_CAPTURE_OBSERVATION,
-    read_agent_session_ids,
-)
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.types import (
-    BranchObservationInfo,
     Err,
     ExecutionDetail,
     ExecutionDetailFull,
@@ -28,7 +22,6 @@ from syn_api.types import (
     Ok,
     PhaseExecution,
     Result,
-    ToolOperation,
 )
 from syn_domain.pagination import Page
 from syn_shared.display import (
@@ -43,13 +36,16 @@ from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
-    PhaseExecutionInfo,
-    PhaseOperationInfo,
 )
-from .phase_activity import summarize_phase_activity
+from .phase_mapping import (
+    _load_agent_session_ids,
+    _map_phase_detail,
+    _map_phase_to_response,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
+    from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
@@ -198,255 +194,6 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
-    )
-
-
-def _parse_iso(value: str) -> datetime | None:
-    """Parse an ISO datetime string, handling trailing 'Z' safely."""
-    raw = value.strip()
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(raw)
-    except ValueError:
-        logger.warning("Failed to parse datetime from value %r", value)
-        return None
-
-
-def _parse_dt(value: datetime | str | None) -> datetime | None:
-    """Normalise a datetime-or-string field to datetime."""
-    if value is None:
-        return None
-    return _parse_iso(value) if isinstance(value, str) else value
-
-
-async def _load_phase_operations(
-    manager: ProjectionManager,
-    session_id: str,
-) -> list[ToolOperation]:
-    """Load tool operations for a session, returning [] on failure."""
-    try:
-        tool_data = await manager.session_tools.get(session_id)
-        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
-    except Exception:
-        logger.exception("Failed to load tool ops for session %s", session_id)
-        return []
-
-
-class _SessionCostData(NamedTuple):
-    cache_creation: int
-    cache_read: int
-    agent_model: str | None
-    cost_by_model: dict[str, Decimal]
-
-
-async def _load_session_cost(
-    manager: ProjectionManager, session_id: str, phase: PhaseExecutionDetail
-) -> _SessionCostData:
-    """Load session cost enrichment data (cache tokens, model info)."""
-    cache_creation = phase.cache_creation_tokens
-    cache_read = phase.cache_read_tokens
-    agent_model: str | None = None
-    cost_by_model: dict[str, Decimal] = {}
-    try:
-        sc = await manager.session_cost.get_session_cost(session_id)
-        if sc is not None:
-            if cache_creation == 0 and cache_read == 0:
-                cache_creation = sc.cache_creation_tokens
-                cache_read = sc.cache_read_tokens
-            agent_model = sc.agent_model
-            cost_by_model = dict(sc.cost_by_model)
-    except Exception:
-        logger.debug("Failed to load session cost for %s", session_id, exc_info=True)
-    return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
-
-
-async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None]:
-    """Which agent-native session ids each of this execution's phases produced.
-
-    Keyed by the phase's ``session_id`` - the uuid4 the HOST assigns per phase
-    run. The values are the ids the AGENTS chose for themselves, which is a
-    disjoint namespace: the host never passes its id to the agent, so nothing
-    else in the system relates the two, and without this an execution cannot be
-    traced to the transcripts it produced (#1185).
-
-    A phase maps to MANY, because one phase yields several whenever it
-    delegates - a codex phase handing work to claude, a subagent, a resumed
-    thread.
-
-    THREE-VALUED, and the caller must keep it that way. ``[]`` means the
-    exporter looked and confirmed none; a MISSING KEY means nobody could tell
-    us, which is what ``dict.get`` already returns as ``None``. Collapsing the
-    two turns a version skew, or a telemetry outage, into a reported loss.
-
-    Lane 2, so it fails soft: an unreachable event store answers "we cannot
-    tell you" for every phase rather than failing a read of the domain truth,
-    which is in Lane 1 and unaffected.
-    """
-    try:
-        from syn_api._wiring import get_event_store_instance
-
-        # ONE query for the whole execution, not one per phase.
-        #
-        # ENVELOPE WARNING: `query_by_execution` FLATTENS the payload to the top
-        # level, where `query`/`query_recent_by_types` nest it under `data`. So
-        # the row IS the payload here, and passing `row["data"]` would read an
-        # absent key on every row - the same misreading that once made every
-        # healthy capture row report as UNKNOWN. Flattening is lossless for this
-        # payload because the write path strips the envelope's own key names
-        # from it (`RESERVED_OBSERVATION_KEYS`, then `_EXCLUDED_KEYS`), so a
-        # stored payload cannot shadow `session_id`.
-        rows = await get_event_store_instance().query_by_execution(
-            execution_id, event_type=SESSION_CAPTURE_OBSERVATION
-        )
-    except Exception:
-        logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
-        return {}
-
-    by_session: dict[str, list[str] | None] = {}
-    for row in rows:
-        session_id = row.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            continue
-        # Rows arrive newest first, so the first one wins: a phase re-probed
-        # after a retry is described by its most recent verdict.
-        if session_id not in by_session:
-            by_session[session_id] = read_agent_session_ids(row)
-    return by_session
-
-
-async def _map_phase_detail(
-    phase: PhaseExecutionDetail,
-    manager: ProjectionManager,
-    agent_sessions: dict[str, list[str] | None],
-) -> PhaseExecution:
-    """Map a domain phase to an API PhaseExecution.
-
-    ``agent_sessions`` is the execution-wide capture lookup from
-    ``_load_agent_session_ids``, passed in rather than fetched here so the
-    query runs once per execution instead of once per phase.
-    """
-    ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
-
-    if phase.session_id:
-        sc = await _load_session_cost(manager, phase.session_id, phase)
-    else:
-        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
-
-    duration_seconds = resolve_duration_seconds(
-        phase.status,
-        started_at=phase.started_at,
-        completed_at=phase.completed_at,
-        recorded_seconds=phase.duration_seconds,
-    )
-
-    return PhaseExecution(
-        phase_id=phase.workflow_phase_id,
-        name=phase.name,
-        status=phase.status,
-        session_id=phase.session_id,
-        artifact_id=phase.artifact_id,
-        error_message=phase.error_message,
-        deliverable_recovered=phase.deliverable_recovered,
-        input_tokens=phase.input_tokens,
-        output_tokens=phase.output_tokens,
-        cache_creation_tokens=sc.cache_creation,
-        cache_read_tokens=sc.cache_read,
-        cost_usd=Decimal("0"),  # Lane 2: enriched via _enrich_costs from execution_cost (#695)
-        duration_seconds=duration_seconds,
-        started_at=_parse_dt(phase.started_at),
-        completed_at=_parse_dt(phase.completed_at),
-        model=sc.agent_model,
-        cost_by_model=sc.cost_by_model,
-        # `.get` on purpose: a phase with no capture row is "not reported",
-        # which is None - never [], which would claim a confirmed empty sweep.
-        agent_session_ids=agent_sessions.get(phase.session_id) if phase.session_id else None,
-        # None stays None for the same reason it does above: it means nothing
-        # read this phase's workspace, which is not the same statement as an
-        # empty list's "read it, and no branch had moved" (#1200).
-        observed_branches=(
-            None
-            if phase.observed_branches is None
-            else [
-                BranchObservationInfo(
-                    repo=w.repo,
-                    branch=w.branch,
-                    remote=w.remote,
-                    remote_commit=w.remote_commit,
-                    remote_commit_at_phase_start=w.remote_commit_at_phase_start,
-                    unpushed_commits=w.unpushed_commits,
-                )
-                for w in phase.observed_branches
-            ]
-        ),
-        operations=ops,
-        # Summarised here, where `ops` are still the projection dataclasses
-        # that know how to identify a call. One hop later they are the API
-        # model and that rule is gone (#1262).
-        activity=summarize_phase_activity(phase, ops, elapsed_seconds=duration_seconds),
-    )
-
-
-def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
-    """Map an API PhaseExecution to an HTTP response model."""
-    operations = [
-        PhaseOperationInfo(
-            operation_id=op.observation_id,
-            operation_type=op.operation_type,
-            timestamp=str(op.timestamp) if op.timestamp else None,
-            tool_name=op.tool_name,
-            tool_use_id=op.tool_use_id,
-            # `None` here means the row carries no verdict (a tool that has
-            # only started), NOT that it went fine. It is rendered True
-            # because the dashboard reads this field as a strict boolean and
-            # would paint every in-flight operation red otherwise. What
-            # changed in #1196 is that a row which DID fail no longer arrives
-            # as None: `read_verdict` settles it to False upstream, so this
-            # default can no longer swallow a failure.
-            success=op.success if op.success is not None else True,
-            error_message=op.error_message,
-        )
-        for op in (phase.operations or [])
-    ]
-    return PhaseExecutionInfo(
-        phase_id=phase.phase_id,
-        name=phase.name,
-        status=phase.status,
-        session_id=phase.session_id,
-        artifact_id=phase.artifact_id,
-        error_message=phase.error_message,
-        deliverable_recovered=phase.deliverable_recovered,
-        input_tokens=phase.input_tokens,
-        output_tokens=phase.output_tokens,
-        cache_creation_tokens=phase.cache_creation_tokens,
-        cache_read_tokens=phase.cache_read_tokens,
-        total_tokens=phase.input_tokens
-        + phase.output_tokens
-        + phase.cache_creation_tokens
-        + phase.cache_read_tokens,
-        duration_seconds=phase.duration_seconds,
-        cost_usd=Decimal(str(phase.cost_usd)),
-        unpriced_observation_count=phase.unpriced_observation_count,
-        started_at=str(phase.started_at) if phase.started_at else None,
-        completed_at=str(phase.completed_at) if phase.completed_at else None,
-        model=phase.model,
-        cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
-        # Same model, passed through rather than rebuilt: this constructor is
-        # the hop that has dropped a field twice (#891, #1176), and a phase
-        # whose branch nobody knows about is exactly the thing this field
-        # exists to stop being invisible (#1200).
-        observed_branches=phase.observed_branches,
-        # Passed through verbatim, None included: this constructor re-lists
-        # every field by hand and is exactly the hop that drops one (#891,
-        # #1176). `or []` here would erase the not-reported/confirmed-none
-        # distinction the field exists to carry.
-        agent_session_ids=phase.agent_session_ids,
-        operations=operations,
-        # Same model, forwarded whole rather than rebuilt field by field -
-        # this constructor is the hop that has dropped a field twice (#891,
-        # #1176), and the readings that tell a timed-out phase from a stalled
-        # one are worth nothing if one of the four goes missing here (#1262).
-        activity=phase.activity,
     )
 
 
