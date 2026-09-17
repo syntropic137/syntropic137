@@ -49,6 +49,14 @@ export async function listArtifactPage(
   scope: ArtifactScope = {}
 ): Promise<ArtifactPage> {
   const params = listQueryParams(query, 'created')
+  // An artifact is written once and has no status, and `/artifacts` never
+  // declared `statuses`. The server used to drop it silently; it now refuses a
+  // parameter it does not declare (#1313), so sending one the endpoint has no
+  // answer for is a 422 rather than a no-op. Dropping it here changes nothing
+  // an operator can observe - it only says in the code what the server was
+  // already doing. Whether artifacts SHOULD be status-filterable is a product
+  // question, and a separate one.
+  params.delete('statuses')
   if (scope.workflow_id) params.set('workflow_id', scope.workflow_id)
   if (scope.phase_id) params.set('phase_id', scope.phase_id)
   if (scope.artifact_type) params.set('artifact_type', scope.artifact_type)
