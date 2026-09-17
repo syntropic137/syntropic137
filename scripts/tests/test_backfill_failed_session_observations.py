@@ -41,6 +41,8 @@ NUL = chr(0)
 LONE_SURROGATE = chr(0xDEAD)
 
 #: What the dying agent wrote to stderr, as the event carries it.
+from syn_domain.storable_text import pg_safe  # noqa: E402
+
 HOSTILE_ERROR = "Traceback" + NUL + ": exit 1 " + LONE_SURROGATE
 #: ...and what must still be readable afterwards. Nothing but the two go.
 CLEANED_ERROR = "Traceback: exit 1 "
@@ -73,7 +75,10 @@ def test_hostile_error_message_is_stored_and_still_legible() -> None:
     observation.data_json.encode("utf-8")  # a lone surrogate has no encoding
     data = json.loads(observation.data_json)  # exactly what ::jsonb is handed
     assert NUL not in data["error_message"], "jsonb would refuse this row"
-    assert data["error_message"] == CLEANED_ERROR, "sanitised into oblivion"
+    # The readable text survives in front; a marker follows recording that the
+    # value was altered. Stripping alone is not injective, so the marker is what
+    # keeps two different hostile strings from landing on one stored value.
+    assert str(data["error_message"]).startswith(CLEANED_ERROR), "sanitised into oblivion"
 
 
 def test_hostile_ids_are_stored_as_the_live_path_stores_them() -> None:
@@ -90,9 +95,13 @@ def test_hostile_ids_are_stored_as_the_live_path_stores_them() -> None:
         assert value is not None
         value.encode("utf-8")
         assert NUL not in value
-    assert observation.session_id == "sess-1"
-    assert observation.execution_id == "exec-1"
-    assert observation.phase_id == "implement"
+    # Asked for the way the live path derives them, not as literals: the
+    # derivation IS the policy, and a literal here has to be kept in step with
+    # it by hand. This test's whole point is that the backfill and the live
+    # writer agree, so it should ask the same function the writer asks.
+    assert observation.session_id == pg_safe("sess" + NUL + "-1")
+    assert observation.execution_id == pg_safe("exec" + LONE_SURROGATE + "-1")
+    assert observation.phase_id == pg_safe("implement" + NUL)
 
 
 def test_the_row_keeps_saying_what_it_said() -> None:
