@@ -4,11 +4,15 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    TASK_INPUT_KEY,
 )
 
 
@@ -216,6 +220,29 @@ class WorkflowExecutionDetail:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
+    inputs: Mapping[str, str] = field(default_factory=dict)
+    """What this run was dispatched with, as its WorkflowExecutionStarted event
+    recorded it: the caller's inputs, the declaration defaults that filled the
+    gaps, and the task (#1307).
+
+    Verbatim, including the keys other fields here are derived from -- ``task``
+    and the ``repos`` string. A run that failed on the platform is retried by
+    dispatching these again, so anything this view edited out would have to be
+    reconstructed from the caller's own notes, which is the situation the field
+    exists to end. Empty for a run whose start event this projection never saw.
+    """
+
+    @property
+    def task(self) -> str | None:
+        """What this run was asked to do, or ``None`` if it was asked nothing.
+
+        Derived rather than stored so there is one copy and it cannot drift
+        from the inputs it was dispatched with. ``None`` is a real answer: a
+        workflow whose phases take no ``$ARGUMENTS`` is dispatched without a
+        task, and that is different from a task nobody recorded.
+        """
+        return self.inputs.get(TASK_INPUT_KEY)
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionDetail":
         """Create from dictionary data.
@@ -246,6 +273,7 @@ class WorkflowExecutionDetail:
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             repos=tuple(data.get("repos", [])),
+            inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
         )
 
     @staticmethod
@@ -277,6 +305,7 @@ class WorkflowExecutionDetail:
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
             "repos": list(self.repos),
+            "inputs": dict(self.inputs),
         }
 
 

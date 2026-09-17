@@ -74,7 +74,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 10  # Bumped: phase counts are now recorded (#1147)
+    VERSION = 11  # Bumped: dispatch inputs are now recorded (#1307)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -149,9 +149,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
+        # What the run was dispatched with. Kept whole (#1307): this is the only
+        # record of what the run was ASKED to do, and a reader retrying a run
+        # that died on the platform dispatches these again. Reading one key out
+        # of it and discarding the rest is what left an execution unable to say
+        # what its own task was.
+        inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
+
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
-        repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
+        repos_raw = inputs.get("repos", "")
+        repos = [u.strip() for u in repos_raw.split(",") if u.strip()] if repos_raw else []
 
         # Create initial phases from workflow definition (all pending)
         # Note: In a full implementation, we'd get phase names from workflow
@@ -172,6 +179,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "artifact_ids": [],
             "error_message": None,
             "repos": repos,
+            "inputs": inputs,
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other
