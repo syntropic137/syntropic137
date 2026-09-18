@@ -649,6 +649,22 @@ def _run_gh(
 #:   quotation of the template if the template is not a complete report, and
 #:   the template is in these bytes. Leaving the examples closed would have
 #:   left the parser's contract unhonoured by the only thing that produces it.
+#: * #1324 gave each outcome ONE complete fence - marker, JSON and terminator
+#:   together - after #1256 left the terminator in a fence with no JSON and the
+#:   JSON in fences with no terminator, so an agent had to assemble the block
+#:   from two places and could silently omit the terminator. Shared, seen by
+#:   every phase.
+#: * #1324 again, reworked, and these bytes move a second time. The first fix
+#:   kept #1256's emitter guarantee by making ``comments`` a ``<"...">`` slot,
+#:   so the fences were complete but still not COPYABLE - an agent that copied
+#:   one faithfully wrote no readable verdict and lost the run exactly as
+#:   before. The JSON is now literal in both fences and nothing in them is left
+#:   to substitute. That gives up "the prompt closes no block of its own",
+#:   which cannot be kept alongside verbatim copyability - the bytes of a
+#:   copyable example ARE the bytes of a report - and keeps the half that
+#:   protects #1256: quoting these bytes can only refuse a phase, never
+#:   complete one. Argued in `workspace_prompt`'s docstring, pinned by
+#:   `test_the_prompt_can_never_manufacture_a_completion`.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -743,35 +759,40 @@ the previous phase failed - report this in your output.
 ## Task Result (REQUIRED)
 
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
-three parts, and it is read as your result only when all three are there:
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-```
-TASK_RESULT: <-- replace this with one of the JSON objects below
-TASK_RESULT_END
-```
-
-If you completed the task successfully, the JSON object is:
-
-```
-{"success": true, "comments": "Brief summary of what was accomplished"}
-```
-
-If you could NOT complete the task (blocked, missing access, error, etc.):
-
-```
-{"success": false, "comments": "Specific reason why — what was missing or what failed"}
-```
-
-Examples of failure reasons:
+A failure reason is specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-The `TASK_RESULT_END` line is what marks the block as your result rather than a
-mention of one, so write it. Without it your phase is failed as unreadable
-instead of completed. With it you are free to quote, explain or discuss this
-format anywhere else in your reply - nothing outside a closed block is read.
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out the other one to explain the
+format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
+
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
+
+You completed the task - copy both lines:
+
+```
+TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+TASK_RESULT_END
+```
+
+You could NOT complete the task, because you were blocked, lacked access, or hit
+an error - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
