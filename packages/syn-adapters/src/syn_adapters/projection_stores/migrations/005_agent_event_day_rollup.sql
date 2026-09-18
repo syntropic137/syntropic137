@@ -1,9 +1,21 @@
--- Migration: 004_agent_event_day_rollup
+-- Migration: 005_agent_event_day_rollup
 -- Description: Per-(day, session, execution) rollup of agent_events, so the
 --              contribution heatmap costs what it RETURNS instead of what the
 --              telemetry table HOLDS.
 -- Date: 2026-09-18
 -- Issue: #1253
+
+-- NOTHING EXECUTES THIS FILE. Read it as documentation, not as the thing that
+-- ran. No migration runner exists in this repository for this directory; the
+-- only `just` target that feeds .sql to psql is `feedback-migrate`, and it
+-- points at lib/ui-feedback. Production and every test database get this
+-- schema from EventStoreSchema.ensure_schema() at API startup
+-- (syn_adapters/events/schema.py), which is therefore the authoritative
+-- definition. If the two ever disagree, ensure_schema() is what you have.
+--
+-- Numbered 005, not 004: PR #1325 (#1322) adds 004_tool_call_counts.sql to
+-- this directory. Since neither file is executed the number is only a name,
+-- but two files claiming one number is a reader's trap, so this one moved.
 
 -- WHY THIS TABLE EXISTS
 --
@@ -36,6 +48,13 @@
 -- rows the trigger did not, with no window in between where an event is
 -- counted twice or not at all. The cost is that ingest is blocked for the
 -- length of one full scan of agent_events - plan the deploy for it.
+--
+-- That cost is paid ONCE. EventStoreSchema._create_day_rollup(), which is
+-- what actually runs, wraps exactly these statements in one transaction and
+-- skips the backfill when the table already exists - and because it is one
+-- transaction, the table existing proves the backfill committed. Without that
+-- gate the scan would be repeated at every API startup, blocking ingestion
+-- each time, for a result ON CONFLICT DO NOTHING already made a no-op.
 
 BEGIN;
 

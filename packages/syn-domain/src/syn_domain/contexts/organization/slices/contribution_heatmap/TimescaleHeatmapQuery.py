@@ -56,13 +56,14 @@ from syn_domain.storable_text import pg_safe
 #
 # They are asked of agent_event_day_rollup instead: one row per
 # (day, session_id, execution_id), maintained by a trigger on agent_events
-# (migration 004). That grain IS the grain of the three answers, so the reads
+# (EventStoreSchema._create_day_rollup; migration 005 documents it but is not
+# executed). That grain IS the grain of the three answers, so the reads
 # are bounded by days x sessions x executions - what the heatmap returns -
 # rather than by how much telemetry those sessions happened to emit.
 #
 # The rollup is NOT a projection: it never reads the event store, so it does
 # not replay from position zero and does not stall the projection coordinator
-# (#1318). See the migration for why it is a trigger and not an application
+# (#1318). See migration 005 for why it is a trigger and not an application
 # hook (insert_batch uses COPY, which no application hook sees).
 #
 # EQUIVALENCE WITH THE QUERIES THIS REPLACED.

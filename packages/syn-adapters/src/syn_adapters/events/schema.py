@@ -63,20 +63,32 @@ class EventStoreSchema:
     compression policies, and schema validation.
 
     Schema Management Strategy:
-        Single Source of Truth: projection_stores/migrations/002_agent_events.sql
+        THIS CLASS IS THE AUTHORITATIVE SCHEMA. ensure_schema() runs at every
+        API startup and is the only thing that creates these objects, in
+        production and in test alike.
 
-        The migration file defines the canonical schema. This Python code
-        auto-creates the table as a fallback for development convenience,
-        but the migration file is authoritative.
+        The files under projection_stores/migrations/ are NOT executed. No
+        migration runner exists in this repository for that directory - the
+        one `just` target that feeds .sql to psql is `feedback-migrate`, which
+        points at lib/ui-feedback. They are design documents that describe
+        what this code does, and they are only as true as the last person to
+        edit both. Do not deploy on the belief that one of them ran.
 
-        To prevent schema drift:
-        1. Always update the migration file FIRST when changing schema
-        2. Run test_schema_consistency.py to verify Python matches SQL
-        3. Update EXPECTED_COLUMNS in models.py to match
-        4. Update docker/init-db if needed for fresh containers
+        (This docstring used to say the opposite - "the migration file is
+        authoritative", "In production: Run migrations before deploying" -
+        and it was never true of this repository. Corrected under #1253.)
 
-        In production: Run migrations before deploying. Auto-creation is
-        disabled when skip_auto_create=True.
+        Because the SQL files are documentation, they cannot drift silently
+        into production, but they can still mislead a reader. So when changing
+        schema:
+        1. Change it HERE - that is the change that ships
+        2. Update the matching migration file so the description stays true
+        3. Run test_schema_consistency.py to verify Python matches SQL
+        4. Update EXPECTED_COLUMNS in models.py to match
+        5. Update docker/init-db if needed for fresh containers
+
+        Auto-creation is disabled when skip_auto_create=True, which leaves the
+        caller responsible for having created the schema some other way.
     """
 
     def __init__(self, *, skip_auto_create: bool = False) -> None:
@@ -102,7 +114,8 @@ class EventStoreSchema:
     async def _create_table(self, conn: asyncpg.Connection) -> None:
         """Create agent_events table and hypertable.
 
-        Schema MUST match: projection_stores/migrations/002_agent_events.sql
+        Schema MUST match: projection_stores/migrations/002_agent_events.sql,
+        which documents this DDL but does not run - see the class docstring.
         """
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS agent_events (
@@ -145,17 +158,57 @@ class EventStoreSchema:
     async def _create_day_rollup(self, conn: asyncpg.Connection) -> None:
         """Create the per-day rollup that bounds the contribution heatmap (#1253).
 
-        Schema MUST match:
-        projection_stores/migrations/004_agent_event_day_rollup.sql - that file
-        is authoritative and is what production runs. This is the same
-        development-convenience fallback the table above gets.
+        This code IS the schema. The matching file,
+        projection_stores/migrations/005_agent_event_day_rollup.sql, documents
+        it and explains it at length, but nothing executes that file - see the
+        class docstring.
 
-        One transaction, deliberately: CREATE TRIGGER takes ACCESS EXCLUSIVE on
-        agent_events, so the backfill sees exactly the rows the trigger did
-        not. Split into separate statements there is a window in which an event
-        is counted twice or not at all.
+        THE BACKFILL RUNS ONCE, AND EXISTENCE OF THE TABLE IS THE PROOF.
+        ensure_schema() runs at EVERY API startup, so anything unconditional
+        here is paid on every restart. The backfill is a GROUP BY over ALL of
+        agent_events - it decompresses every chunk, and it grows with the data
+        - held inside a transaction that has taken ACCESS EXCLUSIVE on
+        agent_events for the CREATE TRIGGER. Unconditionally, that blocks all
+        event ingestion for the length of a full scan, every restart, forever.
+        It never CORRUPTED anything (ON CONFLICT DO NOTHING), it just cost a
+        full outage-shaped scan to achieve nothing.
+
+        So the backfill is gated on the table not already existing, and the
+        single transaction below is what makes that gate sound rather than
+        merely cheap:
+
+          - if this transaction commits, the table exists AND the backfill
+            that ran inside it committed with it;
+          - if it aborts at any point, CREATE TABLE rolls back too, so the
+            table does NOT exist and the next startup redoes the whole thing.
+
+        There is no third state, so "the table is there" means "it was filled".
+        A half-populated rollup is not reachable.
+
+        Everything else here is re-run every startup and is O(1): CREATE ...
+        IF NOT EXISTS resolves to a catalogue lookup, and CREATE OR REPLACE
+        FUNCTION rewrites one pg_proc row. Re-attaching the trigger still takes
+        ACCESS EXCLUSIVE, so ingestion still pauses for it, but it pauses for a
+        catalogue write rather than for a scan. It is re-attached rather than
+        skipped so that a change to the trigger's definition - which rows it
+        fires on, which function it calls - reaches a database that already has
+        the old one.
+
+        Concurrent first startups are safe and at worst wasteful: the second
+        blocks on the first's lock, and either sees the table and skips the
+        backfill, or runs it a second time to no effect (ON CONFLICT DO
+        NOTHING).
         """
         async with conn.transaction():
+            # Read inside the transaction, so it is the same snapshot the DDL
+            # below writes into. Asked as IS NOT NULL and compared against
+            # True, so that anything other than a definite yes - including the
+            # None asyncpg would hand back from an empty result - falls to the
+            # safe side and backfills. That costs one redundant scan; the other
+            # spelling would skip a backfill that never happened.
+            rollup_exists: bool = (
+                await conn.fetchval("SELECT to_regclass('agent_event_day_rollup') IS NOT NULL")
+            ) is True
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS agent_event_day_rollup (
                     day          DATE        NOT NULL,
@@ -182,7 +235,8 @@ class EventStoreSchema:
                 AFTER INSERT ON agent_events
                 FOR EACH ROW EXECUTE FUNCTION agent_event_day_rollup_apply()
             """)
-            await conn.execute(ROLLUP_BACKFILL_SQL)
+            if not rollup_exists:
+                await conn.execute(ROLLUP_BACKFILL_SQL)
 
     async def _configure_compression(self, conn: asyncpg.Connection) -> None:
         """Configure TimescaleDB compression policies."""
