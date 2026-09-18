@@ -68,9 +68,8 @@ the evidence.
 If `fix.md` reports that the first pass certified the change and no edit was
 made, the checkout above has already confirmed it: the remote head is still the
 SHA the first pass reviewed. Certify on that, and do not re-run the whole
-review. The work was already
-verified once by a separate model; repeating it costs a second full pass to
-learn what you already know.
+review. The work was already verified once by a separate model; repeating it
+costs a second full pass to learn what you already know.
 
 This is the common case and it must be cheap.
 
