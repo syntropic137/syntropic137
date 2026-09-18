@@ -23,11 +23,12 @@ what makes the drift unrepresentable.
 WHAT THIS DOES NOT DECIDE. It never talks to the aggregate, builds a command,
 or judges whether a phase succeeded. It is asked to hold, to hand back, and to
 let go - the caller decides when, and the ORDER in which it decides is
-load-bearing on two paths that are documented at their call sites rather than
-here: the unpushed-work guard must run before anything is popped (#1184), and a
-failing phase's branches must be read before teardown (#1200). Those orderings
-stay in the processor precisely so a reader of the completion path can see them
-without opening this file.
+load-bearing on three paths that are documented at their call sites rather
+than here: the unpushed-work guard must run before anything is popped (#1184),
+a failing phase's branches must be read before teardown (#1200), and a dying
+phase's work must be pushed out of its container before that same teardown
+(#1231). Those orderings stay in the processor precisely so a reader of any one
+path can see them without opening this file.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    SavedWork,
     describe_observed_branches,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
@@ -50,6 +52,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     PhaseStartingPoints,
+    save_unpushed_work,
 )
 
 if TYPE_CHECKING:
@@ -211,6 +214,18 @@ class PhaseRuntime:
         #: instance of the class and leave the rest open while looking settled.
         #: Tracked as #1311, with the concurrency it needs under #865.
         self._announced_models: dict[str, str] = {}
+        #: What each phase's definition declares about repository changes,
+        #: recorded when its workspace is attached because that is the only
+        #: frame that has both (#1231). Read by `save_unpushed_work` on the
+        #: terminal paths, which are handed a phase id and no definition.
+        #:
+        #: Written by `attach_workspace` in the same breath as the workspace, so
+        #: a phase that HAS a container has an entry here. The reader still
+        #: needs a value for the gap that cannot happen, and takes the strict
+        #: one (True): judging a workspace strictly saves work that might not
+        #: have been the phase's, and judging it leniently drops work that was.
+        #: Only the second is unrecoverable, so the default goes the other way.
+        self._delivers_repo_changes: dict[str, bool] = {}
         self._started_at: dict[str, datetime] = {}
 
     # ── while a phase is being provisioned ────────────────────────────────
@@ -234,12 +249,28 @@ class PhaseRuntime:
         workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
         agent_env: dict[str, str],
         claude_cmd: list[str],
+        delivers_repo_changes: bool,
     ) -> None:
-        """Hold the container this phase will run in, and how to close it again."""
+        """Hold the container this phase will run in, and how to close it again.
+
+        ``delivers_repo_changes`` is the phase's own declaration, taken HERE
+        because this is the moment the workspace it describes starts existing,
+        and because the paths that need it later have no phase definition to
+        ask: `_fail_execution` and `_cancel_execution` are handed an exception
+        and a phase id (#1231). Recording it beside the container is what lets
+        `save_unpushed_work` below judge a dying workspace by exactly the rule
+        the completion gate judges a finishing one by, without either caller
+        having to know the rule exists.
+
+        Required rather than defaulted, for the reason it is required on
+        `refuse_to_complete_unsaved_phase`: a hop that forgot it would silently
+        restore #1308, and a default would make forgetting invisible.
+        """
         self._workspaces[phase_id] = workspace
         self._workspace_cms[phase_id] = workspace_cm
         self._envs[phase_id] = agent_env
         self._cmds[phase_id] = claude_cmd
+        self._delivers_repo_changes[phase_id] = delivers_repo_changes
 
     async def record_starting_point(self, phase_id: str) -> None:
         """Read where this phase's repositories stand, before its agent runs.
@@ -446,6 +477,33 @@ class PhaseRuntime:
             cache_read_tokens=cache_read,
         )
 
+    async def save_unpushed_work(self, phase_id: str | None, *, execution_id: str) -> SavedWork:
+        """Push a dying phase's unsaved work out of its container (#1231).
+
+        MUST be called before `abandon_all`, for the reason `observe` must be:
+        once teardown has run, work that was only in that workspace is not
+        somewhere else, it is nowhere. That ordering is the whole of this
+        method's contract and it is documented at the two call sites, beside
+        the teardown it has to precede.
+
+        The caller says which phase died and which execution it belonged to.
+        Which container that is, what the phase declared about repository
+        changes, and what it means for there to be no container at all are
+        decided here: a phase with no workspace is holding nothing that dying
+        could erase, which is `SavedWork()` - the same silence a workspace that
+        was genuinely clean produces, because for a caller deciding what to
+        tell an operator the two really are one answer.
+        """
+        workspace = self._workspaces.get(phase_id) if phase_id is not None else None
+        if phase_id is None or workspace is None:
+            return SavedWork()
+        return await save_unpushed_work(
+            workspace,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            delivers_repo_changes=self._delivers_repo_changes.get(phase_id, True),
+        )
+
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""
         return await self._starting_points.observe(phase_id)
@@ -497,6 +555,7 @@ class PhaseRuntime:
         self._starting_points.forget_all()
         self._envs.clear()
         self._cmds.clear()
+        self._delivers_repo_changes.clear()
 
     @property
     def is_idle(self) -> bool:

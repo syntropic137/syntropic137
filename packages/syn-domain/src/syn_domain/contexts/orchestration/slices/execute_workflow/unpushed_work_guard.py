@@ -380,6 +380,15 @@ async def save_unpushed_work(
     answering becomes `SavedWork.unreadable`, which reports the absence of a
     verdict rather than a verdict of "nothing was lost".
 
+    THAT MEANS `Exception`, not just the two the gate declares. The two are
+    what the gate raises when a command ANSWERED badly; they are not what a
+    workspace raises when it cannot run one at all - a container already reaped
+    by a restart, a backend whose transport is gone. Those arrive as whatever
+    the backend throws, and letting one through would report a docker error as
+    the reason a phase timed out. The narrower `except` reads more carefully
+    and is wrong here: on this path an unexpected exception is still, exactly,
+    "we could not look".
+
     BOUNDED, because of WHEN it runs. Every command it issues either is local
     or carries `_REMOTE_TIMEOUT_SECONDS` in its own argv, so the walk costs at
     worst a fixed wait per repository per remote and cannot outlast the budget
@@ -398,6 +407,9 @@ async def save_unpushed_work(
     except WorkspaceInspectionFailedError as unreadable:
         logger.warning("Could not finish saving this workspace's work: %s", unreadable.summary)
         return SavedWork(quarantined=unreadable.quarantined, unreadable=unreadable.summary)
+    except Exception as broken:  # noqa: BLE001 - see "NEVER RAISES" above
+        logger.exception("Could not reach this workspace to save its work")
+        return SavedWork(unreadable=f"the workspace could not be reached ({broken})")
     return SavedWork()
 
 

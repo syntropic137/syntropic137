@@ -230,6 +230,7 @@ class _Process:
             workspace_cm=result.workspace_cm,
             agent_env=result.agent_env,
             claude_cmd=result.claude_cmd,
+            delivers_repo_changes=True,
         )
 
 
