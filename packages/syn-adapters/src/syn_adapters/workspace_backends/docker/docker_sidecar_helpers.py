@@ -89,7 +89,43 @@ async def run_sidecar_container(docker_cmd: list[str]) -> str:
     stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"Failed to start sidecar: {error_msg}")
+        raise RuntimeError(
+            f"Failed to start sidecar: {_why_docker_run_failed(proc.returncode, stdout, stderr)}"
+        )
 
     return stdout.decode().strip()
+
+
+def _why_docker_run_failed(returncode: int | None, stdout: bytes, stderr: bytes) -> str:
+    """Everything the failed `docker run` still knows about why it failed.
+
+    The status is what decided this was a failure, so throwing it away leaves
+    a message that cannot tell "image missing" from "out of disk" from "daemon
+    unreachable" (#1247, and the same shape upstream in the isolation
+    provider's `create`). It used to be replaced by the literal string
+    "Unknown error", which is what a real provisioning failure reported and
+    why that failure is still unattributed.
+
+    Two things this gets deliberately right, both of which have been got wrong
+    before:
+
+    * **A missing status is not a zero.** `returncode` is typed optional and
+      zero reads as success, so the absent case says it is absent rather than
+      quietly claiming the command succeeded while we raise about it (#1341).
+    * **The status belongs to the local `docker` client, not the container.**
+      CPython reports a signal death of its own child as negative, while a
+      process killed *inside* a container comes back through Docker as a
+      positive 128+N - so -11 and 139 are the same event with opposite signs,
+      and a reader who does not know which process the number describes cannot
+      tell them apart (#1295). Naming the process is what disambiguates it;
+      this is not the place that names signals.
+    """
+    if returncode is None:
+        status = "the local `docker run` client has no exit status (it was never reaped)"
+    else:
+        status = f"the local `docker run` client exited {returncode}"
+
+    # stderr first, but docker does not reliably use it, and stdout carrying
+    # the reason is worth more than a sentence saying there was no reason.
+    detail = stderr.decode().strip() or stdout.decode().strip()
+    return f"{status}: {detail}" if detail else f"{status} and wrote nothing to stdout or stderr"
