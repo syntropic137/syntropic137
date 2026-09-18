@@ -44,8 +44,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     # Read-only: this phase has no business editing the tree it is describing,
     # and a review that modified the code under review would be unusable.
@@ -69,8 +71,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 2400
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
@@ -91,8 +95,10 @@ phases:
     # Shorter deliberately: this phase composes findings that already exist. If
     # it needs longer, the verify phase did not finish its job.
     timeout_seconds: 900
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     # No Bash, deliberately, and the prompt agrees with this list rather than
     # asking past it. #1110 told this phase to `gh pr comment` its verdict; the

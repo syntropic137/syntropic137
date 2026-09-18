@@ -132,6 +132,21 @@ guessing:
     delivers_repo_changes: false   # my deliverable is a report
     delivers_repo_changes: true    # my deliverable is a branch (the default)
 
+**The declaration alone does not exempt anything, and today it exempts
+nothing.** A phase that declares `false` still holds `Bash` and `Write`, so its
+word about what it will do is not evidence about what it can do - and trusting
+it would let an agent's real edit be destroyed by the very opt-out meant to
+protect a lockfile. The gate therefore requires the declaration AND proof, read
+from the mount table, that the repository is mounted read-only, so that a build
+tool's churn is the only thing an uncommitted change could be.
+
+**Production does not yet mount repositories read-only** (#1342). Until it
+does, that proof never holds, the exemption never applies, and a phase whose
+`cargo check` rewrites `Cargo.lock` fails exactly as it did before. Declare
+`false` anyway - it is correct, and it starts working the moment the mount
+lands - but do not expect it to prevent the failure today, and do not "fix" the
+gate by dropping the mount check, which would reopen the hole above.
+
 **Declare `false` on any phase whose output artifact is the deliverable** - a
 bootstrap, a premise check, a review, a verify, a plan, an `open_pr` phase that
 only reads a ref. Across the workflows here that is every phase except

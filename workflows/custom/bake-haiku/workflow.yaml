@@ -48,8 +48,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1200
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     allowed_tools:
       - Read
@@ -92,8 +94,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 1800
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
@@ -112,8 +116,10 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 600
-    # Its deliverable is a report, not a branch, so an uncommitted change here
-    # is its own tooling and not work (#1308). See workflows/sdlc/README.md.
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
     # NO WORKING TREE (#1187). This phase reads the verify artifact, checks a
     # remote ref and calls `gh pr create`. Its prompt already says the branch
