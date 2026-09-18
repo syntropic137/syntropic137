@@ -14,16 +14,57 @@ and take the base and head SHAs from it.
 > exists, stop and say so rather than proceeding on no input.
 
 **You are in a fresh workspace on the default branch** - the PR's code is not
-checked out here. Fetch and use the exact SHAs the previous phase recorded, and
-confirm what you are looking at:
+checked out here. The previous phase recorded a base SHA and a head SHA. Work
+from those SHAs and not from the branch names, so that what you are reviewing
+cannot move while you review it:
 
 ```
 git fetch origin
-git rev-parse origin/main origin/<pr-branch>    # must match the recorded SHAs
+git rev-parse origin/<pr-branch>     # THE GATE: must equal the recorded head SHA
+git rev-parse origin/main            # for the record only - NOT a gate
+git diff <recorded-base>...<recorded-head>
 ```
 
-If they differ, the branch moved since the previous phase; say so rather than
-reviewing a different commit than the one that was mapped.
+**The head is the review; the base is not.** One of those two refs moving
+invalidates your work and the other does not, and treating them alike costs a
+whole run:
+
+| what moved | what it means | what you do |
+|---|---|---|
+| **the head** | the code under review changed, and the map you were given describes commits that are no longer the PR | stop and report it. Findings against a superseded head send the author to fix what is already fixed |
+| **`origin/main`** | unrelated work landed while you ran; the head is exactly the one that was recorded | keep going, and record the move |
+
+A queue merges to `origin/main` here, so base movement is the normal condition
+of this repository rather than an exception: a review that halts for it cannot
+run concurrently with a merge, and one that did halt threw away $10.09 of
+finished work and delivered no verdict (#1290). None of the commands above read
+`origin/main` as an input, so the move costs you one line of disclosure and
+nothing else. Put that line in your output, so the report can carry it:
+
+```text
+Reviewed against base `<recorded-base>`; `origin/main` has since moved to `<current-main>`.
+```
+
+### When the merge, and not the head, is what you are judging
+
+Some findings are not about the head alone: "this caller no longer exists",
+"this collides with what just landed", "these two changes are each correct and
+contradict each other". Those are claims about the MERGE RESULT, and the merge
+visible from the recorded base is the one that existed when the map was
+written. Asserting such a claim against a base you know has moved is the same
+dishonesty as reviewing the wrong head, pointed the other way.
+
+So produce the merge before you make one, and say which base it is against:
+
+```
+git checkout -b merge-check <recorded-head> && git merge origin/main
+```
+
+A conflict is a finding, not a reason to stop. Restore the tree afterwards, as
+the read-only rule below requires. If you cannot produce the merge, say the
+claim is unsettled against current `origin/main` rather than asserting it
+against the old base - an unsettled claim that is labelled is useful, and one
+that is quietly stale is not.
 
 Your job is to try to make the PR's central claim FALSE, and to report honestly
 whether you succeeded. A review that sets out to confirm a change finds it
