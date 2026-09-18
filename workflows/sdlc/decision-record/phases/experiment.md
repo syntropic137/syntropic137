@@ -89,3 +89,21 @@ stating how many premises were checked, against which revision, and how many
 failed. Write this file even if some probes did not finish; an unfinished
 probe is a `STILL UNKNOWN` row, not a missing one. Do not modify production
 code.
+
+## End with exactly this, and nothing after it
+
+Your document is the deliverable; the status block only says whether you
+produced it. End your final message with these two lines, verbatim in shape:
+`"success"` and `"comments"` are the only keys, the comment is one short
+sentence on one line with no double quotes inside it, and `TASK_RESULT_END` is
+on its own line. Every detail belongs in the file you wrote, not here. Three
+runs of this workflow completed their document and were still failed because
+the block carried extra keys, long text or no terminator.
+
+```text
+TASK_RESULT: {"success": true, "comments": "Wrote artifacts/output/<file> with <n> sections."}
+TASK_RESULT_END
+```
+
+If you could not produce the document, use `"success": false` and say why in
+the comment.
