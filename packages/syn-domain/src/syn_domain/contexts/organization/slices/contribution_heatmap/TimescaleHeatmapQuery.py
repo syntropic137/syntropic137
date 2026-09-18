@@ -19,7 +19,6 @@ from syn_domain.contexts.organization.domain.read_models.contribution_heatmap im
     HeatmapDayBucket,
 )
 from syn_domain.storable_text import pg_safe
-from syn_shared.events import GIT_COMMIT
 
 # WHAT THIS MODULE COSTS, AND WHY THAT IS THE POINT (#1253)
 #
@@ -37,12 +36,48 @@ from syn_shared.events import GIT_COMMIT
 #   2. It computed `session_start` from that same unnarrowed join, which is
 #      what forced the join to exist at all.
 #
-# Each query below now reads only rows that can change its own answer. What
-# that does NOT fix is stated at `_EXECUTIONS_QUERY`; read it before assuming
-# this endpoint is bounded.
+#   3. Every "how many distinct X on day D" number was computed by reading
+#      every event in the window, because that is what a DISTINCT costs when
+#      you ask it of raw rows.
+#
+# Each query below now reads only rows that can change its own answer: the
+# three distinct-counts come from a per-day rollup (see below), and the usage
+# join reads only the two event types that carry tokens. Nothing on this path
+# grows with telemetry that does not change the output.
+
+# WHERE THE THREE "HOW MANY DISTINCT" NUMBERS COME FROM (#1253)
+#
+# executions-per-day, commits-per-day and "which sessions started inside the
+# window" are all questions about DISTINCT values. No index answers a DISTINCT
+# without visiting the rows carrying the values, so asking agent_events costs
+# one read per EVENT in the window - a million tool-call rows on executions
+# that already appear cost a million reads and change nothing in the output.
+# That is what made this endpoint the slowest in the system.
+#
+# They are asked of agent_event_day_rollup instead: one row per
+# (day, session_id, execution_id), maintained by a trigger on agent_events
+# (migration 004). That grain IS the grain of the three answers, so the reads
+# are bounded by days x sessions x executions - what the heatmap returns -
+# rather than by how much telemetry those sessions happened to emit.
+#
+# The rollup is NOT a projection: it never reads the event store, so it does
+# not replay from position zero and does not stall the projection coordinator
+# (#1318). See the migration for why it is a trigger and not an application
+# hook (insert_batch uses COPY, which no application hook sees).
+#
+# EQUIVALENCE WITH THE QUERIES THIS REPLACED.
+#   - rollup.day is time_bucket('1 day', time)::date, the same expression the
+#     old statements grouped by, so `day BETWEEN $1 AND $2` selects exactly the
+#     rows `time >= $1 AND time < $2 + 1 day` did.
+#   - a rollup row exists for every (day, session, execution) triple that has
+#     an event, and for no other, so COUNT(DISTINCT execution_id) per day is
+#     unchanged and so is the set of days that appear at all.
+#   - first_time is MIN(time) of the triple, so MIN(first_time) per session is
+#     MIN(time) per session.
 
 # A session is counted on the day it STARTED. Membership and start time both
-# come from ONE date-bounded scan, and nothing joins back to history.
+# come from ONE date-bounded read of the rollup, and nothing joins back to the
+# session's history.
 #
 # Filtering rows by time and then taking MIN() would be wrong, not just slow:
 # a session beginning before the window would report its first IN-WINDOW
@@ -52,26 +87,21 @@ from syn_shared.events import GIT_COMMIT
 #     a session started inside the window IFF it has an observation inside
 #     the window and none before it.
 #
-# `window_starts` reads one date range, which is exactly what the hypertable
-# is partitioned on, so chunks outside the window are never opened. The NOT
-# EXISTS is an index probe per candidate session on idx_events_session
-# (session_id, time DESC) that stops at the first earlier row.
+# The NOT EXISTS is an index probe per candidate session on
+# idx_rollup_session_day (session_id, day) that stops at the first earlier row.
 #
-# WHY MIN(time) OVER THE WINDOW IS THE TRUE START HERE, not a fragment of one.
+# WHY MIN OVER THE WINDOW IS THE TRUE START HERE, not a fragment of one.
 # The anti-join has already established that a member session has no row
-# before $1, so every row it owns is >= $1. At least one is < $2+1day, so the
+# before $1, so every row it owns is >= $1. At least one is <= $2, so the
 # smallest of them cannot be one of the rows the upper bound excludes.
 # Therefore MIN over the window equals MIN over the session's whole history -
-# the same value the old `session_start` computed by reading all of it.
-#
-# That identity is what removed the join, and #1253's equivalence tests pin
-# it against the previous implementation on seeded data.
+# the same value the original `session_start` computed by reading all of it.
 _WINDOW_STARTS = """
 window_starts AS (
-    SELECT session_id, MIN(time) AS started_at
-    FROM agent_events
-    WHERE time >= $1::date
-      AND time < ($2::date + interval '1 day')
+    SELECT session_id, MIN(first_time) AS started_at
+    FROM agent_event_day_rollup
+    WHERE day >= $1::date
+      AND day <= $2::date
       {execution_filter}
     GROUP BY session_id
 ),
@@ -80,9 +110,9 @@ session_start AS (
     FROM window_starts w
     WHERE NOT EXISTS (
         SELECT 1
-        FROM agent_events e
-        WHERE e.session_id = w.session_id
-          AND e.time < $1::date
+        FROM agent_event_day_rollup r
+        WHERE r.session_id = w.session_id
+          AND r.day < $1::date
           {execution_filter}
     )
 )
@@ -90,31 +120,17 @@ session_start AS (
 
 _EXECUTION_FILTER = "AND execution_id = ANY($3)"
 
-# THE ONE QUERY STILL PROPORTIONAL TO RAW TELEMETRY VOLUME (#1253).
-#
-# "How many distinct executions were active on day D" is a question about
-# every row in the window: any event type, for any execution, can be the one
-# that makes an execution active that day, and no index can answer "which
-# values are distinct here" without visiting the rows that carry them. Adding
-# a million tool-call rows to executions that already appear costs a million
-# more reads and changes nothing in the output.
-#
-# Bounding it needs a per-day rollup, not a better query. See the report on
-# #1253: the vehicle is a TimescaleDB continuous aggregate over
-# (day, session_id, execution_id), which is maintained by the database and so
-# does NOT replay the event store or stall the projection coordinator (#1318).
-# That is not done here.
-#
 # Executions are NOT re-attributed to a start day the way sessions and usage
 # are. An execution that spans days genuinely did work on each of them, and
-# showing that is the point of the heatmap.
+# showing that is the point of the heatmap. The rollup keeps that: it has a row
+# per (day, execution), so an execution still appears on every day it emitted.
 _EXECUTIONS_QUERY = """
 SELECT
-    time_bucket('1 day', time)::date AS day,
+    day,
     COUNT(DISTINCT execution_id) AS executions
-FROM agent_events
-WHERE time >= $1::date
-  AND time < ($2::date + interval '1 day')
+FROM agent_event_day_rollup
+WHERE day >= $1::date
+  AND day <= $2::date
   {execution_filter}
 GROUP BY day
 ORDER BY day
@@ -122,21 +138,20 @@ ORDER BY day
 
 # Commits, on the day each one happened.
 #
-# Split out of the executions scan so it can be served by idx_events_type
-# (event_type, time DESC): leading with the constant event_type makes the
-# window a range on the second column, so this reads commits and not
-# telemetry. Counting them as a FILTER over the executions scan instead made
-# the cheap metric cost what the expensive one costs.
-_COMMITS_QUERY = f"""
+# HAVING keeps the old result shape exactly: the previous statement selected
+# git_commit rows, so a day with events but no commits produced NO row. Rollup
+# rows exist for every day with any event, so without the HAVING this would
+# start emitting commits=0 rows the caller never used to see.
+_COMMITS_QUERY = """
 SELECT
-    time_bucket('1 day', time)::date AS day,
-    COUNT(*) AS commits
-FROM agent_events
-WHERE event_type = '{GIT_COMMIT}'
-  AND time >= $1::date
-  AND time < ($2::date + interval '1 day')
-  {{execution_filter}}
+    day,
+    SUM(commits)::bigint AS commits
+FROM agent_event_day_rollup
+WHERE day >= $1::date
+  AND day <= $2::date
+  {execution_filter}
 GROUP BY day
+HAVING SUM(commits) > 0
 ORDER BY day
 """
 
