@@ -11,6 +11,15 @@ teardown, and both are wrong in the same way if they read an unanswered
 command as an answer, which is why they share `_checked` rather than being two
 modules that each own half a git.
 
+THE THIRD CALLER ASKS THE FIRST QUESTION ON THE SECOND PATH (#1231).
+`save_unpushed_work` runs the completion gate's walk on the paths that never
+reach it - a phase killed at its ``timeout_seconds``, an execution the user
+cancelled - and reports what it saved as a value instead of a refusal, because
+those have already failed for a reason of their own and must keep it. It is the
+gate called and caught rather than a walk that resembles one: two
+implementations of "what would be lost" is exactly the drift this module is one
+file to avoid.
+
 WHERE A BRANCH STANDS IS A QUESTION ABOUT TWO MOMENTS, so the failing half
 needs a second call: `record_phase_starting_point` runs when the workspace is
 provisioned and records where each remote-tracking ref pointed then. Without
@@ -129,6 +138,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
     ObservedBranches,
     QuarantinedWork,
+    SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
@@ -182,10 +192,12 @@ _IDENTITY: Final[tuple[str, ...]] = (
     "GIT_COMMITTER_EMAIL=agent@agentic.local",
 )
 
-#: How long a remote is given to say where a branch is. Asking it is a NETWORK
-#: call on a path that runs while a phase is already failing and teardown is
-#: queued behind it, so an unreachable remote must cost a bounded wait rather
-#: than the container's remaining lifetime. `--kill-after` covers a transport
+#: How long a remote is given to answer - to say where a branch is, and to
+#: take a quarantine push. Both are NETWORK calls on a path that runs while a
+#: phase is already failing and teardown is queued behind it, so an unreachable
+#: remote must cost a bounded wait rather than the container's remaining
+#: lifetime. Without a bound the wait is the backend's default execute timeout,
+#: which is an hour (#1231). `--kill-after` covers a transport
 #: helper that ignores the first signal.
 #:
 #: Carried in argv through coreutils `timeout`, for the reason `_git_argv`
@@ -335,6 +347,85 @@ async def quarantine_unpushed_work(
         ) from unreadable
     if quarantined:
         raise UnpushedWorkQuarantinedError(phase_id=phase_id, quarantined=tuple(quarantined))
+
+
+async def save_unpushed_work(
+    workspace: GitWorkspace,
+    *,
+    execution_id: str,
+    phase_id: str,
+    delivers_repo_changes: bool,
+) -> SavedWork:
+    """Empty a DYING workspace of everything no remote has, and say where it went.
+
+    THE SAME WALK THE COMPLETION GATE RUNS, on the paths that never reach it
+    (#1231). A phase killed at its ``timeout_seconds`` exits 124, which
+    `_handle_run_agent` turns into a raise, so it unwinds to the failure path
+    and never to `refuse_to_complete_unsaved_phase` - and the failure path only
+    ever LOOKED. `exec-9cb32b4bbfe7` held two commits that existed, were
+    reported accurately, and were then deleted with the container.
+
+    LITERALLY THE GATE, called and caught, rather than a second walk that
+    resembles it. The two paths must not be able to disagree about what counts
+    as unsaved, which ref the work goes to, or whether a push landed, and the
+    cheapest way to guarantee that is one implementation and no copy. That is
+    also why ``delivers_repo_changes`` is required here and not defaulted:
+    defaulting it would let the two paths judge the same workspace differently,
+    which is #1308 re-opened one caller along.
+
+    NEVER RAISES, and that is its whole contract to the terminal paths. It runs
+    on an execution that has ALREADY failed or been cancelled for a reason of
+    its own, and an exception here would replace that reason with this one - a
+    strictly worse error, about a different subject. A workspace that stops
+    answering becomes `SavedWork.unreadable`, which reports the absence of a
+    verdict rather than a verdict of "nothing was lost".
+
+    BOUNDED, because of WHEN it runs. Every command it issues either is local
+    or carries `_REMOTE_TIMEOUT_SECONDS` in its own argv, so the walk costs at
+    worst a fixed wait per repository per remote and cannot outlast the budget
+    that has already expired. See `_push`, which is the network call that was
+    missing its bound.
+    """
+    try:
+        await quarantine_unpushed_work(
+            workspace,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            delivers_repo_changes=delivers_repo_changes,
+        )
+    except UnpushedWorkQuarantinedError as saved:
+        return SavedWork(quarantined=saved.quarantined)
+    except WorkspaceInspectionFailedError as unreadable:
+        logger.warning("Could not finish saving this workspace's work: %s", unreadable.summary)
+        return SavedWork(quarantined=unreadable.quarantined, unreadable=unreadable.summary)
+    return SavedWork()
+
+
+def already_saved_by_the_completion_gate(error: BaseException) -> bool:
+    """Whether this failure IS the completion gate's refusal, work and all (#1184).
+
+    THE ONE FAILURE THAT ARRIVES WITH THE WORKSPACE ALREADY EMPTIED. Both
+    errors below are raised only after `quarantine_unpushed_work` has pushed
+    everything it found, and both carry the report of it, which becomes the
+    failure's reason. Saving again would find the same work - a quarantine
+    pushes to `refs/syn/lost`, which is outside `refs/remotes`, so git still
+    calls those commits unpushed afterwards and cannot answer "already saved"
+    itself.
+
+    So the message would name one ref twice, under two headlines, about one
+    save. That is the certain cost and it is enough on its own: a reader told
+    the same commits were saved twice has no way to tell that they were not.
+
+    The uncertain cost is worse and lands on a clock boundary. `_IDENTITY`
+    fixes the author and committer but not the DATE, so the second
+    `commit-tree` is the identical object only while both attempts fall in the
+    same whole second. Across one, it is a different commit pushed WITHOUT
+    force over a ref it does not descend from, rejected as a non-fast-forward,
+    and rendered as work that is gone - "NONE OF IT IS RECOVERABLE" directly
+    beneath the gate's own "All of it is recoverable", about the same commits,
+    one of them false. Asking here is what stops both, and it is asked once.
+    """
+    return isinstance(error, UnpushedWorkQuarantinedError | WorkspaceInspectionFailedError)
 
 
 @dataclass(frozen=True)
@@ -1054,5 +1145,27 @@ async def _push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) ->
     and by the time it runs the quarantine commit already exists locally. So
     its result is returned rather than raised on, and the caller reports the
     work as NOT recoverable. Every other command here goes through _checked.
+
+    BOUNDED LIKE `ls-remote`, and for a sharper version of the same reason
+    (#1231). This is the second network call in the module and it had no bound
+    at all: a remote that accepts a connection and then stops talking held the
+    workspace open for the backend's default execute timeout, which is an HOUR.
+    On the completion path that merely delayed a phase that had time. On the
+    timeout path, where `save_unpushed_work` calls it, the budget is already
+    spent and teardown is queued behind it, so an unbounded push turns the
+    bounded failure this issue is about into an unbounded one - the exact
+    outcome preserving the work was meant to avoid.
+
+    A push cut off by the bound exits 124 and is reported as a failed push,
+    which is the honest reading: the objects exist locally, the ref may or may
+    not have landed, and the caller must not promise it did.
     """
-    return await workspace.execute(_git_argv(repo, "push", "origin", f"{commit}:{ref}"))
+    return await workspace.execute(
+        _git_argv(
+            repo,
+            "push",
+            "origin",
+            f"{commit}:{ref}",
+            timeout_seconds=_REMOTE_TIMEOUT_SECONDS,
+        )
+    )
