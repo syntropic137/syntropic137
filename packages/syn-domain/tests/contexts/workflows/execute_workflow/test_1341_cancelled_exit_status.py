@@ -27,7 +27,7 @@ the ORDINARY cancellation, not an edge case.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -35,9 +35,6 @@ from syn_adapters.control.commands import ControlSignal, ControlSignalType
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.memory import MemoryEventStreamAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
-from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
-    ExecutionJournal,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -46,6 +43,10 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
 )
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 
+# The same recorder the #1319 tests read their events through: same real
+# handler, same serialized wire form, so the two sets of claims are directly
+# comparable rather than two harnesses that happen to agree.
+from .test_1319_real_handler_exit_status import _Run
 from .test_processor_smoke import (
     FakeArtifactRepository,
     FakeExecutionRepository,
@@ -57,6 +58,7 @@ from .test_processor_smoke import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syn_adapters.conversations import SessionContext
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
     )
@@ -82,13 +84,13 @@ class _StreamInterruptedMidRun(MemoryEventStreamAdapter):
 
     async def stream(
         self,
-        handle: IsolationHandle,  # noqa: ARG002
-        command: list[str],  # noqa: ARG002
+        handle: IsolationHandle,
+        command: list[str],
         *,
-        timeout_seconds: int | None = None,  # noqa: ARG002
-        working_directory: str | None = None,  # noqa: ARG002
-        environment: dict[str, str] | None = None,  # noqa: ARG002
-        wrapper_name: str | None = None,  # noqa: ARG002
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         for _ in range(LINES_BEFORE_CANCEL):
             yield '{"type":"assistant","message":{"content":[]}}'
@@ -106,22 +108,6 @@ class _ControllerThatCancels:
             execution_id=execution_id,
             reason="cancelled by user",
         )
-
-
-class _Run:
-    """What one execution recorded: its status, and every event it committed."""
-
-    def __init__(self, status: str, events: list[object]) -> None:
-        self.status = status
-        self.events = events
-
-    def of_type(self, event_type: str) -> list[dict[str, Any]]:
-        """Every event of `event_type`, serialized as production serializes it."""
-        return [
-            ExecutionJournal._serialize_event(e)  # pyright: ignore[reportPrivateUsage]
-            for e in self.events
-            if type(e).__name__ == event_type
-        ]
 
 
 async def _run_a_phase_cancelled_mid_stream() -> _Run:
@@ -224,7 +210,7 @@ class TestNoCancelledRunIsCreditedWithACleanExit:
 
         class _CapturingConversationStorage:
             async def store_session(
-                self, session_id: str, lines: list[str], context: Any
+                self, session_id: str, lines: list[str], context: SessionContext
             ) -> None:
                 stored.append(bool(context.success))
 
