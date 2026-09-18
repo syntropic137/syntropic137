@@ -1,4 +1,4 @@
-"""No cost read path asks ``agent_events`` for tool completions (#1322).
+"""Which ``agent_events`` scans each cost read path still pays for (#1322).
 
 Five places derived their tool-call column by counting
 ``event_type = 'tool_execution_completed'`` rows in ``agent_events``. That
@@ -8,15 +8,28 @@ inside a compressed chunk and every segment of every row on the page gets
 decompressed - 60,562 buffer hits, 905ms, for one page of sixteen sessions
 over 219,140 rows. /sessions and /executions took 4-30 seconds.
 
-This drives each read path against a connection that records its statements
-and asserts the count is never derived that way again. Four of the five live
-here; the fifth is the ``/executions`` route itself, covered by
-``apps/syn-api/tests/test_executions_list_reads_the_tool_call_tally.py``
+WHAT THIS PROVES, exactly, because the narrow version of it was read as the
+broad one: **the tool-count subpath** no longer asks ``agent_events``
+anything. It does NOT prove that these endpoints have stopped reading
+``agent_events`` - they have not. Token sums, SDK costs, start times, phase
+costs and turn counts are still derived from it, several of them filtering on
+``event_type`` in exactly the shape described above, just not on
+``tool_execution_completed``. #1322 measured and fixed the tool count; #1338
+covers the rest.
+
+So rather than assert the absence of one event type and fall silent about
+every other, this enumerates. ``_EXPECTED_SCANS`` is the whole remaining set,
+written out per endpoint, and the test fails if a read path scans for
+something not on the list - an honest acceptance criterion that also stops the
+remainder being forgotten, which is what an overclaiming one is for.
+
+The four cost paths live here; the fifth is the ``/executions`` route itself,
+covered by ``apps/syn-api/tests/test_executions_list_reads_the_tool_call_tally.py``
 where it lives.
 
 The assertion is deliberately about the EVENT TYPE, not the SQL text:
 filtering ``agent_events`` on ``tool_execution_completed`` is the only way to
-derive this count from raw events, so a read path that never mentions it -
+derive the tool count from raw events, so a read path that never mentions it -
 bound as an argument or written as a literal - cannot have reintroduced the
 scan, however it spells the rest of its query.
 """
@@ -42,7 +55,13 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
 )
-from syn_shared.events import TOOL_EXECUTION_COMPLETED
+from syn_shared.events import (
+    SESSION_STARTED,
+    SESSION_SUMMARY,
+    TOKEN_USAGE,
+    TOOL_EXECUTION_COMPLETED,
+    VALID_EVENT_TYPES,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -54,6 +73,26 @@ _EXECUTION = "exec-1322"
 _MODEL = "claude-opus-5"
 _WHEN = datetime(2026, 9, 17, 10, 0, tzinfo=UTC)
 _TOOL_CALLS = 11
+
+#: A read of ``agent_events`` that filters on no event type at all.
+_NO_EVENT_TYPE_FILTER = "(no event_type filter)"
+
+#: Every ``agent_events`` scan these endpoints still perform, per endpoint.
+#:
+#: This is an inventory, not an allowance: it is here so the remainder is
+#: visible and so adding to it takes a deliberate edit. Each entry is a
+#: candidate for the same treatment the tool count got - see #1338, which
+#: carries this table. The one thing that may never appear in it is
+#: ``tool_execution_completed``.
+_EXPECTED_SCANS: dict[str, frozenset[str]] = {
+    "GET /costs/sessions (list)": frozenset({SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}),
+    "GET /costs/sessions/{id} (detail, via the batch path)": frozenset(
+        {SESSION_SUMMARY, SESSION_STARTED}
+    ),
+    "GET /costs/executions (list)": frozenset({SESSION_SUMMARY, TOKEN_USAGE}),
+    "GET /executions (one page, by id)": frozenset({SESSION_SUMMARY, TOKEN_USAGE}),
+    "GET /costs/executions/{id} (detail)": frozenset({SESSION_SUMMARY, _NO_EVENT_TYPE_FILTER}),
+}
 
 
 def _cell(key: str) -> object:
@@ -120,17 +159,27 @@ class _RecordingConnection:
         return _WHEN if "MIN(time)" in query else 1
 
     @property
-    def tool_event_reads(self) -> list[str]:
-        """Statements that ask ``agent_events`` about tool completions."""
-        return [
-            statement
-            for statement, args in zip(self.statements, self.args, strict=True)
-            if "agent_events" in statement
-            and (
-                TOOL_EXECUTION_COMPLETED in statement
-                or TOOL_EXECUTION_COMPLETED in {str(arg) for arg in args}
-            )
-        ]
+    def agent_events_scans(self) -> set[str]:
+        """Which event types this read path asked ``agent_events`` about.
+
+        Matched against ``VALID_EVENT_TYPES`` rather than against a list kept
+        here, so an event type added to the system is one this test already
+        knows how to see. A statement that reads ``agent_events`` without
+        filtering on a type at all is reported as ``_NO_EVENT_TYPE_FILTER``:
+        it is still a scan, and leaving it out would let the widest query of
+        the lot be the one nothing records.
+        """
+        scans: set[str] = set()
+        for statement, args in zip(self.statements, self.args, strict=True):
+            if "agent_events" not in statement:
+                continue
+            found = {
+                event_type
+                for event_type in VALID_EVENT_TYPES
+                if f"'{event_type}'" in statement or event_type in {str(arg) for arg in args}
+            }
+            scans |= found or {_NO_EVENT_TYPE_FILTER}
+        return scans
 
     @property
     def tally_reads(self) -> list[str]:
@@ -188,20 +237,48 @@ def _read_paths() -> list[tuple[str, Callable[[_Pool], Awaitable[object]]]]:
     ]
 
 
+def test_the_inventory_covers_every_read_path() -> None:
+    """An endpoint missing from ``_EXPECTED_SCANS`` is an unmeasured endpoint."""
+    assert set(_EXPECTED_SCANS) == {endpoint for endpoint, _read in _read_paths()}
+
+
+def test_no_read_path_is_permitted_to_count_tool_events() -> None:
+    """The one entry the inventory may never gain.
+
+    Half of the criterion, and the half that is a rule rather than a
+    measurement: whatever else these endpoints go on reading from
+    ``agent_events``, counting ``tool_execution_completed`` is not on the list.
+    Paired with the test below - which asserts what each path ACTUALLY scans
+    equals its entry here - it says the tool-count scan is gone and cannot be
+    put back by editing the inventory.
+    """
+    for endpoint, expected in _EXPECTED_SCANS.items():
+        assert TOOL_EXECUTION_COMPLETED not in expected, (
+            f"{endpoint} was granted the scan #1322 removed"
+        )
+
+
 @pytest.mark.parametrize(
     ("endpoint", "read"), _read_paths(), ids=lambda v: v if isinstance(v, str) else ""
 )
-async def test_no_read_path_counts_tool_events_in_agent_events(
+async def test_each_read_path_scans_agent_events_for_exactly_what_is_inventoried(
     endpoint: str,
     read: Callable[[_Pool], Awaitable[object]],
 ) -> None:
+    """What it actually asks ``agent_events``, against what it is recorded as asking.
+
+    Equality, not containment. A read path that grows a new scan fails here
+    even though the new scan is nothing to do with tool calls, and fixing it
+    means either removing the query or writing it down - which is the point:
+    #1338 inherits a list that cannot quietly get longer.
+    """
     conn = _RecordingConnection()
 
     await read(_Pool(conn))
 
-    assert not conn.tool_event_reads, (
-        f"{endpoint} still counts tool_execution_completed rows in agent_events: "
-        f"{conn.tool_event_reads}"
+    assert conn.agent_events_scans == _EXPECTED_SCANS[endpoint], (
+        f"{endpoint} scans agent_events for {sorted(conn.agent_events_scans)}, "
+        f"inventoried as {sorted(_EXPECTED_SCANS[endpoint])}"
     )
 
 

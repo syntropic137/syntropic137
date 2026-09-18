@@ -5,10 +5,11 @@ The fifth copy of the slow count lived in the route itself, under a
 took 4-30s. Same table, same unindexable ``event_type`` filter, same fix.
 
 The sibling proof for the four domain read paths is
-``packages/syn-domain/tests/test_no_read_path_counts_tool_events.py``; this
-one covers the route's own query, and that its fail-soft behaviour survived
-the change - a dashboard that 500s because a tally row is missing is worse
-than one showing a dash.
+``packages/syn-domain/tests/test_cost_read_path_agent_events_scans.py``, which
+inventories what each of them still reads from ``agent_events``; this one
+covers the route's own query, and that its fail-soft behaviour survived the
+change - a dashboard that 500s because a tally row is missing is worse than
+one showing a dash.
 """
 
 from __future__ import annotations
