@@ -30,6 +30,10 @@ of them.
   as written. Either amend it so it no longer depends on the false claim, or
   switch to the path the decision named under "what would change this
   decision", and say which. Do not paper over a falsified assumption.
+- If an assumption came back **ASSUMPTION WAS WRONG** because its premise was
+  false, the decision rests on something untrue: treat it exactly like
+  FALSIFIED. If it was only ill-posed, restate it as a falsifiable claim and
+  mark it STILL UNKNOWN.
 - If an assumption is **STILL UNKNOWN**, every step resting on it is marked as
   such, with what would settle it.
 

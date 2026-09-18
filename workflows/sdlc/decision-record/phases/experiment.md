@@ -30,8 +30,8 @@ it is worth building on; one that was only ever confirmed is not.
 
 Open every file and line an assumption cites, confirm the cited text is there,
 and record `git rev-parse HEAD` for the tree you read. If a premise does not
-hold, the verdict is **PREMISE FALSE** - quote what is actually there and name
-the revision. A working tree moves while a workflow runs, so a check against the
+hold, the verdict is **ASSUMPTION WAS WRONG** - quote what is actually there and
+name the revision. A working tree moves while a workflow runs, so a check against the
 wrong revision produces a confident false accusation.
 
 ## Dispatch one subagent per assumption, in parallel

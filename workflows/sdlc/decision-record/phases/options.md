@@ -18,8 +18,10 @@ Before any option exists, write down what a good answer must do:
 - **Is the problem real, and is it already solved?** Search the repository
   first: design docs, ADRs, existing experiments, prior plans, and the code.
   This repository usually has more written design than it looks like. A
-  question that is already answered is a successful finding here, and the
-  right outcome is to say so and stop.
+  question that is already answered is a successful finding here. Do not stop:
+  make the existing answer **Path 0**, cite exactly where it was decided, and
+  still lay out the alternatives. The later phases then test whether that
+  answer still holds, and reaffirming it is a legitimate outcome.
 - **Success criteria** - observable, so a later phase can test a path against
   them.
 - **Constraints** - ADRs, invariants, platform targets, anything a path may not

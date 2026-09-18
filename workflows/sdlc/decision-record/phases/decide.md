@@ -25,7 +25,9 @@ If the attack proposed a new path, treat it as a peer of the original paths.
 
 ## Then decide
 
-Choose ONE path. It may be a combination, but say plainly which parts come from
+Choose ONE path. Reaffirming an existing decision (Path 0) is a legitimate
+choice, and it gets the same rationale and falsifiable assumptions as any
+other. It may be a combination, but say plainly which parts come from
 which path. Write:
 
 - **The decision**, in one sentence.

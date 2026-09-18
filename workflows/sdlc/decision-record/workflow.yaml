@@ -81,8 +81,9 @@ phases:
     output_artifacts: [markdown]
     timeout_seconds: 2400
     delivers_repo_changes: false
-    # No allowed_tools: codex enforces a filesystem sandbox, not a tool
-    # vocabulary, so a tool list here would be accepted and never applied.
+    # No allowed_tools: codex has no tool vocabulary, so a list here would be
+    # accepted and never applied. Its access comes from agent.sandbox, left at
+    # the full-access default, which is what lets it write its output file.
     agent:
       provider: codex
       # The concrete model id, never an alias: an aliased model resolves to no
