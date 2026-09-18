@@ -695,14 +695,14 @@ class WorkflowExecutionProcessor:
                 logger.error(refusal)
                 raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
 
-            if result.command.exit_code != 0:
+            if result.exit_code != 0:
                 reason = result.stream_result.error_reason
                 base = (
                     f"Agent failed: {reason} "
-                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
+                    f"(phase={todo.phase_id}, exit_code={result.exit_code})"
                     if reason
                     else f"Agent execution failed for phase {todo.phase_id} "
-                    f"(exit_code={result.command.exit_code})"
+                    f"(exit_code={result.exit_code})"
                 )
                 # The token counts used to be appended here as
                 # `(tokens=190+545)`, and that string was the ONLY record of
@@ -722,8 +722,14 @@ class WorkflowExecutionProcessor:
                 # non-zero. Which is to say every status that actually
                 # distinguishes the outcomes (124, -11) was durably recorded
                 # nowhere, and only 0 ever survived (#1319).
-                raise NonZeroExitError(base, exit_code=result.command.exit_code)
+                raise NonZeroExitError(base, exit_code=result.exit_code)
 
+            # Non-None because the status is 0: a run with no status either
+            # raised above or was cancelled, and a cancelled one returned at
+            # the `interrupt_requested` check before reaching here (#1341).
+            assert result.command is not None, (
+                "a run that exited 0 must carry the completion to report"
+            )
             aggregate.agent_execution_completed(result.command)
             await self._journal.append(aggregate)
         except Exception:

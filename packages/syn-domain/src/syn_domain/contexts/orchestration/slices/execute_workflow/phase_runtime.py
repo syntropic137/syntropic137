@@ -297,11 +297,13 @@ class PhaseRuntime:
             self._announced_models[phase_id] = announced
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
+        # From the resolved usage rather than the completion command, because a
+        # cancelled run has no command and still spent what it spent (#1341).
         self._auth_tokens[execution_id, phase_id] = (
-            result.command.input_tokens,
-            result.command.output_tokens,
-            result.command.cache_creation_tokens,
-            result.command.cache_read_tokens,
+            result.usage.input_tokens,
+            result.usage.output_tokens,
+            result.usage.cache_creation,
+            result.usage.cache_read,
         )
 
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
