@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 class SidecarTokenInjectionAdapter:
     """Injects tokens into workspace via sidecar proxy.
 
-    Implements TokenInjectionPort from the workspace domain.
+    Does NOT implement TokenInjectionPort, despite the shape: inject() here
+    requires a sidecar_handle the port has no slot for, and ignores the
+    isolation handle the port is built around. The claim that it did was in
+    this docstring and checked by nothing (#1305).
 
     This is the preferred method for token injection because:
     - Tokens never enter the workspace filesystem
