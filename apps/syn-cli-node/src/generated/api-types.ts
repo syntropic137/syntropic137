@@ -3413,13 +3413,24 @@ export interface components {
          *     Every field is a READING, never a verdict. Nothing here says "stalled":
          *     that word is a judgement about intent, and these are four measurements
          *     that let a reader make it.
+         *
+         *     AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+         *     The activity readings come from Lane 2, which fails soft, and a lookup that
+         *     raised or found no database once produced zero operations and no push -
+         *     which is precisely the shape of a stall. The feature built to stop an
+         *     operator being told "do not pay for this again" on no evidence was
+         *     manufacturing exactly that signal out of its own outage.
+         *     ``telemetry_available`` says whether the timeline was read at all, and the
+         *     readings taken from it are null when it was not.
          */
         PhaseActivityInfo: {
             /**
-             * Operations Count
-             * @default 0
+             * Telemetry Available
+             * @default false
              */
-            operations_count: number;
+            telemetry_available: boolean;
+            /** Operations Count */
+            operations_count?: number | null;
             /** Last Push At */
             last_push_at?: string | null;
             /** Seconds Since Last Push */

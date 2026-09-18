@@ -58,6 +58,12 @@ PHASE_DIED_AT = PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS + 21)
 #: "Pushed 90 seconds before dying" - the reading that says it was working.
 PUSHED_AT = PHASE_DIED_AT - timedelta(seconds=90)
 
+#: A 124 raised seven minutes into an hour-long budget. Same exit code, and
+#: nowhere near the cap - so it is not a timeout at all, it is something else
+#: wearing a timeout's exit code, and "raise the budget" is the wrong answer
+#: to it. 431 is not a round number and cannot be arrived at by defaulting.
+DIED_EARLY_AT = PHASE_STARTED_AT + timedelta(seconds=431)
+
 #: What the overnight run had spent when it was killed: 735 tokens, against a
 #: budget measured in hours. The activity summary says the same thing about the
 #: same phase from the other side - four calls, no push - and the two readings
@@ -124,24 +130,41 @@ class _Timeline:
     what this wants: the subject is the activity summary, not Lane 2 cost.
     """
 
-    def __init__(self, operations: list[ToolOperation]) -> None:
-        self.session_tools = _SessionTools(operations)
+    def __init__(self, operations: list[ToolOperation] | None, *, raises: bool = False) -> None:
+        self.session_tools = _SessionTools(operations, raises=raises)
 
 
 class _SessionTools:
-    def __init__(self, operations: list[ToolOperation]) -> None:
-        self._operations = operations
+    """One session's timeline, answering the way the real projection answers.
 
-    async def get(self, session_id: str) -> list[ToolOperation]:
+    THREE-VALUED on purpose, because that is what is under test: rows, `[]` for
+    a session that recorded none, and `None` for a timeline that could not be
+    read - the projection's answer when it has no pool. `raises` is the other
+    way a reader finds out it cannot see, and the phase mapper has to arrive at
+    the same place from both.
+    """
+
+    def __init__(
+        self, operations: list[ToolOperation] | None, *, raises: bool = False
+    ) -> None:
+        self._operations = operations
+        self._raises = raises
+
+    async def get(self, session_id: str) -> list[ToolOperation] | None:
         assert session_id == SESSION_ID
+        if self._raises:
+            raise RuntimeError("connection reset by peer while reading the timeline")
         return self._operations
 
 
 async def _phase_as_an_api_client_sees_it(
-    operations: list[ToolOperation],
+    operations: list[ToolOperation] | None,
     *,
     budgeted: bool = True,
     spent: PhaseUsage | None = None,
+    telemetry_raises: bool = False,
+    died_at: datetime = PHASE_DIED_AT,
+    session_id: str | None = SESSION_ID,
 ) -> PhaseExecutionInfo:
     """Drive a timed-out phase from its events to the served response model.
 
@@ -153,6 +176,13 @@ async def _phase_as_an_api_client_sees_it(
     `budgeted=False` is the execution started without phase definitions, where
     no budget was ever stated. `spent` is what the phase had burned when it was
     killed; absent, it is the zeros a run that spent nothing reports.
+
+    `operations=None` is the timeline answering "I could not read this", and
+    `telemetry_raises=True` is the lookup dying outright; both are Lane 2
+    being unavailable, arrived at by the two routes that reach it. `died_at`
+    moves the kill, so a 124 can be put inside the budget as well as past it.
+    `session_id=None` is the phase that never got a session at all, which has
+    no timeline to read by construction.
     """
     store = InMemoryProjectionStore()
     projection = WorkflowExecutionDetailProjection(store)
@@ -183,7 +213,7 @@ async def _phase_as_an_api_client_sees_it(
             "execution_id": EXECUTION_ID,
             "phase_id": PHASE_ID,
             "phase_name": "implement",
-            "session_id": SESSION_ID,
+            "session_id": session_id,
             "started_at": PHASE_STARTED_AT.isoformat(),
         }
     )
@@ -191,10 +221,10 @@ async def _phase_as_an_api_client_sees_it(
         {
             "execution_id": EXECUTION_ID,
             "workflow_id": "wf-1262",
-            "failed_at": PHASE_DIED_AT.isoformat(),
+            "failed_at": died_at.isoformat(),
             "failed_phase_id": PHASE_ID,
             "error_message": "Agent process exited with code 124",
-            "failed_phase_duration_seconds": (PHASE_DIED_AT - PHASE_STARTED_AT).total_seconds(),
+            "failed_phase_duration_seconds": (died_at - PHASE_STARTED_AT).total_seconds(),
             "failed_phase_input_tokens": (spent or PhaseUsage()).input_tokens,
             "failed_phase_output_tokens": (spent or PhaseUsage()).output_tokens,
             "failed_phase_cache_creation_tokens": (spent or PhaseUsage()).cache_creation_tokens,
@@ -207,7 +237,7 @@ async def _phase_as_an_api_client_sees_it(
     detail = WorkflowExecutionDetail.from_dict(record)
     mapped = await _map_phase_detail(
         detail.phases[0],
-        _Timeline(operations),  # pyright: ignore[reportArgumentType]
+        _Timeline(operations, raises=telemetry_raises),  # pyright: ignore[reportArgumentType]
         {},
     )
     return _map_phase_to_response(mapped)
@@ -493,3 +523,170 @@ async def test_the_budget_survives_a_completion_whose_start_never_landed() -> No
     )
 
     assert _map_phase_to_response(mapped).activity.timeout_seconds == BUDGET_SECONDS
+
+
+# -- "we could not see" is a third answer, not a quiet stall ------------------
+#
+# The pair below is the whole guard, and neither test means anything alone.
+# Both end with an empty timeline in hand; they differ only in WHY it is empty,
+# and that difference is the one an operator's decision turns on. A single test
+# cannot distinguish them, which is how the collapse survived review: every
+# assertion about a broken lookup was also true of a phase that did nothing.
+
+
+@pytest.mark.anyio
+async def test_a_timeline_that_could_not_be_read_reports_no_readings_at_all() -> None:
+    """A dead telemetry query must not arrive as a phase that sat idle.
+
+    This is the defect the feature was manufacturing against itself. The
+    lookup raises - a reset connection, a dropped pool - the read path fails
+    soft as Lane 2 should, and what reached the client was `operations_count:
+    0` and `last_push_at: null`: the stall reading, which is the one that
+    tells an operator to stop paying for the run. Invented from an outage,
+    about a phase nobody looked at.
+
+    `operations_count` is asserted to be None rather than merely "not 4",
+    because 0 is a real answer here and the point is that this is not one.
+    """
+    phase = await _phase_as_an_api_client_sees_it(None, telemetry_raises=True)
+
+    assert phase.activity.telemetry_available is False
+    assert phase.activity.operations_count is None, "0 would be a measurement nobody took"
+    assert phase.activity.last_push_at is None
+
+
+@pytest.mark.anyio
+async def test_a_timeline_read_and_genuinely_empty_still_reports_zero() -> None:
+    """The other half: zero is a real reading and must survive the fix.
+
+    A phase whose process never got anywhere made no calls and pushed nothing,
+    and saying so is a triage answer in its own right - it puts the failure
+    upstream of the agent. A fix that answered "unknown" whenever the list was
+    empty would have destroyed this reading while claiming to protect it, and
+    every assertion here is in the non-default direction: `telemetry_available`
+    defaults to False and `operations_count` to None.
+    """
+    phase = await _phase_as_an_api_client_sees_it([])
+
+    assert phase.activity.telemetry_available is True
+    assert phase.activity.operations_count == 0
+    assert phase.activity.last_push_at is None
+
+
+@pytest.mark.anyio
+async def test_an_unreadable_timeline_and_an_empty_one_are_two_served_answers() -> None:
+    """The pair, stated as the inequality the two tests above cannot state.
+
+    Two absolute assertions can drift back into agreement while both still
+    pass, and agreement here IS the defect: one response, two incidents, no
+    way to tell which one is in front of you. Asserted on the served model,
+    because the distinction is worth nothing if it dies at a hop.
+    """
+    unreadable = (await _phase_as_an_api_client_sees_it(None, telemetry_raises=True)).activity
+    genuinely_empty = (await _phase_as_an_api_client_sees_it([])).activity
+
+    assert unreadable.elapsed_seconds == genuinely_empty.elapsed_seconds, (
+        "fixture: both phases died at the same instant, so elapsed cannot separate them"
+    )
+    assert unreadable != genuinely_empty, (
+        "a telemetry outage and an idle phase must not read identically"
+    )
+
+
+@pytest.mark.anyio
+async def test_a_projection_that_answers_none_is_read_as_unavailable_too() -> None:
+    """The no-pool route to the same place, as the projection renders it.
+
+    `SessionToolsProjection.get` returns None rather than raising when there is
+    no database to ask - the test-and-offline case, and the production case
+    while the pool is still coming up. It is the same "we could not see" as a
+    dead query and has to survive the same five hops, so it is asserted at the
+    same place: the response model.
+    """
+    phase = await _phase_as_an_api_client_sees_it(None)
+
+    assert phase.activity.telemetry_available is False
+    assert phase.activity.operations_count is None
+
+
+@pytest.mark.anyio
+async def test_a_phase_that_never_got_a_session_claims_nothing_about_its_work() -> None:
+    """No session id is no timeline, which is again "we could not see".
+
+    A phase that died before it was handed a session has nothing recorded
+    against it by construction. Reporting that as zero operations is the same
+    false stall as an unreachable query, reached without any query at all -
+    and it is the more common of the two, because it needs no outage.
+    """
+    phase = await _phase_as_an_api_client_sees_it([], session_id=None)
+
+    assert phase.session_id is None, "fixture: the phase never got a session"
+    assert phase.activity.telemetry_available is False
+    assert phase.activity.operations_count is None
+
+
+@pytest.mark.anyio
+async def test_an_unreadable_timeline_still_says_whether_the_cap_was_reached() -> None:
+    """What is withheld is busy-versus-stalled, and only that.
+
+    `elapsed_seconds` and `timeout_seconds` come from the execution record, not
+    from Lane 2, so a telemetry outage says nothing about them and must not
+    take them down with it. A phase with an unreadable timeline is still
+    triageable against its budget - which is the difference between a degraded
+    reading and a useless one.
+    """
+    activity = (await _phase_as_an_api_client_sees_it(None, telemetry_raises=True)).activity
+
+    assert activity.timeout_seconds == BUDGET_SECONDS
+    assert activity.elapsed_seconds == float(BUDGET_SECONDS + 21)
+
+
+# -- the cap, and the 124 that is not the cap --------------------------------
+
+
+@pytest.mark.anyio
+async def test_a_124_well_inside_the_budget_reads_as_one() -> None:
+    """The counterexample to "reached its cap", which needs a third response.
+
+    `test_reaching_the_cap_is_legible_against_the_budget` above shows a phase
+    dying past its deadline. On its own that proves only that two numbers were
+    served; it cannot show they mean anything, because a hop that reported the
+    elapsed time as the budget, or the budget as the elapsed time, would still
+    satisfy it. This one dies at 431 seconds against 3600 - the comparison
+    lands the other way round, and neither number can be standing in for the
+    other.
+
+    An operator reading this does not raise the budget: 124 seven minutes into
+    an hour is a process that was killed by something else, and a bigger cap
+    buys nothing.
+    """
+    phase = await _phase_as_an_api_client_sees_it(
+        _stalled_timeline(), died_at=DIED_EARLY_AT
+    )
+    activity = phase.activity
+
+    assert activity.elapsed_seconds == 431.0, "the measured life of the phase, to the client"
+    assert activity.timeout_seconds == BUDGET_SECONDS, "the budget it did NOT reach"
+    assert activity.elapsed_seconds < activity.timeout_seconds
+    assert phase.duration_seconds == 431.0, (
+        "the phase's own duration and the activity's elapsed are one measurement"
+    )
+
+
+@pytest.mark.anyio
+async def test_the_two_124s_land_on_opposite_sides_of_the_same_budget() -> None:
+    """At the cap and nowhere near it, told apart by the pair of readings.
+
+    Same exit code, same budget, and the only thing separating them is where
+    elapsed falls against timeout. Asserted as a comparison rather than as two
+    constants, because two constants that both drifted would keep passing.
+    """
+    at_the_cap = (await _phase_as_an_api_client_sees_it(_busy_timeline())).activity
+    well_inside = (
+        await _phase_as_an_api_client_sees_it(_stalled_timeline(), died_at=DIED_EARLY_AT)
+    ).activity
+
+    assert at_the_cap.timeout_seconds == well_inside.timeout_seconds == BUDGET_SECONDS
+    assert at_the_cap.elapsed_seconds is not None
+    assert well_inside.elapsed_seconds is not None
+    assert at_the_cap.elapsed_seconds > BUDGET_SECONDS > well_inside.elapsed_seconds

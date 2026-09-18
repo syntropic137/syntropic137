@@ -8963,10 +8963,21 @@
       },
       "PhaseActivityInfo": {
         "properties": {
+          "telemetry_available": {
+            "type": "boolean",
+            "title": "Telemetry Available",
+            "default": false
+          },
           "operations_count": {
-            "type": "integer",
-            "title": "Operations Count",
-            "default": 0
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations Count"
           },
           "last_push_at": {
             "anyOf": [
@@ -9016,7 +9027,7 @@
         },
         "type": "object",
         "title": "PhaseActivityInfo",
-        "description": "What a phase was DOING when it ended, and against what budget (#1262).\n\nTHE ANSWER TO \"was it busy or was it stuck\", for the one failure that\ncannot answer it itself. A phase killed on its deadline exits 124, and so\ndoes a phase that hung; the two need opposite responses - dispatch a\ncontinuation with a bigger budget, or do not pay for that run a second\ntime - and until this model existed nothing in the execution record\nseparated them. An operator had to open the transcript, and four runs in\none day were triaged without one.\n\nRead as a whole, the fields are the triage:\n\n* many operations and a push moments before the end - it was working, and\n  the budget was too short;\n* a handful of operations and no push for most of an hour - it stalled,\n  and a bigger budget buys another stalled hour;\n* ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,\n  as against a 124 reported well inside the budget, which is some other\n  death wearing the same exit code.\n\nEvery field is a READING, never a verdict. Nothing here says \"stalled\":\nthat word is a judgement about intent, and these are four measurements\nthat let a reader make it."
+        "description": "What a phase was DOING when it ended, and against what budget (#1262).\n\nTHE ANSWER TO \"was it busy or was it stuck\", for the one failure that\ncannot answer it itself. A phase killed on its deadline exits 124, and so\ndoes a phase that hung; the two need opposite responses - dispatch a\ncontinuation with a bigger budget, or do not pay for that run a second\ntime - and until this model existed nothing in the execution record\nseparated them. An operator had to open the transcript, and four runs in\none day were triaged without one.\n\nRead as a whole, the fields are the triage:\n\n* many operations and a push moments before the end - it was working, and\n  the budget was too short;\n* a handful of operations and no push for most of an hour - it stalled,\n  and a bigger budget buys another stalled hour;\n* ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,\n  as against a 124 reported well inside the budget, which is some other\n  death wearing the same exit code.\n\nEvery field is a READING, never a verdict. Nothing here says \"stalled\":\nthat word is a judgement about intent, and these are four measurements\nthat let a reader make it.\n\nAND \"WE COULD NOT SEE\" IS A THIRD ANSWER, not a quiet fourth measurement.\nThe activity readings come from Lane 2, which fails soft, and a lookup that\nraised or found no database once produced zero operations and no push -\nwhich is precisely the shape of a stall. The feature built to stop an\noperator being told \"do not pay for this again\" on no evidence was\nmanufacturing exactly that signal out of its own outage.\n``telemetry_available`` says whether the timeline was read at all, and the\nreadings taken from it are null when it was not."
       },
       "PhaseDefinitionResponse": {
         "properties": {
