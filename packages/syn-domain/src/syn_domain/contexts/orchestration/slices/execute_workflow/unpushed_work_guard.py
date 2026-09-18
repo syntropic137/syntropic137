@@ -407,7 +407,7 @@ async def save_unpushed_work(
     except WorkspaceInspectionFailedError as unreadable:
         logger.warning("Could not finish saving this workspace's work: %s", unreadable.summary)
         return SavedWork(quarantined=unreadable.quarantined, unreadable=unreadable.summary)
-    except Exception as broken:  # noqa: BLE001 - see "NEVER RAISES" above
+    except Exception as broken:  # `Exception`, deliberately - see "NEVER RAISES" above
         logger.exception("Could not reach this workspace to save its work")
         return SavedWork(unreadable=f"the workspace could not be reached ({broken})")
     return SavedWork()

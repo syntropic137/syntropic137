@@ -31,8 +31,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseReportedFailureError,
+    SavedWork,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import SavedWork
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )

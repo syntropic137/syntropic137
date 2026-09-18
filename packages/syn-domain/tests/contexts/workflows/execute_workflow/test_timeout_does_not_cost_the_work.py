@@ -53,8 +53,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
     _BRANCH,
-    _MountedReadOnly,
     _clone_repository,
+    _MountedReadOnly,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     GitWorkspace,
