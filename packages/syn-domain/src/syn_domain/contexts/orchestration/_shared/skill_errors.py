@@ -28,6 +28,8 @@ ever calling the API.
 
 from __future__ import annotations
 
+from syn_shared.diagnostics import name_exit_status
+
 
 class SkillError(Exception):
     """Base class for skill registration errors."""
@@ -146,5 +148,5 @@ class SkillInstallFailed(SkillError):
     def __init__(self, skill_name: str, agent: str, exit_code: int, stderr: str) -> None:
         super().__init__(
             f"installing skill {skill_name!r} for agent {agent!r} failed "
-            f"(exit {exit_code}): {stderr.strip()[:500]}"
+            f"({name_exit_status(exit_code)}): {stderr.strip()[:500]}"
         )

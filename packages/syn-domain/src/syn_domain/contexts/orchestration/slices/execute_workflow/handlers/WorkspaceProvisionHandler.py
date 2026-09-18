@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     PhaseOutputCache,
 )
 from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -550,7 +551,17 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
+            # The status is said ALWAYS, not only when stderr is empty. A setup
+            # script killed by a signal writes stderr like any other and the
+            # old `stderr or ...` then dropped the one fact that mattered:
+            # secret injection has been lost to a bare -11 before any agent ran
+            # (#1295). The diagnostic, when there is one, names the signal and
+            # what faulted.
+            detail = name_exit_status(setup_result.exit_code)
+            if setup_result.stderr:
+                detail = f"{detail}: {setup_result.stderr}"
+            if setup_result.signal_death is not None:
+                detail = f"{detail}\n{setup_result.signal_death.describe()}"
             msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             raise RuntimeError(msg)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)

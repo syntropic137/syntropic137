@@ -21,6 +21,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
+from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
@@ -140,9 +141,9 @@ async def run_setup_phase(
             # a similar name runs alongside it and reading one as the other sent
             # an operator to a phase that had completed (#1236).
             logger.error(
-                "Secret-injection setup failed (workspace=%s, exit=%d): %s",
+                "Secret-injection setup failed (workspace=%s, %s): %s",
                 ws.workspace_id,
-                result.exit_code,
+                name_exit_status(result.exit_code),
                 result.stderr,
             )
 
