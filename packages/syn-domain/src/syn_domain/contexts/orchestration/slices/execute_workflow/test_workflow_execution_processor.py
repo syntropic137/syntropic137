@@ -96,7 +96,7 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
@@ -154,7 +154,7 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
@@ -164,7 +164,9 @@ class TestAgentRunnerSelection:
 
         session_mgr = MagicMock()
         session_mgr.mark_launched = AsyncMock()
-        processor._runtime.begin("p-1", session_manager=session_mgr, started_at=datetime.now(UTC))
+        processor._runtimes.of("exec-1").begin(
+            "p-1", session_manager=session_mgr, started_at=datetime.now(UTC)
+        )
 
         phase = ExecutablePhase(
             phase_id="p-1",
@@ -210,7 +212,7 @@ class TestAgentRunnerSelection:
         handler = MagicMock()
         handler.handle = AsyncMock(side_effect=RuntimeError("stop after dispatch"))
         processor._agent_handler = handler
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),
@@ -435,22 +437,26 @@ class TestProcessorCancellation:
         session_mgr_b = MagicMock()
         session_mgr_b.complete_cancelled = AsyncMock()
         started = datetime.now(UTC)
-        processor._runtime.begin("phase-a", session_manager=session_mgr_a, started_at=started)
-        processor._runtime.begin("phase-b", session_manager=session_mgr_b, started_at=started)
+        processor._runtimes.of("exec-cancel").begin(
+            "phase-a", session_manager=session_mgr_a, started_at=started
+        )
+        processor._runtimes.of("exec-cancel").begin(
+            "phase-b", session_manager=session_mgr_b, started_at=started
+        )
 
         # Seed workspace context managers (async context manager protocol).
         workspace_cm_a = MagicMock()
         workspace_cm_a.__aexit__ = AsyncMock(return_value=None)
         workspace_cm_b = MagicMock()
         workspace_cm_b.__aexit__ = AsyncMock(return_value=None)
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-a",
             workspace=MagicMock(),
             workspace_cm=workspace_cm_a,
             agent_env={"FOO": "bar"},
             claude_cmd=["claude", "--model", "haiku"],
         )
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-b",
             workspace=MagicMock(),
             workspace_cm=workspace_cm_b,
@@ -479,7 +485,7 @@ class TestProcessorCancellation:
         # Nothing per-phase is still held after cancellation. Asserted through
         # the runtime's own postcondition rather than one dict at a time: the
         # dicts are its business, "is anything still held" is the guarantee.
-        assert processor._runtime.is_idle
+        assert processor._runtimes.of("exec-cancel").is_idle
 
         # The result reflects the cancellation with the reason as error_message.
         assert result.status == "cancelled"
@@ -497,7 +503,7 @@ class TestProcessorCancellation:
 
         session_mgr = MagicMock()
         session_mgr.complete_cancelled = AsyncMock()
-        processor._runtime.begin(
+        processor._runtimes.of("exec-cancel").begin(
             "phase-a", session_manager=session_mgr, started_at=datetime.now(UTC)
         )
 
@@ -505,7 +511,7 @@ class TestProcessorCancellation:
         failing_cm.__aexit__ = AsyncMock(side_effect=RuntimeError("cleanup exploded"))
         healthy_cm = MagicMock()
         healthy_cm.__aexit__ = AsyncMock(return_value=None)
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-cancel").attach_workspace(
             "phase-a",
             workspace=MagicMock(),
             workspace_cm=failing_cm,
@@ -514,7 +520,7 @@ class TestProcessorCancellation:
         )
         # phase-b holds a workspace CM and nothing else, which is what a phase
         # that died between provisioning and its first use looks like.
-        processor._runtime._workspace_cms["phase-b"] = healthy_cm
+        processor._runtimes.of("exec-cancel")._workspace_cms["phase-b"] = healthy_cm
 
         result = await processor._cancel_execution(
             execution_id="exec-cancel",
@@ -527,7 +533,7 @@ class TestProcessorCancellation:
 
         failing_cm.__aexit__.assert_awaited_once_with(None, None, None)
         healthy_cm.__aexit__.assert_awaited_once_with(None, None, None)
-        assert processor._runtime.is_idle
+        assert processor._runtimes.of("exec-cancel").is_idle
         assert result.status == "cancelled"
         assert result.error_message == "timeout"
 
@@ -658,7 +664,7 @@ class TestStaleCollectArtifactsGuard:
         all_artifact_ids: list[str] = []
         phase_outputs = PhaseOutputCache()
 
-        assert processor._runtime.workspace_for("p-1") is None
+        assert processor._runtimes.of("exec-1").workspace_for("p-1") is None
 
         await processor._handle_collect_artifacts(
             todo,
@@ -674,7 +680,7 @@ class TestStaleCollectArtifactsGuard:
         assert phase_outputs.primary == {}
         # #988: a stale todo must not seed the output TREE either.
         assert phase_outputs.files == {}
-        assert "p-1" not in processor._runtime._artifact_ids
+        assert "p-1" not in processor._runtimes.of("exec-1")._artifact_ids
 
 
 @pytest.mark.unit
@@ -728,7 +734,7 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
         files = [PhaseOutputFile(source_path="artifacts/output/review.yaml", content="r")]
         processor = _make_processor()
         processor._journal.append = AsyncMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "p-1",
             workspace=MagicMock(),
             workspace_cm=AsyncMock(),

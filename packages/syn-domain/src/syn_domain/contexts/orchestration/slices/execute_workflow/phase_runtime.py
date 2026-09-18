@@ -125,8 +125,100 @@ class PhaseTimings:
     session_ids: Mapping[str, str]
 
 
+class PhaseRuntimes:
+    """One `PhaseRuntime` per execution, for a processor that serves many.
+
+    WHY THE KEY LIVES HERE AND NOT INSIDE. A run has one `implement`, so phase
+    id is the whole key any single run needs. What a run does not have is one
+    `implement` ACROSS runs: a workflow names its own phases, so every run of
+    it names them identically. For as long as one `PhaseRuntime` was shared by
+    every concurrent dispatch, each of its maps had two writers and one slot -
+    the second run to provision took the first run's workspace, env, command
+    line and session out from under it, and whichever run finalised first
+    popped the single shared entry and left the other launching into a
+    `KeyError`. That is #1311, and it is the same defect `_said` was in #1256,
+    where run A recovered its deliverable from run B's report and reported a
+    success in place of its own failure.
+
+    Keying every map by `(execution_id, phase_id)` would have answered the
+    question. Handing each run its own object REMOVES it: there is no longer a
+    slot two runs could both write, so a crossing is not something the code
+    avoids, it is something it cannot express. `finalize` and `abandon_all`,
+    which are handed no execution id at all and clear everything they can
+    reach, become correct for the same reason rather than by being taught a
+    new parameter - and one failing run tearing down a healthy one's
+    containers stops being reachable.
+
+    WHAT THE CALLER GETS TO NOT KNOW: that there is more than one runtime,
+    when a run's is built, and when it is thrown away. It asks for the runtime
+    of the execution it is already holding an id for and is handed a runtime
+    that is only ever that run's.
+    """
+
+    def __init__(
+        self,
+        *,
+        capture_port: SessionCapturePort | None,
+        session_store: SessionStorePort | None,
+        writer: ObservabilityRecorder | None,
+        ledger: ImportLedgerPort | None,
+    ) -> None:
+        self._capture_port = capture_port
+        self._session_store = session_store
+        self._writer = writer
+        self._ledger = ledger
+        self._by_execution: dict[str, PhaseRuntime] = {}
+
+    def of(self, execution_id: str) -> PhaseRuntime:
+        """This run's runtime, built on first use.
+
+        Built on demand rather than at the start of `run()` because the
+        processor reaches for it from every dispatch path and from both
+        terminal paths, and a run that fails before it ever provisioned still
+        asks - for the counts it is on its way out to report. An empty runtime
+        answers that correctly; a missing one would make every caller handle an
+        absence that means nothing.
+        """
+        runtime = self._by_execution.get(execution_id)
+        if runtime is None:
+            runtime = PhaseRuntime(
+                capture_port=self._capture_port,
+                session_store=self._session_store,
+                writer=self._writer,
+                ledger=self._ledger,
+            )
+            self._by_execution[execution_id] = runtime
+        return runtime
+
+    @property
+    def is_idle(self) -> bool:
+        """True when no run is still held - what a drained processor looks like.
+
+        The registry's own postcondition, and the one `PhaseRuntime.is_idle`
+        cannot state: a runtime that let go of everything is still a runtime
+        this object is keeping alive for a run that ended.
+        """
+        return not self._by_execution
+
+    def release(self, execution_id: str) -> None:
+        """Let go of a finished run's runtime.
+
+        The processor outlives every run it dispatches, so without this the
+        registry is a leak with one entry per execution for the life of the
+        process - holding, at worst, a workspace handle belonging to a run that
+        ended hours ago. Called from `run()`'s `finally`, so it happens on
+        every way out including the ones that raise.
+        """
+        self._by_execution.pop(execution_id, None)
+
+
 class PhaseRuntime:
-    """The workspaces, sessions and tallies of the phases currently running."""
+    """The workspaces, sessions and tallies of ONE execution's running phases.
+
+    One of these per execution, vended by `PhaseRuntimes`. Everything below is
+    keyed by phase id alone and that is now the whole key, because the only
+    phases this object ever sees are one run's.
+    """
 
     def __init__(
         self,
@@ -158,12 +250,14 @@ class PhaseRuntime:
         #: The id each phase's own harness announced on its stream, which is
         #: what the delegate import subtracts from the sweep.
         #:
-        #: Keyed by (execution_id, phase_id), NOT phase_id alone. The processor
-        #: that owns this runtime is shared across concurrent dispatches, so two
-        #: runs of the same workflow share a phase id. A phase-only key lets one
-        #: run read the OTHER run's leader, and a leader id absent from this
-        #: run's sweep takes the refusal path: no delegate imported, only a log
-        #: line. Popped on success so a completed phase leaves nothing behind.
+        #: Keyed by (execution_id, phase_id). Since #1311 one runtime serves
+        #: one execution, so the phase id alone would now be a whole key and
+        #: this pair is belt and braces. It is kept because `record_agent_run`
+        #: is handed the execution id anyway and the pair costs nothing, and
+        #: because the failure it guards is silent: a leader id read from the
+        #: wrong run is absent from this run's sweep, which takes the refusal
+        #: path - no delegate imported, only a log line.
+        #: Popped on success so a completed phase leaves nothing behind.
         self._leader_native_ids: dict[tuple[str, str], str] = {}
         self._tokens: dict[str, TokenAccumulator] = {}
         #: What each phase spent, in input/output/cache-creation/cache-read
@@ -177,13 +271,13 @@ class PhaseRuntime:
         #: check that fails the phase, so an entry exists here for every phase
         #: whose agent ran at all - including every one that then died.
         #:
-        #: Keyed by (execution_id, phase_id), NOT phase_id alone, for the reason
-        #: `_leader_native_ids` above is: two concurrent runs of the same
-        #: workflow share a phase id, so a phase-only key lets one run report
-        #: the OTHER run's spend. That is worse here than a wrong leader, which
-        #: only costs an import - these counts are the whole basis for telling a
-        #: stalled phase from one that needed a bigger budget (#1262), and a
-        #: number attributed to the wrong execution reads as measurement.
+        #: Keyed by (execution_id, phase_id), for the reason `_leader_native_ids`
+        #: above is, and kept for one more: what it guards is worse than a
+        #: wrong leader. These counts are the whole basis for telling a stalled
+        #: phase from one that needed a bigger budget (#1262), and a number
+        #: attributed to the wrong execution reads as measurement. The pair is
+        #: what #1332's regression tests pin, and #1311 making it redundant is
+        #: not a reason to take a second lock off a number nobody can audit.
         #:
         #: TAKEN, never merely read: `harvest` pops the entry on the success
         #: path and `usage_for` pops it on the failure path, which between them
@@ -196,20 +290,17 @@ class PhaseRuntime:
         #: Held here rather than re-read at collection time because the stream
         #: is gone by then; absent means the harness announced nothing.
         #:
-        #: NOTE: keyed by phase id alone, so two concurrent runs of the same
-        #: workflow overwrite each other, and a restart loses it entirely -
-        #: the same two hazards that moved `last_agent_message` onto the event
-        #: stream in #1300.
+        #: Keyed by phase id alone, which is now the whole key: #1311 gave each
+        #: execution its own runtime, so the only phases this map can ever see
+        #: are one run's. Two concurrent runs of the same workflow no longer
+        #: overwrite each other here.
         #:
-        #: Still open, and deliberately. `_auth_tokens` above was re-keyed
-        #: because its reader was being written at the same time, so the right
-        #: signature cost nothing; this one is not the same shape. EVERY
-        #: remaining map on this object is keyed by phase alone - `_workspaces`,
-        #: `_envs`, `_cmds`, `_session_ids`, `_tokens`, `_artifact_ids`,
-        #: `_started_at` - and `finalize`, which clears them, is not given an
-        #: execution id at all. Re-keying this field alone would close one
-        #: instance of the class and leave the rest open while looking settled.
-        #: Tracked as #1311, with the concurrency it needs under #865.
+        #: A RESTART still loses it, which #1311 did not address and this is
+        #: the right place to keep saying so: the object is process-local by
+        #: construction. That is the second of the two hazards that moved
+        #: `last_agent_message` onto the event stream in #1300, and the fix for
+        #: it is the same - put the announced model in the record, not in the
+        #: processor. Tracked under #865, which needs it for other reasons.
         self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
@@ -340,11 +431,11 @@ class PhaseRuntime:
     def harvest(self, execution_id: str, phase_id: str) -> PhaseHarvest:
         """Take everything a completing phase accumulated, and stop holding it.
 
-        ``execution_id`` names WHOSE phase this is, which `phase_id` alone does
-        not: concurrent runs of one workflow share phase ids, so the counts are
-        held per run. It is the caller's to-do item's, so it always belongs to
-        the run doing the completing. The other fields here are still keyed by
-        phase alone and so are still shared - that is #1311, not this.
+        ``execution_id`` names WHOSE phase this is. Since #1311 this runtime
+        holds one execution's phases and nothing else, so it can only ever be
+        this run's - it comes off the caller's to-do item, which is the run
+        doing the completing. It stays in the key because `_auth_tokens` keeps
+        its pair; see that field for why.
         """
         self._tokens.pop(phase_id, None)
         return PhaseHarvest(
@@ -414,12 +505,10 @@ class PhaseRuntime:
     def usage_for(self, execution_id: str, phase_id: str | None) -> PhaseUsage:
         """What THIS run's phase had spent, for a caller about to report it.
 
-        ``execution_id`` is half the identity of the answer and not context.
-        Concurrent dispatches share this object, and two runs of one workflow
-        share phase ids like "implement", so a phase-only question has no single
-        true answer: it returns whichever run recorded last. The caller always
-        has the id - it is the failing run's own - so asking with it costs a
-        parameter and removes the case entirely.
+        ``execution_id`` is half the key `_auth_tokens` is written under. Since
+        #1311 this runtime holds one execution's phases, so it can only be this
+        run's; the caller always has it - it is the failing run's own - and the
+        pair is kept for the reason given on that field.
 
         TAKES the entry rather than reading it, the way `harvest` does on the
         success path. Between them those are every way a phase ends, so nothing

@@ -872,8 +872,8 @@ class _PhaseRun:
         # `also_as` puts the SAME workspace behind a second phase id, which is
         # what lets one dirty tree be completed twice under two declarations.
         for phase_id in (_PHASE_ID, *([also_as] if also_as is not None else [])):
-            self.processor._runtime._workspaces[phase_id] = workspace  # type: ignore[assignment]
-            self.processor._runtime.begin(
+            self.processor._runtimes.of(_EXECUTION_ID)._workspaces[phase_id] = workspace  # type: ignore[assignment]
+            self.processor._runtimes.of(_EXECUTION_ID).begin(
                 phase_id,
                 session_manager=self.session,  # type: ignore[arg-type]
                 started_at=datetime.now(UTC),
@@ -881,7 +881,7 @@ class _PhaseRun:
 
     @property
     def workspace_still_held(self) -> bool:
-        return _PHASE_ID in self.processor._runtime.live_workspaces
+        return _PHASE_ID in self.processor._runtimes.of(_EXECUTION_ID).live_workspaces
 
     async def complete(self, *, delivers_repo_changes: bool = True) -> None:
         """Complete the phase, as a phase declaring ``delivers_repo_changes``.
