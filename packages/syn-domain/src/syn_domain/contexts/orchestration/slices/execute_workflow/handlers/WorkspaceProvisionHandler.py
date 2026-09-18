@@ -560,6 +560,8 @@ class WorkspaceProvisionHandler:
             stderr = setup_result.stderr.strip()
             detail = f"exit code {format_exit_code(setup_result.exit_code)}"
             detail += f": {stderr}" if stderr else " (no stderr output)"
+            if setup_result.signal_death is not None:
+                detail = f"{detail}\n{setup_result.signal_death.describe()}"
             msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             # Same defect as the agent's own exit, one handler over (#1319):
             # the status was known here and went only into `detail`.

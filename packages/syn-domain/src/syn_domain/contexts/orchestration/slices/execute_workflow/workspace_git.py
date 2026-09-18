@@ -231,6 +231,7 @@ async def checked(
                     exit_code=result.exit_code,
                     stderr=result.stderr,
                     timed_out=cut_off,
+                    signal_death=result.signal_death,
                 ),
             )
         logger.warning(

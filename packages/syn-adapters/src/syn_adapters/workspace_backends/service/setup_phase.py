@@ -31,6 +31,8 @@ from syn_shared.env_constants import (
     ENV_GIT_COMMITTER_NAME,
 )
 
+from syn_shared.diagnostics import name_exit_status
+
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
