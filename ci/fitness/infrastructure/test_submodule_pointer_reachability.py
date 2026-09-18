@@ -45,16 +45,39 @@ Two deliberate deviations from the issue's sketch:
   `git submodule status`. What merges is the gitlink in the commit; the checked
   out submodule working tree is not it, and can differ from it.
 
-A shallow submodule clone is not a problem, which is worth knowing because CI
-always has one: `actions/checkout` passes `--depth=1` to `git submodule update`
-whenever `fetch-depth` is 1, so the checkout the fitness job runs on holds the
-pointer commit and nothing behind it. A fetch that names no depth deepens the
-refs it brings to full history, and ancestry is then computable across the
-original graft point. Verified both ways against a depth-1 clone built the way
-checkout builds one: the merged pointer resolves as an ancestor, and #1329's
-resolves to `origin/fix/1318-independent-rebuild-track`. Do not add `--depth`
-here - it would preserve the truncation and reject every pointer that is not
-literally the tip of the default branch.
+A SHALLOW SUBMODULE CLONE IS THE HARD CASE, AND CI ALWAYS HAS ONE
+================================================================
+
+An earlier revision of this file asserted that "a fetch that names no depth
+deepens the refs it brings to full history". That is false, and it failed all
+four submodules on this PR's own CI run while every pointer was in fact merged.
+Two properties of `--depth=1` conspire, and a fix has to answer both:
+
+* **the clone is single-branch.** `--depth=1` implies `--single-branch`, so the
+  refspec is `+refs/heads/<default>:refs/remotes/origin/<default>` and no other
+  remote branch is ever fetched. `git branch -r --contains` therefore cannot
+  name a branch it was never given - the half of the failure message that tells
+  a reader where their commit actually lives is structurally dead.
+* **a plain fetch does not deepen.** `git submodule update --depth=1` takes the
+  default branch tip first and the pointer second, so the client already holds
+  what `fetch origin` would send. Nothing transfers, the shallow boundary
+  stands, and the tip and the pointer sit in two grafted fragments with no path
+  between them.
+
+`merge-base --is-ancestor` then answers "not an ancestor" - not because the
+commit is unmerged, but because the local graph has been truncated in a way that
+makes ancestry unanswerable. Measured on a clone built the way checkout builds
+one: `origin/main` held 1 commit, the answer was "unmerged", and the commit was
+merged 9 commits back on main.
+
+So the fetch here names a full refspec and unshallows. `_fetch_until_answerable`
+owns both corrections, and the guard below owns the consequence that matters: a
+truncation this gate failed to repair is reported as its own failure and never
+as "not merged". "Cannot tell" and "no" must not reach a reader as one answer -
+this is the same rule the network paragraph above states, applied to the local
+graph instead of the remote. Do not replace that fetch with a bare
+`fetch origin`: it is what #1337 shipped, and it rejects every pointer that is
+not literally the tip of the default branch.
 
 Scope: the direct submodules `.gitmodules` declares, matching `check-submodules`,
 which is deliberately not `--recursive` because CI's own checkout leaves nested
@@ -80,10 +103,20 @@ _NETWORK_TIMEOUT_SECONDS = 180
 
 @dataclass(frozen=True)
 class Submodule:
-    """One entry in `.gitmodules`, as the superproject declares it."""
+    """One entry in `.gitmodules`, as the superproject declares it.
+
+    `root` travels with the entry so the ancestry logic can be pointed at a
+    superproject built by a test instead of only at this checkout. Without it
+    the only way to exercise this gate is to mutate the real `lib/` pointers.
+    """
 
     path: str
     url: str
+    root: Path = _ROOT
+
+    @property
+    def worktree(self) -> Path:
+        return self.root / self.path
 
 
 def _git(
@@ -99,14 +132,14 @@ def _git(
     )
 
 
-def declared_submodules() -> list[Submodule]:
+def declared_submodules(root: Path = _ROOT) -> list[Submodule]:
     """Every submodule `.gitmodules` declares, read by git rather than parsed.
 
     `git config -f` because `.gitmodules` is git config syntax, not INI: it
     tolerates spellings configparser rejects, and a parser that disagrees with
     git about which submodules exist would skip one silently.
     """
-    result = _git("config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$")
+    result = _git("config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$", cwd=root)
     assert result.returncode == 0, (
         f"could not read .gitmodules (git exit {result.returncode}):\n{result.stderr}"
     )
@@ -115,9 +148,9 @@ def declared_submodules() -> list[Submodule]:
     for line in result.stdout.splitlines():
         key, _, path = line.partition(" ")
         name = key[len("submodule.") : -len(".path")]
-        url = _git("config", "-f", ".gitmodules", "--get", f"submodule.{name}.url")
+        url = _git("config", "-f", ".gitmodules", "--get", f"submodule.{name}.url", cwd=root)
         assert url.returncode == 0, f"submodule {name} declares a path but no url"
-        submodules.append(Submodule(path=path, url=url.stdout.strip()))
+        submodules.append(Submodule(path=path, url=url.stdout.strip(), root=root))
     return submodules
 
 
@@ -128,7 +161,7 @@ def _default_branch(sub: Submodule) -> str:
         "--symref",
         "origin",
         "HEAD",
-        cwd=_ROOT / sub.path,
+        cwd=sub.worktree,
         timeout=_NETWORK_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, (
@@ -142,9 +175,49 @@ def _default_branch(sub: Submodule) -> str:
     pytest.fail(f"{sub.path}: {sub.url} reports no default branch (empty repository?)")
 
 
+#: A `--depth=1` clone is single-branch, so its configured refspec fetches only
+#: the default branch. Naming the full refspec explicitly is what lets
+#: `branch -r --contains` answer "it is on: <branch>" at all.
+_ALL_BRANCHES = "+refs/heads/*:refs/remotes/origin/*"
+
+
+def _is_shallow(sub: Submodule) -> bool:
+    return _git("rev-parse", "--is-shallow-repository", cwd=sub.worktree).stdout.strip() == "true"
+
+
+def _fetch_until_answerable(sub: Submodule) -> subprocess.CompletedProcess[str]:
+    """Bring down enough of the remote that ancestry is a question git can answer.
+
+    A caller only needs to know that afterwards the local graph either supports
+    the ancestry query or the attempt failed loudly - not which of the two
+    truncations of a CI checkout had to be undone, or in which order.
+
+    --prune so a branch deleted upstream stops being reported as one that
+    contains the commit. That is not cosmetic: "deleted or rebased" is the
+    failure this gate exists to predict, and a stale remote-tracking ref would
+    answer with the state of the world before it happened.
+
+    --unshallow only when the clone is shallow, because git refuses it on a
+    complete repository. It is the expensive line here - it is also the only one
+    that restores the commits between the pointer and the branch tip, which are
+    exactly the commits ancestry is made of. Measured at ~2s for the largest
+    submodule; a wrong answer costs a broken clone for whoever clones next.
+    """
+    depth = ["--unshallow"] if _is_shallow(sub) else []
+    return _git(
+        "fetch",
+        "--prune",
+        *depth,
+        "origin",
+        _ALL_BRANCHES,
+        cwd=sub.worktree,
+        timeout=_NETWORK_TIMEOUT_SECONDS,
+    )
+
+
 def _containing_branches(sub: Submodule, pointer: str) -> list[str]:
     """Which remote branches hold this commit. Local: the fetch already ran."""
-    result = _git("branch", "-r", "--contains", pointer, cwd=_ROOT / sub.path)
+    result = _git("branch", "-r", "--contains", pointer, cwd=sub.worktree)
     if result.returncode != 0:
         return []
     return [line.strip() for line in result.stdout.splitlines() if "->" not in line]
@@ -161,27 +234,37 @@ def unmerged_pointer(sub: Submodule) -> str | None:
     tell": failing to reach the remote raises, because those two must not arrive
     at the caller as the same answer.
     """
-    worktree = _ROOT / sub.path
+    worktree = sub.worktree
     if not (worktree / ".git").exists():
         return (
             f"{sub.path} is not checked out, so its pointer cannot be verified "
             f"against {sub.url}.\nRun: just submodules-init"
         )
 
-    pointer = _git("rev-parse", f"HEAD:{sub.path}")
+    pointer = _git("rev-parse", f"HEAD:{sub.path}", cwd=sub.root)
     assert pointer.returncode == 0, f"{sub.path}: no gitlink in HEAD:\n{pointer.stderr}"
     sha = pointer.stdout.strip()
 
     branch = _default_branch(sub)
-    # --prune so a branch deleted upstream stops being reported as one that
-    # contains the commit. That is not cosmetic: "deleted or rebased" is the
-    # failure this gate exists to predict, and a stale remote-tracking ref would
-    # answer with the state of the world before it happened.
-    fetch = _git("fetch", "--prune", "origin", cwd=worktree, timeout=_NETWORK_TIMEOUT_SECONDS)
+    fetch = _fetch_until_answerable(sub)
     assert fetch.returncode == 0, (
         f"{sub.path}: cannot fetch {sub.url}, so reachability is unknown.\n"
         f"This gate is network-dependent by design and does not pass offline -\n"
         f"see this module's docstring. git said:\n{fetch.stderr}"
+    )
+
+    # A truncated graph answers "not an ancestor" for a merged commit, so these
+    # two must fail as themselves. Reporting either as "not merged" would be a
+    # confident wrong answer, which is worse than the silence this gate refuses.
+    assert not _is_shallow(sub), (
+        f"{sub.path}: still a shallow clone after fetching {sub.url}, so ancestry\n"
+        "is not computable and this gate cannot answer. This is a bug in the gate,\n"
+        "not a verdict on the pointer - see this module's docstring."
+    )
+    tip = _git("rev-parse", "--verify", f"refs/remotes/origin/{branch}", cwd=worktree)
+    assert tip.returncode == 0, (
+        f"{sub.path}: fetched {sub.url} but have no origin/{branch} to compare against,\n"
+        f"so ancestry is not computable and this gate cannot answer. git said:\n{tip.stderr}"
     )
 
     if _git("merge-base", "--is-ancestor", sha, f"origin/{branch}", cwd=worktree).returncode == 0:
