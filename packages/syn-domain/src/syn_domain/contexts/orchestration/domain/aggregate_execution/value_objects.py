@@ -88,6 +88,64 @@ class FinishedAgentRun:
     last_agent_message: str
 
 
+class InheritedOutputs(BaseModel):
+    """The finished phases a new workspace starts from, and where to read them.
+
+    One value rather than two because the pair is only ever correct together:
+    a list of phase ids means nothing without knowing which executions hold
+    their artifacts, and asking the wrong execution returns silence rather
+    than an error - the next phase simply starts with an empty
+    ``artifacts/input/`` and no one finds out until an agent says it was given
+    nothing. Before #1335 the two travelled separately and agreed by accident,
+    because every run read its own id.
+
+    ``execution_ids`` is NEWEST FIRST and is searched in order, first hit per
+    phase winning. That ordering is what makes a retry of a retry fall out
+    rather than be handled: each run's own outputs shadow the ones it
+    inherited, so a phase re-run successfully in attempt two is read from
+    attempt two even though attempt one also stored something for it.
+
+    A Pydantic model rather than a dataclass because it travels inside
+    ``ResumePoint`` on ``WorkflowExecutionStartedEvent`` and must serialise as
+    event data.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_ids: tuple[str, ...] = ()
+    """Phases already finished, whose deliverables the next phase receives."""
+
+    execution_ids: tuple[str, ...] = ()
+    """Executions holding those deliverables, newest first."""
+
+
+class ResumePoint(BaseModel):
+    """Where a retried execution picks up, and whose finished work it inherits.
+
+    A RETRY IS A NEW EXECUTION, not a revived one (#1335). The failed
+    execution stays failed forever and keeps the cost it actually incurred,
+    which is the whole point of attributing cost to executions at all; the
+    retry carries its own. What makes it a retry rather than an unrelated run
+    is this value: it names the phase to start at and hands over the earlier
+    phases' outputs, so the agent sees exactly the ``artifacts/input/`` the
+    dead attempt saw. For the verify phase that means the same branch and the
+    same head, because the branch and head are facts inside the implement
+    phase's deliverable and never lived in platform state.
+
+    Produced by ``WorkflowExecutionAggregate.resume_point``, which is the only
+    thing that knows whether an execution is resumable and from where.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    """The phase to run again. Everything before it is inherited; everything
+    after it runs as it normally would."""
+
+    inherited: InheritedOutputs
+    """What the retry does not re-run, and where those outputs are stored."""
+
+
 @dataclass(frozen=True)
 class PhaseDefinition:
     """Immutable definition of a phase for aggregate-level sequencing.

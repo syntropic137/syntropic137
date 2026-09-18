@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
         PhaseDefinition,
+        ResumePoint,
     )
 
 
@@ -28,6 +29,7 @@ class StartExecutionCommand:
         inputs: dict[str, Any],
         expected_completion_at: datetime | None = None,
         phase_definitions: list[PhaseDefinition] | None = None,
+        resume: ResumePoint | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -36,6 +38,9 @@ class StartExecutionCommand:
         self.inputs = inputs
         self.expected_completion_at = expected_completion_at
         self.phase_definitions = phase_definitions
+        #: Set when this execution continues a failed one (#1335): which phase
+        #: to start at, and whose outputs to hand it. None is a first attempt.
+        self.resume = resume
 
 
 class CompleteExecutionCommand:

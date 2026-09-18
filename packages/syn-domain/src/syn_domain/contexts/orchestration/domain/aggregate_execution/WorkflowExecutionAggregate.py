@@ -34,7 +34,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
     FinishedAgentRun,
+    InheritedOutputs,
     PhaseDefinition,
+    ResumePoint,
     StrandedDeliverable,
 )
 
@@ -91,6 +93,19 @@ def _evt(event: DomainEvent, field: str, default: Any = None) -> Any:  # noqa: A
     return data.get(field, default)
 
 
+def _resume_point(raw: Any) -> ResumePoint | None:  # noqa: ANN401
+    """Read `resumed_from` off an event, typed or replayed as raw event data.
+
+    Events reach a rebuild either as the model they were emitted as or as a
+    `GenericDomainEvent` carrying plain data, and the whole of the resume
+    state is rebuilt from this field - so a replay that silently produced
+    `None` here would give a retry an empty `artifacts/input/` and no error.
+    """
+    if raw is None or isinstance(raw, ResumePoint):
+        return raw
+    return ResumePoint.model_validate(raw)
+
+
 def _parse_phase_definitions(raw_defs: list[dict[str, Any]]) -> list[PhaseDefinition]:
     """Parse raw phase definition dicts into sorted PhaseDefinition objects."""
     return sorted(
@@ -124,6 +139,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._expected_completion_at: datetime | None = None
         self._total_phases: int = 0
         self._completed_phases: int = 0
+        #: Which phases are finished, not just how many. A retry has to hand
+        #: the phases it does not re-run to the next workspace BY NAME, and a
+        #: count cannot say which ones (#1335). Seeded from what this
+        #: execution inherited, so a retry of a retry inherits transitively.
+        self._completed_phase_ids: list[str] = []
+        #: Executions whose completed-phase artifacts this run may read,
+        #: newest first: its own, then every one it inherited from. The single
+        #: statement of that order - the processor reads it here rather than
+        #: recomputing it, because a second copy is the hop where a retry
+        #: silently starts reading an empty artifacts/input/.
+        self._artifact_sources: tuple[str, ...] = ()
+        #: The phase a failure named, kept so `resume_point` can say where a
+        #: retry would start. `_running_phase_id` is cleared by the failure
+        #: itself and cannot answer this afterwards.
+        self._failed_phase_id: str | None = None
         self._current_phase_order: int = 0
         #: The phase that has started and not yet completed, if any. Needed
         #: because a failure has to name the phase it failed IN: a
@@ -226,6 +256,41 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
 
     @property
+    def inherited_outputs(self) -> InheritedOutputs:
+        """The finished phases the next workspace starts from, and where they live.
+
+        Answers for a retry and a first attempt in the same words, so the
+        provisioning path never learns that retries exist: a first attempt
+        inherits the phases it completed itself, from itself.
+        """
+        return InheritedOutputs(
+            phase_ids=tuple(self._completed_phase_ids),
+            execution_ids=self._artifact_sources,
+        )
+
+    @property
+    def resume_point(self) -> ResumePoint | None:
+        """Where a retry of this execution would start, or None (#1335).
+
+        Answers one question - "can this execution be continued, and from
+        where?" - so a caller does not have to know that FAILED is terminal,
+        that the phase to re-run is the one the failure named, or that the
+        earlier phases' outputs are stored under this execution's id and the
+        ids it inherited.
+
+        Non-None for exactly the case a retry exists for: an execution that
+        FAILED inside a named phase. A failure between phases names none, and
+        there is no phase to re-run; a cancelled or interrupted execution was
+        stopped on purpose and continuing it is a new decision, not a retry.
+        """
+        if self._status is not ExecutionStatus.FAILED:
+            return None
+        phase_id = self._failed_phase_id
+        if phase_id is None:
+            return None
+        return ResumePoint(phase_id=phase_id, inherited=self.inherited_outputs)
+
+    @property
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
@@ -269,6 +334,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             inputs=command.inputs,
             expected_completion_at=command.expected_completion_at,
             phase_definitions=phase_defs_data,
+            resumed_from=command.resume,
         )
         self._apply(event)
 
@@ -581,6 +647,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         raw_defs: list[dict[str, Any]] = _evt(event, "phase_definitions") or []
         self._phase_definitions = _parse_phase_definitions(raw_defs)
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
+        resumed_from = _resume_point(_evt(event, "resumed_from"))
+        inherited = resumed_from.inherited if resumed_from is not None else InheritedOutputs()
+        self._completed_phase_ids = list(inherited.phase_ids)
+        self._completed_phases = len(inherited.phase_ids)
+        self._artifact_sources = (_evt(event, "execution_id") or "", *inherited.execution_ids)
         self._status = ExecutionStatus.RUNNING
 
     @event_sourcing_handler("WorkflowCompleted")
@@ -597,6 +668,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply WorkflowFailedEvent."""
         self._completed_at = _evt(event, "failed_at")
         self._error = _evt(event, "error_message")
+        self._failed_phase_id = _evt(event, "failed_phase_id")
         self._status = ExecutionStatus.FAILED
 
     @event_sourcing_handler("PhaseStarted")
@@ -609,9 +681,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_names[phase_id] = _evt(event, "phase_name") or phase_id
 
     @event_sourcing_handler("PhaseCompleted")
-    def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
+    def on_phase_completed(self, event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
+        phase_id = _evt(event, "phase_id")
+        if phase_id and phase_id not in self._completed_phase_ids:
+            self._completed_phase_ids.append(phase_id)
         self._running_phase_id = None
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
