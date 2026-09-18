@@ -27,9 +27,6 @@ Example Usage:
 See ADR-040: Ports Per Bounded Context for architectural decisions.
 """
 
-from syn_domain.contexts.orchestration.ports.ArtifactContentStoragePort import (
-    ArtifactContentStoragePort,
-)
 from syn_domain.contexts.orchestration.ports.ArtifactQueryServicePort import (
     ArtifactQueryServicePort,
 )
@@ -46,9 +43,6 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
 )
 from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
     CodexRolloutPort,
-)
-from syn_domain.contexts.orchestration.ports.ConversationStoragePort import (
-    ConversationStoragePort,
 )
 from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
     GlobalClaudePluginRegistryRepositoryPort,
@@ -70,14 +64,12 @@ from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
 )
 
 __all__ = [
-    "ArtifactContentStoragePort",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
     "ClaudePluginFile",
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
     "CodexRolloutPort",
-    "ConversationStoragePort",
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
     "SessionRepositoryPort",
