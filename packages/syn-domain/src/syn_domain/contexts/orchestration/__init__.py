@@ -66,6 +66,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    InheritedOutputs,
+    ResumePoint,
+    RetryPlan,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -109,6 +112,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    ResumePhaseNotInWorkflowError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
@@ -197,6 +201,7 @@ __all__ = [
     "HandlerResult",
     # Value objects - workspace
     "ImageManifest",
+    "InheritedOutputs",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
@@ -206,6 +211,9 @@ __all__ = [
     "PhaseExecutionType",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
+    "ResumePhaseNotInWorkflowError",
+    "ResumePoint",
+    "RetryPlan",
     "SecurityPolicy",
     "SidecarConfig",
     "SkillError",

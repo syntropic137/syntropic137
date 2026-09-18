@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.artifacts import AgentIdentity, ArtifactType, PhaseOutputFile
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    InheritedOutputs,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -284,17 +287,18 @@ class ArtifactCollector:
         """
         await self.inject_from_previous_phases_explicit(
             workspace=workspace,
-            completed_phase_ids=ctx.completed_phase_ids,
+            inherited=InheritedOutputs(
+                phase_ids=tuple(ctx.completed_phase_ids),
+                execution_ids=(ctx.execution_id,),
+            ),
             phase_outputs=ctx.phase_outputs,
-            execution_id=ctx.execution_id,
         )
 
     async def inject_from_previous_phases_explicit(
         self,
         workspace: ArtifactWorkspace,
-        completed_phase_ids: list[str],
+        inherited: InheritedOutputs,
         phase_outputs: dict[str, str],
-        execution_id: str = "",
         phase_files: dict[str, list[PhaseOutputFile]] | None = None,
     ) -> None:
         """Inject artifacts using explicit parameters (ISS-196).
@@ -303,21 +307,23 @@ class ArtifactCollector:
 
         Args:
             workspace: The workspace being provisioned for the NEXT phase.
-            completed_phase_ids: Every phase already finished, not just the last.
+            inherited: Every phase already finished, not just the last, and
+                the executions whose artifacts hold their output. A retry
+                inherits phases stored under the execution it retries (#1335).
             phase_outputs: phase_id -> primary deliverable content, the
                 pre-#988 cache shape. Used only for a phase whose output tree
                 is unknown, and then it IS that phase's tree - a single file
                 whose path was never recorded.
-            execution_id: Used to re-query the projection after a restart.
             phase_files: phase_id -> that phase's whole output tree (#988).
                 Omitted or missing a phase means "resolve it from the
                 projection", which is the crash-recovery path.
         """
+        completed_phase_ids = list(inherited.phase_ids)
         if not completed_phase_ids:
             return
 
         resolved = await self._resolve_phase_outputs(
-            completed_phase_ids, phase_files or {}, phase_outputs, execution_id
+            completed_phase_ids, phase_files or {}, phase_outputs, inherited.execution_ids
         )
         await self._inject_and_log(workspace, resolved, completed_phase_ids)
 
@@ -326,7 +332,7 @@ class ArtifactCollector:
         completed_phase_ids: list[str],
         phase_files: dict[str, list[PhaseOutputFile]],
         phase_outputs: dict[str, str],
-        execution_id: str,
+        execution_ids: tuple[str, ...],
     ) -> dict[str, list[PhaseOutputFile]]:
         """What each completed phase produced. The single authority (#1149).
 
@@ -348,13 +354,23 @@ class ArtifactCollector:
         the same filter and the same ``_injection_rank`` as
         ``get_for_phase_injection`` and returns the latter's answer as its
         first entry.
+
+        ``execution_ids`` is asked in order and a phase stops being missing at
+        the first execution that answers for it, so a retry reads its own
+        output for a phase it re-ran and the retried execution's for the
+        phases it inherited (#1335). A first attempt passes one id and the
+        loop runs once.
         """
         resolved = {pid: phase_files[pid] for pid in completed_phase_ids if pid in phase_files}
-        missing = [pid for pid in completed_phase_ids if pid not in resolved]
-        if missing and self._query_service:
+        query_service = self._query_service
+        for source_execution_id in execution_ids if query_service is not None else ():
+            missing = [pid for pid in completed_phase_ids if pid not in resolved]
+            if not missing:
+                break
+            assert query_service is not None
             resolved.update(
-                await self._query_service.get_files_for_phase_injection(
-                    execution_id=execution_id,
+                await query_service.get_files_for_phase_injection(
+                    execution_id=source_execution_id,
                     completed_phase_ids=missing,
                 )
             )

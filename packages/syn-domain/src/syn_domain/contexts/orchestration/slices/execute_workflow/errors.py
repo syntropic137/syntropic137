@@ -52,6 +52,24 @@ class DuplicateExecutionError(Exception):
         self.execution_id = execution_id
 
 
+class ResumePhaseNotInWorkflowError(Exception):
+    """Raised when a retry names a phase its workflow no longer defines.
+
+    A resume point is read off a failed execution, which may be older than
+    the template it ran (#1335). Refusing here keeps the failure at the
+    caller, where it can be reported, instead of starting a run whose first
+    to-do item names a phase nothing can provision.
+    """
+
+    def __init__(self, workflow_id: str, phase_id: str) -> None:
+        super().__init__(
+            f"Workflow {workflow_id} has no phase '{phase_id}' to resume at; "
+            f"the template has changed since that execution ran"
+        )
+        self.workflow_id = workflow_id
+        self.phase_id = phase_id
+
+
 class WorkflowExecutionError(Exception):
     """Raised when workflow execution fails."""
 

@@ -15,6 +15,7 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    REPOS_INPUT_KEY,
     AgentConfiguration,
     ExecutablePhase,
 )
@@ -24,6 +25,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
+    ResumePhaseNotInWorkflowError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
@@ -137,7 +139,7 @@ def _normalise_repo_url(url: str) -> str:
 # repo identity through the generic inputs dict. We fail loudly instead of silently
 # resolving them - the loud error makes the missed translation obvious in tests
 # rather than letting "zero repos" propagate silently into a workflow execution.
-_RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({"repos", "repository"})
+_RESERVED_REPO_INPUT_KEYS: frozenset[str] = frozenset({REPOS_INPUT_KEY, "repository"})
 
 
 def _resolve_repos_from_template(
@@ -352,6 +354,16 @@ class ExecuteWorkflowHandler:
             else f"exec-{uuid4().hex[:12]}"
         )
 
+        resume = command.resume
+        if resume is not None and not any(p.phase_id == resume.phase_id for p in phases):
+            # The template changed under the failed execution: the phase it
+            # would restart at no longer exists. Refuse here rather than let
+            # the processor start a run whose to-do list names a phase it has
+            # no definition for (#1335).
+            raise ResumePhaseNotInWorkflowError(
+                workflow_id=command.aggregate_id, phase_id=resume.phase_id
+            )
+
         try:
             return await self._processor.run(
                 workflow_id=command.aggregate_id,
@@ -360,6 +372,7 @@ class ExecuteWorkflowHandler:
                 inputs=merged_inputs,
                 execution_id=execution_id,
                 repos=repos,
+                resume=resume,
             )
         except StreamAlreadyExistsError:
             logger.warning(

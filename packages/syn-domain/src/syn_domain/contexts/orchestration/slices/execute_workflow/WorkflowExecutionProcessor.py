@@ -11,10 +11,12 @@ from uuid import uuid4
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    REPOS_INPUT_KEY,
     ExecutablePhase,
     ExecutionStatus,
     PhaseDefinition,
     PhaseResult,
+    ResumePoint,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
@@ -194,15 +196,23 @@ class WorkflowExecutionProcessor:
         execution_id: str,
         repos: list[RepositoryRef] | None = None,
         expected_completion_at: datetime | None = None,
+        resume: ResumePoint | None = None,
     ) -> WorkflowExecutionResult:
-        """Execute a workflow using the Processor To-Do List pattern."""
+        """Execute a workflow using the Processor To-Do List pattern.
+
+        ``resume`` makes this run a retry of a failed execution (#1335): the
+        to-do list starts at the phase it names and the phases before it are
+        inherited rather than re-run. Everything below here is unchanged by
+        it - the phases it does run are provisioned, launched and completed
+        exactly as a first attempt's are.
+        """
         started_at = datetime.now(UTC)
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
         # never sees un-normalized slugs. TODO(#712): replace this with typed access
         # once PromptBuilder consumes ``RepositoryRef`` directly.
-        if repos and "repos" not in inputs:
-            inputs["repos"] = ",".join(r.https_url for r in repos)
+        if repos and REPOS_INPUT_KEY not in inputs:
+            inputs[REPOS_INPUT_KEY] = ",".join(r.https_url for r in repos)
         self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 
@@ -225,13 +235,17 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
             expected_completion_at=expected_completion_at,
             phase_definitions=phase_definitions,
+            resume=resume,
         )
         aggregate.start_execution(start_cmd)
         await self._journal.open(aggregate)
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
-        completed_phase_ids: list[str] = []
+        # Seeded with what a retry inherited so the phase counts this run
+        # reports describe the workflow's progress rather than this attempt's.
+        # The aggregate seeds its own count the same way from the same value.
+        completed_phase_ids: list[str] = list(resume.inherited.phase_ids) if resume else []
         phase_outputs = PhaseOutputCache()
         dispatch_ctx = _DispatchContext()
 
@@ -341,7 +355,6 @@ class WorkflowExecutionProcessor:
                 phase,
                 aggregate,
                 repos,
-                completed_phase_ids,
                 phase_outputs,
             )
         elif todo.action == TodoAction.RUN_AGENT:
@@ -465,7 +478,6 @@ class WorkflowExecutionProcessor:
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
         repos: list[RepositoryRef] | None,
-        completed_phase_ids: list[str],
         phase_outputs: PhaseOutputCache,
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
@@ -505,7 +517,6 @@ class WorkflowExecutionProcessor:
             aggregate=aggregate,
             session_id=session_id,
             repo_urls=repo_urls,
-            completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
         )
         self._runtime.attach_workspace(
@@ -527,10 +538,16 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         session_id: str,
         repo_urls: list[str],
-        completed_phase_ids: list[str],
         phase_outputs: PhaseOutputCache,
     ) -> ProvisionResult:
-        """Provision this phase's own workspace and build its ProvisionResult."""
+        """Provision this phase's own workspace and build its ProvisionResult.
+
+        The finished work this phase starts from is asked of the AGGREGATE,
+        which rebuilt it from the event stream, rather than counted up by this
+        process. For a retry the two differ: the phases it inherited were
+        completed by another execution and their artifacts are stored under
+        that execution's id, and only the stream says so (#1335).
+        """
         provision_handler = WorkspaceProvisionHandler(
             workspace_service=self._workspace_service,
             prompt_builder=self._prompt_builder,
@@ -548,7 +565,7 @@ class WorkflowExecutionProcessor:
             session_id=session_id,
             repos=repo_urls,
             artifacts=artifacts,
-            completed_phase_ids=completed_phase_ids,
+            inherited=aggregate.inherited_outputs,
             phase_outputs=phase_outputs,
             inputs=self._inputs,
         )

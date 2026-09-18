@@ -9,6 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from syn_domain.contexts._shared.repository_ref import (
+    RepositoryRef,  # noqa: TC001 - needed at runtime for dataclass field
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -20,6 +23,16 @@ from syn_shared.agents import (
     AgentProvider,
     resolve_phase_model,
 )
+
+REPOS_INPUT_KEY = "repos"
+"""The inputs key the repositories are encoded under, comma-joined as URLs.
+
+Named once because three places have to agree about it and none of them can
+see the others: the processor writes it so `{{repos}}` substitutes in prompts,
+`RetryPlan` lifts it back out and types it, and `ExecuteWorkflowHandler`
+refuses a command that still carries it. Two of those agreeing while the third
+drifts is not a crash - it is a run that clones nothing.
+"""
 
 
 class ExecutionStatus(StrEnum):
@@ -144,6 +157,41 @@ class ResumePoint(BaseModel):
 
     inherited: InheritedOutputs
     """What the retry does not re-run, and where those outputs are stored."""
+
+
+@dataclass(frozen=True)
+class RetryPlan:
+    """Everything it takes to run a failed execution's remaining phases again.
+
+    THE WHOLE ANSWER, so a caller never has to assemble one (#1335). Retrying
+    used to be impossible; the risk in making it possible is that the caller
+    reconstructs the original run by hand and gets one part subtly wrong - the
+    wrong inputs, repos read back as strings, a start phase chosen by guessing
+    which one failed - and the retry then runs, costs money, and verifies
+    something other than what failed. Every one of those facts is in the
+    execution's own event stream, so the aggregate answers with all of them or
+    with nothing.
+
+    ``repos`` is typed here rather than left in ``inputs`` because ADR-063
+    requires repository identity to cross a context boundary typed, and this
+    IS that boundary: the key is removed from ``inputs`` on the way out, which
+    is also what stops ``ExecuteWorkflowHandler`` rejecting the retry for
+    smuggling it.
+    """
+
+    workflow_id: str
+    """The template to run. The retry runs the same one, at its current
+    version - so a phase the template has since dropped is refused rather than
+    silently skipped."""
+
+    inputs: dict[str, str]
+    """What the failed execution was given, minus the repos key."""
+
+    repos: tuple[RepositoryRef, ...]
+    """The repositories it ran against, typed (ADR-063)."""
+
+    resume: ResumePoint
+    """Which phase to start at and what it inherits."""
 
 
 @dataclass(frozen=True)

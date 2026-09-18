@@ -17,6 +17,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -32,11 +33,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    REPOS_INPUT_KEY,
     ExecutionStatus,
     FinishedAgentRun,
     InheritedOutputs,
     PhaseDefinition,
     ResumePoint,
+    RetryPlan,
     StrandedDeliverable,
 )
 
@@ -150,6 +153,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: recomputing it, because a second copy is the hop where a retry
         #: silently starts reading an empty artifacts/input/.
         self._artifact_sources: tuple[str, ...] = ()
+        #: What this execution was started with, so a retry can be started
+        #: with the same thing. Nothing else replays inputs, but a retry that
+        #: rebuilt them from anywhere but the started event would be running a
+        #: different job under the name of the failed one (#1335).
+        self._inputs: dict[str, str] = {}
         #: The phase a failure named, kept so `resume_point` can say where a
         #: retry would start. `_running_phase_id` is cleared by the failure
         #: itself and cannot answer this afterwards.
@@ -289,6 +297,45 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if phase_id is None:
             return None
         return ResumePoint(phase_id=phase_id, inherited=self.inherited_outputs)
+
+    @property
+    def retry_plan(self) -> RetryPlan | None:
+        """Everything needed to run this execution again from where it died, or None.
+
+        The whole of what a caller needs, so that retrying is one call and not
+        a reconstruction (#1335). `resume_point` says WHERE to restart;
+        this says what to restart, with what, against which repositories - all
+        of it read back from the started event rather than re-derived, because
+        a retry assembled from anything else is a different run wearing the
+        failed one's name.
+
+        `repos` is lifted out of `inputs` and typed here. The processor writes
+        the repositories into `inputs["repos"]` for prompt substitution on the
+        way in; ADR-063 requires them typed on the way back out, and
+        `ExecuteWorkflowHandler` refuses a command that leaves them in
+        `inputs` - correctly, since that is the missed-translation shape the
+        guard exists to catch. Doing it here means the retry's caller never
+        sees the encoding at all.
+
+        Raises:
+            ValueError: a recorded repository is unparseable. That is corrupt
+                event data; refusing is better than retrying against a
+                silently shorter list of repositories than the run that
+                failed.
+        """
+        resume = self.resume_point
+        workflow_id = self._workflow_id
+        if resume is None or workflow_id is None:
+            return None
+        inputs = dict(self._inputs)
+        encoded = inputs.pop(REPOS_INPUT_KEY, "")
+        repos = tuple(RepositoryRef.parse(value) for value in encoded.split(",") if value)
+        return RetryPlan(
+            workflow_id=workflow_id,
+            inputs=inputs,
+            repos=repos,
+            resume=resume,
+        )
 
     @property
     def status(self) -> ExecutionStatus:
@@ -652,6 +699,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_phase_ids = list(inherited.phase_ids)
         self._completed_phases = len(inherited.phase_ids)
         self._artifact_sources = (_evt(event, "execution_id") or "", *inherited.execution_ids)
+        # `str()` because event data is typed `Any` once it has been through
+        # the store; every producer of `inputs` declares `dict[str, str]`.
+        self._inputs = {k: str(v) for k, v in (_evt(event, "inputs") or {}).items()}
         self._status = ExecutionStatus.RUNNING
 
     @event_sourcing_handler("WorkflowCompleted")

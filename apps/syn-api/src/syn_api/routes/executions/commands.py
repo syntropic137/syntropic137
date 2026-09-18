@@ -32,6 +32,7 @@ from syn_api.types import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
+    ResumePoint,
     SkillError,
     SkillRef,
     UnsupportedExecutionTypeError,
@@ -363,6 +364,7 @@ async def execute(
     task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
     repos: list[RepositoryRef] | None = None,
+    resume: ResumePoint | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -373,6 +375,8 @@ async def execute(
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
+        resume: Where a failed execution is being continued from (#1335).
+            Omitted for a first attempt, which starts at phase one.
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
@@ -402,6 +406,7 @@ async def execute(
             repos=repos or [],
             execution_id=execution_id,
             task=task,
+            resume=resume,
         )
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:

@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts._shared.repository_ref import (
     RepositoryRef,  # noqa: TC001 - runtime field type
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ResumePoint,  # noqa: TC001 - runtime field type
+)
 
 
 @command("ExecuteWorkflow", "Starts execution of a workflow")
@@ -46,6 +49,15 @@ class ExecuteWorkflowCommand(BaseModel):
     task: str | None = Field(
         default=None,
         description="Primary task description, substituted for $ARGUMENTS in prompts",
+    )
+
+    # Set to retry a failed execution rather than start a fresh one (#1335).
+    # Produced by WorkflowExecutionAggregate.resume_point, never assembled by
+    # a caller: whether an execution can be continued, and from where, is the
+    # aggregate's decision and reading it anywhere else would duplicate it.
+    resume: ResumePoint | None = Field(
+        default=None,
+        description="Resume a failed execution at the phase it failed in",
     )
 
     # Dry run mode - validate without executing

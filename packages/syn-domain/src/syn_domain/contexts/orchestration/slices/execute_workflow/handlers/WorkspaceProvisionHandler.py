@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Final
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
+    InheritedOutputs,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
@@ -448,7 +449,7 @@ class WorkspaceProvisionHandler:
         session_id: str,
         repos: list[str] | None = None,
         artifacts: ArtifactCollector | None = None,
-        completed_phase_ids: list[str] | None = None,
+        inherited: InheritedOutputs | None = None,
         phase_outputs: PhaseOutputCache | None = None,
         inputs: dict[str, object] | None = None,
     ) -> ProvisionResult:
@@ -461,7 +462,11 @@ class WorkspaceProvisionHandler:
             session_id: Agent session ID for this phase.
             repos: Full GitHub URLs to clone and hydrate context from.
             artifacts: Artifact collector for previous-phase injection.
-            completed_phase_ids: Phase IDs completed before this one.
+            inherited: The phases finished before this one and the executions
+                holding their outputs. One value, not a phase list plus this
+                workspace's own execution id: a retry inherits phases another
+                execution completed, and asking the wrong execution for them
+                returns silence rather than an error (#1335).
             phase_outputs: What each previous phase produced - the primary
                 deliverable for prompt substitution, and every file it wrote so
                 the previous phases' output TREES can be rebuilt (#988).
@@ -499,7 +504,7 @@ class WorkspaceProvisionHandler:
             await self._install_baked_delegation_skill(workspace, phase)
             await self._install_attribution_hook(workspace)
             await self._inject_phase_artifacts(
-                workspace, artifacts, completed_phase_ids or [], outputs, todo
+                workspace, artifacts, inherited or InheritedOutputs(), outputs
             )
             return await self._build_provision_result(
                 workspace,
@@ -674,17 +679,15 @@ class WorkspaceProvisionHandler:
         self,
         workspace: ManagedWorkspace,
         artifacts: ArtifactCollector | None,
-        completed_ids: list[str],
+        inherited: InheritedOutputs,
         outputs: PhaseOutputCache,
-        todo: TodoItem,
     ) -> None:
         """Inject artifacts from previous phases into the workspace."""
         if artifacts is not None:
             await artifacts.inject_from_previous_phases_explicit(
                 workspace,
-                completed_ids,
+                inherited,
                 outputs.primary,
-                execution_id=todo.execution_id,
                 phase_files=outputs.files,
             )
 

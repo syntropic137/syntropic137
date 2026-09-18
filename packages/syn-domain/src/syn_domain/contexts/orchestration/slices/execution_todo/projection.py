@@ -89,6 +89,19 @@ _ACTION_RANK: dict[TodoAction, int] = {
 _RANK_PHASE_DONE = 99
 
 
+def _resumed_phase_id(event_data: dict) -> str | None:
+    """The phase a resumed execution starts at, or None for a first attempt.
+
+    Reads `WorkflowExecutionStartedEvent.resumed_from`, which arrives here as
+    plain event data whether it was emitted as a model or replayed.
+    """
+    resumed_from = event_data.get("resumed_from")
+    if not isinstance(resumed_from, dict):
+        return None
+    phase_id = resumed_from.get("phase_id")
+    return phase_id if isinstance(phase_id, str) and phase_id else None
+
+
 def _merge_progress(existing: dict[str, int], updates: dict[str, int]) -> dict[str, int]:
     """Merge two phase-progress maps, keeping the max rank per phase.
 
@@ -188,7 +201,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     # =========================================================================
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
-        """Execution started → provision workspace for first phase."""
+        """Execution started → provision workspace for the phase it starts at."""
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
@@ -197,10 +210,16 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not phase_defs:
             return  # Legacy mode — no to-do list management
 
-        # Sort by order, take first phase
-        sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
-        first_phase = sorted_phases[0]
-        phase_id = first_phase["phase_id"]
+        # A retry starts at the phase its resume point names; every other
+        # execution starts at the lowest-order phase (#1335). This is the ONLY
+        # thing that makes a retry skip the phases it inherited: the rest of
+        # the list is built from the events those phases would have emitted,
+        # so a retry that started at phase one would simply re-run and re-pay
+        # for all of them.
+        phase_id = _resumed_phase_id(event_data)
+        if phase_id is None:
+            sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
+            phase_id = sorted_phases[0]["phase_id"]
 
         # Initial state: phase is at PROVISION_WORKSPACE rank. This is a
         # fresh execution; no prior progress to respect. Idempotency
