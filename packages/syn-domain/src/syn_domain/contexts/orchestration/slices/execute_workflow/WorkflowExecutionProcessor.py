@@ -462,8 +462,7 @@ class WorkflowExecutionProcessor:
             # not take it. An operator can still read what happened, and a read
             # model that is behind must never hold a container open.
             logger.exception(
-                "Failure of execution %s was recorded but the local to-do list "
-                "did not apply it",
+                "Failure of execution %s was recorded but the local to-do list did not apply it",
                 execution_id,
             )
 
@@ -474,9 +473,7 @@ class WorkflowExecutionProcessor:
         try:
             await self._runtime.report_failed(failure.reason)
         except Exception:
-            logger.exception(
-                "Could not close the sessions of execution %s as failed", execution_id
-            )
+            logger.exception("Could not close the sessions of execution %s as failed", execution_id)
         finally:
             await self._runtime.abandon_all("failure")
 

@@ -86,12 +86,12 @@ class _StreamEndingWith(MemoryEventStreamAdapter):
     async def stream(
         self,
         handle: IsolationHandle,
-        command: list[str],  # noqa: ARG002
+        command: list[str],
         *,
-        timeout_seconds: int | None = None,  # noqa: ARG002
-        working_directory: str | None = None,  # noqa: ARG002
-        environment: dict[str, str] | None = None,  # noqa: ARG002
-        wrapper_name: str | None = None,  # noqa: ARG002
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         for line in self._streams.get(handle.isolation_id, []):
             yield line
@@ -187,8 +187,7 @@ class TestAStatusNobodyObservedIsRecordedAsUnknown:
         run = await _run_a_phase_whose_stream_ends_with(NOTHING_OBSERVED)
 
         assert run.status == "failed", (
-            "a phase whose exit status nobody observed must not be completed; "
-            f"got {run.status!r}"
+            f"a phase whose exit status nobody observed must not be completed; got {run.status!r}"
         )
 
     @pytest.mark.anyio
@@ -204,8 +203,7 @@ class TestAStatusNobodyObservedIsRecordedAsUnknown:
         assert len(failed) == 1, f"expected exactly one WorkflowFailedEvent, got {len(failed)}"
         assert "exit_code" in failed[0], "the status must reach the wire, not just the model"
         assert failed[0]["exit_code"] is None, (
-            "an unobserved exit status must be recorded as unknown; "
-            f"got {failed[0]['exit_code']!r}"
+            f"an unobserved exit status must be recorded as unknown; got {failed[0]['exit_code']!r}"
         )
         assert failed[0]["error_type"] == "ExitStatusUnavailableError", (
             "the failure must say the status was unavailable, not name some later symptom"

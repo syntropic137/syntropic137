@@ -112,8 +112,7 @@ class TestTheEventIsOnTheStreamFirst:
             f"the container was reaped before the failure was durable: {list(timeline)}"
         )
         assert timeline.index(RECORDED) < timeline.index(REPORTED), (
-            "a session report that fails must not be able to precede the event: "
-            f"{list(timeline)}"
+            f"a session report that fails must not be able to precede the event: {list(timeline)}"
         )
 
     @pytest.mark.anyio
@@ -191,9 +190,7 @@ class TestAReadModelOutageCannotBlockCleanup:
 
         assert result.status == "failed"
         assert RECORDED in timeline, "the event reached the store before the projection ran"
-        assert REAPED in timeline, (
-            f"a read-model outage held the workspace open: {list(timeline)}"
-        )
+        assert REAPED in timeline, f"a read-model outage held the workspace open: {list(timeline)}"
         assert _NOT_DURABLE not in caplog.text, (
             "a projection outage must not be reported as a lost write - the status "
             "is on the stream, and sending someone to look for it is the wrong call"
@@ -242,9 +239,7 @@ class TestAReadModelOutageCannotBlockCleanup:
         assert RECORDED not in timeline, (
             "the store rejected the write, so nothing may claim it was recorded"
         )
-        assert REAPED in timeline, (
-            f"an event-store outage leaked the workspace: {list(timeline)}"
-        )
+        assert REAPED in timeline, f"an event-store outage leaked the workspace: {list(timeline)}"
         assert _NOT_DURABLE in caplog.text, (
             "a lost write must say the status is lost; reporting it as a lagging "
             f"read model is how #1318 went unnoticed. Logged: {caplog.text!r}"
