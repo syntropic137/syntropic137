@@ -72,6 +72,8 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        reason: str | None = None,
+        attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -110,6 +112,15 @@ class FakeAgentExecutionHandler:
         #: production reader of that report and not a fixture's idea of it
         #: (#1256).
         self._says = says
+        #: Why the harness itself failed, as the stream processors report it -
+        #: "codex reported: Selected model is at capacity...", "API overloaded
+        #: (HTTP 529)", "Authentication failed". Until this double could say
+        #: one, every failure it could express was a bare exit code, and the
+        #: processor decides what a failure MEANS from this string (#1303).
+        self._reason = reason
+        #: What this agent does on each successive attempt, when that changes
+        #: between them. See ``scripted``.
+        self._attempts = tuple(attempts)
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -132,6 +143,23 @@ class FakeAgentExecutionHandler:
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.runners.append(runner)
+        if self._attempts:
+            # The script decides this attempt; the outer double stays the one
+            # the test inspects, so `call_count` counts attempts across all of
+            # them rather than per entry.
+            attempt = self._attempts[min(len(self.calls) - 1, len(self._attempts) - 1)]
+            return await attempt.handle(
+                todo,
+                workspace,
+                agent_env,
+                claude_cmd,
+                session_id,
+                agent_model,
+                timeout_seconds,
+                collector,
+                runner,
+                on_launch,
+            )
         if self._produces:
             await workspace.inject_files(list(self._produces))
         # Every factory below except ``never_launched`` describes a run whose
@@ -153,6 +181,7 @@ class FakeAgentExecutionHandler:
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
+            error_reason=self._reason,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -246,6 +275,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        reason: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
 
@@ -268,7 +298,25 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            reason=reason,
         )
+
+    @classmethod
+    def scripted(cls, *attempts: FakeAgentExecutionHandler) -> FakeAgentExecutionHandler:
+        """An agent whose behaviour CHANGES between attempts at the same phase.
+
+        Each positional argument is one attempt, in order; the last repeats for
+        any attempt beyond it. So ``scripted(failed(...), success(...))`` is an
+        agent that fails once and then succeeds, and ``scripted(failed(...))``
+        is one that fails every time it is asked.
+
+        A phase used to get exactly one attempt, so a double with one fixed
+        outcome could say everything there was to say. Retrying a busy upstream
+        (#1303) makes "what happened the SECOND time" a real question, and a
+        test that cannot vary the answer cannot tell a retry that recovered
+        from one that never happened.
+        """
+        return cls(attempts=attempts)
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:

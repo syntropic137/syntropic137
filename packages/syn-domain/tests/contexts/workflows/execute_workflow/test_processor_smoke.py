@@ -29,6 +29,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    UpstreamRetryPolicy,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -112,12 +115,18 @@ def _make_processor(
     agent_handler: FakeAgentExecutionHandler,
     session_capture: object | None = None,
     artifact_repository: object | None = None,
+    retry_policy: UpstreamRetryPolicy | None = None,
 ) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
 
     ``artifact_repository`` is overridable so a test can assert on what was
     STORED rather than only on what the run returned. The default discards
     everything, which is all most of these tests need.
+
+    ``retry_policy`` is overridable so a test of the retry (#1303) can set the
+    backoff to zero. The DEFAULT IS PRODUCTION'S - a test that does not pass
+    one runs against the real bound and the real schedule, which is what keeps
+    "a phase gets one attempt unless the upstream was busy" true here.
     """
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
@@ -137,6 +146,7 @@ def _make_processor(
         todo_projection=todo_projection,
         agent_handler=agent_handler,
         session_capture=session_capture,  # type: ignore[arg-type]
+        retry_policy=retry_policy,
     )
 
 
