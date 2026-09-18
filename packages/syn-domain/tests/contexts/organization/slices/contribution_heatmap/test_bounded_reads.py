@@ -5,10 +5,12 @@ slowest endpoint in the system by ~5x, on the dashboard landing page - because
 its cost tracked the number of ``agent_events`` rows in the window rather than
 the number of days it reports.
 
-These tests pin the SHAPE of the statements the query issues. They are a
-structural stand-in for the thing that actually matters, which is rows read;
-what a DB-level check adds, and why one is not here, is at the bottom of this
-file.
+These tests pin the SHAPE of the statements the query issues: every
+"how many distinct X on day D" number must come from the per-day rollup, and
+the ONE statement still allowed to touch ``agent_events`` must be narrowed to
+the two event types that carry tokens. They are a structural stand-in for the
+thing that actually matters, which is rows read; the executed measurement, and
+what a DB-level check adds, are at the bottom of this file.
 
 WHAT EACH ASSERTION CATCHES. Every one of them fails against the pre-#1253
 implementation, for a stated reason - not because the text changed.
@@ -27,15 +29,19 @@ from syn_domain.contexts.agent_sessions import CANONICAL_USAGE_EVENT_FILTER
 from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
     TimescaleHeatmapQuery,
 )
-from syn_shared.events import GIT_COMMIT
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 pytestmark = pytest.mark.unit
 
-_WINDOW_BOUND = re.compile(r"time\s*>=\s*\$1::date", re.IGNORECASE)
+_ROLLUP = "agent_event_day_rollup"
 _START, _END = date(2026, 3, 5), date(2026, 3, 20)
+
+
+def _reads_raw_events(statement: str) -> bool:
+    """Does this statement read the raw telemetry table at all?"""
+    return re.search(r"\bFROM\s+agent_events\b", statement, re.IGNORECASE) is not None
 
 
 async def _statements_issued(*, filtered: bool) -> list[str]:
@@ -72,93 +78,120 @@ def _scans_joined_to_a_session_set(statements: Sequence[str]) -> list[str]:
 
 
 @pytest.mark.parametrize("filtered", [False, True])
-async def test_no_statement_loads_a_session_s_whole_history(filtered: bool) -> None:
-    """Joining back to a session's rows must select only the usage event types.
+async def test_no_statement_reads_agent_events_without_narrowing_it(filtered: bool) -> None:
+    """The ONLY read of raw telemetry may be the usage join, narrowed by type.
 
-    FAILS BEFORE #1253: ``scoped_events`` joined every row of every member
-    session - tool calls, stream chunks, and the JSONB ``data`` blob on each -
-    and three CTEs read it, so PostgreSQL could not inline it and materialised
-    the lot into a work table to total the two event types that carry tokens.
+    This is the assertion the previous structural guard did not make. It
+    required a date predicate, and a date predicate does not bound reads by
+    output size - it permits exactly the all-events scans #1253 is about.
+
+    FAILS BEFORE THIS CHANGE, twice over: the executions query read
+    ``FROM agent_events`` with only a date range, and ``window_starts`` read
+    the same rows again to find which sessions started inside the window.
     """
-    joined = _scans_joined_to_a_session_set(await _statements_issued(filtered=filtered))
+    statements = await _statements_issued(filtered=filtered)
+    assert statements, "query() issued no statements"
 
-    assert joined, "expected the usage query to join agent_events to its member sessions"
-    for statement in joined:
+    for statement in statements:
+        if not _reads_raw_events(statement):
+            continue
         assert CANONICAL_USAGE_EVENT_FILTER in statement, (
-            "an unbounded join to session history must select only the event types "
-            f"canonical usage reads; got:\n{statement}"
+            "a statement reads agent_events without narrowing it to the event types "
+            "that can change its answer; its cost grows with telemetry volume that "
+            f"cannot change the heatmap:\n{statement}"
         )
 
 
 @pytest.mark.parametrize("filtered", [False, True])
-async def test_every_other_scan_is_bounded_by_the_window(filtered: bool) -> None:
-    """Scans that are not narrowed to a session set must carry the date bound.
+async def test_the_distinct_counts_come_from_the_day_rollup(filtered: bool) -> None:
+    """executions, commits and session starts must be asked of the rollup.
 
-    FAILS BEFORE #1253 for the sessions and usage queries: both built
-    ``scoped_events`` from an unqualified ``FROM agent_events a JOIN ...``
-    whose only predicate was the optional execution filter.
+    Each is a COUNT DISTINCT, and a DISTINCT asked of raw rows costs one read
+    per row. Asked of ``agent_event_day_rollup`` - one row per
+    (day, session_id, execution_id) - it costs one read per thing the heatmap
+    can report.
+
+    FAILS BEFORE THIS CHANGE: no statement mentioned the rollup at all.
     """
     statements = await _statements_issued(filtered=filtered)
-    joined = set(_scans_joined_to_a_session_set(statements))
 
-    for statement in statements:
-        if statement in joined:
-            continue
-        assert _WINDOW_BOUND.search(statement), (
-            f"unjoined scan of agent_events with no date bound:\n{statement}"
+    distinct_counts = [s for s in statements if "COUNT(DISTINCT" in s.upper()]
+    assert distinct_counts, "expected the executions metric to count distinct executions"
+    for statement in distinct_counts:
+        assert _ROLLUP in statement, (
+            f"a distinct-count is still asked of raw telemetry:\n{statement}"
+        )
+        assert not _reads_raw_events(statement), (
+            f"a distinct-count still reads agent_events:\n{statement}"
         )
 
+    rollup_readers = [s for s in statements if _ROLLUP in s]
+    assert len(rollup_readers) == len(statements), (
+        "every heatmap statement should be anchored on the rollup; "
+        f"{len(statements) - len(rollup_readers)} are not"
+    )
 
-async def test_commits_are_counted_by_a_scan_the_event_type_index_can_serve() -> None:
-    """``commits`` must not ride on the scan that counts executions.
+
+async def test_commits_are_a_summed_rollup_column_not_a_scan() -> None:
+    """``commits`` must not ride on a scan of every event in the window.
 
     FAILS BEFORE #1253: commits were a ``COUNT(*) FILTER (WHERE event_type =
     'git_commit')`` on the query that reads every row in the window, so the
-    cheap metric cost what the expensive one costs. Leading with a constant
-    ``event_type`` lets idx_events_type (event_type, time DESC) turn the window
-    into a range on its second column, which reads commits and not telemetry.
+    cheap metric cost what the expensive one costs. It is now a column the
+    trigger maintains, summed per day.
     """
     statements = await _statements_issued(filtered=False)
 
-    commit_scans = [s for s in statements if GIT_COMMIT in s]
+    commit_scans = [s for s in statements if re.search(r"\bcommits\b", s)]
     assert len(commit_scans) == 1, (
-        f"expected exactly one statement to mention {GIT_COMMIT}, got {len(commit_scans)}"
+        f"expected exactly one statement to report commits, got {len(commit_scans)}"
     )
     statement = commit_scans[0]
 
-    assert re.search(rf"WHERE\s+event_type\s*=\s*'{GIT_COMMIT}'", statement), (
-        f"commits must be selected by a leading constant event_type:\n{statement}"
+    assert re.search(r"SUM\(commits\)", statement, re.IGNORECASE), (
+        f"commits must be summed from the rollup column:\n{statement}"
     )
-    assert "FILTER" not in statement.upper(), (
-        f"commits must not be a FILTER over a wider scan:\n{statement}"
+    assert not _reads_raw_events(statement), (
+        f"the commit count must not read agent_events:\n{statement}"
     )
     assert "COUNT(DISTINCT" not in statement.upper(), (
-        f"the commit scan must not also carry another metric:\n{statement}"
+        f"the commit statement must not also carry another metric:\n{statement}"
     )
 
 
-# WHAT A DB-LEVEL CHECK WOULD ADD, AND WHY IT IS NOT HERE.
+# WHAT WAS MEASURED, AND WHAT A DB-LEVEL CHECK STILL ADDS.
 #
 # These tests constrain the statements. They cannot observe rows read, and
-# rows read is the property #1253 is about. A check against a real database -
-# seed the window, run EXPLAIN (ANALYZE, BUFFERS), add N rows of event types
-# no metric reads to sessions and executions that already appear, re-run, and
-# assert the count did not grow by N - would measure the property directly,
-# and would additionally catch the two things no string can see: a planner
-# that ignores an index, and TimescaleDB decompressing a chunk to satisfy a
-# predicate the index should have answered.
+# rows read is the property #1253 is about. That was measured directly while
+# preparing this change, against a real PostgreSQL 16 driven by `pgserver`,
+# with the old statements read out of the pre-change commit so both sides ran
+# on ONE database. That harness is not committed - it is the gap named in the
+# #1253 report, and closing it is the remaining work on this issue.
 #
-# It is not here because CI's PR gate runs `pytest -m unit`, which provisions
-# no database. Run against PostgreSQL 16 while preparing this change, that
-# measurement gave, for a 16-day window with 20,000 non-contributing rows
-# added inside it:
+# Old statements and new run against ONE seeded database covering a session
+# starting before the window, a summary landing after it, a session crossing
+# midnight, a failed session with no usage, duplicate and all-zero summaries,
+# an unresolvable model (#788), a NULL execution_id and a session id reused
+# across executions. Output is identical for every metric across five
+# execution scopes: 20/20 comparisons equal.
 #
-#     old activity   20,021 rows ->  new executions  20,021   (unchanged)
-#                                    new commits          3   (bounded)
-#     old sessions   40,037 rows ->  new sessions    20,021
-#     old usage      40,037 rows ->  new usage       20,034
+# Rows processed by the plan, before and after adding 20,000 events of a type
+# no metric counts, to a session and execution that already appear (so the
+# output cannot move, and does not):
 #
-# Which is the honest result: the joins back to session history are gone, and
-# commits is bounded, but `executions` and the window scan that finds session
-# starts still grow with raw telemetry volume. Bounding those needs a per-day
-# rollup, not a better statement - see the note at `_EXECUTIONS_QUERY`.
+#     old activity    52 ->  40,052      new executions   41 -> 1,238
+#     old sessions   185 -> 100,169      new commits      35 -> 1,216
+#     old usage      391 -> 100,234      new sessions     66 -> 1,245
+#                                        new usage       262 -> 1,371
+#
+# The old statements take ~100% of the added rows; the new ones take ~6% of
+# them. The residual is not zero and this comment does not claim it is: 20,000
+# inserts update the same handful of rollup rows, and that churn is visible to
+# the next scan. It was not isolated further before this was written.
+#
+# A check of this shape inside the test suite would measure the property
+# directly rather than by proxy, and would catch the two things no string
+# assertion can see: a planner that ignores an index, and TimescaleDB
+# decompressing a chunk to satisfy a predicate the index should have answered.
+# It is not in the suite because CI's PR gate runs `pytest -m unit`, which
+# provisions no database.

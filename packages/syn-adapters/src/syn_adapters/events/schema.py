@@ -6,9 +6,8 @@ import logging
 
 import asyncpg
 
-from syn_shared.events import GIT_COMMIT
-
 from syn_adapters.events.models import EXPECTED_COLUMNS
+from syn_shared.events import GIT_COMMIT
 
 logger = logging.getLogger(__name__)
 
