@@ -164,6 +164,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # can. Defaulting to False here means the failure mode of
                 # forgetting is a phase that cannot publish, not one that can.
                 can_open_pr=_as_bool(p.get("can_open_pr", False), "can_open_pr"),
+                # Dropping this silently re-arms the unpushed-work gate against
+                # a phase that declared it delivers no repository changes, so a
+                # build tool touching a tracked lockfile fails a phase that did
+                # its job (#1308). True is the field's own default, so
+                # forgetting it judges the phase strictly rather than leaving
+                # it unjudged.
+                delivers_repo_changes=_as_bool(
+                    p.get("delivers_repo_changes", True), "delivers_repo_changes"
+                ),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as
