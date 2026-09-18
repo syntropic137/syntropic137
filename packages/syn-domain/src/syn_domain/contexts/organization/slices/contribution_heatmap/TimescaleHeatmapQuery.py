@@ -10,61 +10,74 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncpg
 
-from syn_domain.contexts.agent_sessions import CANONICAL_SESSION_USAGE_CTE, CostCalculator
+from syn_domain.contexts.agent_sessions import (
+    CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_EVENT_FILTER,
+    CostCalculator,
+)
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
 )
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import GIT_COMMIT
 
-# Every observation belonging to a session that STARTED inside the window -
-# not every observation that landed inside it.
+# WHAT THIS MODULE COSTS, AND WHY THAT IS THE POINT (#1253)
 #
-# Filtering rows by time first would hand the canonical CTE a FRAGMENT of a
-# session: a run beginning inside the window whose summary arrives after it
-# would be priced from its placeholder turn rows, reporting 5 output tokens
-# for a session that produced 13,300. That is the bug this whole module
-# exists to prevent, reappearing at the window edge. It also made MIN(time)
-# the first in-window observation rather than the true start, so a session
-# beginning before the window was attributed to the wrong day.
+# The heatmap returns one row per day. It used to cost one read per
+# agent_events ROW in the window instead - 13.6-14.8s in production, the
+# slowest endpoint in the system by ~5x, on the dashboard landing page.
 #
-# So membership is decided per SESSION, then all of that session's rows are
-# loaded regardless of their own timestamps.
+# Two things drove that, and both are fixed below:
 #
-# MEMBERSHIP IS AN ANTI-JOIN, NOT AN AGGREGATE (#1253). Deciding it as
-# "MIN(time) per session, then keep the sessions whose minimum lands in the
-# window" reads the entire table before it looks at the window at all: the
-# date bound applies to the OUTPUT of the aggregation, so a one-week request
-# costs what a one-year request costs. Measured: 7d 4.89s, 366d 6.54s - a
-# constant floor with the range barely visible in it.
+#   1. `scoped_events` joined back to EVERY row of every member session, of
+#      every event type, selecting the JSONB `data` blob with them. Three
+#      CTEs read it, so PostgreSQL could not inline it and materialised the
+#      lot into a work table - tool calls, stream chunks and all - to compute
+#      token totals that only ever look at two event types.
+#   2. It computed `session_start` from that same unnarrowed join, which is
+#      what forced the join to exist at all.
 #
-# The same membership, stated so the window is a predicate on the scan:
+# Each query below now reads only rows that can change its own answer. What
+# that does NOT fix is stated at `_EXECUTIONS_QUERY`; read it before assuming
+# this endpoint is bounded.
+
+# A session is counted on the day it STARTED. Membership and start time both
+# come from ONE date-bounded scan, and nothing joins back to history.
+#
+# Filtering rows by time and then taking MIN() would be wrong, not just slow:
+# a session beginning before the window would report its first IN-WINDOW
+# observation as its start and land on the wrong day. So membership is decided
+# first, per session:
 #
 #     a session started inside the window IFF it has an observation inside
 #     the window and none before it.
 #
-# Both halves are cheap. `window_sessions` reads one date range, which is
-# exactly what the hypertable is partitioned on, so chunks outside the
-# window are never opened. The NOT EXISTS is then an index probe per
-# candidate session on idx_events_session (session_id, time DESC) that stops
-# at the first earlier row.
+# `window_starts` reads one date range, which is exactly what the hypertable
+# is partitioned on, so chunks outside the window are never opened. The NOT
+# EXISTS is an index probe per candidate session on idx_events_session
+# (session_id, time DESC) that stops at the first earlier row.
 #
-# This changes cost, not results: the set of sessions whose MIN(time) is in
-# the window is precisely the set that has a row in it and none before, and
-# the true start is still never read off a fragment - `session_start`
-# recomputes it over the whole of `scoped_events`, which carries all of a
-# member session's rows whatever their timestamps.
-_SCOPED_EVENTS = """
-window_sessions AS (
-    SELECT DISTINCT session_id
+# WHY MIN(time) OVER THE WINDOW IS THE TRUE START HERE, not a fragment of one.
+# The anti-join has already established that a member session has no row
+# before $1, so every row it owns is >= $1. At least one is < $2+1day, so the
+# smallest of them cannot be one of the rows the upper bound excludes.
+# Therefore MIN over the window equals MIN over the session's whole history -
+# the same value the old `session_start` computed by reading all of it.
+#
+# That identity is what removed the join, and #1253's equivalence tests pin
+# it against the previous implementation on seeded data.
+_WINDOW_STARTS = """
+window_starts AS (
+    SELECT session_id, MIN(time) AS started_at
     FROM agent_events
     WHERE time >= $1::date
       AND time < ($2::date + interval '1 day')
       {execution_filter}
+    GROUP BY session_id
 ),
-sessions_in_window AS (
-    SELECT w.session_id
-    FROM window_sessions w
+session_start AS (
+    SELECT w.session_id, w.started_at
+    FROM window_starts w
     WHERE NOT EXISTS (
         SELECT 1
         FROM agent_events e
@@ -72,48 +85,57 @@ sessions_in_window AS (
           AND e.time < $1::date
           {execution_filter}
     )
-),
-scoped_events AS (
-    -- The execution filter is applied AGAIN here, not just when choosing
-    -- sessions. Joining back on session_id alone assumes session ids are
-    -- globally unique, and no constraint enforces that: a retried or resumed
-    -- session id reused across executions would drag an unselected
-    -- execution's rows into a filtered heatmap.
-    SELECT a.session_id, a.execution_id, a.event_type, a.data, a.time
-    FROM agent_events a
-    JOIN sessions_in_window w ON w.session_id = a.session_id
-    WHERE TRUE {execution_filter}
-)
-"""
-
-# Activity markers keep EVENT-time scoping: a commit happens at an instant and
-# belongs on that day, whoever's session it was.
-_ACTIVITY_SCOPE = """
-scoped_events AS (
-    SELECT session_id, execution_id, event_type, data, time
-    FROM agent_events
-    WHERE time >= $1::date
-      AND time < ($2::date + interval '1 day')
-      {execution_filter}
 )
 """
 
 _EXECUTION_FILTER = "AND execution_id = ANY($3)"
 
-# Activity markers, bucketed by the time they actually happened.
+# THE ONE QUERY STILL PROPORTIONAL TO RAW TELEMETRY VOLUME (#1253).
 #
-# Unlike token usage (see canonical_usage), these are NOT re-attributed to a
-# session's start day. A commit happens at an instant, and an execution that
-# spans days genuinely did work on each of them - showing that is the point
-# of the heatmap. Only usage, which has one authoritative record per session,
-# collapses onto a single square.
-_ACTIVITY_QUERY = f"""
-WITH {_ACTIVITY_SCOPE}
+# "How many distinct executions were active on day D" is a question about
+# every row in the window: any event type, for any execution, can be the one
+# that makes an execution active that day, and no index can answer "which
+# values are distinct here" without visiting the rows that carry them. Adding
+# a million tool-call rows to executions that already appear costs a million
+# more reads and changes nothing in the output.
+#
+# Bounding it needs a per-day rollup, not a better query. See the report on
+# #1253: the vehicle is a TimescaleDB continuous aggregate over
+# (day, session_id, execution_id), which is maintained by the database and so
+# does NOT replay the event store or stall the projection coordinator (#1318).
+# That is not done here.
+#
+# Executions are NOT re-attributed to a start day the way sessions and usage
+# are. An execution that spans days genuinely did work on each of them, and
+# showing that is the point of the heatmap.
+_EXECUTIONS_QUERY = """
 SELECT
     time_bucket('1 day', time)::date AS day,
-    COUNT(DISTINCT execution_id) AS executions,
-    COUNT(*) FILTER (WHERE event_type = '{GIT_COMMIT}') AS commits
-FROM scoped_events
+    COUNT(DISTINCT execution_id) AS executions
+FROM agent_events
+WHERE time >= $1::date
+  AND time < ($2::date + interval '1 day')
+  {execution_filter}
+GROUP BY day
+ORDER BY day
+"""
+
+# Commits, on the day each one happened.
+#
+# Split out of the executions scan so it can be served by idx_events_type
+# (event_type, time DESC): leading with the constant event_type makes the
+# window a range on the second column, so this reads commits and not
+# telemetry. Counting them as a FILTER over the executions scan instead made
+# the cheap metric cost what the expensive one costs.
+_COMMITS_QUERY = f"""
+SELECT
+    time_bucket('1 day', time)::date AS day,
+    COUNT(*) AS commits
+FROM agent_events
+WHERE event_type = '{GIT_COMMIT}'
+  AND time >= $1::date
+  AND time < ($2::date + interval '1 day')
+  {{execution_filter}}
 GROUP BY day
 ORDER BY day
 """
@@ -127,8 +149,7 @@ ORDER BY day
 # canonical_usage instead would drop those, reintroducing the split between
 # this number and the metric card's.
 _SESSIONS_QUERY = f"""
-WITH {_SCOPED_EVENTS},
-{CANONICAL_SESSION_USAGE_CTE}
+WITH {_WINDOW_STARTS}
 SELECT started_at::date AS day, COUNT(*) AS sessions
 FROM session_start
 GROUP BY day
@@ -141,8 +162,32 @@ ORDER BY day
 # pricing a day's mixed tokens at one model's rate is the #788 bug. Grouped
 # by START day because that is where the session's single authoritative
 # record belongs (see canonical_usage).
+#
+# `scoped_events` deliberately carries a member session's usage rows WHATEVER
+# their timestamps, including ones after the window ends. Narrowing them by
+# time would hand the canonical CTE a FRAGMENT of a session: a run beginning
+# inside the window whose summary arrives after it would be priced from its
+# placeholder turn rows, reporting 5 output tokens for a session that produced
+# 13,300. That is the bug this whole module exists to prevent, reappearing at
+# the window edge.
+#
+# It is narrowed by EVENT TYPE, which is a different thing and safe: those are
+# the only rows canonical usage reads, and the start day it is bucketed by
+# comes from `session_start` above, which saw every event type.
 _USAGE_QUERY = f"""
-WITH {_SCOPED_EVENTS},
+WITH {_WINDOW_STARTS},
+scoped_events AS (
+    -- The execution filter is applied AGAIN here, not just when choosing
+    -- sessions. Joining back on session_id alone assumes session ids are
+    -- globally unique, and no constraint enforces that: a retried or resumed
+    -- session id reused across executions would drag an unselected
+    -- execution's rows into a filtered heatmap.
+    SELECT a.session_id, a.event_type, a.data, a.time
+    FROM agent_events a
+    JOIN session_start w ON w.session_id = a.session_id
+    WHERE {CANONICAL_USAGE_EVENT_FILTER}
+      {{execution_filter}}
+),
 {CANONICAL_SESSION_USAGE_CTE}
 SELECT
     s.started_at::date AS day,
@@ -157,6 +202,11 @@ JOIN session_start s ON s.session_id = u.session_id
 GROUP BY day, u.model, (u.vendor_cost_usd IS NULL)
 ORDER BY day
 """
+
+
+def _count_by_day(rows: list[asyncpg.Record], column: str) -> dict[str, int]:
+    """Index one count-per-day result by ISO day string."""
+    return {row["day"].isoformat(): int(row[column]) for row in rows}
 
 
 @dataclass
@@ -290,15 +340,16 @@ class TimescaleHeatmapQuery:
     @staticmethod
     def _build_day_breakdown(
         sessions: int,
-        activity: asyncpg.Record | None,
+        executions: int,
+        commits: int,
         day_tokens: _DayTokens,
         day_cost: _DayCost,
     ) -> dict[str, float]:
         """Build one day's breakdown from its activity, tokens and priced cost."""
         return {
             "sessions": float(sessions),
-            "executions": float(activity["executions"]) if activity else 0.0,
-            "commits": float(activity["commits"]) if activity else 0.0,
+            "executions": float(executions),
+            "commits": float(commits),
             "cost_usd": float(day_cost.priced_cost.quantize(Decimal("0.0001"))),
             "tokens": float(day_tokens.total),
             "input_tokens": float(day_tokens.input_tokens),
@@ -326,13 +377,15 @@ class TimescaleHeatmapQuery:
             List of HeatmapDayBucket, one per day (zero-filled).
         """
         async with self._pool.acquire() as conn:
-            activity_rows = await self._fetch(conn, _ACTIVITY_QUERY, start, end, execution_ids)
+            execution_rows = await self._fetch(conn, _EXECUTIONS_QUERY, start, end, execution_ids)
+            commit_rows = await self._fetch(conn, _COMMITS_QUERY, start, end, execution_ids)
             session_rows = await self._fetch(conn, _SESSIONS_QUERY, start, end, execution_ids)
             usage_rows = await self._fetch(conn, _USAGE_QUERY, start, end, execution_ids)
 
         cost_by_day, tokens_by_day = self._price_by_day_and_model(usage_rows)
-        activity_by_day = {row["day"].isoformat(): row for row in activity_rows}
-        sessions_by_day = {row["day"].isoformat(): int(row["sessions"]) for row in session_rows}
+        executions_by_day = _count_by_day(execution_rows, "executions")
+        commits_by_day = _count_by_day(commit_rows, "commits")
+        sessions_by_day = _count_by_day(session_rows, "sessions")
 
         # Zero-fill all days in the range
         buckets: list[HeatmapDayBucket] = []
@@ -340,12 +393,16 @@ class TimescaleHeatmapQuery:
         while current <= end:
             day_str = current.isoformat()
             has_data = (
-                day_str in activity_by_day or day_str in sessions_by_day or day_str in tokens_by_day
+                day_str in executions_by_day
+                or day_str in commits_by_day
+                or day_str in sessions_by_day
+                or day_str in tokens_by_day
             )
             breakdown = (
                 self._build_day_breakdown(
                     sessions_by_day.get(day_str, 0),
-                    activity_by_day.get(day_str),
+                    executions_by_day.get(day_str, 0),
+                    commits_by_day.get(day_str, 0),
                     tokens_by_day.get(day_str, _DayTokens()),
                     cost_by_day.get(day_str, _DayCost()),
                 )

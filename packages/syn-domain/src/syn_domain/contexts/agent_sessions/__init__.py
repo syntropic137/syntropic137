@@ -48,6 +48,7 @@ from syn_domain.contexts.agent_sessions._shared import (
 )
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
 )
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
@@ -123,6 +124,7 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
+    "CANONICAL_USAGE_EVENT_FILTER",
     "AgentLaunch",
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
