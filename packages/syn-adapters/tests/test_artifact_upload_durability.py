@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 from minio.error import S3Error
+from urllib3.exceptions import MaxRetryError
 
 from syn_adapters.object_storage import MinioStorage, UploadError, minio_helpers
 from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
@@ -423,3 +424,66 @@ async def test_a_caller_bug_is_not_degraded_into_a_missing_uri() -> None:
         )
 
     assert repo.events == [], "nothing should have been saved"
+
+
+class _BuggyMinio(_LaggingMinio):
+    """A backend that works, driven by client code that does not.
+
+    `TypeError` stands for every way this adapter can be wrong about its own
+    call: a renamed keyword, a str where bytes belong, a None nobody checked.
+    It is raised from `put_object` because that is the deepest point the chain
+    reaches, and therefore the furthest a bug has to travel back up.
+    """
+
+    def put_object(self, *args: object, **kwargs: object) -> _PutResult:
+        raise TypeError("put_object() got an unexpected keyword argument 'metadata'")
+
+
+async def test_a_bug_below_the_port_is_not_degraded_into_a_missing_uri() -> None:
+    """Drive the real chain, break it in our own code, and hear about it.
+
+    The collector's sibling test injects a broken port and so never enters
+    `MinioArtifactStorage`, `MinioStorage` or `_do_upload` at all - which is
+    exactly why every converter in between could go on catching `Exception`
+    while that test stayed green. This one goes through all of them.
+
+    Both assertions matter. The TypeError escaping says the bug is audible;
+    the empty repository says it was audible BEFORE an artifact was written,
+    because an artifact saved with storage_uri=None is the silent degradation
+    the escape is supposed to prevent, not a partial success.
+    """
+    storage = _storage_for(_BuggyMinio())
+    repo = _FetchingRepository(storage)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await _collect_one(repo, storage)
+
+    assert repo.events == [], "a bug of ours must not write an artifact at all"
+    assert repo.uris == []
+
+
+class _UnreachableMinio(_LaggingMinio):
+    """MinIO is down, and the first call to notice is the bucket check."""
+
+    def bucket_exists(self, bucket_name: str) -> bool:
+        raise MaxRetryError(pool=None, url="/", reason=None)  # pyright: ignore[reportArgumentType]
+
+
+async def test_an_unreachable_backend_still_degrades_rather_than_crashes() -> None:
+    """The narrowing must not make an outage look like a bug either.
+
+    `upload` promises one failure type, but the bucket check runs before any
+    of the code that converts to it - so an unreachable backend used to reach
+    the collector as a raw transport error, which a narrowed `except` would
+    now let kill the phase. Keeping the artifact inline is the right answer to
+    a backend that is genuinely unavailable; it is only the wrong answer to a
+    bug, and this asserts the chain can still tell those apart.
+    """
+    storage = _storage_for(_UnreachableMinio())
+    repo = _FetchingRepository(storage)
+
+    await _collect_one(repo, storage)
+
+    assert repo.uris == [None]
+    (saved,) = repo.events
+    assert saved.content == CONTENT  # type: ignore[attr-defined]

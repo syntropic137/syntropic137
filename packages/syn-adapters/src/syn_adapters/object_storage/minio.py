@@ -247,9 +247,7 @@ class MinioStorage:
                 )
                 logger.info("Created MinIO bucket: %s", self._bucket_name)
         except BACKEND_FAILURES as e:
-            raise StorageError(
-                f"MinIO bucket {self._bucket_name} is not available: {e}"
-            ) from e
+            raise StorageError(f"MinIO bucket {self._bucket_name} is not available: {e}") from e
 
     async def upload(
         self,
