@@ -47,7 +47,7 @@ async def test_a_segfaulted_docker_client_is_named_in_the_reap_failure() -> None
     reason = await _reap_reason(-11)
 
     assert reason is not None
-    assert "exited -11 (SIGSEGV: Segmentation fault)" in reason
+    assert "exited -11 (SIGSEGV)" in reason
 
 
 async def test_an_unreaped_docker_client_is_not_named_a_signal() -> None:

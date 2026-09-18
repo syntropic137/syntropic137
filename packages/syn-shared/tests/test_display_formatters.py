@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import signal
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -380,9 +381,9 @@ class TestFormatExitCode:
             (0, "0"),
             (1, "1"),
             (127, "127"),
-            (-11, "-11 (SIGSEGV: Segmentation fault)"),
-            (-9, "-9 (SIGKILL: Killed)"),
-            (-15, "-15 (SIGTERM: Terminated)"),
+            (-11, "-11 (SIGSEGV)"),
+            (-9, "-9 (SIGKILL)"),
+            (-15, "-15 (SIGTERM)"),
             # Not SIGHUP: every isolation provider writes -1 for "no status
             # was ever collected", so decoding it would name a cause that
             # never happened.
@@ -393,6 +394,33 @@ class TestFormatExitCode:
     )
     def test_renders_expected_string(self, value: int | None, expected: str) -> None:
         assert format_exit_code(value) == expected
+
+    def test_the_host_c_library_cannot_reach_the_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The rendering must be the SAME STRING on every machine.
+
+        ``signal.strsignal`` is the tempting way to describe a signal and it
+        is C-library text: glibc returns ``"Segmentation fault"`` where macOS
+        returns ``"Segmentation fault: 11"``, and it is localised on top. A
+        rendering built from it makes these assertions pass on CI's Linux and
+        fail on a macOS checkout of the same commit - which is what #1331
+        fixed, and the reason it matters is that a developer who learns local
+        failures are noise stops reading them.
+
+        Pinning the expected string above cannot prove that on its own: it is
+        checked on one platform at a time, and on glibc the old rendering and
+        the new one differ only by text this machine happens to produce. So
+        sabotage the C library instead. If anything in ``format_exit_code``
+        consults it, that value appears in the output and this fails - on
+        every platform, including the one where the bug was invisible.
+        """
+        monkeypatch.setattr(signal, "strsignal", lambda _n: "PLATFORM PROSE")
+
+        rendered = format_exit_code(-11)
+
+        assert rendered == "-11 (SIGSEGV)"
+        assert "PLATFORM PROSE" not in rendered
 
     def test_a_number_that_is_no_signal_says_so_instead_of_raising(self) -> None:
         """``signal.Signals`` RAISES on an out-of-range number, and this runs on

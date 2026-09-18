@@ -324,8 +324,7 @@ def format_exit_code(exit_code: int | None) -> str:
     Value       Renders as             Means
     ==========  =====================  =====================================
     ``0``/``3`` ``"0"`` / ``"3"``      the process exited with that status
-    ``-11``     ``"-11 (SIGSEGV:      the process was killed by that signal
-                Segmentation fault)"``
+    ``-11``     ``"-11 (SIGSEGV)"``    the process was killed by that signal
     ``-1``      ``"-1 (no exit        no status was ever collected
                 status)"``
     ==========  =====================  =====================================
@@ -350,6 +349,17 @@ def format_exit_code(exit_code: int | None) -> str:
     path is worse than the bare number this replaces, so it is named for what
     it is instead.
 
+    The signal is named and NOT described. ``signal.strsignal`` is the
+    obvious way to add "Segmentation fault" after the name and it is the
+    wrong one: its text comes from the host C library, so glibc says
+    ``"Segmentation fault"`` where macOS says ``"Segmentation fault: 11"``,
+    and both are localised. Asserting on that renders a test green on CI's
+    Linux and red on a macOS checkout of the same commit - which is where
+    this landed (#1331), and it teaches people that a local failure means
+    nothing. ``Signals(n).name`` is Python's own number-to-name mapping and
+    is stable everywhere, so it is the whole rendering. Do not reintroduce a
+    description, from ``strsignal`` or from a hand-kept table beside it.
+
     Positive codes render exactly as before, so existing messages that carry
     one are unchanged.
 
@@ -369,4 +379,4 @@ def format_exit_code(exit_code: int | None) -> str:
         named = signal.Signals(signal_number)
     except ValueError:
         return f"{exit_code} (unknown signal {signal_number})"
-    return f"{exit_code} ({named.name}: {signal.strsignal(signal_number)})"
+    return f"{exit_code} ({named.name})"

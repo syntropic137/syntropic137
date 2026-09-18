@@ -103,7 +103,7 @@ async def test_the_handler_names_the_signal() -> None:
                 repos=[],
             )
 
-    assert "exit code -11 (SIGSEGV: Segmentation fault)" in str(excinfo.value)
+    assert "exit code -11 (SIGSEGV)" in str(excinfo.value)
 
 
 @pytest.mark.parametrize(

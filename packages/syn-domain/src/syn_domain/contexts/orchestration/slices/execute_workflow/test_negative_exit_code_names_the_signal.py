@@ -64,7 +64,7 @@ def test_the_segfault_that_lost_the_report_is_named_not_numbered() -> None:
     for text in (str(error), error.summary):
         # The number stays - it is what logs get grepped by - but it never
         # travels alone.
-        assert "exited -11 (SIGSEGV: Segmentation fault)" in text
+        assert "exited -11 (SIGSEGV)" in text
         # The command that died is still named, so the report says WHAT
         # segfaulted and not merely that something did.
         assert "find /workspace/repos" in text

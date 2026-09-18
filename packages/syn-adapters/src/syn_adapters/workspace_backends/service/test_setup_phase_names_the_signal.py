@@ -63,7 +63,7 @@ async def test_a_segfaulted_setup_is_logged_as_sigsegv(
         caplog,
     )
 
-    assert "exit=-11 (SIGSEGV: Segmentation fault)" in message
+    assert "exit=-11 (SIGSEGV)" in message
     assert "Secret-injection setup failed" in message
 
 
@@ -98,4 +98,4 @@ async def test_the_credential_removal_trail_names_the_signal() -> None:
     assert not outcome.succeeded
     assert outcome.attempts, "the trail must record the attempts it made"
     for attempt in outcome.attempts:
-        assert attempt == "exit=-11 (SIGSEGV: Segmentation fault)"
+        assert attempt == "exit=-11 (SIGSEGV)"
