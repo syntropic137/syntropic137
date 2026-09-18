@@ -38,9 +38,15 @@ it, so the storage decision can change without any caller changing with it.
 
 The tally is maintained in the SAME transaction as the insert it counts
 (see ``syn_adapters.events.store_write``). It therefore cannot drift from
-``agent_events``: either both land or neither does. ``BACKFILL_SQL`` is the
-definition of the tally and can be re-run against a truncated table at any
-time to prove that.
+``agent_events``: either both land or neither does.
+
+A derived table also has to be reconstructible, because the one thing worse
+than a slow number is a confident wrong one. ``rebuild`` is that: it discards
+the tally and recomputes it from ``agent_events``, and it is the only
+definition of what the rows should be - ``ensure_ready`` calls it rather than
+carrying a second copy of the same SELECT. A read model that survived a
+projection rebuild still holding yesterday's numbers is the failure this
+module is now built to prevent (#1322).
 """
 
 from __future__ import annotations
@@ -78,9 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_call_counts_execution
 ON {TABLE} (execution_id)
 """
 
-#: The definition of the tally, in one statement. Run once when the table is
-#: first created, so an install that already has history does not report every
-#: session as having made zero tool calls.
+#: The definition of the tally, in one statement. The only place that says what
+#: a stored row means, which is why ``rebuild`` runs exactly this and nothing
+#: re-derives the count anywhere else.
 BACKFILL_SQL = f"""
 INSERT INTO {TABLE} (session_id, execution_id, tool_calls)
 SELECT session_id, COALESCE(execution_id, $2), COUNT(*)
@@ -90,6 +96,18 @@ GROUP BY session_id, COALESCE(execution_id, $2)
 ON CONFLICT (session_id, execution_id) DO UPDATE
 SET tool_calls = EXCLUDED.tool_calls
 """
+
+#: Emptied with TRUNCATE rather than DELETE, and that choice is load-bearing:
+#: see ``rebuild``.
+_TRUNCATE_SQL = f"TRUNCATE TABLE {TABLE}"
+
+#: Cheap: one index probe that stops at the first row, and only asked at all
+#: when the tally is blank.
+_TALLY_IS_BLANK_SQL = f"SELECT NOT EXISTS (SELECT 1 FROM {TABLE})"
+
+#: "Is there anything to count?" - asked only of a blank tally, to tell an
+#: install that has never run a tool apart from one whose tally was wiped.
+_HISTORY_HAS_TOOL_CALLS_SQL = "SELECT EXISTS (SELECT 1 FROM agent_events WHERE event_type = $1)"
 
 _RECORD_SQL = f"""
 INSERT INTO {TABLE} (session_id, execution_id, tool_calls)
@@ -132,12 +150,25 @@ class SqlRow(Protocol):
     def __getitem__(self, key: str, /) -> object: ...
 
 
+class SqlTransaction(Protocol):
+    """An open transaction, released when the block exits."""
+
+    async def __aenter__(self) -> object: ...
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object, /) -> object: ...
+
+
 class SqlConnection(Protocol):
-    """The three things this module needs from a database connection.
+    """The four things this module needs from a database connection.
 
     Narrower than ``asyncpg.Connection`` on purpose, and satisfied by it: it is
     what lets a test assert WHICH table the read path queried against a double,
     rather than needing a live TimescaleDB to find out.
+
+    ``transaction`` is here because ``rebuild`` is not correct without one, and
+    a module that needs atomicity should say so rather than smuggling ``BEGIN``
+    through ``execute`` - which would silently commit a caller's open
+    transaction along with its own.
     """
 
     async def execute(self, query: str, /, *args: object) -> str: ...
@@ -145,6 +176,8 @@ class SqlConnection(Protocol):
     async def fetch(self, query: str, /, *args: object) -> Sequence[SqlRow]: ...
 
     async def fetchval(self, query: str, /, *args: object) -> object: ...
+
+    def transaction(self) -> SqlTransaction: ...
 
 
 @dataclass(frozen=True)
@@ -178,19 +211,62 @@ def tally(events: Iterable[tuple[str, str, str | None]]) -> list[ToolCallTally]:
     ]
 
 
-async def ensure_ready(conn: SqlConnection) -> None:
-    """Create the table, and backfill it once if this is the first time.
+async def rebuild(conn: SqlConnection) -> None:
+    """Throw the tally away and recompute it from ``agent_events``.
 
-    Backfilling only on creation is what keeps the one expensive scan of
-    ``agent_events`` to one, ever - asking "is the table empty?" instead would
-    re-scan on every startup of an install whose agents have never used a tool,
-    which is precisely the install that can least afford to be told it is fine.
+    The repair for a tally that is blank, stale or wrong - a table someone
+    truncated, a rebuild that wiped the read models, an import that wrote
+    events by some path that did not keep the count. Always safe to run: the
+    result depends on ``agent_events`` alone, never on what was there before,
+    so running it twice is running it once.
+
+    Atomic, so no reader ever sees the gap. TRUNCATE and the recount are one
+    transaction, which is why a caller repairing a live deployment does not
+    have to choose between a wrong number and no number.
+
+    WHY TRUNCATE AND NOT DELETE, which is the part that is easy to "simplify"
+    later and get wrong: TRUNCATE takes ACCESS EXCLUSIVE on the table, so a
+    concurrent writer blocks at its own ``record`` - and since ``record``
+    shares a transaction with the ``agent_events`` insert it counts, that
+    writer cannot commit either. Its rows are therefore invisible to the
+    recount below and its increment lands on top afterwards. DELETE takes a
+    weaker lock, lets that writer commit in the middle, and loses its
+    increment: the recount would overwrite the row from a snapshot taken
+    before the event existed.
     """
-    already_there = bool(await conn.fetchval(f"SELECT to_regclass('{TABLE}') IS NOT NULL"))
+    async with conn.transaction():
+        await conn.execute(_TRUNCATE_SQL)
+        await conn.execute(BACKFILL_SQL, TOOL_EXECUTION_COMPLETED, NO_EXECUTION)
+
+
+async def ensure_ready(conn: SqlConnection) -> None:
+    """Create the table if it is absent, and fill it if it is blank.
+
+    One rule, not two: a tally with no rows in it is rebuilt, whether this is
+    the first startup after the feature shipped or the first startup after
+    someone truncated the table. The earlier "backfill only when the table did
+    not exist" could not tell those apart, and answered the second with
+    silence - every session reporting zero tool calls, indefinitely, with
+    nothing in the logs and a number on the page that looked like a number.
+
+    What this costs: when the tally IS blank, one probe of ``agent_events``
+    for a single tool completion. That probe stops at the first matching row,
+    so the install it could actually scan to the end of is the one that has
+    never run a tool - and then it finds nothing, rebuilds nothing, and pays
+    it again next startup. Once per process against a table read thousands of
+    times per hour is the trade this whole module exists to make, in the other
+    direction.
+
+    What this does NOT catch is a tally that is populated and wrong - no
+    probe can, short of the recount itself. ``rebuild`` is the answer to that
+    one, and ``scripts/backfill/rebuild_tool_call_counts.py`` runs it.
+    """
     await conn.execute(CREATE_TABLE_SQL)
     await conn.execute(CREATE_INDEX_SQL)
-    if not already_there:
-        await conn.execute(BACKFILL_SQL, TOOL_EXECUTION_COMPLETED, NO_EXECUTION)
+    if not await conn.fetchval(_TALLY_IS_BLANK_SQL):
+        return
+    if await conn.fetchval(_HISTORY_HAS_TOOL_CALLS_SQL, TOOL_EXECUTION_COMPLETED):
+        await rebuild(conn)
 
 
 async def record(conn: SqlConnection, tallies: Sequence[ToolCallTally]) -> None:

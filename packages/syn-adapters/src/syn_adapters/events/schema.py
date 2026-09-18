@@ -58,9 +58,11 @@ class EventStoreSchema:
             await self._create_indexes(conn)
             await self._configure_compression(conn)
             # The tool-call tally the list endpoints read instead of counting
-            # compressed chunks (#1322). Backfills itself the first time, so an
-            # install that already has history does not start reporting every
-            # session as having made zero tool calls.
+            # compressed chunks (#1322). Fills itself whenever it is found
+            # blank - on the first startup after the feature shipped, and
+            # equally on the first startup after a rebuild truncated it - so an
+            # install with history never starts reporting every session as
+            # having made zero tool calls.
             await tool_call_counts.ensure_ready(conn)
 
         await self.validate(conn)

@@ -108,6 +108,23 @@ class _Row:
         return self._cells[key]
 
 
+class _Transaction:
+    """Remembers which statements were issued between enter and exit."""
+
+    def __init__(self, conn: _RecordingConnection) -> None:
+        self._conn = conn
+        self._opened_at = -1
+
+    async def __aenter__(self) -> _Transaction:
+        self._opened_at = len(self._conn.statements)
+        return self
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        assert self._opened_at >= 0, "left a transaction that was never entered"
+        self._conn.transactions.append(self._conn.statements[self._opened_at :])
+        return False
+
+
 class _RecordingConnection:
     """Records every statement, and serves rows only to the tally's table.
 
@@ -117,11 +134,20 @@ class _RecordingConnection:
     moment someone changed the query.
     """
 
-    def __init__(self, rows: Sequence[_Row] = (), *, table_exists: bool = True) -> None:
+    def __init__(
+        self,
+        rows: Sequence[_Row] = (),
+        *,
+        tally_is_blank: bool = False,
+        history_has_tool_calls: bool = True,
+    ) -> None:
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
+        #: One entry per COMMITTED transaction: the statements it contained.
+        self.transactions: list[list[str]] = []
         self._rows = list(rows)
-        self._table_exists = table_exists
+        self._tally_is_blank = tally_is_blank
+        self._history_has_tool_calls = history_has_tool_calls
 
     def _record(self, query: str, args: tuple[object, ...]) -> None:
         self.statements.append(query)
@@ -139,7 +165,14 @@ class _RecordingConnection:
 
     async def fetchval(self, query: str, *args: object) -> object:
         self._record(query, args)
-        return self._table_exists
+        # The two single-value questions ``ensure_ready`` asks, told apart by
+        # the table each is about - so neither has to be matched on its text.
+        if "agent_events" in query:
+            return self._history_has_tool_calls
+        return self._tally_is_blank
+
+    def transaction(self) -> _Transaction:
+        return _Transaction(self)
 
     @property
     def tables_read(self) -> set[str]:
@@ -221,26 +254,94 @@ async def test_recording_nothing_writes_nothing() -> None:
     assert conn.statements == []
 
 
-async def test_a_new_install_backfills_from_the_history_it_already_has() -> None:
-    """Without this, every existing session reports zero tool calls forever.
+# --------------------------------------------------------------------------
+# Getting the table into a state a reader can trust
+#
+# These drive a double and so can only say WHICH statements were issued. That
+# the statements produce the right rows - against a real Postgres, after a real
+# corruption, compared against the GROUP BY they are meant to equal - is
+# ``tests/integration/test_tool_call_counts_rebuild.py``.
+# --------------------------------------------------------------------------
 
-    The one scan of ``agent_events`` this fix is allowed: once, at the moment
-    the table is created.
-    """
-    conn = _RecordingConnection(table_exists=False)
+
+async def test_a_blank_tally_is_filled_from_the_history_already_there() -> None:
+    """Without this, every existing session reports zero tool calls forever."""
+    conn = _RecordingConnection(tally_is_blank=True)
 
     await tool_call_counts.ensure_ready(conn)
 
-    assert any("agent_events" in statement for statement in conn.statements), (
+    assert any(statement == tool_call_counts.BACKFILL_SQL for statement in conn.statements), (
         "an install with history was left with an empty tally"
     )
-    assert conn.args[-1][0] == TOOL_EXECUTION_COMPLETED
 
 
-async def test_an_install_that_already_has_the_table_never_scans_again() -> None:
+async def test_a_tally_that_has_rows_is_not_rebuilt_on_startup() -> None:
     """The scan is the cost being removed; paying it on every startup is not a fix."""
-    conn = _RecordingConnection(table_exists=True)
+    conn = _RecordingConnection(tally_is_blank=False)
 
     await tool_call_counts.ensure_ready(conn)
 
     assert not any("agent_events" in statement for statement in conn.statements)
+
+
+async def test_an_install_that_has_never_run_a_tool_is_not_rebuilt_forever() -> None:
+    """A blank tally is the right answer when there is nothing to count.
+
+    Rebuilding on the strength of "blank" alone would re-run the recount on
+    every startup of the install that has the least to gain from it.
+    """
+    conn = _RecordingConnection(tally_is_blank=True, history_has_tool_calls=False)
+
+    await tool_call_counts.ensure_ready(conn)
+
+    assert conn.transactions == [], "recounted an install with nothing to count"
+
+
+async def test_a_truncated_tally_is_rebuilt_rather_than_accepted() -> None:
+    """The regression this exists for (#1322).
+
+    Startup used to ask ``to_regclass`` - does the TABLE exist - and a table
+    truncated by a projection rebuild answers yes. So the read model came back
+    up reporting zero tool calls for every session, indefinitely, and the page
+    showed that zero as a fact. A blank tally is now a blank tally whatever
+    emptied it.
+    """
+    conn = _RecordingConnection(tally_is_blank=True)
+
+    await tool_call_counts.ensure_ready(conn)
+
+    assert not any("to_regclass" in statement for statement in conn.statements), (
+        "startup still decides by whether the table exists"
+    )
+    assert conn.transactions == [[tool_call_counts._TRUNCATE_SQL, tool_call_counts.BACKFILL_SQL]]
+
+
+async def test_rebuild_empties_and_recounts_in_one_transaction() -> None:
+    """Split across two, a reader between them sees a tally with no rows in it.
+
+    The repair for a WRONG tally is the only repair there is, so it has to be
+    one a live deployment can run - which means never publishing a blank.
+    """
+    conn = _RecordingConnection()
+
+    await tool_call_counts.rebuild(conn)
+
+    assert conn.transactions == [conn.statements], "rebuild left statements outside a transaction"
+    assert conn.statements == [tool_call_counts._TRUNCATE_SQL, tool_call_counts.BACKFILL_SQL]
+    assert conn.args[-1] == (TOOL_EXECUTION_COMPLETED, tool_call_counts.NO_EXECUTION)
+
+
+async def test_rebuild_empties_with_truncate_and_not_delete() -> None:
+    """DELETE would pass every other test here and lose concurrent increments.
+
+    TRUNCATE's ACCESS EXCLUSIVE lock is what stops a writer committing between
+    the empty and the recount; a writer that committed there would have its
+    event counted by neither, because the recount's snapshot predates it.
+    """
+    conn = _RecordingConnection()
+
+    await tool_call_counts.rebuild(conn)
+
+    assert conn.statements[0].startswith("TRUNCATE "), (
+        f"emptied the tally with {conn.statements[0]!r}, which does not lock out writers"
+    )
