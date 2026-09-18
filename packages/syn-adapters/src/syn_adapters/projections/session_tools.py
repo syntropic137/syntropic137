@@ -187,14 +187,21 @@ class SessionToolsProjection:
         """Get the database pool, lazily loading from event store if needed."""
         return _get_pool_impl(self)
 
-    async def get(self, session_id: str) -> list[ToolOperation]:
+    async def get(self, session_id: str) -> list[ToolOperation] | None:
         """Get all tool operations for a session.
 
         Args:
             session_id: The session ID to query
 
         Returns:
-            List of tool operations ordered by timestamp
+            Tool operations ordered by timestamp, ``[]`` for a session with
+            none recorded, or ``None`` when the timeline could not be read -
+            no database, or the query failed.
+
+            THE THIRD ANSWER IS THE POINT. A reader that only lists rows can
+            write ``or []`` and lose nothing; a reader that counts a phase's
+            work cannot, because zero operations is how a stalled phase looks
+            and an unreadable timeline is not evidence of one (#1332).
         """
         return await _get_session_tools_impl(
             self,

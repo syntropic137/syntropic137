@@ -70,20 +70,42 @@ def _last_push_at(operations: Sequence[TimelineRow]) -> datetime | None:
 
 def summarize_phase_activity(
     phase: PhaseExecutionDetail,
-    operations: Sequence[TimelineRow],
+    operations: Sequence[TimelineRow] | None,
     *,
     elapsed_seconds: float | None,
 ) -> PhaseActivityInfo:
     """The readings that tell a phase killed on its cap from one that hung.
+
+    ``operations`` is THREE-VALUED and the caller must keep it that way. A list
+    is the timeline as it was read, ``[]`` included - a phase can genuinely
+    make no calls. ``None`` means the timeline could not be read: the query
+    raised, no database answered, or the phase never had a session to record
+    against. Lane 2 fails soft, so that is a normal outcome rather than an
+    error, and the caller sees the difference because the alternative is this
+    function reporting an outage as a stall - the one verdict that tells an
+    operator to stop paying, invented from no evidence at all.
 
     ``elapsed_seconds`` is passed in, already resolved, rather than derived
     here: the phase reports the same number as ``duration_seconds`` one level
     up, and two derivations of one measurement are two things to keep in
     agreement.
     """
+    if operations is None:
+        # Everything the timeline would have told us is withheld; the budget
+        # and the elapsed time still stand, because they come from the
+        # execution record and an unreadable timeline says nothing about them.
+        # So "it reached its cap" remains answerable here, and only
+        # "was it busy or stuck" is refused.
+        return PhaseActivityInfo(
+            telemetry_available=False,
+            elapsed_seconds=elapsed_seconds,
+            timeout_seconds=phase.timeout_seconds,
+        )
+
     last_push = _last_push_at(operations)
 
     return PhaseActivityInfo(
+        telemetry_available=True,
         # Calls, not rows: a call is a start row and a completion row, so the
         # length of `operations` is about double the work (#1061).
         operations_count=len({call_identity(op) for op in operations}),

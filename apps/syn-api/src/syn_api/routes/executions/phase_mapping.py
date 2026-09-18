@@ -10,6 +10,14 @@ The three Lane 2 lookups (tool operations, session cost, capture rows) all
 fail soft, because none of them is domain truth: a phase whose telemetry is
 unreachable is still reported, with the enrichment absent rather than the
 read failed.
+
+Absent has to LOOK absent, though, and that is the harder half. Two of the
+three say so in their return type - ``None`` for "nobody could tell us", ``[]``
+for "we looked and there was nothing" - because the values they carry have real
+meanings at zero and at empty, so a soft failure answering zero is read as a
+measurement. Tool operations were the one that did not, and a phase whose
+timeline could not be read was served as a phase that did nothing: the stall
+verdict, invented out of an outage (#1332).
 """
 
 from __future__ import annotations
@@ -67,14 +75,32 @@ def _parse_dt(value: datetime | str | None) -> datetime | None:
 async def _load_phase_operations(
     manager: ProjectionManager,
     session_id: str,
-) -> list[ToolOperation]:
-    """Load tool operations for a session, returning [] on failure."""
+) -> list[ToolOperation] | None:
+    """This session's timeline rows, or ``None`` if Lane 2 could not be read.
+
+    THREE-VALUED, for the same reason ``_load_agent_session_ids`` below is:
+    ``[]`` is a timeline that was read and held nothing, ``None`` is a
+    timeline nobody could read. Returning ``[]`` for both was #1332's defect -
+    a phase whose telemetry was unreachable reported no operations and no
+    push, which is exactly what a stalled phase reports, so the feature built
+    to tell a timeout from a stall manufactured the stall verdict out of its
+    own outage. Wrong in the expensive direction: "stalled" is the reading
+    that says do not pay for this run again.
+
+    Failing soft is still right - a phase whose telemetry is unreachable is
+    reported, not failed - but soft is not the same as silent.
+    """
     try:
         tool_data = await manager.session_tools.get(session_id)
-        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
     except Exception:
         logger.exception("Failed to load tool ops for session %s", session_id)
-        return []
+        return None
+    # `None` from the projection is its own "could not read", not an empty
+    # timeline, and collapsing it here would undo the distinction one hop
+    # after it was made.
+    if tool_data is None:
+        return None
+    return [ToolOperation.model_validate(op, from_attributes=True) for op in tool_data]
 
 
 class _SessionCostData(NamedTuple):
@@ -170,7 +196,10 @@ async def _map_phase_detail(
     ``_load_agent_session_ids``, passed in rather than fetched here so the
     query runs once per execution instead of once per phase.
     """
-    ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
+    # A phase with no session id has no timeline to read, which is "we cannot
+    # see", not "it did nothing" - the same statement an unreachable query
+    # makes, and it must not arrive as an idle phase either.
+    ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else None
 
     if phase.session_id:
         sc = await _load_session_cost(manager, phase.session_id, phase)
@@ -223,10 +252,16 @@ async def _map_phase_detail(
                 for w in phase.observed_branches
             ]
         ),
-        operations=ops,
+        # The rows themselves stay a plain list: `activity.telemetry_available`
+        # below is the one place that says whether this list is short because
+        # nothing happened or because nothing could be read, and a second
+        # representation of that fact is a second thing to keep in agreement.
+        operations=ops or [],
         # Summarised here, where `ops` are still the projection dataclasses
         # that know how to identify a call. One hop later they are the API
-        # model and that rule is gone (#1262).
+        # model and that rule is gone (#1262). `ops` is passed WHOLE, `None`
+        # included: `or []` here would hand the summary an empty timeline and
+        # get back the stall reading that #1332 is about.
         activity=summarize_phase_activity(phase, ops, elapsed_seconds=duration_seconds),
     )
 

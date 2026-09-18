@@ -862,10 +862,48 @@ class PhaseActivityInfo(BaseModel):
     Every field is a READING, never a verdict. Nothing here says "stalled":
     that word is a judgement about intent, and these are four measurements
     that let a reader make it.
+
+    AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+    The activity readings come from Lane 2, which fails soft, and a lookup that
+    raised or found no database once produced zero operations and no push -
+    which is precisely the shape of a stall. The feature built to stop an
+    operator being told "do not pay for this again" on no evidence was
+    manufacturing exactly that signal out of its own outage.
+    ``telemetry_available`` says whether the timeline was read at all, and the
+    readings taken from it are null when it was not.
     """
 
-    operations_count: int = 0
+    telemetry_available: bool = False
+    """Whether this phase's Lane 2 timeline could be read at all.
+
+    False means NOTHING BELOW THAT COMES FROM THE TIMELINE WAS MEASURED - the
+    query raised, no database was reachable, or the phase never got a session
+    to record against. It is NOT a statement about the phase, which may have
+    been busy or stalled; it is a statement about this record.
+
+    It is a field of its own rather than being left to be inferred from a null
+    ``operations_count`` because ``last_push_at`` and
+    ``seconds_since_last_push`` cannot carry the distinction themselves: null
+    already means "no push was observed" there, and that is a real, and the
+    most expensive, reading. One flag answers for all three.
+
+    ``elapsed_seconds`` and ``timeout_seconds`` are unaffected - they come from
+    the execution record, not from telemetry - so a phase whose timeline is
+    unreadable can still be read against its cap. It is busy-versus-stalled
+    that is withheld, and only that.
+
+    It defaults to False so that an ``activity`` nobody summarised claims
+    nothing, rather than claiming an idle phase.
+    """
+
+    operations_count: int | None = None
     """Operations this phase performed, as ``phases[].operations`` records them.
+
+    ``None`` when ``telemetry_available`` is False, and ``0`` only when the
+    timeline was read and held nothing. Both are answers and they are different
+    answers; the sentinel that would merge them is not worth inventing, because
+    zero is already a real one - a phase whose process never got anywhere did
+    make no calls, and that says the failure is upstream of the agent.
 
     NOT ``len(operations)``, and the difference is not cosmetic: a tool call is
     two rows there, a start and a completion, so the list's length is about
@@ -889,6 +927,10 @@ class PhaseActivityInfo(BaseModel):
     reached the remote: the observation is written when the push is initiated
     (the pre-push hook, ADR-043), so this is when the phase last TRIED.
 
+    READ IT WITH ``telemetry_available``. The null above is an observation, and
+    it is only an observation when something observed: with the flag False
+    nothing looked, and no claim about pushing is being made here at all.
+
     Covers the legacy ``git_push_started``/``git_push_completed`` spellings as
     well as today's ``git_push``. A rule that knew one of the three would
     answer "never pushed" for a session recorded under another, which is the
@@ -905,7 +947,8 @@ class PhaseActivityInfo(BaseModel):
 
     ``None`` when nothing was pushed - ``elapsed_seconds`` is then the whole
     answer, because the silence is the entire phase - or when the phase has no
-    end to measure to.
+    end to measure to, or when ``telemetry_available`` is False and there was
+    no timeline to find a push in.
     """
 
     elapsed_seconds: float | None = None
