@@ -20,7 +20,7 @@ going up. Growing an excepted file is how an exception becomes permanent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -111,7 +111,7 @@ class PhaseFailure:
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
     about rather than one the caller names again alongside it."""
-    usage: PhaseUsage = PhaseUsage()
+    usage: PhaseUsage = field(default_factory=PhaseUsage)
     """What the failing phase had spent when it died (#1262).
 
     A SIXTH SINK, and the one the other five made the case for. The phase's
