@@ -38,6 +38,29 @@ class EventStoreSchema:
 
         In production: Run migrations before deploying. Auto-creation is
         disabled when skip_auto_create=True.
+
+    NO RUNNER APPLIES THAT MIGRATION (#1338).
+
+        "Single source of truth" above describes intent, not mechanism. Nothing
+        in this repository reads projection_stores/migrations/*.sql: the only
+        references to 002_agent_events.sql are docstrings and the drift tests in
+        tests/events/. There is no migration command, no justfile target and no
+        startup hook that executes it.
+
+        So the DDL in this class is not a development convenience that a
+        migration later supersedes - for agent_events it is the whole delivery
+        path, on a fresh install and on an existing one alike. The .sql file is
+        a specification that a test compares against.
+
+        Two consequences worth knowing before changing either:
+
+        1. Schema or index changes MUST land in BOTH files. Only the Python side
+           runs; only the SQL side is reviewed as the canonical schema. The
+           drift tests in tests/events/ exist to stop the two separating, and
+           they now cover indexes as well as columns.
+        2. skip_auto_create=True turns agent_events DDL off entirely with no
+           replacement. That is correct for a database whose schema is managed
+           out of band, and a guarantee of an empty schema for one that is not.
     """
 
     def __init__(self, *, skip_auto_create: bool = False) -> None:
@@ -86,7 +109,16 @@ class EventStoreSchema:
         """)
 
     async def _create_indexes(self, conn: asyncpg.Connection) -> None:
-        """Create indexes for common queries."""
+        """Create indexes for common queries.
+
+        Index set MUST match: projection_stores/migrations/002_agent_events.sql,
+        which carries the reasoning for each one. Nothing applies that migration
+        (see the class docstring), so this method is the only path by which any
+        of these indexes reaches a database - a new index added only to the .sql
+        file is a no-op everywhere.
+
+        Pinned by test_agent_events_index_set_reaches_a_fresh_install.py.
+        """
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_events_session
             ON agent_events (session_id, time DESC)
@@ -100,6 +132,32 @@ class EventStoreSchema:
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_events_type
             ON agent_events (event_type, time DESC)
+        """)
+
+        # The cost read paths pair an id with an event_type; the three indexes
+        # above all lead on one column and then on `time`, so none of them
+        # serves that pair (#1338). Uncompressed chunks only - see the migration.
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_session_type
+            ON agent_events (session_id, event_type, time DESC)
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_execution_type
+            ON agent_events (execution_id, event_type, time DESC)
+        """)
+
+        # Declared canonical in 002_agent_events.sql since that migration was
+        # written, and created here for the first time in #1338: it was the
+        # pre-existing drift the index test found on its first run, so until now
+        # no install had it. Listed last because it is the one index here that
+        # serves no query in this repository today - it is kept because the
+        # canonical schema declares it, and dropping a GIN index over every
+        # `data` payload is a write-throughput decision to take deliberately in
+        # both files rather than by leaving Python silently behind.
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_data
+            ON agent_events USING GIN (data)
         """)
 
     async def _configure_compression(self, conn: asyncpg.Connection) -> None:
