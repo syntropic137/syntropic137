@@ -163,9 +163,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # what its own task was.
         inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = inputs.get("repos", "")
-        repos = [u.strip() for u in repos_raw.split(",") if u.strip()] if repos_raw else []
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
+        # No empty-string special case: "".split(",") is [""], which the filter
+        # already drops, so the guard that used to sit here decided nothing.
+        repos = [u.strip() for u in inputs.get("repos", "").split(",") if u.strip()]
 
         # Each phase's wall-clock budget, keyed by phase id. Stated once, on
         # this event, and not restated by the phase that later consumes it, so

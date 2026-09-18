@@ -104,14 +104,16 @@ def _dispatched_inputs(task: str | None) -> dict[str, str]:
     )
 
 
-def _started(task: str | None) -> WorkflowExecutionStartedEvent:
+def _started(
+    task: str | None, inputs: dict[str, str] | None = None
+) -> WorkflowExecutionStartedEvent:
     return WorkflowExecutionStartedEvent(
         workflow_id=WORKFLOW_ID,
         execution_id=EXECUTION_ID,
         workflow_name="implement-verify-report",
         started_at=_STARTED_AT,
         total_phases=3,
-        inputs=_dispatched_inputs(task),
+        inputs=_dispatched_inputs(task) if inputs is None else inputs,
     )
 
 
@@ -123,14 +125,16 @@ class _StubProjectionManager:
     workflow_execution_detail: WorkflowExecutionDetailProjection
 
 
-async def _read_path(monkeypatch: pytest.MonkeyPatch, task: str | None) -> _StubProjectionManager:
+async def _read_path(
+    monkeypatch: pytest.MonkeyPatch, task: str | None, inputs: dict[str, str] | None = None
+) -> _StubProjectionManager:
     """Drive the real projection from a real start event and wire the routes."""
     from syn_api import _wiring
     from syn_api.routes.executions import queries
 
     store = InMemoryProjectionStore()
     projection = WorkflowExecutionDetailProjection(store)
-    await projection.on_workflow_execution_started(_started(task).model_dump())
+    await projection.on_workflow_execution_started(_started(task, inputs).model_dump())
 
     manager = _StubProjectionManager(store=store, workflow_execution_detail=projection)
 
@@ -144,12 +148,14 @@ async def _read_path(monkeypatch: pytest.MonkeyPatch, task: str | None) -> _Stub
 
 
 async def _served(
-    monkeypatch: pytest.MonkeyPatch, task: str | None = TASK
+    monkeypatch: pytest.MonkeyPatch,
+    task: str | None = TASK,
+    inputs: dict[str, str] | None = None,
 ) -> ExecutionDetailResponse:
     """`GET /executions/{id}` as an API client receives it."""
     from syn_api.routes.executions import queries
 
-    await _read_path(monkeypatch, task)
+    await _read_path(monkeypatch, task, inputs)
     return await queries.get_execution_endpoint(EXECUTION_ID)
 
 
@@ -256,3 +262,35 @@ async def test_repos_are_still_derived_from_the_kept_inputs(
     response = await _served(monkeypatch)
 
     assert response.repos == ["https://github.com/syntropic137/syntropic137"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_dispatched_with_no_repos_still_reports_its_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `repos` input reads back as no repos, not as one empty-string repo.
+
+    Pins the removal of the `if repos_raw else []` guard the projection used to
+    carry. `"".split(",")` is `[""]`, so it is the truthiness filter and not the
+    guard that empties this; the guard was a special case that decided nothing,
+    and this is what makes its absence safe rather than merely untested.
+
+    Read off the served response, because the guard sat upstream of five hops
+    that each re-list their fields by hand.
+    """
+    no_repos = ExecuteWorkflowHandler._merge_inputs(  # pyright: ignore[reportPrivateUsage]
+        ExecuteWorkflowCommand(
+            aggregate_id=WORKFLOW_ID,
+            execution_id=EXECUTION_ID,
+            inputs={"issue_number": "1307"},
+            task=TASK,
+        ),
+        _WorkflowWithDeclarations([DECLARED_DEFAULT]),  # pyright: ignore[reportArgumentType]
+    )
+    assert "repos" not in no_repos
+
+    response = await _served(monkeypatch, inputs=no_repos)
+
+    assert response.repos == []
+    assert response.task == TASK
+    assert response.inputs == no_repos
