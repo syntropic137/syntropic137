@@ -17,9 +17,8 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 # Runtime import: pydantic resolves the annotation below at class-construction
 # time, and the whole point of reusing the DOMAIN enum here is that the API and
 # the CLI cannot grow a second spelling of the same vocabulary (#1357).
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    FailureClassification,
-)
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import FailureClassification
 
 # ---------------------------------------------------------------------------
 # Result type
