@@ -263,6 +263,15 @@ export interface WorkflowExecutionSummary {
   total_cost_usd: number
 }
 
+/**
+ * Why a `failed` run failed: the machinery broke, or the work was refused (#1357).
+ *
+ * Aliased to the generated enum rather than restated, so a member added on the
+ * server is a compile error here instead of a string this UI silently renders
+ * as an unhandled default.
+ */
+export type FailureClassification = components['schemas']['FailureClassification']
+
 /** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
   /** Explicit naming for OTel correlation (ADR-028) */
@@ -281,6 +290,16 @@ export interface ExecutionListItem {
   duration_seconds: number | null
   duration_display: string
   tool_call_count: number
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
@@ -364,6 +383,16 @@ export interface ExecutionDetailResponse {
   unpriced_observation_count: number
   artifact_ids: string[]
   error_message: string | null
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   // Workspace info (ADR-021)

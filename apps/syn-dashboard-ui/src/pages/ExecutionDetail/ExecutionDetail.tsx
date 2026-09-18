@@ -141,7 +141,12 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Execution</h1>
-              <StatusBadge status={execution.status} size="lg" pulse={execution.status === 'running'} />
+              <StatusBadge
+                status={execution.status}
+                failureClassification={execution.failure_classification}
+                size="lg"
+                pulse={execution.status === 'running'}
+              />
             </div>
             <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
