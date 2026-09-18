@@ -355,7 +355,9 @@ class WorkflowExecutionProcessor:
                 phase_outputs,
             )
         elif todo.action == TodoAction.COMPLETE_PHASE:
-            await self._handle_complete_phase(todo, aggregate, phase_results, completed_phase_ids)
+            await self._handle_complete_phase(
+                todo, phase, aggregate, phase_results, completed_phase_ids
+            )
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
@@ -809,6 +811,7 @@ class WorkflowExecutionProcessor:
     async def _handle_complete_phase(
         self,
         todo: TodoItem,
+        phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
@@ -820,12 +823,21 @@ class WorkflowExecutionProcessor:
         it succeeded, before that is persisted, and before the runtime tears
         the workspace down. Every one of those is a point of no return, and the
         guard is only a guard on the near side of all four.
+
+        `phase` is here for the guard, which cannot tell an authored edit from
+        a build tool's side effect without the phase's own declaration (#1308).
+        Every other handler already took it; this one dropped it, which is why
+        the declaration had nowhere to arrive.
         """
         assert todo.phase_id is not None
         # FIRST, and on the real path rather than inside a try: nothing has
         # been popped, the workspace is still alive and the aggregate has not
         # been told this phase succeeded, so the raise IS the outcome (#1184).
-        await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
+        await refuse_to_complete_unsaved_phase(
+            self._runtime.live_workspaces,
+            todo,
+            delivers_repo_changes=phase.delivers_repo_changes,
+        )
 
         harvest = self._runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(

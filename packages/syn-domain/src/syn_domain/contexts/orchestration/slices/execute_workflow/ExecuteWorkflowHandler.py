@@ -481,6 +481,14 @@ class ExecuteWorkflowHandler:
                     timeout_seconds=phase.timeout_seconds,
                     clone_repos=phase.clone_repos,
                     can_open_pr=phase.can_open_pr,
+                    # Dropping this would put the unpushed-work gate back to
+                    # guessing what an uncommitted change means, which is
+                    # #1308 (a read-only phase failed for a Cargo.lock its own
+                    # `cargo check` rewrote). The default it would fall back to
+                    # is True, so the failure mode of forgetting is a phase
+                    # that is judged strictly rather than one that is not
+                    # judged at all.
+                    delivers_repo_changes=phase.delivers_repo_changes,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

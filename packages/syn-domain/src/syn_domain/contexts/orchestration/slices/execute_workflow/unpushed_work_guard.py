@@ -59,6 +59,55 @@ inside the gate against it. ``_checked`` is the single point where a result
 becomes readable output, so the discipline holds for commands nobody has
 written yet.
 
+WHAT COUNTS AS WORK IS WHAT THE PHASE COULD DO, NOT WHAT IT SAID (#1308). Git
+records who wrote a file and nothing else: a half-finished feature and a
+``Cargo.lock`` that ``cargo check`` rewrote while merely inspecting the
+toolchain arrive here as the same single line of ``status --porcelain``.
+Reading that line as work failed a bootstrap phase that had done its job
+correctly, quarantined the lockfile churn, and threw away an hour of
+already-pushed work behind it.
+
+There is no reading of the diff that fixes this, and a rule about filenames
+would be a guess in both directions - lockfile churn IS the deliverable of a
+dependency-bump phase, and a tool can dirty anything.
+
+ASKING THE PHASE DOES NOT FIX IT EITHER, which is the correction #1317 needed.
+``delivers_repo_changes`` is declared in the workflow definition, beside
+``clone_repos`` and ``can_open_pr``, where the agent cannot decline it - but
+it states what a phase INTENDS, and the gate needs to know what it CAN do.
+Every phase that declares False still holds ``Bash`` or ``Write``, so a gate
+that believed the declaration threw away an agent's genuine edit in precisely
+the case it was built for. An intention is not a guarantee and cannot be
+spent as one.
+
+SO THE EXEMPTION IS EARNED FROM THE WORKSPACE, NOT ASSERTED BY THE PHASE. A
+dirty path stops counting as work only when BOTH hold: the phase declared the
+churn is not its deliverable, AND the repository sits on a read-only mount, so
+the agent could not have authored anything in it. The second half is read out
+of ``/proc/self/mountinfo`` - the kernel's own account, which an agent holding
+an empty capability set can neither remount nor forge, and which the
+permission bits are not, since the agent OWNS this tree and may chmod it back
+at will. With the second half missing the gate is exactly what #1184 built.
+
+NOTHING MOUNTS THEM READ-ONLY YET, so #1308's incident still fails its phase
+and this is the honest state of it: the loss the exemption would have caused
+is worse than the failure it would have prevented. The remaining half belongs
+to provisioning - repositories cloned outside the agent-writable mount and
+bound back in read-only, build caches and output somewhere writable,
+dependency commands run frozen - and it cannot be done from inside the
+workspace at all, so it lands with the container's creation, in
+agentic-primitives and the image, not here. This gate needs no change when it
+does: `_write_protected` simply starts finding repositories.
+
+A COMMIT IS AN AUTHORING ACT AND IS ALWAYS WORK. No build tool writes one, so
+``delivers_repo_changes`` does not reach unpushed commits at all: a phase that
+declares False and commits anyway still fails, still quarantines, and still
+says where the work went. What the declaration decides is narrower - whether an
+UNCOMMITTED change, by itself, is evidence of anything. False does not exempt a
+path and does not make the files invisible: when a phase holds commits too, the
+quarantine still captures the whole working tree, because by then the phase has
+demonstrably authored something and every byte beside it is worth keeping.
+
 SCOPE, stated because it is a real limit. Repositories are the ones cloned
 directly under ``/workspace/repos``. Work committed inside a SUBMODULE of one
 of those is DETECTED - the superproject reports a modified gitlink, so the
@@ -94,6 +143,21 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: The kernel's own account of what is mounted where, and the only evidence
+#: here an agent cannot manufacture: writing it needs a mount, mounting needs
+#: CAP_SYS_ADMIN, and a workspace agent has no capabilities at all. Preferred
+#: over `mount` and `findmnt`, neither of which the image promises to ship.
+_MOUNT_TABLE: Final[str] = "/proc/self/mountinfo"
+
+#: The mount option that means the filesystem refuses every write, whatever
+#: the permission bits underneath it say.
+_READ_ONLY_OPTION: Final[str] = "ro"
+
+#: mountinfo's fixed prefix: id, parent, dev, root, mount point, options. Any
+#: line shorter than this is not one of its records.
+_MOUNT_FIELDS: Final[int] = 6
+
 
 #: Namespace for quarantined work. Deliberately outside refs/heads and
 #: refs/tags: nothing fetches it by default, no PR shows it, and no reviewer is
@@ -150,6 +214,8 @@ class GitWorkspace(Protocol):
 async def refuse_to_complete_unsaved_phase(
     workspaces: Mapping[str, GitWorkspace],
     todo: TodoItem,
+    *,
+    delivers_repo_changes: bool,
 ) -> None:
     """Refuse to complete a phase that is holding work its teardown would erase.
 
@@ -160,13 +226,23 @@ async def refuse_to_complete_unsaved_phase(
     path downstream, from any other phase failure (#1184). Called after either,
     the guard can still detect the loss but can no longer prevent it.
 
-    The caller hands over the live workspace map and the to-do item and needs
-    to know nothing else - which workspace belongs to the phase, and what an
-    absent one means, are decided here. ABSENCE IS NOT A FAILURE, and that is a
-    verdict rather than an oversight: a phase with no workspace is holding
-    nothing that dying could erase, so there is nothing to save and nothing to
-    refuse. Contrast a workspace that is present but will not answer, which
+    The caller hands over the live workspace map, the to-do item and the
+    completing phase's own declaration, and needs to know nothing else - which
+    workspace belongs to the phase, and what an absent one means, are decided
+    here. ABSENCE IS NOT A FAILURE, and that is a verdict rather than an
+    oversight: a phase with no workspace is holding nothing that dying could
+    erase, so there is nothing to save and nothing to refuse. Contrast a
+    workspace that is present but will not answer, which
     `quarantine_unpushed_work` treats as the failure it is.
+
+    Args:
+        workspaces: Live workspaces, by phase id.
+        todo: The COMPLETE_PHASE item naming the phase at stake.
+        delivers_repo_changes: What that phase's definition declares about
+            repository changes. Required rather than defaulted, because a hop
+            that forgot it would silently restore #1308. Necessary for the
+            exemption and not sufficient for it: what the phase was ABLE to
+            write is established here, from the workspace.
 
     Raises:
         UnpushedWorkQuarantinedError: as `quarantine_unpushed_work`.
@@ -176,7 +252,12 @@ async def refuse_to_complete_unsaved_phase(
     workspace = workspaces.get(phase_id) if phase_id is not None else None
     if phase_id is None or workspace is None:
         return
-    await quarantine_unpushed_work(workspace, execution_id=todo.execution_id, phase_id=phase_id)
+    await quarantine_unpushed_work(
+        workspace,
+        execution_id=todo.execution_id,
+        phase_id=phase_id,
+        delivers_repo_changes=delivers_repo_changes,
+    )
 
 
 async def quarantine_unpushed_work(
@@ -184,6 +265,7 @@ async def quarantine_unpushed_work(
     *,
     execution_id: str,
     phase_id: str,
+    delivers_repo_changes: bool,
 ) -> None:
     """Fail the phase if it is holding work the workspace's death would erase.
 
@@ -192,6 +274,15 @@ async def quarantine_unpushed_work(
     at all (a bootstrap that only reports, a verify that only reads). Silence
     here means "nothing is being lost", and - because every command it relies
     on is checked - never "nothing was checked".
+
+    ``delivers_repo_changes`` NARROWS what "nothing" can mean for this phase;
+    it does not decide it (#1308). With it False, a dirty tree is silence only
+    in a repository this workspace mounted read-only, where the phase could
+    not have authored the change whatever it intended. Everywhere else - which
+    is everywhere, until provisioning mounts them read-only - a dirty tree is
+    work, exactly as it was before the declaration existed. Unpushed commits
+    are work under every combination of the two. See the module docstring for
+    why an intention cannot be spent as a guarantee.
 
     Raises:
         UnpushedWorkQuarantinedError: work was found. It has already been
@@ -207,8 +298,17 @@ async def quarantine_unpushed_work(
     ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
     quarantined: list[QuarantinedWork] = []
     try:
-        for repo in await _repositories(workspace):
-            work = await _unsaved_work(workspace, repo)
+        repos = await _repositories(workspace)
+        # BOTH HALVES, OR NEITHER (#1308). The declaration is asked first only
+        # because it is free: a phase that delivers repository changes is
+        # judged strictly whatever it was mounted on, and never pays for the
+        # mount table. A phase that disclaims them still has to be shown
+        # incapable, repository by repository.
+        protected = (
+            frozenset() if delivers_repo_changes else await _write_protected(workspace, repos)
+        )
+        for repo in repos:
+            work = await _unsaved_work(workspace, repo, uncommitted_is_work=repo not in protected)
             if work is not None:
                 quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
     except WorkspaceInspectionFailedError as unreadable:
@@ -638,8 +738,74 @@ async def _repositories(workspace: GitWorkspace) -> list[str]:
     return sorted(line.strip()[: -len(suffix)] for line in found.splitlines() if line.strip())
 
 
-async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | None:
-    """What this repository holds that the remote does not, or None if nothing."""
+def _read_only_mount(mount_table: str, path: str) -> bool:
+    """Whether the filesystem under ``path`` refuses writes, per mountinfo.
+
+    The DEEPEST mount point containing the path is the one that governs it: a
+    writable mount nested inside a read-only one is writable, and stopping at
+    the first match would report the opposite. Where two lines mount the same
+    point, the later one is the one in force.
+
+    A line this cannot parse is skipped rather than guessed at. The verdict is
+    only ever used to WEAKEN the gate, so every uncertainty here resolves to
+    "writable", which is the answer that keeps work.
+    """
+    governing = ""
+    deepest = -1
+    for line in mount_table.splitlines():
+        fields = line.split(" ")
+        if len(fields) < _MOUNT_FIELDS:
+            continue
+        mount_point, options = fields[4], fields[5]
+        stem = mount_point.rstrip("/")
+        if path != stem and not path.startswith(f"{stem}/"):
+            continue
+        depth = stem.count("/")
+        if depth >= deepest:
+            deepest, governing = depth, options
+    return _READ_ONLY_OPTION in governing.split(",")
+
+
+async def _write_protected(workspace: GitWorkspace, repos: list[str]) -> frozenset[str]:
+    """Of these repositories, the ones the phase was unable to write to.
+
+    This is the evidence half of the #1308 exemption, and it is evidence
+    rather than testimony: a read-only mount is a property of the container
+    the phase ran in, fixed before the agent started and beyond its reach
+    afterwards. Read once for the whole workspace, because one mount table
+    covers every repository in it.
+
+    NOT ``_checked``, which is the second and last deliberate exception to
+    this module's rule, alongside ``_push``. The rule exists because reading
+    an unanswered command as "clean" turns "I could not look" into "I looked
+    and it was fine". Here the direction is reversed: a mount table nobody
+    could read is no evidence, no evidence exempts nothing, and the phase is
+    then judged exactly as strictly as it would have been without this call.
+    Failing the gate instead would break every backend that cannot cat a file
+    in order to protect nothing.
+    """
+    result = await workspace.execute(["cat", _MOUNT_TABLE])
+    if not result.success or result.exit_code != 0:
+        logger.info(
+            "Could not read %s in this workspace (exit %d), so no repository can be "
+            "shown to have been write-protected. Every uncommitted change is judged "
+            "as work, which is this gate's default.",
+            _MOUNT_TABLE,
+            result.exit_code,
+        )
+        return frozenset()
+    return frozenset(repo for repo in repos if _read_only_mount(result.stdout, repo))
+
+
+async def _unsaved_work(
+    workspace: GitWorkspace, repo: str, *, uncommitted_is_work: bool
+) -> _UnsavedWork | None:
+    """What this repository holds that the remote does not, or None if nothing.
+
+    ``uncommitted_is_work`` is the caller's verdict on the dirty tree, not a
+    question to be re-litigated here - see `quarantine_unpushed_work` for what
+    it takes to make it False. Commits are unaffected by it either way.
+    """
     status = await _git(workspace, repo, "status", "--porcelain")
     tips = await _git(
         workspace, repo, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"
@@ -666,9 +832,32 @@ async def _unsaved_work(workspace: GitWorkspace, repo: str) -> _UnsavedWork | No
         unpushed = set(reachable.split())
 
     files = tuple(line.rstrip() for line in status.splitlines() if line.strip())
-    if not unpushed and not files:
+    # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
+    # evidence of work unless the phase both disclaimed it and was unable to
+    # write it, in which case the same line is a build tool that dirtied a
+    # tree somebody else's process owns. Commits are untouched by this and
+    # are read as work either way - see the module docstring.
+    unsaved_files = files if uncommitted_is_work else ()
+    if not unpushed and not unsaved_files:
+        if files:
+            # Said out loud rather than dropped: the tree IS about to be
+            # destroyed, and an operator reading this phase's logs after a
+            # surprising rebuild deserves to see which paths the phase's own
+            # tooling had rewritten.
+            logger.info(
+                "Leaving %d uncommitted path(s) in %s to the workspace: this phase "
+                "declares it delivers no repository changes, and could not have "
+                "written them - the repository is mounted read-only. Paths: %s",
+                len(files),
+                repo,
+                ", ".join(files),
+            )
         return None
 
+    # `files`, NOT `unsaved_files`. Reaching here means the phase is holding
+    # commits, so it authored something and the whole tree goes into the
+    # quarantine `git add --all` builds; reporting a subset of what was saved
+    # would describe a commit nobody could then read.
     # HEAD is a parent whenever it exists, even when it is fully pushed: it is
     # what makes an uncommitted-changes-only snapshot diffable against the
     # branch it came from.
