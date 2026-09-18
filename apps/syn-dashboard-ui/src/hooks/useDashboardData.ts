@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { getMetrics, listWorkflows } from '../api/client'
 import type { MetricsResponse, WorkflowSummary } from '../types'
+import { ifStillWanted } from './serialRefreshLoop'
 import { useLiveRefresh } from './useLiveRefresh'
 import { useSerialRefresh } from './useSerialRefresh'
 
@@ -53,15 +54,9 @@ export function useDashboardData(): UseDashboardDataResult {
   const fetchMetrics = useCallback(
     (signal: AbortSignal): Promise<void> =>
       getMetrics(undefined, signal)
-        .then((next) => {
-          if (!signal.aborted) setMetrics(next)
-        })
-        .catch((error) => {
-          if (!signal.aborted) console.error(error)
-        })
-        .finally(() => {
-          if (!signal.aborted) setLoading(false)
-        }),
+        .then(ifStillWanted(signal, (next: MetricsResponse) => setMetrics(next)))
+        .catch(ifStillWanted(signal, (error: unknown) => console.error(error)))
+        .finally(ifStillWanted<void>(signal, () => setLoading(false))),
     [],
   )
 

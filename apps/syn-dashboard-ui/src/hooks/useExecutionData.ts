@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getArtifact } from '../api/artifacts'
 import { getExecution } from '../api/executions'
+import { ifStillWanted } from './serialRefreshLoop'
 import { useExecutionStream } from './useExecutionStream'
 import { useLiveTimer } from './useLiveTimer'
 import { RUNNING_POLL_INTERVAL_MS, useSerialRefresh } from './useSerialRefresh'
@@ -56,29 +57,26 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
   const isRunning = execution?.status === 'running'
   const now = useLiveTimer(isRunning)
 
-  // `signal` aborts when the execution being viewed changes. Every branch below
-  // checks it, because all three would otherwise describe the PREVIOUS
-  // execution: its data under this one's id, its failure, or a settled state
-  // that belongs to a request this view is no longer waiting on.
+  // `signal` aborts when the execution being viewed changes, and all three
+  // handlers are wrapped because all three would otherwise describe the
+  // PREVIOUS execution: its data under this one's id, its failure, or a settled
+  // state that belongs to a request this view is no longer waiting on.
   const fetchExecution = useCallback(
     (signal: AbortSignal): Promise<void> => {
       if (!executionId) return Promise.resolve()
       return getExecution(executionId, signal)
-        .then((exec) => {
-          if (signal.aborted) return
-          setExecution(exec)
-          // A poll that succeeds clears the last one's failure. Without this the
-          // first transient 502 in a run latched `error` for the life of the
-          // page, and the detail view rendered "Execution not found" on top of
-          // execution data that was still refreshing underneath it (#1048).
-          setError(null)
-        })
-        .catch((err) => {
-          if (!signal.aborted) setError(err.message)
-        })
-        .finally(() => {
-          if (!signal.aborted) setLoading(false)
-        })
+        .then(
+          ifStillWanted(signal, (exec: ExecutionDetailResponse) => {
+            setExecution(exec)
+            // A poll that succeeds clears the last one's failure. Without this the
+            // first transient 502 in a run latched `error` for the life of the
+            // page, and the detail view rendered "Execution not found" on top of
+            // execution data that was still refreshing underneath it (#1048).
+            setError(null)
+          }),
+        )
+        .catch(ifStillWanted(signal, (err: Error) => setError(err.message)))
+        .finally(ifStillWanted<void>(signal, () => setLoading(false)))
     },
     [executionId],
   )

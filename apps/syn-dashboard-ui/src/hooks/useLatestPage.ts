@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
+import { ifStillWanted } from './serialRefreshLoop'
 import { useSerialRefresh } from './useSerialRefresh'
 
 const EMPTY_PAGE: ListPage<never> = { rows: [], total: 0, statusCounts: {}, excludedUndated: 0 }
@@ -64,21 +65,15 @@ export function useLatestPage<TRow>(
   const fetchLatest = useCallback(
     (signal: AbortSignal) =>
       fetchPage(query, signal)
-        .then((next) => {
-          if (!signal.aborted) setResult(next)
-        })
-        .catch((error) => {
-          // Including the abort itself: the request was cancelled on purpose,
-          // and reporting it as a failure of this list would be a lie about a
-          // query nobody asked for any more.
-          if (!signal.aborted) console.error(error)
-        })
-        .finally(() => {
-          // Left loading on purpose when overtaken. The replacement is what
-          // this list is waiting for now, and clearing the flag here would
-          // show the previous query's rows as though they were settled.
-          if (!signal.aborted) setLoading(false)
-        }),
+        .then(ifStillWanted(signal, (next: ListPage<TRow>) => setResult(next)))
+        // The abort itself included: the request was cancelled on purpose, and
+        // reporting it as a failure of this list would be a lie about a query
+        // nobody asked for any more.
+        .catch(ifStillWanted(signal, (error: unknown) => console.error(error)))
+        // Left loading on purpose when overtaken. The replacement is what this
+        // list is waiting for now, and clearing the flag would show the
+        // previous query's rows as though they were settled.
+        .finally(ifStillWanted<void>(signal, () => setLoading(false))),
     [fetchPage, query],
   )
 

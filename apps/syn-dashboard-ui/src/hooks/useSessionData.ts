@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
+import { ifStillWanted } from './serialRefreshLoop'
 import { useLiveTimer } from './useLiveTimer'
 import { RUNNING_POLL_INTERVAL_MS, useSerialRefresh } from './useSerialRefresh'
 import { isTerminalSessionStatus } from '../utils/terminalStatus'
@@ -50,19 +51,22 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
       }, FETCH_TIMEOUT_MS)
 
       return getSession(sessionId, controller.signal)
-        .then((data) => {
-          if (signal.aborted) return
-          setSession(data)
-          setError(null)
-          setLoading(false)
-        })
-        .catch((err) => {
-          // Abandoned by the loop: not a failure, and about a session nobody
-          // is looking at any more.
-          if (signal.aborted) return
-          setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
-          setLoading(false)
-        })
+        .then(
+          ifStillWanted(signal, (data: SessionResponse) => {
+            setSession(data)
+            setError(null)
+            setLoading(false)
+          }),
+        )
+        // Abandoned by the loop: not a failure, and about a session nobody is
+        // looking at any more - so the wrapper covers this handler too.
+        .catch(
+          ifStillWanted(signal, (err: Error) => {
+            setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
+            setLoading(false)
+          }),
+        )
+        // Not wrapped: the timer has to be cleared whatever the answer was.
         .finally(() => {
           clearTimeout(timeoutId)
         })

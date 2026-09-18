@@ -60,11 +60,12 @@ export interface SerialRefreshOptions {
    *
    *   - pass it to the request, so the server stops computing an answer nobody
    *     will read;
-   *   - check `signal.aborted` before applying anything, INCLUDING an error. It
+   *   - apply nothing the signal has abandoned, INCLUDING an error. `aborted`
    *     is true exactly when what arrived is about something the caller has
    *     stopped looking at, so applying it renders one page's data under
    *     another page's controls, and reporting the abort itself shows the user
-   *     a failure that did not happen.
+   *     a failure that did not happen. `ifStillWanted` below is that rule; use
+   *     it rather than restating it per handler.
    */
   fetch: (signal: AbortSignal) => Promise<void>
   /**
@@ -73,6 +74,26 @@ export interface SerialRefreshOptions {
    * re-times the next poll; it never starts a second one.
    */
   pollIntervalMs: number | null
+}
+
+/**
+ * Wrap a handler so it runs only while its answer is still wanted.
+ *
+ * An abandoned request still answers - with a value, with a rejection, or just
+ * by finishing - and none of that describes what the caller is looking at now.
+ * The guard therefore belongs on every handler, including the failure ones,
+ * which is precisely why it should not be written out at each of them: the
+ * handler that gets forgotten is never the happy path, and a `catch` that
+ * reports a deliberate abort as an error is indistinguishable, on screen, from
+ * the endpoint being down.
+ */
+export function ifStillWanted<T>(
+  signal: AbortSignal,
+  apply: (value: T) => void,
+): (value: T) => void {
+  return (value) => {
+    if (!signal.aborted) apply(value)
+  }
 }
 
 export interface SerialRefreshLoop {
