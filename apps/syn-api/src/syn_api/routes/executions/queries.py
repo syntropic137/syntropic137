@@ -358,6 +358,7 @@ def _to_execution_summary(
         total_output_tokens=s.total_output_tokens,
         total_cache_creation_tokens=s.total_cache_creation_tokens,
         total_cache_read_tokens=s.total_cache_read_tokens,
+        failure_classification=s.failure_classification,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
@@ -430,6 +431,7 @@ async def get(
             unknown_duration_phase_count=duration.unknown_phase_count,
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
+            failure_classification=detail.failure_classification,
             repos=list(detail.repos),
         )
     )
@@ -533,6 +535,7 @@ async def get_detail(
             started_at=detail.started_at,
             completed_at=detail.completed_at,
             error_message=detail.error_message,
+            failure_classification=detail.failure_classification,
             repos=list(detail.repos),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
@@ -574,6 +577,7 @@ async def list_active(
                     cost_by_execution, s.workflow_execution_id
                 ).unpriced_observation_count,
                 error_message=s.error_message,
+                failure_classification=s.failure_classification,
                 repos=list(s.repos),
             )
             for s in active

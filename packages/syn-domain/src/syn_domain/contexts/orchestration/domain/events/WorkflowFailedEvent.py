@@ -8,8 +8,9 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    FailureClassification,
 )
 
 
@@ -29,6 +30,35 @@ class WorkflowFailedEvent(DomainEvent):
     failed_phase_id: str | None = None
     error_message: str
     error_type: str | None = None
+
+    # WHAT KIND OF FAILURE THIS WAS (#1357), and the field every failure
+    # number is computed from.
+    #
+    # `error_type` is the exception's CLASS NAME and answers a different
+    # question badly: `PhaseReportedFailureError` is what a correct refusal
+    # raises AND what an unreadable report raises, `RuntimeError` is what a
+    # non-zero exit raises, and no tally can be built on either. This names
+    # the distinction instead of leaving it to be re-derived from prose -
+    # which is what it was, inside `error_message`, readable by a human and
+    # by nothing else.
+    #
+    # DEFAULTS TO `UNCLASSIFIED`, WHICH IS THE REPLAY CONTRACT. Every event
+    # written before this field existed carries no such key, and pydantic
+    # gives those exactly this value: they load, they do not crash, and they
+    # claim nothing about a run nobody classified. A live failure never
+    # reaches this default - `fail_execution` always states it - so
+    # `unclassified` in the store means "written before #1357" and means
+    # nothing else.
+    #
+    # WHY NOT A NEW TERMINAL STATUS instead. `failed` is what happened to the
+    # run and stays true for every value here: it did not deliver, and every
+    # consumer that branches on terminality - the realtime sentinel, the
+    # trigger guards, reconciliation - is right to treat all of them alike.
+    # Splitting the status would change the meaning of `status = failed` for
+    # every one of them to fix a question none of them asks, and would leave
+    # historical rows claiming a status the new vocabulary has no word for. A
+    # field beside it adds the answer without moving the question.
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
 
     # How long failed_phase_id had been running when the failure was caught.
     # None when no phase was in flight (e.g. failure between phases).

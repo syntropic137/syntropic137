@@ -658,9 +658,13 @@ class WorkflowExecutionProcessor:
             # same reason - see `AgentVerdict`.
             verdict = result.stream_result.verdict
             if verdict.refuses_completion:
-                refusal = verdict.refusal(phase_id=todo.phase_id)
-                logger.error(refusal)
-                raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
+                # The verdict goes in whole, not a message rendered here: it
+                # carries both what an operator reads and whether this is the
+                # agent's own refusal or a platform failure (#1357), and the
+                # error is the only thing that reaches the tally.
+                refused = PhaseReportedFailureError(phase_id=todo.phase_id, verdict=verdict)
+                logger.error(str(refused))
+                raise refused
 
             if result.command.exit_code != 0:
                 reason = result.stream_result.error_reason

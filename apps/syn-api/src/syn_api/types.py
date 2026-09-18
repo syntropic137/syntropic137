@@ -14,6 +14,13 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
+# Runtime import: pydantic resolves the annotation below at class-construction
+# time, and the whole point of reusing the DOMAIN enum here is that the API and
+# the CLI cannot grow a second spelling of the same vocabulary (#1357).
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -466,6 +473,21 @@ class ExecutionSummary(BaseModel):
     """
     tool_call_count: int = 0
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says whether that was the
+    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
+    success=false` and being recorded faithfully (`correct_refusal`) - the
+    system working. `unclassified` is a run that ended before anything
+    recorded the difference, and is what every failure predating the field
+    reads as.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -502,6 +524,21 @@ class ExecutionDetail(BaseModel):
     """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says whether that was the
+    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
+    success=false` and being recorded faithfully (`correct_refusal`) - the
+    system working. `unclassified` is a run that ended before anything
+    recorded the difference, and is what every failure predating the field
+    reads as.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -1080,6 +1117,21 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says whether that was the
+    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
+    success=false` and being recorded faithfully (`correct_refusal`) - the
+    system working. `unclassified` is a run that ended before anything
+    recorded the difference, and is what every failure predating the field
+    reads as.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
