@@ -42,14 +42,21 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
     async def stream(
         self,
         handle: IsolationHandle,
-        _command: list[str],
+        command: list[str],  # noqa: ARG002
         *,
-        _timeout_seconds: int | None = None,
-        _working_directory: str | None = None,
-        _environment: dict[str, str] | None = None,
-        _wrapper_name: str | None = None,
+        timeout_seconds: int | None = None,  # noqa: ARG002
+        working_directory: str | None = None,  # noqa: ARG002
+        environment: dict[str, str] | None = None,  # noqa: ARG002
+        wrapper_name: str | None = None,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Stream mock output lines.
+
+        The unused parameters are named as `EventStreamPort` names them, with
+        `noqa` rather than an underscore prefix, because `ManagedWorkspace`
+        passes them BY KEYWORD: an underscore-prefixed parameter is a different
+        keyword, so this adapter could not be streamed through at all
+        (`TypeError: unexpected keyword argument 'timeout_seconds'`). The
+        recording adapter beside it already spells them this way.
 
         Args:
             handle: Isolation handle
