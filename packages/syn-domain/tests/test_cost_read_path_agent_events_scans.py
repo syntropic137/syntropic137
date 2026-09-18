@@ -23,6 +23,13 @@ written out per endpoint, and the test fails if a read path scans for
 something not on the list - an honest acceptance criterion that also stops the
 remainder being forgotten, which is what an overclaiming one is for.
 
+Each path is driven TWICE, once per data branch. All five are written as
+"prefer the ``session_summary``, fall back to ``token_usage``", and a fixture
+that always produces a summary measures only the arm a finished session takes -
+leaving the arm every LIVE session takes unmeasured, which is the arm the
+dashboard spends its time rendering. ``_Branch`` is the whole of that
+distinction; see ``_RecordingConnection``.
+
 The four cost paths live here; the fifth is the ``/executions`` route itself,
 covered by ``apps/syn-api/tests/test_executions_list_reads_the_tool_call_tally.py``
 where it lives.
@@ -38,7 +45,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
@@ -77,21 +85,91 @@ _TOOL_CALLS = 11
 #: A read of ``agent_events`` that filters on no event type at all.
 _NO_EVENT_TYPE_FILTER = "(no event_type filter)"
 
-#: Every ``agent_events`` scan these endpoints still perform, per endpoint.
+
+class _Branch(Enum):
+    """Which of the two shapes of session data the database is holding.
+
+    Every one of these read paths is written as "prefer the summary, fall back
+    to ``token_usage``", and the two arms issue different queries and build the
+    read model with different code. A double that always answers as though a
+    summary exists therefore measures half of each endpoint - and the half it
+    skips is the one a live session is served by, because the summary is not
+    written until the session ENDS. So each read path is driven twice.
+    """
+
+    #: The session has finished and written its ``session_summary``.
+    SUMMARISED = "summarised"
+    #: The session is still running: ``token_usage`` rows and nothing else.
+    IN_PROGRESS = "in-progress"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class _Case(NamedTuple):
+    """One read path in one data branch - the unit everything here is per."""
+
+    endpoint: str
+    branch: _Branch
+
+    def __str__(self) -> str:
+        return f"{self.endpoint} [{self.branch}]"
+
+
+def _case(endpoint: str, branch: _Branch) -> _Case:
+    return _Case(endpoint, branch)
+
+
+#: Every ``agent_events`` scan these endpoints still perform, per endpoint and
+#: per data branch.
 #:
 #: This is an inventory, not an allowance: it is here so the remainder is
 #: visible and so adding to it takes a deliberate edit. Each entry is a
 #: candidate for the same treatment the tool count got - see #1338, which
 #: carries this table. The one thing that may never appear in it is
 #: ``tool_execution_completed``.
-_EXPECTED_SCANS: dict[str, frozenset[str]] = {
-    "GET /costs/sessions (list)": frozenset({SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}),
-    "GET /costs/sessions/{id} (detail, via the batch path)": frozenset(
+#:
+#: The summary query appears in every IN_PROGRESS row too: the fallback is
+#: chosen by running that query and finding nothing, so asking is the
+#: precondition for falling back, not an alternative to it.
+_EXPECTED_SCANS: dict[_Case, frozenset[str]] = {
+    _case("GET /costs/sessions (list)", _Branch.SUMMARISED): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
+    ),
+    _case("GET /costs/sessions (list)", _Branch.IN_PROGRESS): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
+    ),
+    _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.SUMMARISED): frozenset(
         {SESSION_SUMMARY, SESSION_STARTED}
     ),
-    "GET /costs/executions (list)": frozenset({SESSION_SUMMARY, TOKEN_USAGE}),
-    "GET /executions (one page, by id)": frozenset({SESSION_SUMMARY, TOKEN_USAGE}),
-    "GET /costs/executions/{id} (detail)": frozenset({SESSION_SUMMARY, _NO_EVENT_TYPE_FILTER}),
+    # The fallback query the summarised row never reaches. Inventoried here
+    # rather than merged into the line above, because "this endpoint scans
+    # token_usage" is true of one arm and not the other, and a union would say
+    # neither.
+    _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.IN_PROGRESS): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
+    ),
+    _case("GET /costs/executions (list)", _Branch.SUMMARISED): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE}
+    ),
+    _case("GET /costs/executions (list)", _Branch.IN_PROGRESS): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE}
+    ),
+    _case("GET /executions (one page, by id)", _Branch.SUMMARISED): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE}
+    ),
+    _case("GET /executions (one page, by id)", _Branch.IN_PROGRESS): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE}
+    ),
+    _case("GET /costs/executions/{id} (detail)", _Branch.SUMMARISED): frozenset(
+        {SESSION_SUMMARY, _NO_EVENT_TYPE_FILTER}
+    ),
+    # Two more, both only on this arm: the token_usage fallback itself, and the
+    # turn count - which a summarised execution reads off its summary row and an
+    # in-progress one gets by counting token_usage rows in agent_events.
+    _case("GET /costs/executions/{id} (detail)", _Branch.IN_PROGRESS): frozenset(
+        {SESSION_SUMMARY, TOKEN_USAGE, _NO_EVENT_TYPE_FILTER}
+    ),
 }
 
 
@@ -130,9 +208,16 @@ class _AnyRow:
 
 
 class _RecordingConnection:
-    """Answers every query with one row, and remembers what it was asked."""
+    """Answers every query with one row, and remembers what it was asked.
 
-    def __init__(self) -> None:
+    Except the summary query, when the branch is ``IN_PROGRESS``: that one
+    comes back empty, which is the whole of what "this session has not
+    finished" means to any of these read paths. Nothing else is special-cased,
+    so the fallback each of them then takes is its own.
+    """
+
+    def __init__(self, branch: _Branch = _Branch.SUMMARISED) -> None:
+        self.branch = branch
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
 
@@ -140,17 +225,20 @@ class _RecordingConnection:
         self.statements.append(query)
         self.args.append(args)
 
+    def _has_rows(self, args: tuple[object, ...]) -> bool:
+        return self.branch is _Branch.SUMMARISED or SESSION_SUMMARY not in args
+
     async def execute(self, query: str, *args: object) -> str:
         self._record(query, args)
         return "OK"
 
     async def fetch(self, query: str, *args: object) -> list[_AnyRow]:
         self._record(query, args)
-        return [_AnyRow()]
+        return [_AnyRow()] if self._has_rows(args) else []
 
-    async def fetchrow(self, query: str, *args: object) -> _AnyRow:
+    async def fetchrow(self, query: str, *args: object) -> _AnyRow | None:
         self._record(query, args)
-        return _AnyRow()
+        return _AnyRow() if self._has_rows(args) else None
 
     async def fetchval(self, query: str, *args: object) -> object:
         self._record(query, args)
@@ -237,9 +325,26 @@ def _read_paths() -> list[tuple[str, Callable[[_Pool], Awaitable[object]]]]:
     ]
 
 
-def test_the_inventory_covers_every_read_path() -> None:
-    """An endpoint missing from ``_EXPECTED_SCANS`` is an unmeasured endpoint."""
-    assert set(_EXPECTED_SCANS) == {endpoint for endpoint, _read in _read_paths()}
+def _cases() -> list[tuple[_Case, Callable[[_Pool], Awaitable[object]]]]:
+    """Every read path, in both branches - which is what "every read path" means.
+
+    An endpoint driven in one branch is an endpoint half measured, and the
+    inventory below is checked against THIS, so a branch that stops being
+    exercised cannot go unnoticed either.
+    """
+    return [
+        (_Case(endpoint, branch), read) for endpoint, read in _read_paths() for branch in _Branch
+    ]
+
+
+def _id(value: object) -> str:
+    """A test id per case, with no spaces in it, so ``-k`` can select one."""
+    return str(value).replace(" ", "-") if isinstance(value, _Case) else ""
+
+
+def test_the_inventory_covers_every_read_path_in_both_branches() -> None:
+    """A case missing from ``_EXPECTED_SCANS`` is an unmeasured case."""
+    assert set(_EXPECTED_SCANS) == {case for case, _read in _cases()}
 
 
 def test_no_read_path_is_permitted_to_count_tool_events() -> None:
@@ -252,17 +357,15 @@ def test_no_read_path_is_permitted_to_count_tool_events() -> None:
     equals its entry here - it says the tool-count scan is gone and cannot be
     put back by editing the inventory.
     """
-    for endpoint, expected in _EXPECTED_SCANS.items():
+    for case, expected in _EXPECTED_SCANS.items():
         assert TOOL_EXECUTION_COMPLETED not in expected, (
-            f"{endpoint} was granted the scan #1322 removed"
+            f"{case} was granted the scan #1322 removed"
         )
 
 
-@pytest.mark.parametrize(
-    ("endpoint", "read"), _read_paths(), ids=lambda v: v if isinstance(v, str) else ""
-)
+@pytest.mark.parametrize(("case", "read"), _cases(), ids=_id)
 async def test_each_read_path_scans_agent_events_for_exactly_what_is_inventoried(
-    endpoint: str,
+    case: _Case,
     read: Callable[[_Pool], Awaitable[object]],
 ) -> None:
     """What it actually asks ``agent_events``, against what it is recorded as asking.
@@ -272,21 +375,19 @@ async def test_each_read_path_scans_agent_events_for_exactly_what_is_inventoried
     means either removing the query or writing it down - which is the point:
     #1338 inherits a list that cannot quietly get longer.
     """
-    conn = _RecordingConnection()
+    conn = _RecordingConnection(case.branch)
 
     await read(_Pool(conn))
 
-    assert conn.agent_events_scans == _EXPECTED_SCANS[endpoint], (
-        f"{endpoint} scans agent_events for {sorted(conn.agent_events_scans)}, "
-        f"inventoried as {sorted(_EXPECTED_SCANS[endpoint])}"
+    assert conn.agent_events_scans == _EXPECTED_SCANS[case], (
+        f"{case} scans agent_events for {sorted(conn.agent_events_scans)}, "
+        f"inventoried as {sorted(_EXPECTED_SCANS[case])}"
     )
 
 
-@pytest.mark.parametrize(
-    ("endpoint", "read"), _read_paths(), ids=lambda v: v if isinstance(v, str) else ""
-)
+@pytest.mark.parametrize(("case", "read"), _cases(), ids=_id)
 async def test_every_read_path_reads_the_tally_exactly_once(
-    endpoint: str,
+    case: _Case,
     read: Callable[[_Pool], Awaitable[object]],
 ) -> None:
     """Not reading it at all is the other way to pass the test above.
@@ -295,11 +396,11 @@ async def test_every_read_path_reads_the_tally_exactly_once(
     offending query either - and would report every session as having used no
     tools, which is the failure this whole change exists to avoid showing.
     """
-    conn = _RecordingConnection()
+    conn = _RecordingConnection(case.branch)
 
     await read(_Pool(conn))
 
-    assert len(conn.tally_reads) == 1, f"{endpoint} read the tally {len(conn.tally_reads)} times"
+    assert len(conn.tally_reads) == 1, f"{case} read the tally {len(conn.tally_reads)} times"
 
 
 def _tool_calls_of(result: object) -> Sequence[int]:
@@ -308,11 +409,9 @@ def _tool_calls_of(result: object) -> Sequence[int]:
     return [int(getattr(result, "tool_calls", -1))]
 
 
-@pytest.mark.parametrize(
-    ("endpoint", "read"), _read_paths(), ids=lambda v: v if isinstance(v, str) else ""
-)
+@pytest.mark.parametrize(("case", "read"), _cases(), ids=_id)
 async def test_the_tallys_number_reaches_the_read_model(
-    endpoint: str,
+    case: _Case,
     read: Callable[[_Pool], Awaitable[object]],
 ) -> None:
     """The count has to arrive, not merely be fetched.
@@ -321,9 +420,13 @@ async def test_the_tallys_number_reaches_the_read_model(
     execution), so a correct query whose result is looked up under the wrong
     key returns 0 for everything - silently, because 0 tool calls is an
     ordinary number.
+
+    Per branch, because the lookup is written once per branch: the summary arm
+    and the fallback arm build the read model in different functions, and
+    getting the key right in one of them is not getting it right.
     """
-    conn = _RecordingConnection()
+    conn = _RecordingConnection(case.branch)
 
     result = await read(_Pool(conn))
 
-    assert _tool_calls_of(result) == [_TOOL_CALLS], f"{endpoint} lost the count"
+    assert _tool_calls_of(result) == [_TOOL_CALLS], f"{case} lost the count"
