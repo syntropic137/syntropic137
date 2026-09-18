@@ -364,7 +364,6 @@ def format_exit_code(exit_code: int | None) -> str:
         return "no exit status" if exit_code is None else f"{exit_code} (no exit status)"
     if exit_code >= 0:
         return str(exit_code)
-        return f"{exit_code} (no exit status)"
     signal_number = -exit_code
     try:
         named = signal.Signals(signal_number)

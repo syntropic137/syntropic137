@@ -551,9 +551,17 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or (
-                f"exit code {format_exit_code(setup_result.exit_code)} (no stderr output)"
-            )
+            # THE STATUS FIRST AND ALWAYS, then stderr if there was any. This
+            # read `stderr or <exit code>`, so any stderr at all REPLACED the
+            # status - and a setup script that fails has usually printed
+            # something, which made the case that needed the code most the one
+            # case that dropped it. #1295 is exactly that: killed by SIGSEGV,
+            # and the -11 saying so never reached the stored record. The two
+            # facts answer different questions ("how did it end", "what did it
+            # say"), so neither can stand in for the other.
+            stderr = setup_result.stderr.strip()
+            detail = f"exit code {format_exit_code(setup_result.exit_code)}"
+            detail += f": {stderr}" if stderr else " (no stderr output)"
             msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             raise RuntimeError(msg)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
