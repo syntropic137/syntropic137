@@ -12,14 +12,32 @@ queue merges to main, the base moving is the normal condition. That made reviews
 and merges mutually exclusive, which is to say the failure rate rose with exactly
 the concurrency the platform exists to provide.
 
-WHY THE ASSERTION IS ABOUT THE GATE LINE AND NOT ABOUT THE PROSE. A prompt only
-has text, so any test of one is a test of strings; the question is whether it
-pins the part that decides behaviour. `_recorded_sha_gates` finds the lines that
-oblige the phase to compare a ref against a previously recorded SHA - the defect
-was entirely in WHICH refs one of those lines named. So this fails in both wrong
-directions: naming `origin/main` there again is the original bug, and dropping
-the gate altogether is the over-correction that lets a review certify a head
-nobody read.
+WHY THESE TESTS RUN THE PROMPT'S COMMANDS INSTEAD OF MATCHING ITS TEXT. The
+first attempt at this fix asserted that a gate line matched ``must equal the
+recorded`` and did not contain ``origin/main``. Pointing that line at
+``origin/some-unrelated-branch`` left all six cases green: the assertion was
+about the shape of a sentence, and the bug is about which commit gets read. A
+prompt only has text, but the part of it that decides behaviour is a shell
+script, so these tests execute it.
+
+Each test builds a throwaway origin (``main``, a PR branch and an unrelated
+branch, all at different commits), clones it onto the default branch exactly as
+a phase workspace arrives, runs the ``investigate`` block to produce the two
+SHAs, moves ``origin/main`` underneath it, and then runs the ``verify`` block
+with the recorded SHAs substituted in. The assertion is on
+``git rev-parse HEAD`` of that clone - the commit the worktree actually resolves
+to - and never on the ref name the prompt asked for. Aim the gate anywhere but
+the PR and the SHA stops matching.
+
+That also wires the producer to the consumer: the values fed into ``verify``
+are whatever ``investigate`` printed, and any placeholder ``verify`` names that
+``investigate`` does not produce is an unsubstituted ``<...>`` the run fails on.
+``pr-review-slp`` had no ref-resolution step at all while carrying a
+byte-identical copy of the gate, which is exactly that failure.
+
+The over-correction is covered too: a prompt that simply stopped gating would
+let a review certify a head nobody read, so one case moves the HEAD instead of
+the base and requires the script to exit non-zero.
 
 WHY IT GOES THROUGH EXECUTION AND NOT `Path.read_text`. The prompt travels
 `prompt_file` -> `prompt_template` -> `CreateWorkflowTemplateCommand` ->
@@ -36,6 +54,8 @@ by before. Parametrising is what makes a half-fix red.
 from __future__ import annotations
 
 import re
+import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -72,13 +92,23 @@ _WORKFLOWS = Path(__file__).resolve().parents[8] / "workflows"
 #: Every workflow in this repository that reviews a pull request.
 _REVIEW_WORKFLOWS = ["sdlc/pr-review", "sdlc/pr-review-slp"]
 
-#: A line that obliges the phase to compare a ref against a SHA an earlier phase
-#: recorded. The defect was which refs one of these named, so these lines are
-#: what the test is about.
-_RECORDED_SHA_GATE = re.compile(r"must (?:equal|match) the recorded", re.IGNORECASE)
+#: The one fenced ``bash`` block in a review prompt: the commands that resolve
+#: and pin the refs. A phase prompt is prose plus this script, and the script is
+#: the only part of it with a testable exit status, so it is tagged to be found
+#: and the tests below refuse a prompt that carries more than one.
+_BASH_BLOCK = re.compile(r"^```bash\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 #: Fenced blocks the report phase gives as the literal shape of a verdict line.
 _TEXT_BLOCK = re.compile(r"^```text\n(.*?)^```", re.MULTILINE | re.DOTALL)
+
+#: A whole line that is a resolved commit. ``git diff`` prints abbreviated
+#: hashes inside ``index`` lines, never a bare 40-character one, so this picks
+#: out exactly what ``git rev-parse`` emitted and in the order it emitted it.
+_RESOLVED_SHA = re.compile(r"^[0-9a-f]{40}$", re.MULTILINE)
+
+#: The placeholders a phase may name. Anything else left in a block after
+#: substitution is a value the previous phase never produced.
+_PR_BRANCH = "pr-branch"
 
 
 async def _prompt_reaching_execution(workflow: str, phase_id: str) -> str:
@@ -130,37 +160,225 @@ async def _prompt_reaching_execution(workflow: str, phase_id: str) -> str:
     return by_id[phase_id].prompt_template
 
 
-def _recorded_sha_gates(prompt: str) -> list[str]:
-    return [line for line in prompt.splitlines() if _RECORDED_SHA_GATE.search(line)]
+@dataclass(frozen=True)
+class _Review:
+    """A PR waiting to be reviewed, and the workspace a phase would arrive in.
 
-
-@pytest.mark.parametrize("workflow", _REVIEW_WORKFLOWS)
-async def test_the_review_still_gates_on_something(workflow: str) -> None:
-    """Letting the base move must not become letting anything move.
-
-    The guarantee worth keeping is that the phase reviews the head it was given.
-    A prompt with no recorded-SHA obligation at all would pass the test below
-    while certifying code nobody looked at.
+    ``workspace`` is a clone sitting on the default branch with the PR's commit
+    fetched but not checked out, which is the state every review phase starts
+    from and the state the old prompt never left.
     """
-    prompt = await _prompt_reaching_execution(workflow, "verify")
 
-    assert _recorded_sha_gates(prompt), (
-        f"{workflow} 'verify' no longer asserts any ref against a recorded SHA. "
-        "Base movement is survivable; head movement is not."
+    workspace: Path
+    base: str
+    head: str
+    unrelated: str
+
+    def resolve(self, rev: str) -> str:
+        return _git(self.workspace, "rev-parse", rev)
+
+    def move_main(self) -> str:
+        """Land an unrelated commit on the base, as the merge queue does."""
+        return self._commit_on("main", "queue.txt")
+
+    def move_head(self) -> str:
+        """Push another commit to the PR, superseding the recorded head."""
+        return self._commit_on(_PR_BRANCH, "amended.txt")
+
+    def _commit_on(self, branch: str, name: str) -> str:
+        author = self.workspace.parent / "author"
+        _git(author, "checkout", branch)
+        (author / name).write_text(name)
+        _git(author, "add", name)
+        _git(author, "commit", "-m", f"move {branch}")
+        _git(author, "push", "origin", branch)
+        return _git(author, "rev-parse", "HEAD")
+
+
+def _git(cwd: Path, *args: str) -> str:
+    done = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=_GIT_ENV,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return done.stdout.strip()
+
+
+_GIT_ENV = {
+    "PATH": "/usr/bin:/bin:/usr/local/bin",
+    "HOME": "/nonexistent",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+}
+
+
+def _a_pull_request(root: Path) -> _Review:
+    origin = root / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(origin)],
+        env=_GIT_ENV,
+        capture_output=True,
+        check=True,
+    )
+    author = root / "author"
+    author.mkdir()
+    _git(author, "init", "--initial-branch=main")
+    _git(author, "remote", "add", "origin", str(origin))
+
+    (author / "shipped.py").write_text("shipped = 1\n")
+    _git(author, "add", "shipped.py")
+    _git(author, "commit", "-m", "base")
+    _git(author, "push", "origin", "main")
+    base = _git(author, "rev-parse", "HEAD")
+
+    # Three distinct commits, so that a gate aimed at the wrong ref resolves to
+    # a SHA that is wrong rather than to one that happens to coincide.
+    _git(author, "checkout", "-b", _PR_BRANCH)
+    (author / "shipped.py").write_text("shipped = 2\n")
+    _git(author, "commit", "-am", "the change under review")
+    _git(author, "push", "origin", _PR_BRANCH)
+    head = _git(author, "rev-parse", "HEAD")
+
+    _git(author, "checkout", "-b", "some-unrelated-branch", "main")
+    (author / "elsewhere.py").write_text("elsewhere = 1\n")
+    _git(author, "add", "elsewhere.py")
+    _git(author, "commit", "-m", "nothing to do with the PR")
+    _git(author, "push", "origin", "some-unrelated-branch")
+    unrelated = _git(author, "rev-parse", "HEAD")
+    _git(author, "checkout", "main")
+
+    workspace = root / "workspace"
+    workspace.mkdir()
+    _git(workspace, "clone", str(origin), ".")
+    return _Review(workspace=workspace, base=base, head=head, unrelated=unrelated)
+
+
+def _the_script(prompt: str, workflow: str, phase_id: str) -> str:
+    blocks = _BASH_BLOCK.findall(prompt)
+    assert len(blocks) == 1, (
+        f"{workflow} '{phase_id}' has {len(blocks)} fenced `bash` blocks; these tests "
+        "run the one that pins the refs, so exactly one may be tagged that way."
+    )
+    return str(blocks[0])
+
+
+def _run(script: str, review: _Review, **values: str) -> subprocess.CompletedProcess[str]:
+    """Run a phase's block with the recorded values substituted in.
+
+    ``set -e`` is what turns the prompt's ``test`` lines into a gate with an
+    exit status. Any placeholder the block names that the caller did not supply
+    is a value no earlier phase produces, and is refused here rather than left
+    to fail as a mangled git argument.
+    """
+    for name, value in values.items():
+        script = script.replace(f"<{name}>", value)
+    leftover = sorted(set(re.findall(r"<[a-z-]+>", script)))
+    assert not leftover, (
+        f"the block names {leftover}, which no earlier phase produces. "
+        f"Substitutable here: {sorted(values)}."
+    )
+    return subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script],
+        cwd=review.workspace,
+        env={**_GIT_ENV, "HOME": str(review.workspace.parent)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+async def _record_the_refs(workflow: str, review: _Review) -> tuple[str, str]:
+    """Run the `investigate` phase's block and read the base and head off it."""
+    block = _the_script(
+        await _prompt_reaching_execution(workflow, "investigate"), workflow, "investigate"
+    )
+    recorded = _run(block, review, **{"pr-branch": _PR_BRANCH})
+    assert recorded.returncode == 0, recorded.stderr
+
+    shas = _RESOLVED_SHA.findall(recorded.stdout)
+    assert len(shas) >= 2, (
+        f"{workflow} 'investigate' resolved {shas}, so the SHAs the 'verify' gate "
+        f"reads have no producer at all.\n{recorded.stdout}"
+    )
+    base, head = str(shas[0]), str(shas[1])
+    assert (base, head) == (review.base, review.head), (
+        f"{workflow} 'investigate' recorded base={base} head={head}; the PR is "
+        f"base={review.base} head={review.head}. The next phase checks out the "
+        "second of these, so which one comes first is part of the contract."
+    )
+    return base, head
+
+
+async def _verify_against(
+    workflow: str, review: _Review, base: str, head: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the `verify` phase's gate on the SHAs `investigate` actually printed."""
+    block = _the_script(await _prompt_reaching_execution(workflow, "verify"), workflow, "verify")
+    return _run(
+        block,
+        review,
+        **{"pr-branch": _PR_BRANCH, "recorded-base": base, "recorded-head": head},
     )
 
 
 @pytest.mark.parametrize("workflow", _REVIEW_WORKFLOWS)
-async def test_the_base_is_not_what_the_review_is_gated_on(workflow: str) -> None:
-    """#1290 itself: no recorded-SHA obligation may name `origin/main`."""
-    prompt = await _prompt_reaching_execution(workflow, "verify")
+async def test_verify_leaves_the_worktree_at_the_recorded_head(
+    workflow: str, tmp_path: Path
+) -> None:
+    """The pin is a commit the tree is ON, not a sentence saying it should be.
 
-    named_base = [line for line in _recorded_sha_gates(prompt) if "origin/main" in line]
+    Asserted on the SHA `git rev-parse HEAD` returns, so aiming the gate at any
+    other ref - the default branch it arrives on, or a branch with nothing to
+    do with the PR - fails here no matter how the prompt words it.
 
-    assert not named_base, (
-        f"{workflow} 'verify' gates a recorded SHA on `origin/main`: {named_base}. "
-        "An unrelated merge landing on main does not change the PR head, so this "
-        "aborts finished work for a reason that is not about the code under review."
+    The base moves first, because that is #1290's own failure: a queue merge
+    landing mid-review must cost a line of disclosure and not the run.
+    """
+    review = _a_pull_request(tmp_path)
+    base, head = await _record_the_refs(workflow, review)
+
+    moved = review.move_main()
+    assert moved != base
+
+    result = await _verify_against(workflow, review, base, head)
+
+    assert result.returncode == 0, (
+        f"{workflow} 'verify' aborted while only `origin/main` had moved "
+        f"({base} -> {moved}).\n{result.stdout}\n{result.stderr}"
+    )
+    assert review.resolve("HEAD") == head, (
+        f"{workflow} 'verify' left the workspace at {review.resolve('HEAD')}; the PR "
+        f"is {head}. Everything the phase reads after this point - the diff, "
+        "the tests it runs, the files it greps - is the wrong code."
+    )
+
+
+@pytest.mark.parametrize("workflow", _REVIEW_WORKFLOWS)
+async def test_verify_stops_when_the_head_itself_moved(workflow: str, tmp_path: Path) -> None:
+    """Survivable base movement must not become survivable head movement.
+
+    A prompt that dropped the gate would pass the test above - the recorded head
+    is still checked out - while certifying a head nobody read.
+    """
+    review = _a_pull_request(tmp_path)
+    base, head = await _record_the_refs(workflow, review)
+
+    superseded = review.move_head()
+    assert superseded != head
+
+    result = await _verify_against(workflow, review, base, head)
+
+    assert result.returncode != 0, (
+        f"{workflow} 'verify' ran to completion after the PR moved to {superseded}. "
+        f"Its findings would describe {head}, which is no longer the PR."
     )
 
 
