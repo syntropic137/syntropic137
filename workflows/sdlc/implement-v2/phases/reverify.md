@@ -123,10 +123,12 @@ should have caught Y".
 under `artifacts/output/` FAILS.** Write the file before you finish.
 
 1. **CERTIFIED** or **BLOCKED**, as the first line, in one word.
-2. **The branch and the full commit SHA you certified**, with the
-   `git rev-parse origin/<branch>` and `git rev-parse HEAD` output that proves
-   you checked it out. The phase after you opens a PR only for that exact SHA,
-   and an abbreviated or absent one leaves it nothing to compare against.
+2. **The branch and the full commit SHA you certified** - or, if BLOCKED, the
+   one you checked out and refused - with the `git rev-parse origin/<branch>`
+   and `git rev-parse HEAD` output that proves you checked it out. The phase
+   after you opens a PR only for that exact SHA, and an abbreviated or absent
+   one leaves it nothing to compare against. On a BLOCKED verdict the future
+   pass that picks this up needs to know which head your findings describe.
 3. **Each blocking defect from `verify.md`** - every one, not only the ones
    `fix.md` discusses - and whether it is now closed, with the `file:line` you
    checked.
