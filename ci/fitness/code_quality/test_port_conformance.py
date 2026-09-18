@@ -14,6 +14,12 @@ A port with no implementation in this repository goes in ``_UNIMPLEMENTED``
 with its reason. That table is the ratchet -- adding a port is free, adding
 one that nothing implements costs an explicit entry.
 
+What counts as a port is deliberately NOT just the ``Port`` name suffix. A
+gate keyed on spelling is dodged by a rename, which is the #1188 defect: the
+number stays still while the thing it measured walks away. So a ``Protocol``
+declared in a ``ports`` package or a ``*_port.py`` module counts too, whatever
+it is called -- the location says it is a boundary as loudly as the name does.
+
 Standard: ADR-062 (architectural fitness function standard).
 """
 
@@ -50,6 +56,15 @@ def _is_protocol(node: ast.ClassDef) -> bool:
     return any("Protocol" in ast.unparse(base) for base in node.bases)
 
 
+def _is_port_location(path: Path) -> bool:
+    """Whether a module's location declares it to be a port boundary.
+
+    Checked alongside the name so that renaming ``FooPort`` to ``FooProtocol``
+    does not remove a port from the gate while leaving it in the architecture.
+    """
+    return "ports" in path.parts or path.stem.endswith("_port")
+
+
 def _is_production_source(path: Path) -> bool:
     parts = path.parts
     return (
@@ -61,7 +76,7 @@ def _is_production_source(path: Path) -> bool:
 
 
 def _declared_ports() -> dict[str, Path]:
-    """Every ``Protocol`` named ``*Port`` in production source, by name."""
+    """Every ``Protocol`` in production source that is a port by name or location."""
     ports: dict[str, Path] = {}
     for root in _SEARCH_ROOTS:
         for file in sorted((_REPO_ROOT / root).rglob("*.py")):
@@ -71,8 +86,8 @@ def _declared_ports() -> dict[str, Path]:
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.ClassDef)
-                    and node.name.endswith("Port")
                     and _is_protocol(node)
+                    and (node.name.endswith("Port") or _is_port_location(file))
                 ):
                     ports[node.name] = file.relative_to(_REPO_ROOT)
     return ports

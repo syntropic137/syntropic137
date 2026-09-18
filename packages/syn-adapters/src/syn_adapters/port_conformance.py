@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
+    from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
+    from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
@@ -107,6 +109,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
+    from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
+        PendingSHAStore,
+    )
     from syn_domain.contexts.orchestration._shared.ports import (
         ArtifactCollectionPort,
         EventStreamPort,
@@ -255,6 +260,8 @@ if TYPE_CHECKING:
         memory_state: InMemoryControlStateAdapter,
         redis_signals: RedisSignalQueueAdapter,
         memory_signals: InMemorySignalQueueAdapter,
+        postgres_pending: PostgresPendingSHAStore,
+        memory_pending: InMemoryPendingSHAStore,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -271,3 +278,5 @@ if TYPE_CHECKING:
         _memory_state: ControlStatePort = memory_state
         _redis_signals: SignalQueuePort = redis_signals
         _memory_signals: SignalQueuePort = memory_signals
+        _postgres_pending: PendingSHAStore = postgres_pending
+        _memory_pending: PendingSHAStore = memory_pending
