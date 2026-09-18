@@ -21,6 +21,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
+from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
@@ -29,8 +30,6 @@ from syn_shared.env_constants import (
     ENV_GIT_COMMITTER_EMAIL,
     ENV_GIT_COMMITTER_NAME,
 )
-
-from syn_shared.diagnostics import name_exit_status
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace

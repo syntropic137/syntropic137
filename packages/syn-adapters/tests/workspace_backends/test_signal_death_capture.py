@@ -236,7 +236,7 @@ async def test_the_backend_carries_the_diagnostic_out_on_its_result() -> None:
     )
     with (
         patch.object(adapter, "_provider", provider),
-        patch.dict(adapter._workspaces, {handle.isolation_id: MagicMock()}),  # noqa: SLF001
+        patch.dict(adapter._workspaces, {handle.isolation_id: MagicMock()}),
     ):
         result = await adapter.execute(handle, ["git", "-C", "/workspace/repos/x", "rev-parse"])
 

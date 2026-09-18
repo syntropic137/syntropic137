@@ -205,7 +205,7 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (  # noqa: E501
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         WorkspaceProvisionHandler,
     )
 
@@ -223,19 +223,21 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
     )
     handler = WorkspaceProvisionHandler.__new__(WorkspaceProvisionHandler)
 
-    with patch(
-        "syn_adapters.workspace_backends.service.SetupPhaseSecrets.create",
-        AsyncMock(return_value=MagicMock(codex_auth_json=None)),
+    with (
+        patch(
+            "syn_adapters.workspace_backends.service.SetupPhaseSecrets.create",
+            AsyncMock(return_value=MagicMock(codex_auth_json=None)),
+        ),
+        pytest.raises(RuntimeError) as raised,
     ):
-        with pytest.raises(RuntimeError) as raised:
-            await handler._hydrate_workspace(  # noqa: SLF001
-                workspace,
-                ["syntropic137/syntropic137"],
-                phase_name="premise",
-                clone_repos=True,
-                can_open_pr=False,
-                include_codex_auth=False,
-            )
+        await handler._hydrate_workspace(
+            workspace,
+            ["syntropic137/syntropic137"],
+            phase_name="premise",
+            clone_repos=True,
+            can_open_pr=False,
+            include_codex_auth=False,
+        )
 
     message = str(raised.value)
     assert "was killed by SIGSEGV" in message
@@ -256,7 +258,7 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (  # noqa: E501
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         WorkspaceProvisionHandler,
     )
 
@@ -272,19 +274,21 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
     )
     handler = WorkspaceProvisionHandler.__new__(WorkspaceProvisionHandler)
 
-    with patch(
-        "syn_adapters.workspace_backends.service.SetupPhaseSecrets.create",
-        AsyncMock(return_value=MagicMock(codex_auth_json=None)),
+    with (
+        patch(
+            "syn_adapters.workspace_backends.service.SetupPhaseSecrets.create",
+            AsyncMock(return_value=MagicMock(codex_auth_json=None)),
+        ),
+        pytest.raises(RuntimeError) as raised,
     ):
-        with pytest.raises(RuntimeError) as raised:
-            await handler._hydrate_workspace(  # noqa: SLF001
-                workspace,
-                ["syntropic137/syntropic137"],
-                phase_name="premise",
-                clone_repos=True,
-                can_open_pr=False,
-                include_codex_auth=False,
-            )
+        await handler._hydrate_workspace(
+            workspace,
+            ["syntropic137/syntropic137"],
+            phase_name="premise",
+            clone_repos=True,
+            can_open_pr=False,
+            include_codex_auth=False,
+        )
 
     message = str(raised.value)
     assert "was killed by SIGSEGV" in message

@@ -134,7 +134,11 @@ async def test_setup_failure_with_no_stderr_still_names_setup_and_phase() -> Non
     assert "Secret-injection setup failed" in message
     assert f"phase '{FAILING_PHASE_NAME}'" in message
     assert "Setup phase failed" not in message
-    assert "exit code 2" in message
+    # Reworded by #1295: the status now goes through `name_exit_status`, so
+    # that a setup script KILLED by a signal reads as SIGSEGV rather than as
+    # "exit code -11". What #1236 is about - that the status is here at all
+    # when there is no stderr to displace it - is unchanged.
+    assert "exited 2" in message
 
 
 @pytest.mark.unit
