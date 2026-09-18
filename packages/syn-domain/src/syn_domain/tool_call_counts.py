@@ -55,11 +55,50 @@ places that have to reach ``rebuild`` are both here:
   alongside every other read model, so a version bump or an operator's
   ``rebuild_projection`` recounts it instead of walking past it.
 - ``ensure_ready`` runs at every startup, from ``AgentEventStore.initialize``.
-  Deliberately NOT from the branch that auto-creates tables: production sets
-  ``SYN_SKIP_AUTO_CREATE_TABLES=true``, so the deployment most likely to have
-  had its tally emptied - by a rebuild, a restore, an operator - was the one
-  configuration that skipped the repair. Creating tables and repairing a read
-  model are different jobs and must not share a switch.
+
+ONE RULE DECIDES BOTH OF THIS MODULE'S HALVES, and it is worth stating on its
+own because getting it wrong is what produced every bug this file has had:
+
+    **Migrations own the DDL. The read model owns the rows.**
+
+DDL, first. ``SYN_SKIP_AUTO_CREATE_TABLES=true`` is a deployment saying "I
+apply my own schema; do not invent tables under me" - and it means it, because
+the role the application connects as may hold no CREATE privilege at all, in
+which case a stray ``CREATE TABLE IF NOT EXISTS`` is not a harmless no-op but
+a startup that dies. So under that flag this module issues no DDL whatsoever.
+It checks that migration 004 has been applied and says so plainly if it has
+not, which is a better failure than either inventing the table or carrying on
+against one that is not there.
+
+Rows, second, and the mirror image. Migration 004 creates the tables and
+stops. It does NOT backfill, and the reason is subtle enough to be worth the
+paragraph: a migration runs while the PREVIOUS version of the application is
+still up, and that version does not maintain this tally. Anything it appends
+to ``agent_events`` between the backfill and the new binary's first breath is
+counted in the history and missing from the tally. A migration-backfilled
+table is therefore populated, plausible, and wrong - and "populated" was the
+only question startup used to ask, so nothing ever repaired it. Undercounting
+forever, with no blank table and no log line to give it away.
+
+What replaces that question is ``agent_tool_call_counts_version``: a stamp
+written by ``rebuild``, and by nothing else. Its presence means "a writer that
+maintains this tally reconstructed these rows at definition version N". A
+migration cannot write it, because a migration is not that writer. So the
+first startup after the upgrade finds no stamp, recounts once, stamps, and is
+cheap on every startup after. Bump ``TALLY_VERSION`` and the same thing
+happens again, everywhere, exactly once - which is the guarantee every other
+read model here gets free from its checkpoint version, and this one cannot,
+because its ``handle_event`` is a no-op and a first registration has no
+checkpoint to mismatch.
+
+One honest limit on that guarantee: the recount happens during the new
+application's startup, so it covers everything the old writer appended before
+it stopped. A deployment that runs both versions against one database
+concurrently can still have the old one append after the stamp lands. The
+topology this ships in replaces the container rather than overlapping it, and
+for anything that does overlap, ``rebuild_projection tool_call_counts`` or
+``scripts/backfill/rebuild_tool_call_counts.py`` is the recount to run once
+the last legacy writer is down.
 """
 
 from __future__ import annotations
@@ -81,10 +120,27 @@ if TYPE_CHECKING:
         ProjectionCheckpointStore,
     )
 
-#: The table this module owns. Created by ``ensure_ready`` and mirrored, for
-#: installs that apply migrations by hand, in
-#: ``syn_adapters/projection_stores/migrations/004_tool_call_counts.sql``.
+#: The table this module owns. Created by migration 004, and by
+#: ``ensure_ready`` when - and only when - the deployment has asked for tables
+#: to be auto-created.
 TABLE = "agent_tool_call_counts"
+
+#: Where ``rebuild`` records the definition version it last recounted to. A
+#: separate table rather than a column on the tally, because it says something
+#: about the tally as a whole and there is exactly one of it.
+VERSION_TABLE = "agent_tool_call_counts_version"
+
+#: The migration that creates both tables. Named in the error a deployment
+#: gets when it has not been applied, so the message is actionable.
+MIGRATION = "004_tool_call_counts.sql"
+
+#: What a stored row MEANS. Bump it when that changes - a different event type
+#: counted, a different key, a corrected ``COALESCE`` - and every deployment
+#: recounts once on its next startup instead of serving rows built to the old
+#: definition. This is the tally's equivalent of a projection version, and
+#: ``ToolCallCountsProjection.VERSION`` is deliberately the same number: there
+#: is one definition of these rows, so there is one version of it.
+TALLY_VERSION = 1
 
 #: ``execution_id`` for an observation that carried no execution. The column is
 #: part of the key and a key cannot be NULL; this is that, and nothing else.
@@ -104,6 +160,16 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 CREATE_INDEX_SQL = f"""
 CREATE INDEX IF NOT EXISTS idx_tool_call_counts_execution
 ON {TABLE} (execution_id)
+"""
+
+#: One row, enforced by the schema rather than by everyone who writes it: the
+#: key is a boolean that is CHECKed to be true, so a second row is a constraint
+#: violation and ``SELECT rebuilt_version FROM ...`` cannot be ambiguous.
+CREATE_VERSION_TABLE_SQL = f"""
+CREATE TABLE IF NOT EXISTS {VERSION_TABLE} (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    rebuilt_version INTEGER NOT NULL
+)
 """
 
 #: The definition of the tally, in one statement. The only place that says what
@@ -130,6 +196,25 @@ _TALLY_IS_BLANK_SQL = f"SELECT NOT EXISTS (SELECT 1 FROM {TABLE})"
 #: "Is there anything to count?" - asked only of a blank tally, to tell an
 #: install that has never run a tool apart from one whose tally was wiped.
 _HISTORY_HAS_TOOL_CALLS_SQL = "SELECT EXISTS (SELECT 1 FROM agent_events WHERE event_type = $1)"
+
+#: The stamp, read. ``None`` when nothing has ever recounted these rows, which
+#: is what a migration-created table looks like and is the whole point of it.
+_STAMPED_VERSION_SQL = f"SELECT rebuilt_version FROM {VERSION_TABLE}"
+
+#: The stamp, written. Only ``rebuild`` runs this, and only inside the
+#: transaction that recounted - see ``rebuild``.
+_STAMP_SQL = f"""
+INSERT INTO {VERSION_TABLE} (singleton, rebuilt_version)
+VALUES (TRUE, $1)
+ON CONFLICT (singleton) DO UPDATE SET rebuilt_version = EXCLUDED.rebuilt_version
+"""
+
+#: Does a table exist, without creating it. ``to_regclass`` resolves through
+#: ``search_path`` exactly as the module's other statements do, so this asks
+#: about the table those statements would reach and not a same-named one
+#: somewhere else. Returns NULL rather than raising for an absent relation,
+#: which is why it is this and not a ``SELECT`` against the table itself.
+_TABLE_EXISTS_SQL = "SELECT to_regclass($1) IS NOT NULL"
 
 _RECORD_SQL = f"""
 INSERT INTO {TABLE} (session_id, execution_id, tool_calls)
@@ -252,6 +337,18 @@ def tally(events: Iterable[tuple[str, str, str | None]]) -> list[ToolCallTally]:
     ]
 
 
+class ToolCallCountsNotMigratedError(RuntimeError):
+    """Auto-creation is off and the tally's tables are not there."""
+
+    def __init__(self, table: str) -> None:
+        super().__init__(
+            f"Table '{table}' does not exist and SYN_SKIP_AUTO_CREATE_TABLES is set, "
+            f"so this deployment owns its own DDL. Apply "
+            f"packages/syn-adapters/src/syn_adapters/projection_stores/migrations/"
+            f"{MIGRATION} before starting."
+        )
+
+
 async def rebuild(conn: SqlConnection) -> None:
     """Throw the tally away and recompute it from ``agent_events``.
 
@@ -274,40 +371,91 @@ async def rebuild(conn: SqlConnection) -> None:
     weaker lock, lets that writer commit in the middle, and loses its
     increment: the recount would overwrite the row from a snapshot taken
     before the event existed.
+
+    The stamp goes in the SAME transaction, and that is not tidiness. Split
+    out, a crash between the recount and the stamp leaves one of two states,
+    and one of them is unrecoverable by any later startup: stamped rows that
+    were never recounted. Committed together, the only state a crash can leave
+    is "correct rows, no stamp" - which the next startup fixes by recounting
+    again, and recounting twice is recounting once.
     """
     async with conn.transaction():
         await conn.execute(_TRUNCATE_SQL)
         await conn.execute(BACKFILL_SQL, TOOL_EXECUTION_COMPLETED, NO_EXECUTION)
+        await conn.execute(_STAMP_SQL, TALLY_VERSION)
 
 
-async def ensure_ready(conn: SqlConnection) -> None:
-    """Create the table if it is absent, and fill it if it is blank.
+async def ensure_ready(conn: SqlConnection, *, skip_auto_create: bool) -> None:
+    """Make the tally fit to read, without deciding who owns the schema.
 
-    One rule, not two: a tally with no rows in it is rebuilt, whether this is
-    the first startup after the feature shipped or the first startup after
-    someone truncated the table. The earlier "backfill only when the table did
-    not exist" could not tell those apart, and answered the second with
-    silence - every session reporting zero tool calls, indefinitely, with
-    nothing in the logs and a number on the page that looked like a number.
+    Two questions that used to be one, and were wrong in opposite directions
+    each time they shared a switch. "Do these tables exist" is the deployment's
+    business and ``skip_auto_create`` is its answer. "Do these rows mean what
+    this version of the code says they mean" is this module's business and no
+    flag gets a vote on it. So the repair below runs in every configuration,
+    and the DDL above runs in exactly one.
 
-    What this costs: when the tally IS blank, one probe of ``agent_events``
-    for a single tool completion. That probe stops at the first matching row,
-    so the install it could actually scan to the end of is the one that has
-    never run a tool - and then it finds nothing, rebuilds nothing, and pays
-    it again next startup. Once per process against a table read thousands of
-    times per hour is the trade this whole module exists to make, in the other
-    direction.
+    ``skip_auto_create`` is required, with no default, on purpose. The two
+    regressions here were both a caller not saying which policy it was under:
+    once the repair inherited the DDL branch and production silently skipped
+    it, once the DDL escaped the branch and ran against roles that may not hold
+    CREATE. A default would be a third way to not say.
 
-    What this does NOT catch is a tally that is populated and wrong - no
-    probe can, short of the recount itself. ``rebuild`` is the answer to that
-    one, and ``scripts/backfill/rebuild_tool_call_counts.py`` runs it.
+    Raises:
+        ToolCallCountsNotMigratedError: auto-creation is off and the tables are
+            not there. Loud, at startup, naming the migration - as against
+            creating them anyway (the deployment said not to) or carrying on
+            (every read of the tally is about to fail on a missing relation).
     """
-    await conn.execute(CREATE_TABLE_SQL)
-    await conn.execute(CREATE_INDEX_SQL)
-    if not await conn.fetchval(_TALLY_IS_BLANK_SQL):
-        return
-    if await conn.fetchval(_HISTORY_HAS_TOOL_CALLS_SQL, TOOL_EXECUTION_COMPLETED):
+    if skip_auto_create:
+        await _require_migration_applied(conn)
+    else:
+        await conn.execute(CREATE_TABLE_SQL)
+        await conn.execute(CREATE_INDEX_SQL)
+        await conn.execute(CREATE_VERSION_TABLE_SQL)
+
+    if await _needs_reconstruction(conn):
         await rebuild(conn)
+
+
+async def _require_migration_applied(conn: SqlConnection) -> None:
+    """Check both tables are there, creating nothing.
+
+    The DDL-free half of ``ensure_ready``. A role with no CREATE privilege can
+    run every statement this issues.
+    """
+    for table in (TABLE, VERSION_TABLE):
+        if not await conn.fetchval(_TABLE_EXISTS_SQL, table):
+            raise ToolCallCountsNotMigratedError(table)
+
+
+async def _needs_reconstruction(conn: SqlConnection) -> bool:
+    """Is a full recount owed? Two states say yes, for two different reasons.
+
+    **Never recounted at this definition.** No stamp means these rows came
+    from something that is not a writer of this tally: migration 004's table,
+    a restore, a hand ``INSERT``. A stamp below ``TALLY_VERSION`` means they
+    were built to an older definition of what a row is. Neither is detectable
+    by looking at the rows - a wrong tally is full of perfectly ordinary
+    numbers - which is why the stamp exists at all, and why "is it populated"
+    was never a safe question to decide this on.
+
+    **Blank with history behind it.** The stamp survives a bare ``TRUNCATE``
+    of the tally, so it cannot be the only test: someone truncates the table,
+    the stamp still reads 1, and every session reports zero tool calls
+    indefinitely. Blank is the other yes, and it is qualified by whether there
+    is anything to count so a fresh install is not condemned to probe
+    ``agent_events`` on every startup it ever has.
+
+    Cheap in the case that matters, which is the steady one: a stamped,
+    populated tally costs a single-row read and one index probe that stops at
+    the first row.
+    """
+    if await conn.fetchval(_STAMPED_VERSION_SQL) != TALLY_VERSION:
+        return True
+    if not await conn.fetchval(_TALLY_IS_BLANK_SQL):
+        return False
+    return bool(await conn.fetchval(_HISTORY_HAS_TOOL_CALLS_SQL, TOOL_EXECUTION_COMPLETED))
 
 
 async def record(conn: SqlConnection, tallies: Sequence[ToolCallTally]) -> None:
@@ -400,7 +548,11 @@ class ToolCallCountsProjection(CheckpointedProjection):
     drifting from ``agent_events`` in the first place.
     """
 
-    VERSION = 1
+    #: The definition version of the rows, shared with ``ensure_ready``'s
+    #: stamp rather than tracked twice. A bump here recounts on the next
+    #: startup (the stamp no longer matches) as well as through the
+    #: coordinator's version check, which is one number meaning one thing.
+    VERSION = TALLY_VERSION
 
     def __init__(self, pool: SqlPool | None = None) -> None:
         self._pool = pool

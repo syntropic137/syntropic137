@@ -79,27 +79,26 @@ class AgentEventStore:
         )
 
     async def initialize(self) -> None:
-        """Open the pool, ready the schema, and repair the tool-call tally.
+        """Open the pool, ready the schema, and ready the tool-call tally.
 
-        TWO STEPS, NOT ONE, and the reason is the flag. ``ensure_schema``
-        auto-creates ``agent_events`` only when
-        ``SYN_SKIP_AUTO_CREATE_TABLES`` is unset, because a deployment that
-        applies migrations by hand does not want DDL invented under it. That
-        is a statement about who owns the DDL.
+        TWO CALLS, ONE POLICY. ``SYN_SKIP_AUTO_CREATE_TABLES`` says who owns
+        the DDL in this deployment, and it is one answer for the whole
+        database: ``agent_events`` and the tally are both auto-created or
+        both left to the migrations. So the flag reaches both, and neither
+        gets to opt out of the half it finds inconvenient.
 
-        The tally is a different question: not "does this table exist" but
-        "does this read model hold the right rows". Migration 004 backfills it
-        the once, at the moment it is applied, and after that the table is as
-        emptiable as any other - a projection rebuild, a restore, a hand
-        TRUNCATE. An empty tally is not a missing number, it is a wrong one:
-        every session on the page reporting zero tool calls, indefinitely,
-        with nothing in the logs. So the repair runs on every startup in every
-        configuration, which is what makes "a blank tally repairs itself at
-        startup" a true statement about the deployment we actually ship rather
-        than about the development default (#1322).
+        What the flag does NOT govern is whether the tally's rows are fit to
+        read. That is the read model's own business and it is settled on every
+        startup in every configuration - see ``tool_call_counts.ensure_ready``,
+        which runs no DDL when it has been told not to and repairs the rows
+        either way. Both halves of this used to be wrong: the repair once hid
+        inside the auto-create branch, so the configuration we deploy skipped
+        it and came up reporting zero tool calls for every session; then the
+        DDL escaped the branch, so a role holding no CREATE privilege could
+        not start at all (#1322).
 
-        Cheap when there is nothing to do: one index probe that stops at the
-        first row. See ``tool_call_counts.ensure_ready``.
+        Cheap when there is nothing to do: a single-row read of the version
+        stamp and one index probe that stops at the first row.
         """
         if self._initialized:
             return
@@ -112,7 +111,10 @@ class AgentEventStore:
 
         async with self.pool.acquire() as conn:
             await self._schema.ensure_schema(conn)  # type: ignore[arg-type]  # asyncpg PoolConnectionProxy is compatible with Connection
-            await tool_call_counts.ensure_ready(conn)  # type: ignore[arg-type]  # asyncpg satisfies the protocol
+            await tool_call_counts.ensure_ready(
+                conn,  # type: ignore[arg-type]  # asyncpg satisfies the protocol
+                skip_auto_create=self._schema.skip_auto_create,
+            )
 
         self._initialized = True
         logger.info("AgentEventStore initialized")

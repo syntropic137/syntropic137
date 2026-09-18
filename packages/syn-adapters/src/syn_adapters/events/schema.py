@@ -43,6 +43,19 @@ class EventStoreSchema:
     def __init__(self, *, skip_auto_create: bool = False) -> None:
         self._skip_auto_create = skip_auto_create
 
+    @property
+    def skip_auto_create(self) -> bool:
+        """Does this deployment apply its own DDL?
+
+        Public because it is not this class's private business: it is the
+        deployment's policy, and every table the store readies has to honour
+        the same answer. ``AgentEventStore.initialize`` passes it on to
+        ``tool_call_counts.ensure_ready``, which owns a table this class does
+        not - reading ``_skip_auto_create`` through the underscore instead
+        would make one policy look like two.
+        """
+        return self._skip_auto_create
+
     async def ensure_schema(self, conn: asyncpg.Connection) -> None:
         """Create schema if needed and validate it.
 

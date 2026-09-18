@@ -13,15 +13,21 @@ hand, and each was wrong in exactly one configuration:
 
 2. **Startup.** The repair ran inside ``if not self._skip_auto_create``, so
    ``SYN_SKIP_AUTO_CREATE_TABLES=true`` - the configuration we deploy - skipped
-   it. Migration 004 creates the table EMPTY, so the deployment came up
-   reporting zero tool calls for every session that had ever run.
+   it. The deployment came up reporting zero tool calls for every session that
+   had ever run. Moving the repair out of that branch then took the DDL with
+   it, and ``CREATE TABLE IF NOT EXISTS`` against a role holding no CREATE
+   privilege does not start at all. Sections 3 and 4 are the two halves that
+   had to be separated: the flag governs DDL and nothing else, and the rows
+   are decided by a version stamp rather than by whether the table has
+   anything in it - because a migration-backfilled tally has rows and is
+   short, and "has rows" accepted it forever.
 
 Both failures are silent, and both are invisible to a test that calls
 ``ensure_ready`` or ``rebuild`` directly: those functions were always correct.
-What was wrong was who called them. So nothing here calls either one. These
-drive ``create_coordinator_service`` and ``AgentEventStore.initialize``, the
-two entry points production actually uses, and assert the recount came out the
-other end.
+What was wrong was who called them, and with what. So nothing here calls
+either one. These drive ``create_coordinator_service`` and
+``AgentEventStore.initialize``, the two entry points production actually uses,
+and assert the recount came out the other end.
 
 The database is a double, deliberately: what is under test is which call
 reaches which SQL, not what Postgres does with it. The rows themselves are
@@ -40,7 +46,11 @@ from syn_adapters.events.schema import EventStoreSchema
 from syn_adapters.events.store import AgentEventStore
 from syn_adapters.subscriptions import create_coordinator_service
 from syn_domain import tool_call_counts
-from syn_domain.tool_call_counts import ToolCallCountsNotWiredError, ToolCallCountsProjection
+from syn_domain.tool_call_counts import (
+    ToolCallCountsNotMigratedError,
+    ToolCallCountsNotWiredError,
+    ToolCallCountsProjection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -89,10 +99,19 @@ class _Conn:
     startup that skips the repair pass.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        tables_exist: bool = True,
+        tally_is_blank: bool = True,
+        stamped_version: int | None = None,
+    ) -> None:
         self.statements: list[str] = []
         self.transactional: list[str] = []
         self.open_transactions = 0
+        self.tables_exist = tables_exist
+        self.tally_is_blank = tally_is_blank
+        self.stamped_version = stamped_version
 
     def _record(self, query: str) -> None:
         self.statements.append(query)
@@ -114,9 +133,19 @@ class _Conn:
 
     async def fetchval(self, query: str, *_args: object) -> object:
         self._record(query)
+        # "do the tally's tables exist?" -> as configured.
+        if "to_regclass" in query:
+            return self.tables_exist
+        # "what definition version were these rows recounted to?" -> none, the
+        # state migration 004 leaves and the one a startup must not accept.
+        # Asked before the tally's own name, which this table's contains.
+        if tool_call_counts.VERSION_TABLE in query:
+            return self.stamped_version
         # "has agent_events anything to count?" -> yes.
-        # "is the tally blank?" -> yes.
-        return True
+        if "agent_events" in query:
+            return True
+        # "is the tally blank?" -> as configured.
+        return self.tally_is_blank
 
     def transaction(self) -> _Transaction:
         return _Transaction(self)
@@ -277,17 +306,19 @@ async def test_startup_repairs_the_tally_whatever_the_auto_create_flag_says(
 ) -> None:
     """Readiness and DDL are different jobs and no longer share a switch.
 
-    ``True`` is the case that was broken and is the reason for the parameter:
-    it is what ``SYN_SKIP_AUTO_CREATE_TABLES=true`` produces, it is what we
-    deploy, and it is the value under which startup used to do nothing at all.
-    ``False`` is here so a fix that merely moved the bug to the other branch
-    fails too.
+    ``True`` is the case that was broken first and is the reason for the
+    parameter: it is what ``SYN_SKIP_AUTO_CREATE_TABLES=true`` produces, it is
+    what we deploy, and it is the value under which startup used to do nothing
+    at all. ``False`` is here so a fix that merely moved the bug to the other
+    branch fails too.
+
+    What the flag governs is the subject of the two tests below. It is not
+    this one: the recount runs either way.
     """
     conn = _Conn()
 
     await _start_the_store(skip_auto_create=skip_auto_create, conn=conn)
 
-    assert conn.issued(tool_call_counts.CREATE_TABLE_SQL)
     assert _recount_ran(conn), (
         f"startup with skip_auto_create={skip_auto_create} issued {conn.statements}, "
         "which leaves the tally blank"
@@ -309,3 +340,156 @@ async def test_the_deployed_configuration_really_is_the_one_being_measured() -> 
     assert not conn.issued(_AGENT_EVENTS_DDL_MARKER), (
         "agent_events was auto-created despite skip_auto_create=True"
     )
+
+
+# ---------------------------------------------------------------------------
+# 3. The flag governs DDL, and only DDL
+# ---------------------------------------------------------------------------
+
+#: Every statement this system may issue that requires CREATE privilege on the
+#: tally's behalf. A deployment that applies its own migrations may be
+#: connecting as a role that holds none, in which case each of these is not a
+#: harmless no-op but a failed startup.
+_TALLY_DDL = (
+    tool_call_counts.CREATE_TABLE_SQL,
+    tool_call_counts.CREATE_INDEX_SQL,
+    tool_call_counts.CREATE_VERSION_TABLE_SQL,
+)
+
+
+async def test_the_deployment_that_owns_its_ddl_is_issued_none_of_it() -> None:
+    """The blocker: the repair escaped the auto-create branch and took the DDL with it.
+
+    ``CREATE TABLE IF NOT EXISTS`` reads as harmless and is not. It needs
+    CREATE on the schema before it can decide the table is already there, so
+    against the least-privileged role a hand-migrated deployment is entitled to
+    use, this is the statement that refuses to start the application - for a
+    table that exists.
+
+    Asserted over every DDL statement the module owns rather than the one that
+    happened to regress, because the next one added is the next one to leak.
+    """
+    conn = _Conn()
+
+    await _start_the_store(skip_auto_create=True, conn=conn)
+
+    leaked = [sql for sql in _TALLY_DDL if conn.issued(sql)]
+    assert leaked == [], f"startup issued DDL a role without CREATE cannot run: {leaked}"
+
+
+async def test_the_deployment_that_asked_for_auto_creation_still_gets_it() -> None:
+    """The other direction, so "issue no DDL" cannot be satisfied by issuing none ever.
+
+    Development and the test stack come up against an empty database with no
+    migrations applied. If the flag is unset, the tables are this module's to
+    create - all three of them, including the version table, without which
+    nothing can record that a recount happened.
+    """
+    conn = _Conn()
+
+    await _start_the_store(skip_auto_create=False, conn=conn)
+
+    missing = [sql for sql in _TALLY_DDL if not conn.issued(sql)]
+    assert missing == [], f"auto-creation was asked for and these were not created: {missing}"
+
+
+async def test_a_deployment_missing_the_migration_is_told_so_at_startup() -> None:
+    """Auto-creation off and the tables absent is an operator error, not a state to survive.
+
+    The two alternatives are both worse. Creating them anyway is the bug
+    above. Carrying on leaves an application whose every read of the tally
+    fails on a missing relation, at request time, on the dashboard - so the
+    first thing anyone sees is a page of errors rather than a startup log line
+    naming the migration to run.
+    """
+    conn = _Conn(tables_exist=False)
+
+    with pytest.raises(ToolCallCountsNotMigratedError) as raised:
+        await _start_the_store(skip_auto_create=True, conn=conn)
+
+    assert tool_call_counts.MIGRATION in str(raised.value)
+    assert not any(conn.issued(sql) for sql in _TALLY_DDL), "created the tables it just refused to"
+
+
+# ---------------------------------------------------------------------------
+# 4. A tally that is populated and short
+# ---------------------------------------------------------------------------
+
+
+async def test_a_populated_tally_no_writer_of_it_produced_is_recounted() -> None:
+    """The blocker, in the state the upgrade actually passes through (#1322).
+
+    Migration 004 used to backfill. It runs against a live database, so the
+    application still serving while it runs is the one that does not maintain
+    this tally, and everything that version appends to ``agent_events`` before
+    the new binary starts is counted in the history and missing from the
+    backfilled rows.
+
+    The table is then NON-BLANK, which was the only question startup asked, so
+    the gap was accepted - and the coordinator does not cover it either, since
+    a first registration has no checkpoint to mismatch and nothing calls
+    ``clear_all_data``. Both nets missed and the undercount was permanent.
+
+    ``stamped_version=None`` is that state and could not arise any other way:
+    only ``rebuild`` writes the stamp, so its absence means no writer of this
+    tally has ever produced these rows, whatever the rows look like.
+    """
+    conn = _Conn(tally_is_blank=False, stamped_version=None)
+
+    await _start_the_store(skip_auto_create=True, conn=conn)
+
+    assert _recount_ran(conn), (
+        f"a populated but unstamped tally was accepted; startup issued {conn.statements}"
+    )
+
+
+async def test_a_tally_built_to_an_older_definition_is_recounted() -> None:
+    """What the stamp buys beyond the one upgrade: a version, that can be bumped.
+
+    Every other read model here recounts on a version bump because the
+    coordinator compares its checkpoint's version. This one cannot - its
+    ``handle_event`` is a no-op and a first registration has no checkpoint -
+    so the stamp is where that guarantee lives instead. Change what a row
+    means, bump ``TALLY_VERSION``, and every deployment recounts once.
+    """
+    conn = _Conn(tally_is_blank=False, stamped_version=tool_call_counts.TALLY_VERSION - 1)
+
+    await _start_the_store(skip_auto_create=True, conn=conn)
+
+    assert _recount_ran(conn), "rows built to a superseded definition were served as current"
+
+
+async def test_a_stamped_tally_is_not_recounted_on_every_startup() -> None:
+    """The cost ceiling, without which the fix above is the bug it is fixing.
+
+    A recount is the full ``GROUP BY`` over ``agent_events`` that #1322 exists
+    to stop running - unbounded by anything except how much the agents have
+    done. Once per definition is the whole budget; once per restart would be
+    worse than what was there before, because now it blocks startup.
+    """
+    conn = _Conn(tally_is_blank=False, stamped_version=tool_call_counts.TALLY_VERSION)
+
+    await _start_the_store(skip_auto_create=True, conn=conn)
+
+    assert not conn.issued(tool_call_counts.BACKFILL_SQL), "recounted a tally already at version"
+    assert not conn.issued("TRUNCATE TABLE")
+
+
+async def test_the_stamp_is_committed_with_the_rows_it_describes() -> None:
+    """Separately committed, a crash between them can strand a lie.
+
+    Rows-then-stamp leaves "stamped but never recounted" recoverable by
+    nothing: every later startup reads a current version and walks past. In one
+    transaction the only state a crash can leave is "recounted, unstamped",
+    which the next startup fixes by recounting again - and recounting twice is
+    recounting once.
+    """
+    conn = _Conn()
+
+    await _start_the_store(skip_auto_create=True, conn=conn)
+
+    assert conn.issued(tool_call_counts._STAMP_SQL)
+    assert any(tool_call_counts._STAMP_SQL.strip() in sql for sql in conn.transactional), (
+        "the version stamp was committed outside the recount's transaction"
+    )
+    assert conn.open_transactions == 0

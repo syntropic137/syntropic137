@@ -140,6 +140,8 @@ class _RecordingConnection:
         *,
         tally_is_blank: bool = False,
         history_has_tool_calls: bool = True,
+        stamped_version: int | None = tool_call_counts.TALLY_VERSION,
+        tables_exist: bool = True,
     ) -> None:
         self.statements: list[str] = []
         self.args: list[tuple[object, ...]] = []
@@ -148,6 +150,10 @@ class _RecordingConnection:
         self._rows = list(rows)
         self._tally_is_blank = tally_is_blank
         self._history_has_tool_calls = history_has_tool_calls
+        #: What ``agent_tool_call_counts_version`` holds. ``None`` is a table
+        #: that no ``rebuild`` has ever stamped - a fresh migration, a restore.
+        self._stamped_version = stamped_version
+        self._tables_exist = tables_exist
 
     def _record(self, query: str, args: tuple[object, ...]) -> None:
         self.statements.append(query)
@@ -165,8 +171,16 @@ class _RecordingConnection:
 
     async def fetchval(self, query: str, *args: object) -> object:
         self._record(query, args)
-        # The two single-value questions ``ensure_ready`` asks, told apart by
-        # the table each is about - so neither has to be matched on its text.
+        # The single-value questions ``ensure_ready`` asks, told apart by the
+        # table each is about - so none has to be matched on its text. The
+        # version table is tested for FIRST because its name contains the
+        # tally's: matched the other way round, every stamp read would be
+        # answered as a blankness probe and the parameter below would do
+        # nothing at all.
+        if "to_regclass" in query:
+            return self._tables_exist
+        if tool_call_counts.VERSION_TABLE in query:
+            return self._stamped_version
         if "agent_events" in query:
             return self._history_has_tool_calls
         return self._tally_is_blank
@@ -264,11 +278,26 @@ async def test_recording_nothing_writes_nothing() -> None:
 # --------------------------------------------------------------------------
 
 
+def _args_of(conn: _RecordingConnection, statement: str) -> tuple[object, ...]:
+    """The parameters ``statement`` was issued with. Keyed by the statement
+    rather than by position, so adding one to the recount cannot silently
+    repoint an assertion at a different query."""
+    return conn.args[conn.statements.index(statement)]
+
+
+#: What a full recount looks like from the database's side, in order.
+_RECOUNT = [
+    tool_call_counts._TRUNCATE_SQL,
+    tool_call_counts.BACKFILL_SQL,
+    tool_call_counts._STAMP_SQL,
+]
+
+
 async def test_a_blank_tally_is_filled_from_the_history_already_there() -> None:
     """Without this, every existing session reports zero tool calls forever."""
     conn = _RecordingConnection(tally_is_blank=True)
 
-    await tool_call_counts.ensure_ready(conn)
+    await tool_call_counts.ensure_ready(conn, skip_auto_create=False)
 
     assert any(statement == tool_call_counts.BACKFILL_SQL for statement in conn.statements), (
         "an install with history was left with an empty tally"
@@ -276,25 +305,36 @@ async def test_a_blank_tally_is_filled_from_the_history_already_there() -> None:
 
 
 async def test_a_tally_that_has_rows_is_not_rebuilt_on_startup() -> None:
-    """The scan is the cost being removed; paying it on every startup is not a fix."""
+    """The scan is the cost being removed; paying it on every startup is not a fix.
+
+    ``stamped_version`` is the current one here, which is the steady state:
+    some earlier startup already recounted these rows. Without it this would
+    pass for the wrong reason - a recount every time is also "not rebuilt
+    because it has rows".
+    """
     conn = _RecordingConnection(tally_is_blank=False)
 
-    await tool_call_counts.ensure_ready(conn)
+    await tool_call_counts.ensure_ready(conn, skip_auto_create=False)
 
     assert not any("agent_events" in statement for statement in conn.statements)
+    assert conn.transactions == []
 
 
 async def test_an_install_that_has_never_run_a_tool_is_not_rebuilt_forever() -> None:
     """A blank tally is the right answer when there is nothing to count.
 
-    Rebuilding on the strength of "blank" alone would re-run the recount on
-    every startup of the install that has the least to gain from it.
+    "Forever" is the claim, so the second startup is where it is tested. The
+    first one recounts - it has to, nothing has stamped these rows yet - and
+    the stamp it leaves is what stops the one after it, whether or not the
+    install has ever run a tool.
     """
     conn = _RecordingConnection(tally_is_blank=True, history_has_tool_calls=False)
+    await tool_call_counts.ensure_ready(conn, skip_auto_create=False)
 
-    await tool_call_counts.ensure_ready(conn)
+    settled = _RecordingConnection(tally_is_blank=True, history_has_tool_calls=False)
+    await tool_call_counts.ensure_ready(settled, skip_auto_create=False)
 
-    assert conn.transactions == [], "recounted an install with nothing to count"
+    assert settled.transactions == [], "recounted an install with nothing to count"
 
 
 async def test_a_truncated_tally_is_rebuilt_rather_than_accepted() -> None:
@@ -303,17 +343,18 @@ async def test_a_truncated_tally_is_rebuilt_rather_than_accepted() -> None:
     Startup used to ask ``to_regclass`` - does the TABLE exist - and a table
     truncated by a projection rebuild answers yes. So the read model came back
     up reporting zero tool calls for every session, indefinitely, and the page
-    showed that zero as a fact. A blank tally is now a blank tally whatever
-    emptied it.
+    showed that zero as a fact.
+
+    The stamp does not help here and that is the point of stating it: a bare
+    ``TRUNCATE`` of the tally leaves the version table alone, so the stamp
+    still reads current. Blank is the other reason to recount, and it is why
+    there are two.
     """
     conn = _RecordingConnection(tally_is_blank=True)
 
-    await tool_call_counts.ensure_ready(conn)
+    await tool_call_counts.ensure_ready(conn, skip_auto_create=False)
 
-    assert not any("to_regclass" in statement for statement in conn.statements), (
-        "startup still decides by whether the table exists"
-    )
-    assert conn.transactions == [[tool_call_counts._TRUNCATE_SQL, tool_call_counts.BACKFILL_SQL]]
+    assert conn.transactions == [_RECOUNT]
 
 
 async def test_rebuild_empties_and_recounts_in_one_transaction() -> None:
@@ -327,8 +368,12 @@ async def test_rebuild_empties_and_recounts_in_one_transaction() -> None:
     await tool_call_counts.rebuild(conn)
 
     assert conn.transactions == [conn.statements], "rebuild left statements outside a transaction"
-    assert conn.statements == [tool_call_counts._TRUNCATE_SQL, tool_call_counts.BACKFILL_SQL]
-    assert conn.args[-1] == (TOOL_EXECUTION_COMPLETED, tool_call_counts.NO_EXECUTION)
+    assert conn.statements == _RECOUNT
+    assert _args_of(conn, tool_call_counts.BACKFILL_SQL) == (
+        TOOL_EXECUTION_COMPLETED,
+        tool_call_counts.NO_EXECUTION,
+    )
+    assert _args_of(conn, tool_call_counts._STAMP_SQL) == (tool_call_counts.TALLY_VERSION,)
 
 
 async def test_rebuild_empties_with_truncate_and_not_delete() -> None:
