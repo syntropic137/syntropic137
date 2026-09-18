@@ -1,9 +1,12 @@
 import type { MetricsResponse } from '../types'
 import { API_BASE, fetchJSON } from './base'
 
-export async function getMetrics(workflowId?: string): Promise<MetricsResponse> {
+export async function getMetrics(
+  workflowId?: string,
+  signal?: AbortSignal
+): Promise<MetricsResponse> {
   const query = workflowId ? `?workflow_id=${workflowId}` : ''
-  return fetchJSON(`${API_BASE}/metrics${query}`)
+  return fetchJSON(`${API_BASE}/metrics${query}`, { signal })
 }
 
 export interface ToolExecution {

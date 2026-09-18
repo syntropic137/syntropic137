@@ -68,18 +68,26 @@ class PhaseResultBuilder:
         session_id: str,
         error_message: str,
         completed_at: datetime | None = None,
+        artifact_id: str | None = None,
     ) -> PhaseResult:
         """Build a failed PhaseResult.
 
         ``completed_at`` is accepted so the caller can pass the SAME instant it
         used to compute the phase's duration. Reading the clock again here made
         ``completed_at - started_at`` disagree with the recorded duration.
+
+        ``artifact_id`` names what was kept out of the phase before the run was
+        torn down (#1321). A failed phase could carry no artifact at all, which
+        is why a phase that wrote a 1322-line deliverable and then botched its
+        ``TASK_RESULT`` showed ``artifact_ids: []``. It stays optional because
+        most failures have nothing to point at.
         """
         return PhaseResult(
             phase_id=phase_id,
             status=PhaseStatus.FAILED,
             started_at=started_at,
             completed_at=completed_at or datetime.now(UTC),
+            artifact_id=artifact_id,
             session_id=session_id,
             error_message=error_message,
         )

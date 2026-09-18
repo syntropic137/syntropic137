@@ -111,8 +111,14 @@ def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
 def _make_processor(
     agent_handler: FakeAgentExecutionHandler,
     session_capture: object | None = None,
+    artifact_repository: object | None = None,
 ) -> WorkflowExecutionProcessor:
-    """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies."""
+    """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
+
+    ``artifact_repository`` is overridable so a test can assert on what was
+    STORED rather than only on what the run returned. The default discards
+    everything, which is all most of these tests need.
+    """
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
 
@@ -120,7 +126,7 @@ def _make_processor(
         execution_repository=FakeExecutionRepository(),
         session_repository=FakeSessionRepository(),
         workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
-        artifact_repository=FakeArtifactRepository(),
+        artifact_repository=artifact_repository or FakeArtifactRepository(),
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
