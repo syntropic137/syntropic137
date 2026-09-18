@@ -20,16 +20,23 @@ recovered its deliverable from run B's report, success in place of its own
 failure (#1256). This is the same defect with the workspace instead of the
 message.
 
-WHY THE INTERLEAVE IS HELD AND NOT RACED. The defect needs one specific order -
-both runs must take charge of their workspace before either launches its agent
-- and nothing inside a single ``run()`` comes between a phase's own
-``attach_workspace`` and its own ``launch``. So ``asyncio.gather`` alone
-produces it only by luck, and a test that relied on that luck would pass for
-scheduling reasons and stop catching this the day the event loop changed.
-``_HoldEveryRunAtProvision`` therefore stops each run on a real await it
-already makes - persisting its own ``WorkspaceProvisionedForPhaseEvent`` - and
-releases both only once both have arrived. That is a legal production
-interleave, held still.
+WHY THE INTERLEAVE IS HELD AND NOT RACED. Each defect needs one specific
+order, and ``asyncio.gather`` alone produces it only by luck: these fakes do no
+I/O, so a run started first can reach its own teardown before the other has
+been scheduled at all. A test relying on that luck would pass for scheduling
+reasons and stop catching this the day the event loop changed. So both runs are
+stopped at two rendezvous, each on a real await the run already makes, and
+released only once every run has arrived. Both are legal production
+interleaves, held still.
+
+``_HoldEveryRunAtSessionStart`` is the earlier one: a run has recorded the
+inputs it was dispatched with and has not yet built a prompt out of them. That
+is the window in which a second run's arrival overwrote the first run's inputs.
+
+``_HoldEveryRunAtProvision`` is the later one: a run holds its workspace and
+has not yet launched its agent. Nothing inside a single ``run()`` comes between
+a phase's own ``attach_workspace`` and its own ``launch``, so this is the only
+way to get both writes in before either read.
 
 THE SENTINELS COULD NOT ARISE BY DEFAULT. Each run's command line is built from
 its own execution id by the prompt builder below, its announced model is a
@@ -76,10 +83,14 @@ from .test_processor_smoke import FakeExecutionRepository
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.agent_sessions import AgentSessionAggregate
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        WorkflowExecutionResult,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -90,9 +101,6 @@ if TYPE_CHECKING:
         ObservabilityCollector,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        WorkflowExecutionResult,
-    )
 
 pytestmark = pytest.mark.unit
 
@@ -115,6 +123,15 @@ ANNOUNCED = {ONE: "claude-opus-5-20260115", TWO: "claude-haiku-4-5-20251001"}
 #: is not recoverable from it by any other means.
 DELIVERABLE = {ONE: b"# deliverable written by run one", TWO: b"# deliverable written by run two"}
 
+#: What each run was asked to do. Two different issues in two different repos,
+#: because that is the shape of the real input - a run is dispatched at one
+#: issue - and because a prompt built from the other run's is a valid prompt
+#: pointed at the wrong work. Nothing downstream can tell.
+INPUTS = {
+    ONE: {"issue": "1311", "repo": "syntropic137/syntropic137"},
+    TWO: {"issue": "9042", "repo": "syntropic137/event-sourcing-platform"},
+}
+
 
 @dataclass(frozen=True)
 class _Launch:
@@ -132,6 +149,61 @@ class _Launch:
     session_id: str
 
 
+class _Rendezvous:
+    """Hold every run at one point until all of them have reached it.
+
+    Not `asyncio.Barrier`: each run must be admitted exactly once however many
+    times the await it rides on is taken, so arrival is recorded per run id.
+    A run that arrives twice passes straight through rather than deadlocking
+    the ones still to come.
+    """
+
+    def __init__(self, parties: int) -> None:
+        self._parties = parties
+        self._arrived = 0
+        self._everyone_here = asyncio.Event()
+        self._held: set[str] = set()
+
+    async def hold(self, run_id: str) -> None:
+        if run_id in self._held:
+            return
+        self._held.add(run_id)
+        self._arrived += 1
+        if self._arrived >= self._parties:
+            self._everyone_here.set()
+        await self._everyone_here.wait()
+
+
+class _HoldEveryRunAtSessionStart:
+    """A session repository that stops each run before it builds a prompt.
+
+    `SessionLifecycleManager.start` persists the phase's session part way
+    through `_handle_provision`, after `run()` has recorded the inputs it was
+    dispatched with and before `_provision_workspace` reads them back out. So
+    holding here puts every run's inputs in place before any run builds a
+    prompt - which is exactly the order in which a slot shared by both runs
+    hands one of them the other's issue.
+    """
+
+    def __init__(self, rendezvous: _Rendezvous) -> None:
+        self._inner = FakeSessionRepository()
+        self._rendezvous = rendezvous
+
+    async def save(self, aggregate: AgentSessionAggregate) -> None:
+        await self._inner.save(aggregate)
+        if aggregate.execution_id is not None:
+            await self._rendezvous.hold(aggregate.execution_id)
+
+    async def save_new(self, aggregate: AgentSessionAggregate) -> None:
+        await self.save(aggregate)
+
+    async def get_by_id(self, aggregate_id: str) -> AgentSessionAggregate | None:
+        return await self._inner.get_by_id(aggregate_id)
+
+    async def exists(self, aggregate_id: str) -> bool:
+        return await self._inner.exists(aggregate_id)
+
+
 class _HoldEveryRunAtProvision:
     """An execution repository that stops each run once it holds its workspace.
 
@@ -145,12 +217,9 @@ class _HoldEveryRunAtProvision:
     workspace already attached and the agent not yet dispatched.
     """
 
-    def __init__(self, parties: int) -> None:
+    def __init__(self, rendezvous: _Rendezvous) -> None:
         self._inner = FakeExecutionRepository()
-        self._parties = parties
-        self._arrived = 0
-        self._everyone_here = asyncio.Event()
-        self._held: set[str] = set()
+        self._rendezvous = rendezvous
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
         provisioned = any(
@@ -158,12 +227,8 @@ class _HoldEveryRunAtProvision:
             for envelope in aggregate.get_uncommitted_events()
         )
         await self._inner.save(aggregate)
-        if provisioned and aggregate.id not in self._held:
-            self._held.add(aggregate.id)
-            self._arrived += 1
-            if self._arrived >= self._parties:
-                self._everyone_here.set()
-            await self._everyone_here.wait()
+        if provisioned:
+            await self._rendezvous.hold(aggregate.id)
 
     async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
         await self._inner.save_new(aggregate)
@@ -252,21 +317,39 @@ class _AnAgentThatSignsItsWork:
         return found[0]
 
 
-async def _a_prompt_naming_its_run(
-    phase: ExecutablePhase,
-    execution_id: str,
-    workflow_id: str,
-    repo_url: str | None,
-    phase_outputs: dict,
-    inputs: dict,
-) -> str:
-    """The prompt carries the run's id, so the command line does too.
+class _APromptNamingItsRun:
+    """Builds each run's prompt, and keeps the inputs it was given to build it.
 
-    That is what makes ``claude_cmd`` a sentinel rather than a constant: in
-    production the command line is built per run from that run's prompt, and
-    launching a container with another run's is the concrete form of the bug.
+    A recorder rather than a plain function because ``inputs`` is the second
+    thing this file is about: it was held as ``self._inputs`` on the processor,
+    assigned at the top of ``run()`` and read several awaits later during
+    provisioning, so a concurrent run starting in between replaced it. What
+    reaches the agent then is a well-formed prompt naming the other run's issue
+    and repo - and the only place that is observable is right here, where the
+    prompt is built.
     """
-    return f"prompt for {execution_id}"
+
+    def __init__(self) -> None:
+        self.inputs_seen: dict[str, dict[str, str]] = {}
+
+    async def __call__(
+        self,
+        phase: ExecutablePhase,
+        execution_id: str,
+        workflow_id: str,
+        repo_url: str | None,
+        phase_outputs: dict,
+        inputs: dict,
+    ) -> str:
+        """The prompt carries the run's id, so the command line does too.
+
+        That is what makes ``claude_cmd`` a sentinel rather than a constant: in
+        production the command line is built per run from that run's prompt,
+        and launching a container with another run's is the concrete form of
+        the bug.
+        """
+        self.inputs_seen[execution_id] = dict(inputs)
+        return f"prompt for {execution_id}"
 
 
 def _echo_the_prompt(phase: ExecutablePhase, prompt: str) -> list[str]:
@@ -296,6 +379,7 @@ class _BothRuns:
     results: dict[str, WorkflowExecutionResult]
     agent: _AnAgentThatSignsItsWork
     artifacts: _KeepEveryArtifact
+    prompts: _APromptNamingItsRun
 
 
 async def _two_concurrent_runs() -> _BothRuns:
@@ -307,9 +391,10 @@ async def _two_concurrent_runs() -> _BothRuns:
     """
     agent = _AnAgentThatSignsItsWork()
     artifacts = _KeepEveryArtifact()
+    prompts = _APromptNamingItsRun()
     processor = WorkflowExecutionProcessor(
-        execution_repository=_HoldEveryRunAtProvision(parties=2),  # type: ignore[arg-type]
-        session_repository=FakeSessionRepository(),
+        execution_repository=_HoldEveryRunAtProvision(_Rendezvous(parties=2)),  # type: ignore[arg-type]
+        session_repository=_HoldEveryRunAtSessionStart(_Rendezvous(parties=2)),  # type: ignore[arg-type]
         workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
         artifact_repository=artifacts,  # type: ignore[arg-type]
         artifact_content_storage=None,
@@ -317,7 +402,7 @@ async def _two_concurrent_runs() -> _BothRuns:
         conversation_storage=None,
         observability_writer=None,
         controller=None,
-        prompt_builder=_a_prompt_naming_its_run,
+        prompt_builder=prompts,
         command_builder=_echo_the_prompt,
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         agent_handler=agent,  # type: ignore[arg-type]
@@ -328,7 +413,7 @@ async def _two_concurrent_runs() -> _BothRuns:
             workflow_id=WORKFLOW_ID,
             workflow_name="sdlc-implement",
             phases=_the_phase(),
-            inputs={},
+            inputs=dict(INPUTS[execution_id]),
             execution_id=execution_id,
         )
 
@@ -336,7 +421,9 @@ async def _two_concurrent_runs() -> _BothRuns:
         asyncio.gather(_run(ONE), _run(TWO)),
         timeout=30,
     )
-    return _BothRuns(results={ONE: one, TWO: two}, agent=agent, artifacts=artifacts)
+    return _BothRuns(
+        results={ONE: one, TWO: two}, agent=agent, artifacts=artifacts, prompts=prompts
+    )
 
 
 class TestEachRunLaunchesItsOwnAgent:
@@ -369,6 +456,31 @@ class TestEachRunLaunchesItsOwnAgent:
         both = await _two_concurrent_runs()
 
         assert both.agent.launch_for(ONE).session_id != both.agent.launch_for(TWO).session_id
+
+
+class TestEachRunIsAskedToDoItsOwnWork:
+    """The inputs, which were `self._inputs` on the shared processor.
+
+    Not a map keyed by phase id but the same defect one step simpler: one slot
+    on an object two runs share, written at the top of `run()` and read several
+    awaits later. It is the worst of the group to land in production because
+    the result is indistinguishable from correct - a well-formed prompt, a
+    clean run, a finished deliverable, for the wrong issue.
+    """
+
+    async def test_each_run_builds_its_prompt_from_its_own_inputs(self) -> None:
+        both = await _two_concurrent_runs()
+
+        assert both.prompts.inputs_seen[ONE] == INPUTS[ONE]
+        assert both.prompts.inputs_seen[TWO] == INPUTS[TWO]
+
+    async def test_neither_run_is_pointed_at_the_other_s_issue(self) -> None:
+        """Stated as the harm rather than as equality: the issue number is what
+        the agent opens, and the repo is what it pushes to."""
+        both = await _two_concurrent_runs()
+
+        assert both.prompts.inputs_seen[ONE]["issue"] != INPUTS[TWO]["issue"]
+        assert both.prompts.inputs_seen[TWO]["repo"] != INPUTS[ONE]["repo"]
 
 
 class TestEachRunStoresItsOwnWork:

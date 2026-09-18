@@ -223,8 +223,11 @@ class _Process:
             repo_urls=[],
             completed_phase_ids=self.completed_phase_ids,
             phase_outputs=self.phase_outputs,
+            # The restart under test carries no trigger inputs; what the
+            # salvage recovers has to come from the event stream either way.
+            inputs={},
         )
-        self.processor._runtime.attach_workspace(  # pyright: ignore[reportPrivateUsage]
+        self.processor._runtimes.of(todo.execution_id).attach_workspace(  # pyright: ignore[reportPrivateUsage]
             phase.phase_id,
             workspace=result.workspace,
             workspace_cm=result.workspace_cm,

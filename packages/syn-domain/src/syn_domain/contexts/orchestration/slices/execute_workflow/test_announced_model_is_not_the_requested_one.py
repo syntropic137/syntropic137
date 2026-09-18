@@ -651,7 +651,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
         repo = MockArtifactRepo()
         processor = _make_workflow_processor(artifact_repository=repo)
         processor._journal.append = AsyncMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-1").attach_workspace(
             "verify",
             workspace=CollectedWorkspace(
                 collected_files=[("artifacts/output/deliverable.md", b"# Verified")]
@@ -660,7 +660,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
             agent_env={},
             claude_cmd=[],
         )
-        processor._runtime.record_agent_run(
+        processor._runtimes.of("exec-1").record_agent_run(
             "verify",
             execution_id="exec-1",
             result=AgentExecutionResult(

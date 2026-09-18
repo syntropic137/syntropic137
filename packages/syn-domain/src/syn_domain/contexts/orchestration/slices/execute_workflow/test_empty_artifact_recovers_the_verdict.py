@@ -493,7 +493,7 @@ class TestTheVerdictSurvivesEveryHop:
         processor = _make_processor()
         processor._journal.append = AsyncMock()
         workspace = MagicMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-0bac0e1ed2b2").attach_workspace(
             "verify",
             workspace=workspace,
             workspace_cm=AsyncMock(),

@@ -125,8 +125,100 @@ class PhaseTimings:
     session_ids: Mapping[str, str]
 
 
+class PhaseRuntimes:
+    """One `PhaseRuntime` per execution, for a processor that serves many.
+
+    WHY THE KEY LIVES HERE AND NOT INSIDE. A run has one `implement`, so phase
+    id is the whole key any single run needs. What a run does not have is one
+    `implement` ACROSS runs: a workflow names its own phases, so every run of
+    it names them identically. For as long as one `PhaseRuntime` was shared by
+    every concurrent dispatch, each of its maps had two writers and one slot -
+    the second run to provision took the first run's workspace, env, command
+    line and session out from under it, and whichever run finalised first
+    popped the single shared entry and left the other launching into a
+    `KeyError`. That is #1311, and it is the same defect `_said` was in #1256,
+    where run A recovered its deliverable from run B's report and reported a
+    success in place of its own failure.
+
+    Keying every map by `(execution_id, phase_id)` would have answered the
+    question. Handing each run its own object REMOVES it: there is no longer a
+    slot two runs could both write, so a crossing is not something the code
+    avoids, it is something it cannot express. `finalize` and `abandon_all`,
+    which are handed no execution id at all and clear everything they can
+    reach, become correct for the same reason rather than by being taught a
+    new parameter - and one failing run tearing down a healthy one's
+    containers stops being reachable.
+
+    WHAT THE CALLER GETS TO NOT KNOW: that there is more than one runtime,
+    when a run's is built, and when it is thrown away. It asks for the runtime
+    of the execution it is already holding an id for and is handed a runtime
+    that is only ever that run's.
+    """
+
+    def __init__(
+        self,
+        *,
+        capture_port: SessionCapturePort | None,
+        session_store: SessionStorePort | None,
+        writer: ObservabilityRecorder | None,
+        ledger: ImportLedgerPort | None,
+    ) -> None:
+        self._capture_port = capture_port
+        self._session_store = session_store
+        self._writer = writer
+        self._ledger = ledger
+        self._by_execution: dict[str, PhaseRuntime] = {}
+
+    def of(self, execution_id: str) -> PhaseRuntime:
+        """This run's runtime, built on first use.
+
+        Built on demand rather than at the start of `run()` because the
+        processor reaches for it from every dispatch path and from both
+        terminal paths, and a run that fails before it ever provisioned still
+        asks - for the counts it is on its way out to report. An empty runtime
+        answers that correctly; a missing one would make every caller handle an
+        absence that means nothing.
+        """
+        runtime = self._by_execution.get(execution_id)
+        if runtime is None:
+            runtime = PhaseRuntime(
+                capture_port=self._capture_port,
+                session_store=self._session_store,
+                writer=self._writer,
+                ledger=self._ledger,
+            )
+            self._by_execution[execution_id] = runtime
+        return runtime
+
+    @property
+    def is_idle(self) -> bool:
+        """True when no run is still held - what a drained processor looks like.
+
+        The registry's own postcondition, and the one `PhaseRuntime.is_idle`
+        cannot state: a runtime that let go of everything is still a runtime
+        this object is keeping alive for a run that ended.
+        """
+        return not self._by_execution
+
+    def release(self, execution_id: str) -> None:
+        """Let go of a finished run's runtime.
+
+        The processor outlives every run it dispatches, so without this the
+        registry is a leak with one entry per execution for the life of the
+        process - holding, at worst, a workspace handle belonging to a run that
+        ended hours ago. Called from `run()`'s `finally`, so it happens on
+        every way out including the ones that raise.
+        """
+        self._by_execution.pop(execution_id, None)
+
+
 class PhaseRuntime:
-    """The workspaces, sessions and tallies of the phases currently running."""
+    """The workspaces, sessions and tallies of ONE execution's running phases.
+
+    One of these per execution, vended by `PhaseRuntimes`. Everything below is
+    keyed by phase id alone and that is now the whole key, because the only
+    phases this object ever sees are one run's.
+    """
 
     def __init__(
         self,
