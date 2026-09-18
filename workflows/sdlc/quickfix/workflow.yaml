@@ -142,7 +142,7 @@ phases:
     # cost this workflow exists to remove.
     #
     # Sonnet is what `sdlc-implement-v2` already trusts with `gh pr create` and
-    # with reading gate output, in its bootstrap and open_pr phases.
+    # with reading gate output, in its premise and open_pr phases.
     agent:
       provider: claude
       model: sonnet
