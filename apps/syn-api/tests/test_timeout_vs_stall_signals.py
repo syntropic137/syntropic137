@@ -144,9 +144,7 @@ class _SessionTools:
     the same place from both.
     """
 
-    def __init__(
-        self, operations: list[ToolOperation] | None, *, raises: bool = False
-    ) -> None:
+    def __init__(self, operations: list[ToolOperation] | None, *, raises: bool = False) -> None:
         self._operations = operations
         self._raises = raises
 
@@ -660,9 +658,7 @@ async def test_a_124_well_inside_the_budget_reads_as_one() -> None:
     an hour is a process that was killed by something else, and a bigger cap
     buys nothing.
     """
-    phase = await _phase_as_an_api_client_sees_it(
-        _stalled_timeline(), died_at=DIED_EARLY_AT
-    )
+    phase = await _phase_as_an_api_client_sees_it(_stalled_timeline(), died_at=DIED_EARLY_AT)
     activity = phase.activity
 
     assert activity.elapsed_seconds == 431.0, "the measured life of the phase, to the client"
