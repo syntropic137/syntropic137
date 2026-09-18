@@ -162,6 +162,20 @@ merged yet" rather than "something is wrong". Three shapes are distinguished --
 on another branch, on no branch at all (never pushed), and absent from the remote
 (rebased away and collected).
 
+**The fetch is not a detail (#1337).** The gate's first revision asked a plain
+`git fetch origin` and then for ancestry, and failed all four pointers on its own
+CI run while every one was merged. `actions/checkout` runs
+`git submodule update --depth=1`, which is shallow *and* single-branch, and takes
+the branch tip before the pointer -- so that fetch transfers nothing, the shallow
+boundary stands, and tip and pointer sit in two fragments with no path between
+them. Ancestry is then not false, it is unanswerable; and with only the default
+branch in the refspec, `branch -r --contains` had nothing to name, so the message
+degraded to "it has not been pushed" about a commit that was pushed. The fetch
+therefore names a full refspec and unshallows, and a guard reports a graph it
+could not repair as a gate bug rather than as a verdict. Condition 2 of the
+ADR-062 amendment, applied to the local graph: "cannot tell" must not reach a
+reader as "no".
+
 ### 12. Request Contract Honesty (#1313)
 
 A request that asks for something the server does not implement must be told

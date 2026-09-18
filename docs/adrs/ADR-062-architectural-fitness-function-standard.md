@@ -176,6 +176,10 @@ is wrong -- a green gate over nothing, which is what the issue was filed about.
 2. It **fails** when the network is unavailable, carrying the underlying tool's
    own error. It must never skip and must never pass. A gate that goes quiet when
    it cannot see is worse than no gate, because the absence reads as approval.
+   This covers any state the gate cannot read, not only an unreachable remote:
+   #1337 was a local graph too truncated to answer, which git reports in the
+   vocabulary of a normal negative. Where a "no" and a "cannot tell" share a
+   spelling, the gate has to separate them itself, and fail as the second.
 3. It is reached only through `just preflight`, which is already a networked
    target (`check-default-workspace-image` pulls the pinned image;
    `check-pinned-image-channels` queries the registry). That is what keeps the

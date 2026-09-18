@@ -23,22 +23,22 @@ needs. The message is most of this gate's value; it is worth a test.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-
 from ci.fitness.infrastructure.test_submodule_pointer_reachability import (
     Submodule,
     unmerged_pointer,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 pytestmark = pytest.mark.architecture
 
 
 def _git(*args: str, cwd: Path) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -88,9 +88,7 @@ def _superproject_with_ci_shaped_checkout(
 
     url = f"file://{upstream}"
     path = "lib/thing"
-    (root / ".gitmodules").write_text(
-        f'[submodule "thing"]\n\tpath = {path}\n\turl = {url}\n'
-    )
+    (root / ".gitmodules").write_text(f'[submodule "thing"]\n\tpath = {path}\n\turl = {url}\n')
 
     worktree = root / path
     worktree.parent.mkdir(parents=True, exist_ok=True)
