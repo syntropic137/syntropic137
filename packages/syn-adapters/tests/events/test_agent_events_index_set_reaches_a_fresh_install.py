@@ -66,7 +66,7 @@ def _executed_indexes() -> dict[str, str]:
     asyncpg's connection protocol, and this file's whole subject is a string of
     DDL rather than any behaviour around it.
     """
-    return _indexes(inspect.getsource(EventStoreSchema._create_indexes))  # noqa: SLF001
+    return _indexes(inspect.getsource(EventStoreSchema._create_indexes))
 
 
 def test_the_two_declarations_of_the_index_set_agree() -> None:
