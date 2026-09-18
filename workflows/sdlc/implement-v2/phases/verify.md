@@ -228,6 +228,12 @@ unit-test output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
 
+**Name the branch and the full commit SHA you verified**, together with the
+`git rev-parse HEAD` output above. The `fix` phase starts in a fresh clone of
+the default branch and has only your report to learn the branch from; without
+the name it cannot fetch what you reviewed, and without the full SHA it cannot
+tell whether what it fetched is still it.
+
 ## Judge the design, not only the correctness
 
 A change can be correct and still be the wrong change. Review for what it costs

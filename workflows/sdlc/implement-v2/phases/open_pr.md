@@ -34,8 +34,20 @@ all, so nothing is on disk here. Open a PR from the **existing remote branch**
 named in the artifacts - you do not need to push anything.
 
 Confirm first that the branch exists on origin and that its head SHA matches the
-one verification reported. If they differ, something pushed over it; stop and say
-so rather than opening a PR for code nobody verified.
+full SHA `reverify.md` reports as certified:
+
+```
+gh api repos/<owner>/<repo>/commits/<branch> --jq .sha
+```
+
+**That SHA, not the one the first pass verified.** Whenever the repair path ran,
+the first-pass SHA is the PRE-FIX head - the very tree the fix was written to
+replace - so comparing against it either blocks a good branch or waves through
+an unrepaired one. `reverify.md` names the head it checked out and certified;
+that is the only SHA this check has any reason to trust.
+
+If they differ, something pushed over the branch after it was certified; stop
+and say so rather than opening a PR for code nobody verified.
 
 Do not merge. Never force push, never rebase.
 
