@@ -121,6 +121,48 @@ async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> b
     return any(content for _, content in collected)
 
 
+async def _exit_code_after_codex_verdict(
+    *,
+    runner: AgentRunner,
+    stream_result: StreamResult,
+    exit_code: int | None,
+    workspace: ManagedWorkspace,
+    phase_id: str,
+) -> int | None:
+    """``exit_code``, overridden to 1 when codex could not trust its own stream.
+
+    The codex parser reserves ``error_reason`` for a BROKEN stream (malformed
+    JSON, no terminal ``turn.completed``), and that verdict has to outrank a
+    process that exited 0: exiting cleanly says nothing about whether the
+    stream the process wrote was complete.
+
+    ONE exception (issue #1111): a stream that simply stopped before
+    ``turn.completed``, having produced the phase's deliverable, is a telemetry
+    gap and not a failed phase. Failing it discards finished work and skips
+    every downstream phase - three complete codex reviews were lost this way in
+    twelve hours. An auth failure or a malformed line still fails here, because
+    it carries a DIFFERENT reason and because a codex that never authenticated
+    writes nothing to artifacts/output.
+
+    A ``None`` exit code is returned untouched. "Nobody observed the exit" is
+    not a verdict this can improve on, and it is the caller's to fail (#1319);
+    turning it into a number here would be the same invention that issue is
+    about, just one function further down.
+    """
+    if runner != AgentRunner.CODEX or stream_result.error_reason is None or exit_code != 0:
+        return exit_code
+    if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
+        await _produced_deliverable(workspace, phase_id)
+    ):
+        logger.warning(
+            "Codex stream ended without turn.completed but the phase produced "
+            "a deliverable (phase=%s) - completing with ESTIMATED usage",
+            phase_id,
+        )
+        return exit_code
+    return 1
+
+
 @dataclass(frozen=True)
 class FinalUsage:
     """A phase's end-of-run token totals, and whether the harness itself reported them.
@@ -351,33 +393,13 @@ class AgentExecutionHandler:
             await launch.settle(workspace.last_stream_exit_code)
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
-        if (
-            runner == AgentRunner.CODEX
-            and stream_result.error_reason is not None
-            and exit_code == 0
-        ):
-            # The codex parser reserves error_reason for a BROKEN stream
-            # (malformed JSON / missing terminal turn.completed); force a
-            # non-zero phase exit even when the process exit was 0.
-            #
-            # ONE exception (issue #1111): a stream that simply stopped before
-            # `turn.completed`, having produced the phase's deliverable, is a
-            # telemetry gap, not a failed phase. Failing it discards finished
-            # work and skips every downstream phase - three complete codex
-            # reviews were lost this way in twelve hours. An auth failure or a
-            # malformed line still fails here, because it carries a DIFFERENT
-            # reason and because a codex that never authenticated writes
-            # nothing to artifacts/output.
-            if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
-                await _produced_deliverable(workspace, todo.phase_id)
-            ):
-                logger.warning(
-                    "Codex stream ended without turn.completed but the phase produced "
-                    "a deliverable (phase=%s) - completing with ESTIMATED usage",
-                    todo.phase_id,
-                )
-            else:
-                exit_code = 1
+        exit_code = await _exit_code_after_codex_verdict(
+            runner=runner,
+            stream_result=stream_result,
+            exit_code=exit_code,
+            workspace=workspace,
+            phase_id=todo.phase_id,
+        )
 
         # Resolved ONCE, for both lanes. The session_summary used to be written
         # straight from `stream_result.result_*` while the command below used
