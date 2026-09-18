@@ -212,6 +212,7 @@ is the property that matters.
 | directory | output | status |
 |---|---|---|
 | `research-plan/` | an implementation plan | built |
+| `decision-record/` | a decision among several paths, with its rationale, after trying to falsify it by experiment | built |
 | `implement/` | a PR implementing an approved plan | built |
 | `quickfix/` | a PR for a change with nothing to prove | built |
 | `tech-debt/` | a prioritised debt register | planned |
