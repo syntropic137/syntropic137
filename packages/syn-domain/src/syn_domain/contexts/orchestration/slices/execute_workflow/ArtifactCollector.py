@@ -33,11 +33,11 @@ from syn_shared.workspace_paths import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.artifacts.ports import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         ArtifactRepository,

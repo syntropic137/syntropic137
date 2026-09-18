@@ -90,11 +90,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
-    from syn_domain.contexts.artifacts.ports import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,

@@ -348,7 +348,7 @@ async def test_upload_fails_when_the_key_only_ever_serves_the_previous_object() 
     client = _LaggingMinio(window=repeat(_head_lies(STALE_BYTES)))
     storage = _storage_for(client)
 
-    with pytest.raises(UploadError, match="a read still returns .* bytes hashing sha256:"):
+    with pytest.raises(UploadError, match=r"a read still returns \d+ bytes hashing sha256:"):
         await storage.upload("artifacts/stale.md", EXPECTED_BYTES)
 
 
