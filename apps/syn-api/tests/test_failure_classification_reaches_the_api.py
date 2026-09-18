@@ -78,6 +78,11 @@ pytestmark = pytest.mark.unit
 REFUSED_ID = "exec-refused-1357"
 #: The run whose container died with the agent never having reported anything.
 CRASHED_ID = "exec-crashed-1357"
+#: The run that ended BEFORE this field existed. Neither its events nor the row
+#: the projection wrote for it carry the key at all, and no VERSION bump means
+#: that row is never rebuilt - so this is what the store actually holds for the
+#: 221 failures the issue counted.
+HISTORICAL_ID = "exec-historical-1357"
 
 WORKFLOW_ID = "wf-1357"
 PHASE_ID = "implement"
@@ -183,10 +188,15 @@ class _StubProjectionManager:
 
 
 async def _projections() -> _StubProjectionManager:
-    """Both views, built by replaying both runs' real event streams."""
+    """Both views, built by replaying both runs' real event streams.
+
+    One store backs both, as one does in production: they occupy different
+    projection names, and a test that gave them separate stores could not ask
+    what a stored ROW looks like without reaching inside a projection.
+    """
     store = InMemoryProjectionStore()
     detail = WorkflowExecutionDetailProjection(store)
-    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+    listing = WorkflowExecutionListProjection(store)
 
     for execution_id, error in (
         (REFUSED_ID, _refusal_error()),
@@ -198,6 +208,56 @@ async def _projections() -> _StubProjectionManager:
 
     return _StubProjectionManager(
         store=store, workflow_execution_detail=detail, workflow_execution_list=listing
+    )
+
+
+async def _projections_with_a_pre_1357_run() -> _StubProjectionManager:
+    """The same two views, plus one run that predates the field entirely.
+
+    Two hops have to be aged, because #1367 bumped no projection VERSION and
+    both are consequences of that:
+
+    1. the EVENT, whose payload never had the key - nothing wrote it; and
+    2. the stored ROW, which pre-#1367 projection code wrote without the key
+       and which, absent a VERSION bump, is never rebuilt from the stream.
+
+    The row is aged by replaying the aged event and then saving the result back
+    with the key removed, rather than by hand-writing a row: every other column
+    is then exactly what the production projection produces, so this stays a
+    real row of that shape as the projection evolves.
+
+    The two live runs are kept alongside deliberately. `UNCLASSIFIED` is the
+    DEFAULT on both response models, so a historical run asserted on its own
+    would pass just as well against a read path that dropped the field at every
+    hop - the neighbours are what tell "resolved to unclassified" apart from
+    "never carried at all".
+    """
+    manager = await _projections()
+    store = manager.store
+    detail, listing = manager.workflow_execution_detail, manager.workflow_execution_list
+
+    aged = _failed(HISTORICAL_ID, _refusal_error()).model_dump()
+    del aged["failure_classification"]
+
+    for projection in (detail, listing):
+        await projection.on_workflow_execution_started(_started(HISTORICAL_ID).model_dump())
+        await projection.on_workflow_failed(aged)
+
+    for name in (detail.PROJECTION_NAME, listing.PROJECTION_NAME):
+        row = await store.get(name, HISTORICAL_ID)
+        assert row is not None, f"{name} did not project {HISTORICAL_ID}"
+        assert "failure_classification" in row, (
+            "the row this test ages no longer carries the key, so removing it "
+            "would age nothing and the test would prove nothing"
+        )
+        await store.save(
+            name, HISTORICAL_ID, {k: v for k, v in row.items() if k != "failure_classification"}
+        )
+
+    return _StubProjectionManager(
+        store=store,
+        workflow_execution_detail=detail,
+        workflow_execution_list=listing,
     )
 
 
@@ -224,11 +284,16 @@ async def _detail(monkeypatch: pytest.MonkeyPatch, execution_id: str) -> Executi
 
 async def _summaries(
     monkeypatch: pytest.MonkeyPatch,
+    manager: _StubProjectionManager | None = None,
 ) -> dict[str, ExecutionSummaryResponse]:
-    """Serve `GET /executions`, keyed by execution id."""
+    """Serve `GET /executions`, keyed by execution id.
+
+    `manager` defaults to the two live runs; pass one to serve a different set
+    of projections, such as the aged ones in `TestARunOlderThanTheFieldItself`.
+    """
     from syn_api.routes.executions import queries
 
-    _serve(monkeypatch, await _projections())
+    _serve(monkeypatch, manager if manager is not None else await _projections())
     # Every parameter passed explicitly: called outside FastAPI, the `Query(...)`
     # defaults arrive as `Query` objects rather than as the values they describe.
     response = await queries.list_executions_endpoint(
@@ -376,3 +441,118 @@ class TestWhatDoubtCountsAs:
 
         assert row is not None
         assert row.failure_classification is FailureClassification.UNCLASSIFIED
+
+
+class TestARunOlderThanTheFieldItself:
+    """#1367 bumped no projection VERSION, so nothing re-projects history.
+
+    Every failure already in the store was recorded by code that did not have
+    this field, and will still be served by code that does. What those runs
+    answer is therefore not a migration detail - it is the answer the API gives
+    for most of the 221 failures the issue counted, indefinitely.
+
+    The contract is the same one `from_stored` exists to keep, asserted where a
+    consumer can actually observe it: an explicit `unclassified`, never a null
+    in a field the schema declares non-null, never an exception that 500s the
+    page, and never a guess - least of all `platform`, which would book the
+    quality gate working as the platform breaking and is the exact error #1357
+    was opened about.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_detail_endpoint_reads_it_as_unclassified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _serve(monkeypatch, await _projections_with_a_pre_1357_run())
+        from syn_api.routes.executions import queries
+
+        historical = await queries.get_execution_endpoint(HISTORICAL_ID)
+
+        assert historical.failure_classification is FailureClassification.UNCLASSIFIED
+        assert historical.status == "failed", "the run still failed; only the KIND is unknown"
+
+    @pytest.mark.asyncio
+    async def test_the_list_endpoint_reads_it_as_unclassified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The endpoint the failure NUMBERS are counted over, off the other projection."""
+        summaries = await _summaries(monkeypatch, await _projections_with_a_pre_1357_run())
+
+        assert summaries[HISTORICAL_ID].failure_classification is (
+            FailureClassification.UNCLASSIFIED
+        )
+        assert summaries[HISTORICAL_ID].status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_it_is_never_guessed_into_platform_or_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The failure this is really guarding, stated as the thing forbidden.
+
+        A read path that defaulted absence to `platform` would be green on
+        every other test in this file and would silently restore #1357's exact
+        defect for all of history: `correct_refusal` would be undercounted by
+        however many of those 221 runs were the platform working.
+        """
+        _serve(monkeypatch, await _projections_with_a_pre_1357_run())
+        from syn_api.routes.executions import queries
+
+        historical = await queries.get_execution_endpoint(HISTORICAL_ID)
+
+        assert historical.failure_classification not in (
+            FailureClassification.PLATFORM,
+            FailureClassification.CORRECT_REFUSAL,
+        ), (
+            "a run recorded before the field existed was given a KIND the "
+            "record does not support; the evidence for it was never written"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_field_is_present_and_non_null_once_serialized(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the HTTP client actually receives, not what the object holds.
+
+        Both response models declare the field non-null, so a `None` reaching
+        the wire is a schema violation the generated TypeScript client would
+        decode into a lie. Asserted after `model_dump`, because that is the hop
+        that decides what is on the wire.
+        """
+        _serve(monkeypatch, await _projections_with_a_pre_1357_run())
+        from syn_api.routes.executions import queries
+
+        detail = (await queries.get_execution_endpoint(HISTORICAL_ID)).model_dump()
+        summary = (await _summaries(monkeypatch, await _projections_with_a_pre_1357_run()))[
+            HISTORICAL_ID
+        ].model_dump()
+
+        for name, body in (("detail", detail), ("summary", summary)):
+            assert "failure_classification" in body, f"{name} dropped the field entirely"
+            assert body["failure_classification"] == "unclassified", (
+                f"{name} put {body['failure_classification']!r} on the wire"
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_runs_beside_it_still_carry_their_own_kinds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What stops the four assertions above from being a default asserted twice.
+
+        `UNCLASSIFIED` is the default on both response models, so a read path
+        that never passed the field at all would satisfy every historical
+        assertion here. These two runs, served in the SAME responses off the
+        SAME projections, can only read this way if the value is genuinely
+        carried - which is what makes the historical `unclassified` a resolved
+        answer rather than an untouched default.
+        """
+        summaries = await _summaries(monkeypatch, await _projections_with_a_pre_1357_run())
+        _serve(monkeypatch, await _projections_with_a_pre_1357_run())
+        from syn_api.routes.executions import queries
+
+        refused = await queries.get_execution_endpoint(REFUSED_ID)
+
+        assert refused.failure_classification is FailureClassification.CORRECT_REFUSAL
+        assert summaries[REFUSED_ID].failure_classification is (
+            FailureClassification.CORRECT_REFUSAL
+        )
+        assert summaries[CRASHED_ID].failure_classification is FailureClassification.PLATFORM
