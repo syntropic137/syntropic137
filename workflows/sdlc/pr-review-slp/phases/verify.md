@@ -13,6 +13,12 @@ and take the base and head SHAs from it.
 > goes. Look in the directory first and fall back to the flat file. If neither
 > exists, stop and say so rather than proceeding on no input.
 
+Your job is to try to make the PR's central claim FALSE, and to report honestly
+whether you succeeded. A review that sets out to confirm a change finds it
+confirmed.
+
+## First: pin the refs you are reviewing
+
 **You are in a fresh workspace on the default branch** - the PR's code is not
 checked out here. The previous phase recorded a base SHA and a head SHA. Work
 from those SHAs and not from the branch names, so that what you are reviewing
@@ -65,10 +71,6 @@ the read-only rule below requires. If you cannot produce the merge, say the
 claim is unsettled against current `origin/main` rather than asserting it
 against the old base - an unsettled claim that is labelled is useful, and one
 that is quietly stale is not.
-
-Your job is to try to make the PR's central claim FALSE, and to report honestly
-whether you succeeded. A review that sets out to confirm a change finds it
-confirmed.
 
 ## Where to attack
 
