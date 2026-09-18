@@ -88,6 +88,36 @@ class NonZeroExitError(RuntimeError):
         self.exit_code = exit_code
 
 
+class ExitStatusUnavailableError(RuntimeError):
+    """The agent's process ended and NOTHING observed what it exited with.
+
+    THE LIE THIS REPLACES (#1319). The status was read off the workspace, and
+    the workspace reports None when no stream ever completed - a container
+    removed out from under us, a stream that never started, a backend that lost
+    the process. Every one of those fell through to `return 0`, so the case
+    where we know LEAST became indistinguishable from a clean exit. An operator
+    reading 0 concludes the phase finished and moves on; that is a lie they act
+    on, and it is worse than an error.
+
+    Deliberately carries NO `exit_code` attribute, which is not an omission but
+    the mechanism: `exit_code_of` reads that attribute and reports None without
+    it, so the durable failure event records the status as ABSENT. A durable
+    None is honest - it says "retry, nobody was watching" - and it is the one
+    answer that does not send someone the wrong way.
+
+    Subclasses `RuntimeError` alongside `NonZeroExitError` so every caller that
+    already catches a phase's failure catches this one too.
+    """
+
+    def __init__(self, phase_id: str, *, lines_seen: int) -> None:
+        super().__init__(
+            f"Agent exit status unavailable for phase {phase_id}: no completed stream "
+            f"reported one (lines={lines_seen}). The container may have been removed "
+            f"externally; the status is recorded as unknown rather than as a clean exit."
+        )
+        self.phase_id = phase_id
+
+
 class WorkflowNotFoundError(Exception):
     """Raised when a workflow is not found."""
 

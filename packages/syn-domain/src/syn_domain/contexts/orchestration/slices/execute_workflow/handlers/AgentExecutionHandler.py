@@ -22,6 +22,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProces
     MISSING_TERMINAL_TURN_REASON,
     CodexStreamProcessor,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    ExitStatusUnavailableError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
     StreamResult,
@@ -55,15 +58,29 @@ def _detect_exit_code(
     workspace: ManagedWorkspace,
     phase_id: str,
     tokens: TokenAccumulator,
-) -> int:
-    """Determine agent exit code from stream result and workspace state.
+) -> int | None:
+    """What the agent's process exited with, or None if nothing observed it.
 
-    Note: If interrupt_requested=True, the caller is responsible for routing
-    to the cancellation path. This function returns only the actual process
-    exit code.
+    0 IS RETURNED ONLY WHEN THE VALUE IS EXPLICITLY 0 (#1319). The workspace
+    reports None whenever no stream status was ever completed, and that
+    includes a container removed out from under the run - so returning 0 for
+    None made "exited cleanly" and "nobody was left to watch" the same answer.
+    They are opposite situations needing opposite responses, and 0 is the one
+    that gets acted on. The caller turns this None into a failure carrying no
+    status at all; see `ExitStatusUnavailableError`.
+
+    The exception is a CANCELLED run, and it is an exception because there the
+    missing status is not a mystery: we asked the process to stop. The caller
+    routes on `interrupt_requested` without reading this value, and the cancel
+    path records `ExecutionCancelledEvent`, which carries no exit status - so
+    nothing durable is built on the 0 returned here (#661).
     """
     stream_exit_code = workspace.last_stream_exit_code
-    if stream_exit_code is not None and stream_exit_code != 0:
+    if stream_exit_code is None:
+        if stream_result.interrupt_requested:
+            return 0
+        return None
+    if stream_exit_code != 0:
         logger.error(
             "Agent CLI exited with code %d (phase=%s, lines=%d)",
             stream_exit_code,
@@ -389,6 +406,19 @@ class AgentExecutionHandler:
                 duration_ms=stream_result.duration_ms,
                 totals_are_authoritative=usage.is_authoritative,
             )
+
+        # AFTER the session summary above, and that order is deliberate: the
+        # tokens a phase burned are Lane 2 and are true whether or not anyone
+        # saw the process exit. Raising before the summary would make an
+        # unobservable exit also an uncosted one.
+        #
+        # There is no `exit_code` to put on the command, so no command is
+        # built. `AgentExecutionCompletedCommand` can only say the run
+        # completed with a number, and the one thing known here is that the
+        # number is unknown - writing 0 into it is exactly the lie #1319 is
+        # about. The failure path records the status as absent instead.
+        if exit_code is None:
+            raise ExitStatusUnavailableError(todo.phase_id, lines_seen=stream_result.line_count)
 
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,

@@ -33,6 +33,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseReportedFailureError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    EventsNotRecordedError,
     ExecutionJournal,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -368,8 +369,20 @@ class WorkflowExecutionProcessor:
         The aggregate is already in CANCELLED status - no new command needed.
         """
         cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
+        # Guarded for the reason the failure path below is: the reap is what
+        # stops a container outliving the run, and a session report that raises
+        # must not be what skips it. ExecutionCancelledEvent is already on the
+        # stream by the time this runs (_handle_cancel_signal appended it), so
+        # unlike the failure path there is no ordering to correct here - only
+        # the teardown to make unconditional.
+        try:
+            await self._runtime.report_cancelled(cancellation.reason)
+        except Exception:
+            logger.exception(
+                "Could not close the sessions of execution %s as cancelled", execution_id
+            )
+        finally:
+            await self._runtime.abandon_all("cancel")
         return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _complete_execution(
@@ -419,17 +432,54 @@ class WorkflowExecutionProcessor:
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
-
+        # RECORDED BEFORE ANYTHING IS TORN DOWN, and this order is the whole of
+        # #1319. The exit status exists in exactly one place - this frame - and
+        # the teardown below destroys the container that could have been asked
+        # again. Reporting the sessions and reaping the workspaces first meant
+        # a crash, a cancellation or a session-repository outage anywhere in
+        # that teardown left NO WorkflowFailedEvent at all, so restart
+        # reconciliation could only ever record the status as unknown. Writing
+        # it first costs nothing when the teardown succeeds and is the only
+        # thing that survives when it does not.
         fail_cmd = failure.as_command(
             execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
         )
         try:
             aggregate.fail_execution(fail_cmd)
             await self._journal.append(aggregate)
-        except Exception as save_err:
-            logger.error("Failed to save failure event: %s", save_err)
+        except EventsNotRecordedError:
+            # Nothing was written. The status this run died with is now
+            # unrecoverable, which is the failure #1319 is about - so it is
+            # logged as one, and NOT as "the projection is lagging".
+            logger.exception(
+                "Failure of execution %s was not durably recorded (exit_code=%s) - "
+                "the status this run died with is lost",
+                execution_id,
+                failure.exit_code,
+            )
+        except Exception:
+            # The event IS on the stream; only this run's local to-do list did
+            # not take it. An operator can still read what happened, and a read
+            # model that is behind must never hold a container open.
+            logger.exception(
+                "Failure of execution %s was recorded but the local to-do list "
+                "did not apply it",
+                execution_id,
+            )
+
+        # Cleanup runs whatever the above did. `finally` rather than a second
+        # `except`, because a session report that is CANCELLED (shutdown) must
+        # still release the workspace - an unreported session is a read-model
+        # inaccuracy, an unreleased one is a leaked container.
+        try:
+            await self._runtime.report_failed(failure.reason)
+        except Exception:
+            logger.exception(
+                "Could not close the sessions of execution %s as failed", execution_id
+            )
+        finally:
+            await self._runtime.abandon_all("failure")
+
         return failure.execution_result(
             workflow_id,
             execution_id,
