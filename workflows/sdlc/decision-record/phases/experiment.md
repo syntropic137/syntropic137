@@ -50,13 +50,16 @@ on "I'll report verdicts once they land". If a subagent comes back without
 writing its file, write that assumption's verdict file yourself as
 `STILL UNKNOWN`, saying why.
 
-**Where probe code goes.** Under `artifacts/output/experiments/<n>-<slug>/`,
-beside its verdict file, so it is collected with this phase's output. Never
-inside a cloned repository's working tree: this phase delivers no repository
-changes, and uncommitted files there fail the phase (the same run was also
-failed for this). A probe crate may `path`-depend on the repository's crates.
-Keep build output out of `artifacts/output/`: set `CARGO_TARGET_DIR` (and any
-other tool's cache) to a directory under `/tmp`, or it is collected too.
+**Where probe code goes.** Under `/tmp/probes/<n>-<slug>/`, with its build
+output (`CARGO_TARGET_DIR` and any other cache) under `/tmp` too. Not inside a
+cloned repository's working tree: this phase delivers no repository changes,
+and uncommitted files there fail the phase (the same run was also failed for
+this). Not under `artifacts/output/` either: everything there is collected as
+text with no size cap, so build trees flood it and binary files (images,
+fonts) are silently corrupted. A probe crate may `path`-depend on the
+repository's crates. The verdict file is the durable record, so put the
+probe's essential source in it as a fenced block, and describe any image or
+binary output by what you measured from it.
 
 ## Every verdict file contains
 
