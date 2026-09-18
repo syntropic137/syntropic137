@@ -6,7 +6,7 @@
 
 import type {
   ArtifactDetail,
-  ArtifactSummary,
+  ArtifactListResponse,
   ControlResponse,
   ExecutionCost,
   ExecutionDetail,
@@ -269,17 +269,29 @@ export const metricsResponse: MetricsResponse = {
   phases: [],
 };
 
-export const artifactList: ArtifactSummary[] = [
-  {
-    id: "art-001",
-    workflow_id: "wf-issue-001",
-    phase_id: "phase-analyze",
-    artifact_type: "analysis",
-    title: "Issue Analysis Report",
-    size_bytes: 4096,
-    created_at: "2026-03-16T12:02:00Z",
-  },
-];
+export const artifactList: ArtifactListResponse = {
+  artifacts: [
+    {
+      id: "art-001",
+      workflow_id: "wf-issue-001",
+      phase_id: "phase-analyze",
+      artifact_type: "analysis",
+      title: "Issue Analysis Report",
+      size_bytes: 4096,
+      created_at: "2026-03-16T12:02:00Z",
+    },
+  ],
+  total: 1,
+  page: 1,
+  page_size: 20,
+};
+
+export const artifactListPaged: ArtifactListResponse = {
+  artifacts: artifactList.artifacts,
+  total: 137,
+  page: 2,
+  page_size: 50,
+};
 
 export const artifactDetail: ArtifactDetail = {
   id: "art-001",
