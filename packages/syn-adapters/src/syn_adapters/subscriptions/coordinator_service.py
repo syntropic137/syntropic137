@@ -405,7 +405,7 @@ def create_coordinator_service(
             # the lifecycle. Registered means an operator rebuilding the read
             # models recounts this table too; unregistered, it was the one
             # they emptied and never refilled.
-            ToolCallCountsProjection(pool=pool),
+            ToolCallCountsProjection(pool=pool),  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         ],
     )
 
