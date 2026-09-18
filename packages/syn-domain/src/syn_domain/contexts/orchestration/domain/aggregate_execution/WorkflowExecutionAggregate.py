@@ -7,7 +7,7 @@ Location: orchestration/domain/aggregate_execution/ (per ADR-020)
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from event_sourcing import (
     AggregateRoot,
@@ -28,6 +28,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     PauseExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     ResumeExecutionCommand,
+    RetryPhaseCommand,
     StartExecutionCommand,
     StartPhaseCommand,
 )
@@ -59,6 +60,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
         PhaseCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
+        PhaseRetryScheduledEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
         PhaseStartedEvent,
@@ -105,6 +109,19 @@ def _parse_phase_definitions(raw_defs: list[dict[str, Any]]) -> list[PhaseDefini
         ],
         key=lambda p: p.order,
     )
+
+
+#: How many times one phase of one execution may be attempted, counting the
+#: original. Two, so a phase gets exactly one retry (#1335).
+#:
+#: A CEILING ON THE BILL, not a tuning knob. The fault this exists for - an
+#: agent stream that ends without its terminal usage event - is indistinguishable
+#: from the outside from one that will recur every time, so every attempt beyond
+#: the first is money spent on a guess. One retry is the smallest number that
+#: turns "lose the whole run" into "lose this phase"; a larger one buys a
+#: diminishing share of the remaining faults at full price each, and an
+#: unbounded one bills until the phase timeout does the refusing instead.
+MAX_PHASE_ATTEMPTS: Final[int] = 2
 
 
 @aggregate("WorkflowExecution")
@@ -154,6 +171,15 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: The name each started phase goes by, so a salvage can title what it
         #: stores the way the live collector titles it.
         self._phase_names: dict[str, str] = {}
+        #: How many times each phase has been ATTEMPTED, counting the one
+        #: running now. Absent means never started; a phase that has started
+        #: once and never been retried is 1.
+        #:
+        #: Replayed state because it is the retry budget itself, and a budget
+        #: rebuilt from the process would be restored to full by any restart -
+        #: which is the difference between one extra attempt and an unbounded
+        #: number of them, each one billed. See `MAX_PHASE_ATTEMPTS`.
+        self._phase_attempts: dict[str, int] = {}
         #: Phases whose deliverable was salvaged rather than written.
         #:
         #: Decided at collection and needed at completion, which are two
@@ -179,6 +205,26 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         state, so it survives a restart - which is the case that needs it.
         """
         return self._running_phase_id
+
+    def may_retry_phase(self, phase_id: str) -> bool:
+        """Whether this phase may be attempted again, budget-wise (#1335).
+
+        Answers only the half of the question this aggregate owns: how many
+        attempts this phase has already had against `MAX_PHASE_ATTEMPTS`. It
+        says nothing about whether the attempt that just died deserves another
+        one - that is a reading of the agent's stream, and the slice that reads
+        the stream decides it.
+
+        Asked before `retry_phase` rather than discovered by catching its
+        refusal, because a caller that has run out of budget has a different
+        job to do (report the failure it was about to report) and not an error
+        to handle.
+        """
+        return self._phase_attempts.get(phase_id, 0) < MAX_PHASE_ATTEMPTS
+
+    def attempts_for(self, phase_id: str) -> int:
+        """How many times this phase has been attempted, 0 if never started."""
+        return self._phase_attempts.get(phase_id, 0)
 
     def last_agent_message_for(self, phase_id: str) -> str | None:
         """What this phase's agent said as it finished, or None.
@@ -364,6 +410,46 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_order=command.phase_order,
             started_at=datetime.now(UTC),
             session_id=command.session_id,
+        )
+        self._apply(event)
+
+    @command_handler("RetryPhaseCommand")
+    def retry_phase(self, command: RetryPhaseCommand) -> None:
+        """Handle RetryPhaseCommand — give this phase's attempt up, keep the phase.
+
+        Emits no failure and completes nothing: the execution stays RUNNING and
+        the phase stays the current phase, so every phase already completed
+        keeps its result and its cost. The next `PhaseStarted` for this phase
+        is the retry (#1335).
+
+        Refuses outside the budget rather than silently granting an extra
+        attempt, so a caller that skipped `may_retry_phase` cannot spend money
+        this aggregate has already said no to.
+        """
+        from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
+            PhaseRetryScheduledEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot retry phase in status {self._status}"
+            raise ValueError(msg)
+        if self._running_phase_id != command.phase_id:
+            msg = (
+                f"Cannot retry phase {command.phase_id}: the running phase is "
+                f"{self._running_phase_id}"
+            )
+            raise ValueError(msg)
+        if not self.may_retry_phase(command.phase_id):
+            msg = f"Phase {command.phase_id} has used all {MAX_PHASE_ATTEMPTS} of its attempts"
+            raise ValueError(msg)
+
+        event = PhaseRetryScheduledEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            attempt=self._phase_attempts.get(command.phase_id, 0) + 1,
+            reason=command.reason,
+            scheduled_at=datetime.now(UTC),
         )
         self._apply(event)
 
@@ -617,11 +703,29 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._running_phase_id = phase_id
         if phase_id:
             self._phase_names[phase_id] = _evt(event, "phase_name") or phase_id
+            # Counted HERE, on the event that says an attempt began, rather
+            # than on PhaseRetryScheduled which only says one was asked for.
+            # A retry that is scheduled and then never starts - the process
+            # died in between - must not have been billed to the budget, or a
+            # restart would find the phase out of attempts having run once.
+            self._phase_attempts[phase_id] = self._phase_attempts.get(phase_id, 0) + 1
 
     @event_sourcing_handler("PhaseCompleted")
     def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
+        self._running_phase_id = None
+
+    @event_sourcing_handler("PhaseRetryScheduled")
+    def on_phase_retry_scheduled(self, _event: PhaseRetryScheduledEvent) -> None:
+        """Apply PhaseRetryScheduledEvent — the attempt is over, the phase is not.
+
+        `_running_phase_id` is cleared because no attempt is running until the
+        retry's own `PhaseStarted` arrives, and a failure in that window names
+        no phase rather than naming the abandoned attempt.
+
+        `_completed_phases` is deliberately untouched: nothing completed.
+        """
         self._running_phase_id = None
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
