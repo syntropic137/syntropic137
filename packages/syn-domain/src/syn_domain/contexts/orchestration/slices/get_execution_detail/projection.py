@@ -22,6 +22,9 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
+from syn_domain.contexts.orchestration.slices.get_execution_detail.failed_phase_record import (
+    FailedPhaseRecord,
+)
 from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
     PhaseDetail,
 )
@@ -74,7 +77,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 10  # Bumped: phase counts are now recorded (#1147)
+    VERSION = 11  # Bumped: per-phase timeout budgets are now recorded (#1262)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -153,6 +156,37 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         repos_raw = event_data.get("inputs", {}).get("repos", "")
         repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
 
+        # Each phase's wall-clock budget, keyed by phase id. Stated once, on
+        # this event, and not restated by the phase that later consumes it, so
+        # it is read here and held on the execution record until
+        # `on_phase_started` has a phase to attach it to (#1262). The store IS
+        # this projection's memory; a map on the instance would not survive a
+        # restart mid-run.
+        #
+        # DELIBERATELY NOT A HELPER, and please do not extract it. A function a
+        # handler hands its payload to must declare a typed payload
+        # (test_typed_projection_handlers.py, #1268), and there is no narrower
+        # type to give this one: `event_data` is a `model_dump()` of an event
+        # whose `phase_definitions` is itself `list[dict[str, Any]]`. Extracting
+        # it adds a new untyped site to a table that only ever shrinks, so the
+        # tidier-looking version is the one that fails the gate. It moves out of
+        # here when the dispatch hands handlers the event itself.
+        #
+        # Every value is checked because none of them are validated: the field
+        # is a list of `dict[str, Any]`, so a definition can carry anything at
+        # all. A phase with no stated budget is absent rather than 0, which is
+        # what keeps an unknown budget reading as None downstream instead of as
+        # a number nobody set.
+        definitions = event_data.get("phase_definitions")
+        phase_budgets: dict[str, int] = {}
+        for definition in definitions if isinstance(definitions, list) else []:
+            if not isinstance(definition, dict):
+                continue
+            phase_id = definition.get("phase_id")
+            timeout = definition.get("timeout_seconds")
+            if isinstance(phase_id, str) and phase_id and isinstance(timeout, int):
+                phase_budgets[phase_id] = timeout
+
         # Create initial phases from workflow definition (all pending)
         # Note: In a full implementation, we'd get phase names from workflow
         # For now, phases are populated as they start/complete
@@ -179,6 +213,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # default worth defending here; 0 would be a run with no phases.
             "total_phases": event_data.get("total_phases", 0),
             "completed_phases": 0,
+            # Held here, not served from here: `on_phase_started` moves each
+            # budget onto the phase that it belongs to, which is where a
+            # reader needs it next to that phase's elapsed time (#1262).
+            "phase_budgets": phase_budgets,
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
@@ -199,11 +237,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phases = existing.get("phases", [])
 
         if self._find_phase(phases, phase_id) is None:
+            budgets = existing.get("phase_budgets") or {}
             phase = PhaseDetail.running(
                 phase_id=phase_id,
                 name=event_data.get("phase_name", phase_id),
                 session_id=event_data.get("session_id"),
                 started_at=event_data.get("started_at"),
+                timeout_seconds=budgets.get(phase_id),
             )
             phases.append(phase.to_dict())
             existing["phases"] = phases
@@ -264,7 +304,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             _, phase = found
             self._update_phase_metrics(phase, event_data)
         else:
-            new_phase = PhaseDetail.completed(phase_id or "", phase_id or "", event_data)
+            budgets = existing.get("phase_budgets") or {}
+            new_phase = PhaseDetail.completed(
+                phase_id or "",
+                phase_id or "",
+                event_data,
+                timeout_seconds=budgets.get(phase_id or ""),
+            )
             phases.append(new_phase.to_dict())
 
         # Aggregate totals
@@ -346,6 +392,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
+        # The ONE read of this event's failed-phase fields. Everything below
+        # asks the record, so nothing here names a key or a default (#1262).
+        failed = FailedPhaseRecord.from_event(event_data)
+
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
             # Create minimal entry for orphaned failure events (#598)
@@ -373,38 +423,39 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 event_data, existing.get("completed_phases", 0)
             )
 
-            # Mark failed phase if specified
-            failed_phase_id = event_data.get("failed_phase_id")
-            if failed_phase_id:
-                found = self._find_phase(existing.get("phases", []), failed_phase_id)
-                if found:
-                    _, phase = found
-                    phase["status"] = "failed"
-                    phase["error_message"] = event_data.get("error_message")
+        # The orphan entry built above carries an empty `phases` list, so the
+        # lookup simply finds nothing there and that case needs no branch of
+        # its own. Hydrating the stored phase into its own model is what lets
+        # the failure be applied by attribute rather than by string key, and
+        # is lossless because `PhaseDetail` declares every field this
+        # projection writes into a phase.
+        found = self._find_phase(existing.get("phases", []), failed.phase_id)
+        if found is not None:
+            index, stored = found
+            phase = PhaseDetail.from_dict(stored)
+            failed.stamp_onto(phase)
+            existing["phases"][index] = phase.to_dict()
 
-                    # How this phase's branches stood when it died (#1200).
-                    # Copied verbatim INCLUDING None and []: the two are
-                    # different incidents - nobody could read the workspace,
-                    # versus read it and found no branch differing from how the
-                    # phase found it - and a `or []` here would report the first
-                    # as the second. Absent on every event that predates the
-                    # field, which is null: correct, because nothing looked.
-                    phase["observed_branches"] = event_data.get("observed_branches")
+            # ONE roll-up for both, where before it was the duration alone:
+            # the execution totals only accumulate from PhaseCompleted, so
+            # they under-report by exactly the failed phase's time AND by
+            # exactly what it spent (#1262).
+            self._aggregate_totals(
+                existing,
+                failed.input_tokens,
+                failed.output_tokens,
+                failed.cache_creation_tokens,
+                failed.cache_read_tokens,
+                failed.elapsed_seconds,
+            )
 
-                    # The failed phase never gets a PhaseCompleted event, so
-                    # without this its duration_seconds is stuck at the 0.0
-                    # PhaseDetail.running() seeded it with -- reporting a
-                    # timed-out phase as instantaneous (#1036). The processor
-                    # computes this from when the phase actually started, so
-                    # it is present exactly when a phase was in flight.
-                    failed_duration = event_data.get("failed_phase_duration_seconds")
-                    if failed_duration is not None:
-                        phase["duration_seconds"] = failed_duration
-                        phase["completed_at"] = event_data.get("failed_at")
-                        # Also roll into the execution total, which otherwise
-                        # under-reports by exactly the failed phase's time --
-                        # it only accumulates from PhaseCompleted events.
-                        self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
+        # Outside the phase lookup, and outside the orphan branch above, on
+        # purpose: an artifact that was stored exists whether or not this
+        # projection can still find the phase it came from, and an execution
+        # whose artifact_ids stay empty is one whose deliverable nothing links
+        # to (#1321).
+        for artifact_id in failed.artifact_ids:
+            self._track_artifact(existing, artifact_id)
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

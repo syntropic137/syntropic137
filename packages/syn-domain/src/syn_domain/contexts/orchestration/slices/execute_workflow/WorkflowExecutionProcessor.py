@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+    UnfinishedPhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseReportedFailureError,
@@ -87,14 +88,15 @@ if TYPE_CHECKING:
         SessionCapturePort,
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
@@ -122,6 +124,11 @@ class _DispatchContext:
     """
 
     current_phase_id: str | None = None
+    #: What was taken out of the failing phase's workspace before it was torn
+    #: down (#1321). Per-run for the same reason `current_phase_id` is: the
+    #: processor is shared across concurrent executions, so instance state
+    #: would attribute one run's artifacts to another's failure.
+    kept_artifact_ids: list[str] = field(default_factory=list)
 
 
 class WorkflowExecutionProcessor:
@@ -276,6 +283,7 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids,
                 started_at,
                 failed_phase_id=dispatch_ctx.current_phase_id,
+                kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
 
     async def _drain_todo_list(
@@ -337,7 +345,7 @@ class WorkflowExecutionProcessor:
                 phase_outputs,
             )
         elif todo.action == TodoAction.RUN_AGENT:
-            await self._handle_run_agent(todo, phase, aggregate)
+            await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
             await self._handle_collect_artifacts(
                 todo,
@@ -399,21 +407,48 @@ class WorkflowExecutionProcessor:
         completed_phase_ids: list[str],
         started_at: datetime,
         failed_phase_id: str | None = None,
+        kept_artifact_ids: list[str] | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result.
 
         ``failed_phase_id`` comes from the run's own _DispatchContext so
         it always belongs to THIS execution, even with concurrent runs
-        sharing the processor instance.
+        sharing the processor instance. ``kept_artifact_ids`` comes from the
+        same place and for the same reason: it is what was taken out of that
+        phase's workspace on the way here (#1321), and it has to reach the
+        execution's own artifact list, the failed phase's record and the
+        event - otherwise the artifact exists and nothing points at it.
         """
+        kept = list(kept_artifact_ids or [])
+        for artifact_id in kept:
+            if artifact_id not in all_artifact_ids:
+                all_artifact_ids.append(artifact_id)
         # BEFORE any await: teardown clears both maps, so reading them
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         timings = self._runtime.timings()
+        # Read in the same breath as the timings, and for the same reason: the
+        # counts are the dying phase's own, and this is the last frame in which
+        # anything can still ask for them (#1262). Without this the phase
+        # reported zero tokens no matter what it had burned, so an exit 124
+        # after 735 tokens - a stall - was indistinguishable from one after
+        # 300k, which needed a bigger budget rather than a retry.
+        #
+        # Asked with `execution_id`, not just the phase: this processor is
+        # shared across concurrent dispatches and two runs of one workflow have
+        # the same phase ids, so "what did `implement` spend" names two answers.
+        # The id is the run's own, so it always names this one's.
+        usage = self._runtime.usage_for(execution_id, failed_phase_id)
         # Before the teardown below, the only window in which it is askable (#1200).
         observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
-            error, failed_phase_id, timings.started_at, timings.session_ids, observed=observed
+            error,
+            failed_phase_id,
+            timings.started_at,
+            timings.session_ids,
+            observed=observed,
+            kept_artifact_ids=kept,
+            usage=usage,
         )
         if failure.result is not None:
             phase_results.append(failure.result)
@@ -542,6 +577,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
+        dispatch_ctx: _DispatchContext,
     ) -> None:
         """Dispatch RUN_AGENT."""
         assert todo.phase_id is not None
@@ -596,32 +632,104 @@ class WorkflowExecutionProcessor:
             await self._handle_cancel_signal(todo, result, aggregate)
             return
 
-        # THE PHASE'S OWN REPORT, on the same footing as its exit status and
-        # checked before the aggregate is told the run completed (#1256). A
-        # phase that wrote `TASK_RESULT: {"success": false, ...}` said it did
-        # not do what it was asked; completing it anyway converts a DETECTED
-        # failure into a pass, which is the one direction that lets defects
-        # through every gate downstream. An unreadable report refuses for the
-        # same reason - see `AgentVerdict`.
-        verdict = result.stream_result.verdict
-        if verdict.refuses_completion:
-            refusal = verdict.refusal(phase_id=todo.phase_id)
-            logger.error(refusal)
-            raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
+        # EVERY WAY OUT OF HERE THAT ENDS THE RUN GOES PAST THE SAME DOOR
+        # (#1321). Below this point the only exits are raises, and each of them
+        # unwinds to `_fail_execution`, which abandons the workspace - so
+        # whatever the phase wrote under artifacts/output/ is destroyed with
+        # it, unclaimed, because COLLECT_ARTIFACTS is a LATER to-do item that
+        # is now never dispatched. That cost exec-76a6d3b22b23 a finished
+        # 1322-line deliverable over an unreadable report, and it cost the
+        # non-zero-exit path beside it the same thing for longer.
+        #
+        # "This phase did not complete" and "throw away what it produced" are
+        # different decisions and this is where they come apart. The keep is
+        # attached to the exception rather than repeated at each raise so that
+        # a raise added later cannot forget it, and it never raises itself, so
+        # the reason the phase failed always reaches the caller intact.
+        try:
+            # THE PHASE'S OWN REPORT, on the same footing as its exit status and
+            # checked before the aggregate is told the run completed (#1256). A
+            # phase that wrote `TASK_RESULT: {"success": false, ...}` said it did
+            # not do what it was asked; completing it anyway converts a DETECTED
+            # failure into a pass, which is the one direction that lets defects
+            # through every gate downstream. An unreadable report refuses for the
+            # same reason - see `AgentVerdict`.
+            verdict = result.stream_result.verdict
+            if verdict.refuses_completion:
+                refusal = verdict.refusal(phase_id=todo.phase_id)
+                logger.error(refusal)
+                raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
 
-        if result.command.exit_code != 0:
-            reason = result.stream_result.error_reason
-            base = (
-                f"Agent failed: {reason} (phase={todo.phase_id}, exit_code={result.command.exit_code})"
-                if reason
-                else f"Agent execution failed for phase {todo.phase_id} (exit_code={result.command.exit_code})"
+            if result.command.exit_code != 0:
+                reason = result.stream_result.error_reason
+                base = (
+                    f"Agent failed: {reason} "
+                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
+                    if reason
+                    else f"Agent execution failed for phase {todo.phase_id} "
+                    f"(exit_code={result.command.exit_code})"
+                )
+                # The token counts used to be appended here as
+                # `(tokens=190+545)`, and that string was the ONLY record of
+                # them anywhere (#1262). They are real fields on the failure
+                # event now, so restating them in prose would be a second
+                # account of the same fact - and a WORSE one: these are the raw
+                # accumulated deltas, which double-count the context re-sent on
+                # every turn, where the fields carry what `FinalUsage.resolve`
+                # settled on. Two numbers for one phase, and nothing to say
+                # which the reader should believe.
+                logger.error(base)
+                raise RuntimeError(base)
+
+            aggregate.agent_execution_completed(result.command)
+            await self._journal.append(aggregate)
+        except Exception:
+            dispatch_ctx.kept_artifact_ids = await self._keep_unfinished_output(
+                todo, phase, workspace=launch.workspace, workflow_id=workflow_id
             )
-            msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
-            logger.error(msg)
-            raise RuntimeError(msg)
+            raise
 
-        aggregate.agent_execution_completed(result.command)
-        await self._journal.append(aggregate)
+    async def _keep_unfinished_output(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        *,
+        workspace: ManagedWorkspace,
+        workflow_id: str,
+    ) -> list[str]:
+        """Store what a phase wrote before the run that produced it is torn down.
+
+        Runs while the workspace is still alive, which is the only window there
+        is: `_fail_execution` abandons it a few frames up. Never raises and
+        never salvages from the transcript - the phase's outcome is already
+        decided and is reported where failures are reported; the question here
+        is only what survives it.
+        """
+        assert todo.phase_id is not None
+        collector = ArtifactCollector(
+            self._artifact_repo, self._artifact_content_storage, self._artifact_query
+        )
+        kept = await collector.collect_from_unfinished_phase(
+            workspace=workspace,
+            workflow_id=workflow_id,
+            phase_id=todo.phase_id,
+            execution_id=todo.execution_id,
+            session_id=todo.session_id or "",
+            phase_name=phase.name,
+            output_artifact_types=phase.output_artifact_types,
+            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
+            outcome=UnfinishedPhase.FAILED,
+        )
+        if kept:
+            logger.warning(
+                "Phase %s (%s) failed; kept %d artifact(s) it had already written "
+                "under artifacts/output/ rather than discarding them with the "
+                "workspace (#1321)",
+                todo.phase_id,
+                phase.name,
+                len(kept),
+            )
+        return kept
 
     async def _handle_cancel_signal(
         self,
@@ -719,7 +827,7 @@ class WorkflowExecutionProcessor:
         # been told this phase succeeded, so the raise IS the outcome (#1184).
         await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
 
-        harvest = self._runtime.harvest(todo.phase_id)
+        harvest = self._runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",

@@ -18,10 +18,11 @@ export type SessionListResponse = components['schemas']['SessionListResponse']
 /** Sessions are additionally scoped to one workflow; every other filter is shared. */
 export async function listSessions(
   query: ListQuery & { workflow_id?: string },
+  signal?: AbortSignal,
 ): Promise<SessionListResponse> {
   const params = listQueryParams(query)
   if (query.workflow_id) params.set('workflow_id', query.workflow_id)
-  return fetchJSON(`${API_BASE}/sessions?${params}`)
+  return fetchJSON(`${API_BASE}/sessions?${params}`, { signal })
 }
 
 export async function getSession(sessionId: string, signal?: AbortSignal): Promise<SessionResponse> {

@@ -133,11 +133,23 @@ class StorageProtocol(Protocol):
             content_type: MIME type. Auto-detected if not provided.
             metadata: Custom metadata to attach.
 
+        Implementations MUST NOT return until a read of `key` returns these
+        exact bytes. Callers publish pointers to uploaded objects, so
+        "accepted" is not a fact any of them can use, and neither is "an
+        object of the right size is there" - only "a reader gets what was
+        written" is (#700). Backends that are read-after-write consistent
+        satisfy this for free; the rest have to confirm, by reading.
+
+        That is READABILITY. It is not durability, which is a write-quorum or
+        replication property of the deployment and cannot be established by
+        any call this protocol offers. No implementation may imply otherwise.
+
         Returns:
             UploadResult with key, size, and optional URL.
 
         Raises:
-            StorageError: If upload fails.
+            StorageError: If upload fails, or if a read of the written key does
+                not return the written bytes.
         """
         ...
 

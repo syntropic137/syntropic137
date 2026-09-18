@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from syn_adapters.projections.session_tools import call_identity
 from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
 from syn_api.types import (
     Err,
@@ -200,11 +201,12 @@ class _ToolStatsAccumulator:
     def _call_for(self, op: AdapterToolOperation) -> _CallState:
         """Return the call `op` belongs to, counting it if this is its first row.
 
-        Identity is `tool_use_id`, falling back to `observation_id` when the
-        row carries none; `_accumulate_tool_stats` explains why.
+        Identity is `session_tools.call_identity`, the same rule the phase
+        activity summary counts by (#1262); `_accumulate_tool_stats` below
+        explains why it is that rule and not another.
         """
         name = op.tool_name or "unknown"
-        identity = op.tool_use_id or op.observation_id
+        identity = call_identity(op)
 
         call = self._calls.get(identity)
         if call is None:
@@ -310,6 +312,12 @@ def _accumulate_tool_stats(
     `tests/test_tool_execution_identity.py` is what holds that true - it
     fails if an unidentified tool_execution pair ever starts being produced,
     which is the point at which this paragraph would need revisiting.
+
+    The rule itself now lives in `session_tools.call_identity`, because a
+    second caller needed it: the phase activity summary counts a timed-out
+    phase's calls to tell a stall from a budget that was too short (#1262),
+    and a second copy of this reasoning would be a second chance to get it
+    wrong.
     """
     accumulator = _ToolStatsAccumulator()
     for op in operations:
