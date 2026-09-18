@@ -42,12 +42,12 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
     async def stream(
         self,
         handle: IsolationHandle,
-        _command: list[str],
+        command: list[str],
         *,
-        _timeout_seconds: int | None = None,
-        _working_directory: str | None = None,
-        _environment: dict[str, str] | None = None,
-        _wrapper_name: str | None = None,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        wrapper_name: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream mock output lines.
 
@@ -62,6 +62,7 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         Yields:
             Pre-configured output lines
         """
+        del command, timeout_seconds, working_directory, environment, wrapper_name  # named for the port; unused here
         lines = self._streams.get(handle.isolation_id, [])
         for line in lines:
             yield line
