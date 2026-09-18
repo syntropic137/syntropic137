@@ -46,7 +46,8 @@ function toArtifactSummary(row: ApiArtifactSummary): ArtifactSummary {
  */
 export async function listArtifactPage(
   query: ListQuery,
-  scope: ArtifactScope = {}
+  scope: ArtifactScope = {},
+  signal?: AbortSignal
 ): Promise<ArtifactPage> {
   const params = listQueryParams(query, 'created')
   // An artifact is written once and has no status, and `/artifacts` never
@@ -60,7 +61,9 @@ export async function listArtifactPage(
   if (scope.workflow_id) params.set('workflow_id', scope.workflow_id)
   if (scope.phase_id) params.set('phase_id', scope.phase_id)
   if (scope.artifact_type) params.set('artifact_type', scope.artifact_type)
-  const response = await fetchJSON<ArtifactListResponse>(`${API_BASE}/artifacts?${params}`)
+  const response = await fetchJSON<ArtifactListResponse>(`${API_BASE}/artifacts?${params}`, {
+    signal,
+  })
   // Spread, so a field added to the envelope arrives here without an edit. The
   // two named below are the only ones this layer changes the shape of.
   return {
