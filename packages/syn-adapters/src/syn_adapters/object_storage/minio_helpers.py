@@ -26,6 +26,48 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _discover_backend_failures() -> tuple[type[Exception], ...]:
+    """Which exception types mean the backend failed rather than we did.
+
+    Imported defensively because `minio` is an optional extra: without it a
+    client can never be built, so the types can never be raised either, and a
+    missing package is reported by `_get_client` rather than here.
+    """
+    failures: list[type[Exception]] = [OSError]
+    try:
+        from minio.error import MinioException
+    except ImportError:  # pragma: no cover - only without the optional extra
+        pass
+    else:
+        failures.append(MinioException)
+    try:
+        from urllib3.exceptions import HTTPError
+    except ImportError:  # pragma: no cover - installed alongside minio
+        pass
+    else:
+        failures.append(HTTPError)
+    return tuple(failures)
+
+
+#: Everything a MinIO call raises when the STORAGE is what went wrong.
+#:
+#: The list exists so the converters below can catch this instead of
+#: `Exception`. That difference is the whole point: a converter that catches
+#: `Exception` re-raises our own `TypeError` as a storage error, and the
+#: callers of this adapter are built to treat a storage error as "the backend
+#: is unavailable, keep the content inline and carry on" (#700). A bug that
+#: arrives wearing that costume is answered by degrading instead of by
+#: failing: the artifact is written with `storage_uri=None`, the phase
+#: completes, and nothing ever reports that the code is broken.
+#:
+#: So the members here are the ones the backend genuinely owns - `minio`'s own
+#: hierarchy for anything the server said, `urllib3`'s for anything the
+#: transport did, and `OSError` for the socket beneath both. Everything else,
+#: `TypeError` and `ValueError` (which is also what `minio` raises for an
+#: argument WE built wrongly) included, propagates untouched.
+BACKEND_FAILURES: tuple[type[Exception], ...] = _discover_backend_failures()
+
 #: How long a write may take to become readable before we call the upload failed.
 #: MinIO itself is read-after-write consistent, so in practice the first read
 #: answers; the budget is here for S3-compatible backends that are not, and for
@@ -61,7 +103,9 @@ async def _read_served(client: Minio, bucket_name: str, key: str) -> _Served | N
         )
     except ObjectNotFoundError:
         return None
-    except Exception as exc:
+    except DownloadError as exc:
+        # `do_download` below declares exactly these two, so this catches its
+        # contract rather than every way it could be wrong.
         raise UploadError(f"Failed to confirm upload of {key}: {exc}", key=key) from exc
     return _Served(sha256=hashlib.sha256(payload).hexdigest(), size_bytes=len(payload))
 
@@ -187,8 +231,9 @@ def do_download(
 ) -> bytes:
     """Synchronous download body for MinIO (run in executor).
 
-    Converts nosuchkey/not-found errors to ObjectNotFoundError and wraps
-    other failures in DownloadError so the async caller needs no try/except.
+    Converts nosuchkey/not-found errors to ObjectNotFoundError and wraps other
+    BACKEND_FAILURES in DownloadError so the async caller needs no try/except.
+    Anything else is a bug in this process and is left alone to say so.
 
     Args:
         client: Minio client instance.
@@ -209,9 +254,7 @@ def do_download(
         finally:
             response.close()
             response.release_conn()
-    except (ObjectNotFoundError, DownloadError):
-        raise
-    except Exception as exc:
+    except BACKEND_FAILURES as exc:
         error_msg = str(exc).lower()
         if "nosuchkey" in error_msg or "not found" in error_msg:
             raise ObjectNotFoundError(key) from exc

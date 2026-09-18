@@ -15,6 +15,7 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.object_storage.protocol import StorageError as ObjectStorageError
 from syn_adapters.storage.artifact_storage.minio_helpers import (
     build_s3_metadata,
     parse_s3_key,
@@ -109,7 +110,13 @@ class MinioArtifactStorage:
         content_type: str = "text/markdown",
         metadata: dict[str, Any] | None = None,
     ) -> StorageResult:
-        """Upload artifact content to MinIO."""
+        """Upload artifact content to MinIO.
+
+        Raises:
+            StorageError: If the backend could not take the content or could
+                not serve it back. A failure in THIS process is not a storage
+                failure and propagates unchanged.
+        """
         key = self._build_key(artifact_id, workflow_id, execution_id)
         content_hash = hashlib.sha256(content).hexdigest()
         s3_metadata = build_s3_metadata(artifact_id, content_hash, phase_id, execution_id, metadata)
@@ -121,7 +128,13 @@ class MinioArtifactStorage:
                 content_type=content_type,
                 metadata=s3_metadata,
             )
-        except Exception as e:
+        except ObjectStorageError as e:
+            # The layer below declares this one type for every way the backend
+            # can fail it, so catching it catches all of them - and nothing
+            # else. `Exception` here would put our own bugs in a `StorageError`,
+            # and `StorageError` is an `ArtifactStorageError`, which callers
+            # answer by keeping the content inline and completing the phase.
+            # A bug answered that way is a bug nobody hears about (#700).
             logger.error(
                 "Failed to upload artifact to MinIO",
                 extra={"artifact_id": artifact_id, "error": str(e)},

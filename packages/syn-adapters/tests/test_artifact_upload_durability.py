@@ -21,6 +21,7 @@ from itertools import repeat
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
+from minio.error import S3Error
 
 from syn_adapters.object_storage import MinioStorage, UploadError, minio_helpers
 from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
@@ -51,11 +52,25 @@ STALE_BYTES = b"S" * len(EXPECTED_BYTES)
 DIVERGENT_READS = 3
 
 
-class _NoSuchKey(Exception):
-    """What an S3-compatible backend answers for an object it cannot serve."""
+class _NoSuchKey(S3Error):
+    """What an S3-compatible backend answers for an object it cannot serve.
+
+    An `S3Error` rather than a bare `Exception` because the adapter converts
+    only what the real client can raise. A double free to raise anything is a
+    double that can prove a converter handles what no backend would ever send
+    it, which is how the `except Exception` below it stayed defensible.
+    """
 
     def __init__(self, key: str) -> None:
-        super().__init__(f"NoSuchKey: {key} does not exist")
+        super().__init__(
+            response=None,  # pyright: ignore[reportArgumentType] - unread here
+            code="NoSuchKey",
+            message=f"{key} does not exist",
+            resource=key,
+            request_id=None,
+            host_id=None,
+            object_name=key,
+        )
 
 
 class _Visibility(NamedTuple):

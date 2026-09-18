@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from minio.error import S3Error
+from urllib3.exceptions import ProtocolError
 
 from syn_adapters.object_storage import (
     LocalStorage,
@@ -26,6 +28,24 @@ from syn_shared.settings.storage import StorageProvider, StorageSettings
 # classes here and silently skipped the rest. #700 found that the hard way: a
 # mock in TestMinioStorage went stale and no CI job could have noticed.
 pytestmark = pytest.mark.unit
+
+
+def _s3_error(code: str, message: str) -> S3Error:
+    """An error the way the real client delivers it.
+
+    The doubles below used to raise a bare `Exception`, which passed only
+    because the adapter caught `Exception` too. Both halves of that were the
+    bug: raising what the backend actually raises is what keeps the converter
+    honest about the difference between a failed call and a broken one.
+    """
+    return S3Error(
+        response=None,  # pyright: ignore[reportArgumentType] - unread here
+        code=code,
+        message=message,
+        resource="test-bucket",
+        request_id=None,
+        host_id=None,
+    )
 
 
 class TestLocalStorage:
@@ -321,7 +341,7 @@ class TestMinioStorage:
 
         mock_client = MagicMock()
         mock_client.bucket_exists.return_value = True
-        mock_client.put_object.side_effect = Exception("Network error")
+        mock_client.put_object.side_effect = ProtocolError("Network error")
 
         with (
             patch.object(storage, "_get_client", return_value=mock_client),
@@ -352,7 +372,7 @@ class TestMinioStorage:
         from unittest.mock import MagicMock, patch
 
         mock_client = MagicMock()
-        mock_client.get_object.side_effect = Exception("NoSuchKey: not found")
+        mock_client.get_object.side_effect = _s3_error("NoSuchKey", "not found")
 
         with (
             patch.object(storage, "_get_client", return_value=mock_client),
@@ -368,7 +388,7 @@ class TestMinioStorage:
         from syn_adapters.object_storage import DownloadError
 
         mock_client = MagicMock()
-        mock_client.get_object.side_effect = Exception("Connection refused")
+        mock_client.get_object.side_effect = ConnectionRefusedError("Connection refused")
 
         with (
             patch.object(storage, "_get_client", return_value=mock_client),

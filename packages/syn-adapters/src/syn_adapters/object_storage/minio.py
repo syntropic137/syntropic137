@@ -35,6 +35,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.minio_helpers import (
+    BACKEND_FAILURES,
+)
+from syn_adapters.object_storage.minio_helpers import (
     await_readable_content as _await_readable_content,
 )
 from syn_adapters.object_storage.minio_helpers import (
@@ -52,6 +55,7 @@ from syn_adapters.object_storage.minio_queries import (
 from syn_adapters.object_storage.protocol import (
     ListResult,
     StorageConfigurationError,
+    StorageError,
     StorageObject,
     UploadError,
     UploadResult,
@@ -84,7 +88,8 @@ def _do_upload(
     """Synchronous upload body for MinIO (run in executor).
 
     Handles content-type detection, put_object, and ETag computation.
-    Raises UploadError on failure so the async caller needs no try/except.
+    Raises UploadError when the BACKEND fails, so the async caller needs no
+    try/except; a failure of OURS is left to propagate as itself.
 
     Args:
         client: Minio client instance.
@@ -98,7 +103,7 @@ def _do_upload(
         UploadResult with key, size, and ETag.
 
     Raises:
-        UploadError: If upload fails.
+        UploadError: If the backend rejects or cannot take the write.
     """
     try:
         resolved_type = _resolve_content_type(key, content_type)
@@ -120,9 +125,7 @@ def _do_upload(
             etag=result.etag if hasattr(result, "etag") else etag,
             url=None,
         )
-    except UploadError:
-        raise
-    except Exception as e:
+    except BACKEND_FAILURES as e:
         logger.exception("Failed to upload to MinIO: %s", key)
         raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
 
@@ -216,21 +219,37 @@ class MinioStorage:
         await self._ensure_bucket()
 
     async def _ensure_bucket(self) -> None:
-        """Ensure the bucket exists, create if not."""
+        """Ensure the bucket exists, create if not.
+
+        Converts a backend failure into `StorageError` for the same reason
+        `_do_upload` does, in the other direction: `upload` promises callers a
+        single failure type, and an unreachable MinIO reaches this method
+        first. Leaving a raw transport error to escape from here would make an
+        outage look like a bug to everyone above, which is just as wrong as
+        the reverse.
+
+        Raises:
+            StorageError: If the backend cannot confirm or create the bucket.
+        """
         client = self._get_client()
         loop = asyncio.get_event_loop()
 
-        exists = await loop.run_in_executor(
-            None,
-            partial(client.bucket_exists, self._bucket_name),
-        )
-
-        if not exists:
-            await loop.run_in_executor(
+        try:
+            exists = await loop.run_in_executor(
                 None,
-                partial(client.make_bucket, self._bucket_name),
+                partial(client.bucket_exists, self._bucket_name),
             )
-            logger.info("Created MinIO bucket: %s", self._bucket_name)
+
+            if not exists:
+                await loop.run_in_executor(
+                    None,
+                    partial(client.make_bucket, self._bucket_name),
+                )
+                logger.info("Created MinIO bucket: %s", self._bucket_name)
+        except BACKEND_FAILURES as e:
+            raise StorageError(
+                f"MinIO bucket {self._bucket_name} is not available: {e}"
+            ) from e
 
     async def upload(
         self,
@@ -258,8 +277,10 @@ class MinioStorage:
             UploadResult with key, size, and ETag.
 
         Raises:
-            UploadError: If the upload fails, or if a read of the written key
-                does not return the written bytes.
+            StorageError: If the backend is unavailable, if the upload fails,
+                or if a read of the written key does not return the written
+                bytes. Failures of ours are not converted and propagate as
+                themselves - see BACKEND_FAILURES.
         """
         await self._ensure_bucket()
         client = self._get_client()
