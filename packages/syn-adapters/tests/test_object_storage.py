@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,8 +21,13 @@ from syn_adapters.object_storage import (
 )
 from syn_shared.settings.storage import StorageProvider, StorageSettings
 
+# Marked on the MODULE, not per class. Only TestLocalStorage carried the marker,
+# so `pytest -m unit` - which is what CI runs - collected one of the five
+# classes here and silently skipped the rest. #700 found that the hard way: a
+# mock in TestMinioStorage went stale and no CI job could have noticed.
+pytestmark = pytest.mark.unit
 
-@pytest.mark.unit
+
 class TestLocalStorage:
     """Tests for LocalStorage adapter."""
 
@@ -220,6 +226,17 @@ class TestStorageSettings:
             assert "SYN_STORAGE_MINIO" in str(e)
 
 
+def _serves(mock_client: object, payload: bytes) -> None:
+    """Make a mocked Minio client hand `payload` back to a reader.
+
+    `upload` confirms its write by reading it (#700), so any mock that stands
+    in for a healthy backend has to answer `get_object`.
+    """
+    response = MagicMock()
+    response.read.return_value = payload
+    mock_client.get_object.return_value = response  # type: ignore[attr-defined]
+
+
 class TestMinioStorage:
     """Tests for MinioStorage adapter."""
 
@@ -263,9 +280,11 @@ class TestMinioStorage:
         mock_result = MagicMock()
         mock_result.etag = "abc123"
         mock_client.put_object.return_value = mock_result
-        # upload confirms the write is readable before returning (#700), so a
-        # backend that accepted it has to answer stat_object like one.
-        mock_client.stat_object.return_value.size = 11
+        # upload confirms the write is READABLE before returning (#700), which
+        # means reading it back - so the mock has to serve what it accepted, not
+        # just report a size. A stat_object answer would not do here, and that
+        # is the point: it did not prove anything at the real backend either.
+        _serves(mock_client, b"hello world")
 
         with patch.object(storage, "_get_client", return_value=mock_client):
             result = await storage.upload("test.txt", b"hello world")
@@ -285,7 +304,7 @@ class TestMinioStorage:
         mock_result = MagicMock()
         mock_result.etag = "xyz789"
         mock_client.put_object.return_value = mock_result
-        mock_client.stat_object.return_value.size = 7  # readable after the put (#700)
+        _serves(mock_client, b"content")  # readable after the put (#700)
 
         with patch.object(storage, "_get_client", return_value=mock_client):
             result = await storage.upload("file.txt", b"content")
