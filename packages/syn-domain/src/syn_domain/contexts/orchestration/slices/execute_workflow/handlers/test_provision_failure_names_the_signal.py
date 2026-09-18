@@ -33,6 +33,23 @@ FAILING_PHASE_NAME = "Prepare the workspace"
 #: What #1295 reported, with no stderr - so the code IS the whole diagnosis.
 SEGFAULTED_SETUP = ExecutionResult(exit_code=-11, success=False, duration_ms=430.0)
 
+#: Distinctive enough that finding it in the record cannot be a coincidence.
+SETUP_STDERR = "fatal: could not read Username for 'https://github.com'"
+
+#: THE CASE THE FIRST FIXTURE CANNOT REACH, and the reason this constant
+#: exists. The failure path read `stderr or <exit code>`, so it only ever
+#: consulted the exit code when stderr was EMPTY - which is what
+#: ``SEGFAULTED_SETUP`` is. A setup script that fails has usually printed
+#: something, so the realistic shape of #1295 is this one: killed by a signal
+#: AND chatty, the combination in which the -11 was dropped. A test using only
+#: the fixture above passes on a handler that still drops it.
+SEGFAULTED_SETUP_WITH_STDERR = ExecutionResult(
+    exit_code=-11,
+    success=False,
+    duration_ms=430.0,
+    stderr=SETUP_STDERR,
+)
+
 
 def _the_failing_phase() -> ExecutablePhase:
     return ExecutablePhase(
@@ -89,8 +106,31 @@ async def test_the_handler_names_the_signal() -> None:
     assert "exit code -11 (SIGSEGV: Segmentation fault)" in str(excinfo.value)
 
 
-async def test_the_execution_record_an_operator_reads_names_the_signal() -> None:
-    """The field #1295 was actually reported from."""
+@pytest.mark.parametrize(
+    ("setup_result", "expected"),
+    [
+        pytest.param(SEGFAULTED_SETUP, ("-11", "SIGSEGV"), id="silent"),
+        pytest.param(
+            SEGFAULTED_SETUP_WITH_STDERR,
+            ("-11", "SIGSEGV", SETUP_STDERR),
+            id="stderr-present",
+        ),
+    ],
+)
+async def test_the_execution_record_an_operator_reads_names_the_signal(
+    setup_result: ExecutionResult,
+    expected: tuple[str, ...],
+) -> None:
+    """The field #1295 was actually reported from.
+
+    Both cases, because the two of them take DIFFERENT BRANCHES and only one
+    of them was ever exercised. The silent one reaches the "no stderr output"
+    fallback; the chatty one is the case the fallback never sees, and it is
+    the case in which the exit code used to be thrown away entirely. They must
+    end up in the same record carrying the same three facts - how it ended,
+    what that means, and what it said on the way out - because an operator
+    reading one of these has no way to know which branch produced it.
+    """
     from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
         WorkflowExecutionProcessor,
@@ -102,7 +142,7 @@ async def test_the_execution_record_an_operator_reads_names_the_signal() -> None
     processor = WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
-        workspace_service=_workspace_service_whose_setup_returns(SEGFAULTED_SETUP),
+        workspace_service=_workspace_service_whose_setup_returns(setup_result),
         artifact_repository=AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,
@@ -127,5 +167,5 @@ async def test_the_execution_record_an_operator_reads_names_the_signal() -> None
 
     assert result.status == "failed"
     assert result.error_message is not None
-    assert "SIGSEGV" in result.error_message, result.error_message
-    assert "-11" in result.error_message
+    for fact in expected:
+        assert fact in result.error_message, result.error_message
