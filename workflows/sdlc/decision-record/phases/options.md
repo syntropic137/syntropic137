@@ -54,6 +54,12 @@ pick a winner.
 
 ## Write to `artifacts/output/options.md`
 
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
+
 Sections: Problem, Is it real / already solved, Success criteria, Constraints,
 Non-goals, Paths (one subsection each), Comparison.
 
