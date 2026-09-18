@@ -22,7 +22,6 @@ from syn_domain.contexts.orchestration import (
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
 )
-
 from syn_shared.diagnostics import name_exit_status
 
 if TYPE_CHECKING:

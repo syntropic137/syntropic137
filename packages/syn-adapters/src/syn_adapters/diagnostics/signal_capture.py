@@ -126,11 +126,10 @@ async def _kernel_fault_lines() -> tuple[tuple[str, ...], str | None]:
             f"reading {_KMSG} did not finish within {_BUDGET_SECONDS:g}s and was "
             f"abandoned so it would not delay this workspace's teardown"
         )
-    except Exception as unexpected:  # noqa: BLE001 - see module docstring
+    except Exception as unexpected:
         logger.debug("Kernel ring buffer capture failed", exc_info=True)
         return (), (
-            f"reading {_KMSG} failed unexpectedly with "
-            f"{type(unexpected).__name__}: {unexpected}"
+            f"reading {_KMSG} failed unexpectedly with {type(unexpected).__name__}: {unexpected}"
         )
 
 

@@ -16,12 +16,13 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from syn_shared.diagnostics import SignalDeath
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
+
+    from syn_shared.diagnostics import SignalDeath
 
 # Register MappingProxyType for copy/pickle support — required because
 # Pydantic model_copy() and event sourcing deepcopy individual fields.
