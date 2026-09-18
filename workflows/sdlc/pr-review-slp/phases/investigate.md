@@ -9,6 +9,28 @@ $ARGUMENTS
 A single reviewer picks two or three concerns and misses the rest. You are not
 going to review this alone.
 
+## First: resolve and record the refs
+
+This workspace is a fresh clone checked out on the DEFAULT branch, not on the
+PR. `git diff origin/main...HEAD` would compare main against itself and show
+you nothing, and an empty diff read as "a small change" is the worst possible
+start - for you and for all eight subagents you are about to send into it.
+
+So name the refs explicitly:
+
+```bash
+git fetch origin
+git rev-parse origin/main            # the BASE SHA - record it
+git rev-parse origin/<pr-branch>     # the HEAD SHA - record it
+git diff origin/main...origin/<pr-branch>
+```
+
+If the diff is empty, stop and say so - that means the refs are wrong, not that
+the PR is trivial. **Record both SHAs in your output, labelled base and head.**
+The next phase gets its own fresh clone and checks out the head SHA you record;
+without it that phase reviews the default branch, and a review of two different
+commits is not a review.
+
 ## What you have
 
 Eight leverage-point skills are installed in this workspace. Each one is a
@@ -68,6 +90,9 @@ a smell, and the phase after this one needs to know which is which.
 
 ## Write to `artifacts/output/investigate.md`
 
+- **The base and head SHAs**, labelled, exactly as `git rev-parse` printed
+  them. The `verify` phase checks out the head SHA and gates on it; it has no
+  other source for it.
 - **What the change claims to do**, and where that claim comes from.
 - **Findings, ranked**, each with `file:line`, the failure path, and the lenses
   that raised it.
