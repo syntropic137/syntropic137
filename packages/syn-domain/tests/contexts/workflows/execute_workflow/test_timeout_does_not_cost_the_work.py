@@ -70,6 +70,9 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
         _Clone,
     )
@@ -416,6 +419,121 @@ async def test_a_remote_that_never_answers_cannot_hold_the_save_open(
     assert "NOT RECOVERABLE" in failed.error_message.upper(), (
         f"a push that was cut off was reported as work that survived: {failed.error_message}"
     )
+
+
+async def test_a_clean_filter_that_never_returns_cannot_hold_the_save_open(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A LOCAL command was the cheapest way to hang the path that bounds a timeout.
+
+    Bounding the two network calls left the reasoning "a local git command
+    that hangs is a broken container" in place, and that is false where the
+    repository gets a vote. `.gitattributes` names a `clean` filter, the
+    checkout's own config supplies the program, and `git add --all` - which
+    the quarantine runs over every path, unconditionally - executes it once
+    per file. Nothing about that is a broken container: it is the repository
+    asking for code to run, and git obliging.
+
+    And "unbounded" here is not "until the container dies". It is the
+    backend's default execute timeout, an HOUR, spent by the one routine that
+    exists so that reaching a phase's limit costs the time and not the work.
+    Thirty seconds of filter against a three-second bound, so the elapsed time
+    is the assertion: anything near thirty means nothing cut it off.
+
+    THE SECOND HALF IS THAT IT SAYS SO. A bound that fires and is swallowed
+    would leave an operator reading "nothing was found" about a workspace
+    nobody managed to look inside, which is #1184's defect exactly - a
+    confident statement nobody checked - and would cost the work just as
+    silently as the hang.
+    """
+    monkeypatch.setattr(guard, "_LOCAL_TIMEOUT_SECONDS", 3)
+    processor = await _provisioned(clone)
+    clone.commit("state_machine.py", "an hour of work\n")
+    clone.hang_the_clean_filter(seconds=30)
+
+    began = time.monotonic()
+    failed = await _timed_out(processor)
+    elapsed = time.monotonic() - began
+
+    assert elapsed < 15, (
+        f"the save waited {elapsed:.1f}s on a filter the repository supplied - a "
+        "local command has no bound, and teardown waits behind it"
+    )
+    assert "exit_code=124" in failed.error_message, (
+        "the phase's own reason must survive a save that could not finish"
+    )
+    assert "timed out, so it did not finish" in failed.error_message, (
+        f"a command that was cut off was not reported as one: {failed.error_message}"
+    )
+    assert "UNKNOWN" in failed.error_message.upper(), (
+        "a workspace nobody could finish reading was reported as one holding "
+        f"nothing: {failed.error_message}"
+    )
+
+
+class _Recording:
+    """The real workspace, keeping every argv the gate handed the port.
+
+    The port is where the question can be answered at all. `_git_argv` builds
+    most of these and returning the right list from it proves nothing about a
+    command that never went through it - which is the only way this invariant
+    can break.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.commands: list[list[str]] = []
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        self.commands.append(list(command))
+        return await self._inner.execute(command)
+
+
+async def test_no_command_the_save_issues_is_unbounded_or_consults_a_repository_hook(
+    clone: _Clone,
+) -> None:
+    """The bound and the hooks override hold for EVERY command, not the ones fixed.
+
+    One hanging `clean` filter is one way in, and the test above closes it.
+    This closes the class: the reason `git add --all` could hang for an hour
+    was not that anyone judged it safe, it was that bounding happened at the
+    call sites someone thought of. A tenth command added next year, or a
+    `workspace.execute` called directly because it was one line shorter, puts
+    the hole straight back.
+
+    So the assertion is over everything the port was actually handed during a
+    real terminal path - `find`, `cat` and `rm` included, which are not git
+    but are subprocesses on the same dying path with the same default - and it
+    fails on the first one that arrives without a bound.
+
+    HOOKS ARE THE OTHER HALF and are asserted here rather than in a test of
+    their own, because the thing worth pinning is the same thing: that no git
+    command escapes the prefix. A `pre-push` hook hangs the quarantine push
+    exactly as the filter hangs `add`, and unlike filters it can be switched
+    off completely, so it is. Staging a real hanging hook is not possible in
+    every environment this suite runs in - a hook on a `noexec` tmpdir is
+    ignored, and the test would pass without proving anything - so what is
+    checked is that the override reached the command, which is the step that
+    can regress.
+    """
+    recording = _Recording(cast("GitWorkspace", clone.workspace))
+    processor = await _provisioned(clone, workspace=cast("GitWorkspace", recording))
+    clone.commit("state_machine.py", "an hour of work\n")
+
+    await _timed_out(processor)
+
+    assert recording.commands, "the save ran no commands at all, so this asserts nothing"
+    unbounded = [command for command in recording.commands if command[:1] != ["timeout"]]
+    assert unbounded == [], (
+        "these ran with no bound of their own, so they inherit the backend's "
+        f"hour on a path whose budget is already gone: {unbounded}"
+    )
+    hooked = [
+        command
+        for command in recording.commands
+        if "git" in command and "core.hooksPath=/dev/null" not in command
+    ]
+    assert hooked == [], f"these git commands would run a hook the repository supplied: {hooked}"
 
 
 async def test_a_workspace_that_cannot_run_a_command_does_not_replace_the_failure(

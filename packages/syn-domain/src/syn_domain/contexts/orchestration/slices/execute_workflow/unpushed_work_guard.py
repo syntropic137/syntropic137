@@ -239,7 +239,16 @@ _KILL_AFTER_SECONDS: Final[int] = 5
 #: Worth having ON TOP OF the bound because it is the one COMPLETE
 #: neutralisation available: git looks for hooks in exactly one directory, so
 #: pointing that at a non-directory closes the entire class at once, leaves
-#: nothing partially covered, and needs no maintenance.
+#: nothing partially covered, and needs no maintenance. It is also the only
+#: level that can close it: the image entrypoint already points
+#: `core.hooksPath` at its own directory, which incidentally hides a
+#: repository's `.git/hooks` - but a repository's own `.git/config` outranks
+#: that, and only `-c` on the command line outranks the repository.
+#:
+#: The same reasoning, and the same `/dev/null`, as the provisioning clone in
+#: `setup_phase_secrets`. Nothing of OURS is lost by it: the image's hook is
+#: `prepare-commit-msg`, and the quarantine commit is written by
+#: `commit-tree`, which is plumbing and consults no hook in any case.
 #:
 #: FILTERS ARE NOT CLOSED THE SAME WAY, deliberately, and the asymmetry is the
 #: decision rather than an omission. A `clean` filter is named by the
@@ -1201,9 +1210,7 @@ async def _checked(
     )
 
 
-def _git_argv(
-    repo: str, *args: str, index: str | None = None, identity: bool = False
-) -> list[str]:
+def _git_argv(repo: str, *args: str, index: str | None = None, identity: bool = False) -> list[str]:
     """Argv for one git command in ``repo``, with no hook of the repository's own.
 
     Environment is carried in argv, via ``env``, rather than through the

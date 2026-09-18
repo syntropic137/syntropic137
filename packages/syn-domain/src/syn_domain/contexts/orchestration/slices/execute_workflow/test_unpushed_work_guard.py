@@ -216,6 +216,25 @@ class _Clone:
         self.git("config", "protocol.ext.allow", "always")
         self.git("remote", "set-url", "origin", f"ext::sleep {seconds}")
 
+    def hang_the_clean_filter(self, seconds: int) -> None:
+        """Make reading this repository's worktree run a program that never returns.
+
+        THE LOCAL HALF of `hang_the_remote`, and the one that matters more
+        (#1231): a `clean` filter is code the REPOSITORY supplies and git runs
+        while reading files, so it turns a local command into an unbounded
+        wait without any network being involved. `.gitattributes` names the
+        driver and the repository's own config supplies the program - both of
+        them things a phase's checkout carries - and `git add --all`, which
+        the quarantine runs over every path, invokes it for each one.
+
+        A config value rather than a hook script on purpose: it needs no
+        executable file, so this stages the hang identically on a tmpdir
+        mounted `noexec`, where a hook would simply be ignored and the test
+        would pass for the wrong reason.
+        """
+        (self.path / ".gitattributes").write_text("* filter=syn-hang\n")
+        self.git("config", "filter.syn-hang.clean", f"sleep {seconds}")
+
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
 
