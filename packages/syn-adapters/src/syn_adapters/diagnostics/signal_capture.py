@@ -198,14 +198,18 @@ def _uptime_seconds() -> float | None:
 def _fault_records(fd: int, uptime: float | None) -> tuple[str, ...]:
     """Walk the ring buffer, keeping recent fault reports.
 
-    Each read() on ``/dev/kmsg`` returns exactly one record, formatted
-    ``priority,sequence,microseconds,flags;message``. The walk ends at EAGAIN,
+    Records are ``priority,sequence,microseconds,flags;message`` and newline
+    terminated. ``/dev/kmsg`` hands back exactly one per read(), but that is a
+    property of the device and not of file descriptors, so the walk splits on
+    the terminator instead of relying on it - which is also what lets this be
+    tested against a descriptor holding real records. The walk ends at EAGAIN,
     which is how a non-blocking read says it has reached the present.
     """
     kept: list[str] = []
+    pending = ""
     for _ in range(_MAX_RECORDS):
         try:
-            record = os.read(fd, 8192)
+            chunk = os.read(fd, 65536)
         except BlockingIOError:
             break
         except OSError as err:
@@ -214,15 +218,29 @@ def _fault_records(fd: int, uptime: float | None) -> tuple[str, ...]:
             if err.errno != errno.EPIPE:
                 raise
             continue
-        if not record:
+        if not chunk:
             break
-        message, age = _parse_record(record.decode("utf-8", "replace"))
+        pending += chunk.decode("utf-8", "replace")
+        records = pending.split("\n")
+        pending = records.pop()
+        kept.extend(_faults_among(records, uptime))
+        if len(kept) > _MAX_LINES:
+            del kept[:-_MAX_LINES]
+    kept.extend(_faults_among([pending], uptime))
+    return tuple(kept[-_MAX_LINES:])
+
+
+def _faults_among(records: list[str], uptime: float | None) -> list[str]:
+    """The messages in ``records`` that report a fault and are recent enough."""
+    kept: list[str] = []
+    for record in records:
+        message, age = _parse_record(record)
         if message is None or not _FAULT_PATTERN.search(message):
             continue
         if uptime is not None and age is not None and uptime - age > _RECENT_SECONDS:
             continue
         kept.append(message)
-    return tuple(kept[-_MAX_LINES:])
+    return kept
 
 
 def _parse_record(record: str) -> tuple[str | None, float | None]:
