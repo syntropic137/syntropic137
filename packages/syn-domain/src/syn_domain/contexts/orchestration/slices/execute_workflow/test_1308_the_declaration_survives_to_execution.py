@@ -42,6 +42,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.Workfl
 from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+    WorkflowPhaseUpdatedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
 )
@@ -50,6 +53,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from event_sourcing import DomainEvent
+
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -60,8 +67,14 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _WORKFLOWS = Path(__file__).resolve().parents[8] / "workflows"
 
 
-async def _executable_phases(workflow: Path) -> dict[str, ExecutablePhase]:
-    """The phases production would run, through a real event round trip."""
+async def _executable_phases(
+    workflow: Path, *, then: Sequence[DomainEvent] = ()
+) -> dict[str, ExecutablePhase]:
+    """The phases production would run, through a real event round trip.
+
+    `then` is the rest of the stream: events recorded against this workflow
+    after it was created, replayed in order onto the same fresh aggregate.
+    """
     definition = WorkflowDefinition.from_file(workflow)
     origin = WorkflowTemplateAggregate()
     origin.create_workflow(build_command_from_definition(definition))
@@ -70,9 +83,9 @@ async def _executable_phases(workflow: Path) -> dict[str, ExecutablePhase]:
     # THE RESTART PATH. Phases come back out of the event store as plain JSON,
     # so a field the event does not carry survives every in-process test and
     # nothing else.
-    serialized = type(created).model_validate(created.model_dump(mode="json"))
     rehydrated = WorkflowTemplateAggregate()
-    rehydrated.apply_event(serialized)
+    for event in (created, *then):
+        rehydrated.apply_event(type(event).model_validate(event.model_dump(mode="json")))
 
     captured: list[ExecutablePhase] = []
 
@@ -172,3 +185,40 @@ async def test_a_phase_that_commits_still_reaches_execution_judged_strictly(
 
     assert phase_id in phases, f"{workflow} no longer has a '{phase_id}' phase"
     assert phases[phase_id].delivers_repo_changes is True
+
+
+async def test_an_edit_to_a_phase_leaves_its_declaration_where_the_author_put_it() -> None:
+    """A field the edit never mentions must arrive unchanged (#1308).
+
+    THE SEVENTH HOP, and the only one that is not on the startup path: a
+    workflow is not only created, it is edited, and the edit is an event in
+    the same stream. `WorkflowPhaseUpdated` carries a prompt and four optional
+    overrides - it has never carried `delivers_repo_changes` and should not,
+    because the declaration belongs to the workflow author in the YAML. What
+    it must not do is RESET it, which is what applying the event by rebuilding
+    the phase from its named fields did: `bootstrap` came back True, the gate
+    came back on, and the next lockfile failed the phase again.
+
+    The edit here changes only the prompt, which is the ordinary case and the
+    one that hid it, and the assertion is on the `ExecutablePhase` the
+    processor hands to the gate rather than on the aggregate's own phase - the
+    value has to survive the remaining hops too, and this is the hop that
+    drops things.
+    """
+    workflow = _WORKFLOWS / "sdlc/implement/workflow.yaml"
+    edited = await _executable_phases(
+        workflow,
+        then=[
+            WorkflowPhaseUpdatedEvent(
+                workflow_id=WorkflowDefinition.from_file(workflow).id,
+                phase_id="bootstrap",
+                prompt_template="Edited: check the toolchain and stop.",
+            )
+        ],
+    )
+
+    assert edited["bootstrap"].prompt_template == "Edited: check the toolchain and stop."
+    assert edited["bootstrap"].delivers_repo_changes is False
+    # The edit is to one phase. Its neighbours are not collateral.
+    assert edited["implement"].delivers_repo_changes is True
+    assert edited["verify"].delivers_repo_changes is False
