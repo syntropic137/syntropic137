@@ -68,6 +68,32 @@ class WorkflowFailedEvent(DomainEvent):
     # would tell the stream the next phase is ready in a run being failed.
     failed_phase_artifact_ids: list[str] = Field(default_factory=list)
 
+    # What the failed phase itself had spent when it died (#1262), zeros when
+    # its agent never ran.
+    #
+    # FLAT AND NAMED FOR THE PHASE, like `failed_phase_duration_seconds` above
+    # and for the same reason: these describe the ONE phase that died, not the
+    # run, and the `total_*` fields further down are the run's partial totals
+    # from the phases that completed. Collapsing the two sets is how a failed
+    # phase's spend would be read as the execution's.
+    #
+    # WHY THEY ARE ON THE EVENT AT ALL. Until they were, the only record of
+    # them was the prose `(tokens=190+545)` inside `error_message`. A phase
+    # killed at its 1200s cap having spent 735 tokens had stalled and should
+    # not be retried as-is; phases killed the same day after 171 messages and
+    # 133 tool calls needed a bigger cap. Both reported exit 124, and no
+    # queryable field separated them - so the stalled one was retried, and the
+    # retry was the one unblocking a performance fix.
+    #
+    # Zero is a measurement here, not "not provided": a phase whose agent never
+    # launched spent nothing. Read them against
+    # `failed_phase_duration_seconds` and the phase's budget, which is what
+    # tells "ran to the cap" from "died early and reported 124".
+    failed_phase_input_tokens: int = 0
+    failed_phase_output_tokens: int = 0
+    failed_phase_cache_creation_tokens: int = 0
+    failed_phase_cache_read_tokens: int = 0
+
     # Partial progress
     completed_phases: int
     total_phases: int

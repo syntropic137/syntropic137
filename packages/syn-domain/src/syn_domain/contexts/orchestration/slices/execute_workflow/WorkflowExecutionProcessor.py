@@ -427,6 +427,18 @@ class WorkflowExecutionProcessor:
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         timings = self._runtime.timings()
+        # Read in the same breath as the timings, and for the same reason: the
+        # counts are the dying phase's own, and this is the last frame in which
+        # anything can still ask for them (#1262). Without this the phase
+        # reported zero tokens no matter what it had burned, so an exit 124
+        # after 735 tokens - a stall - was indistinguishable from one after
+        # 300k, which needed a bigger budget rather than a retry.
+        #
+        # Asked with `execution_id`, not just the phase: this processor is
+        # shared across concurrent dispatches and two runs of one workflow have
+        # the same phase ids, so "what did `implement` spend" names two answers.
+        # The id is the run's own, so it always names this one's.
+        usage = self._runtime.usage_for(execution_id, failed_phase_id)
         # Before the teardown below, the only window in which it is askable (#1200).
         observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
@@ -436,6 +448,7 @@ class WorkflowExecutionProcessor:
             timings.session_ids,
             observed=observed,
             kept_artifact_ids=kept,
+            usage=usage,
         )
         if failure.result is not None:
             phase_results.append(failure.result)
@@ -656,9 +669,17 @@ class WorkflowExecutionProcessor:
                     else f"Agent execution failed for phase {todo.phase_id} "
                     f"(exit_code={result.command.exit_code})"
                 )
-                msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
-                logger.error(msg)
-                raise RuntimeError(msg)
+                # The token counts used to be appended here as
+                # `(tokens=190+545)`, and that string was the ONLY record of
+                # them anywhere (#1262). They are real fields on the failure
+                # event now, so restating them in prose would be a second
+                # account of the same fact - and a WORSE one: these are the raw
+                # accumulated deltas, which double-count the context re-sent on
+                # every turn, where the fields carry what `FinalUsage.resolve`
+                # settled on. Two numbers for one phase, and nothing to say
+                # which the reader should believe.
+                logger.error(base)
+                raise RuntimeError(base)
 
             aggregate.agent_execution_completed(result.command)
             await self._journal.append(aggregate)
@@ -806,7 +827,7 @@ class WorkflowExecutionProcessor:
         # been told this phase succeeded, so the raise IS the outcome (#1184).
         await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
 
-        harvest = self._runtime.harvest(todo.phase_id)
+        harvest = self._runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",

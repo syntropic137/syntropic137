@@ -166,6 +166,54 @@ class PhaseInput:
 
 
 @dataclass(frozen=True)
+class PhaseUsage:
+    """What a phase spent, frozen at the moment something asked.
+
+    THE ANSWER FOR A PHASE THAT DID NOT FINISH, which is the only reason this
+    is a type rather than five arguments. A phase that completes reports its
+    counts on ``PhaseCompleted`` and always has; a phase that was killed at its
+    timeout reports on the failure path instead, and that path carried no token
+    counts at all - so a run that burned 735 tokens against a 1200s budget and
+    a run that burned 300k both arrived as exit 124 with zeros beside them.
+    They need opposite responses - a bigger budget, or stop paying for this
+    retry - and nothing in the record separated them (#1262).
+
+    ZERO IS A MEASUREMENT HERE, not "unknown", which is why there is no
+    three-valued variant of this and no ``None``. A phase whose agent never
+    launched spent nothing, and that is the honest report; the distinction
+    ``duration_seconds`` has to keep - never started versus started and took no
+    time - has no analogue for tokens, because a phase cannot accumulate
+    tokens before it exists. Removing that case rather than handling it is what
+    keeps this off every call site.
+
+    RESOLVED, NOT ACCUMULATED. These are whatever ``FinalUsage.resolve`` settled
+    on for the run: the harness's own terminal totals when it reported them, and
+    the deltas observed while it ran when it died before reporting. A killed
+    phase only ever has the second, which is the case this exists for.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        """The four summed, derived here so no caller sums them again.
+
+        Every sink that carries a total carried its own addition before this
+        existed, and an addition repeated at four call sites is four chances to
+        leave one term out.
+        """
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
+
+
+@dataclass(frozen=True)
 class PhaseResult:
     """Result of a single phase execution.
 

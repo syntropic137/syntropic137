@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
     AgentVerdict,
+    PhaseUsage,
     StreamResult,
     SubagentTracker,
     TokenAccumulator,
@@ -70,6 +71,7 @@ class FakeAgentExecutionHandler:
         launches: bool = True,
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
+        spent: PhaseUsage | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -88,6 +90,19 @@ class FakeAgentExecutionHandler:
         #: is what lets a test drive the collection step for real instead of
         #: mocking out the very hop under test.
         self._produces = tuple(produces)
+        #: What this agent burned before it returned. Zeros by default, and
+        #: settable for the same reason ``produces`` is: a FAILING agent is not
+        #: an agent that did nothing. A phase killed at its timeout has spent
+        #: real tokens, and until this double could say so the only failures any
+        #: test could drive were free ones - the single case where losing the
+        #: counts costs nothing to notice (#1262).
+        #:
+        #: Put on the COMMAND as well as the accumulator, because the command is
+        #: what production reads: the real handler resolves the two through
+        #: ``FinalUsage`` and writes the answer there, and the failure path reads
+        #: it back off the runtime. A double that set only the accumulator would
+        #: leave the hop under test reading a zero.
+        self._spent = spent or PhaseUsage()
         #: The last thing this double's agent SAYS, verbatim - including its
         #: ``TASK_RESULT`` block if it writes one. Passed through the REAL
         #: `AgentVerdict.from_agent_text` below rather than setting a verdict
@@ -125,6 +140,13 @@ class FakeAgentExecutionHandler:
         # looking like one that never started (#1047, #1065).
         if self._launches and on_launch is not None:
             await on_launch()
+        tokens = TokenAccumulator()
+        tokens.record(
+            self._spent.input_tokens,
+            self._spent.output_tokens,
+            self._spent.cache_creation_tokens,
+            self._spent.cache_read_tokens,
+        )
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
@@ -137,6 +159,10 @@ class FakeAgentExecutionHandler:
             phase_id=todo.phase_id or "",
             session_id=session_id,
             exit_code=self._exit_code,
+            input_tokens=self._spent.input_tokens,
+            output_tokens=self._spent.output_tokens,
+            cache_creation_tokens=self._spent.cache_creation_tokens,
+            cache_read_tokens=self._spent.cache_read_tokens,
             # The real handler puts it here as well as on the stream result,
             # because the command is what reaches the event store and the
             # event store is what a restart reads (#1195, #1300). A double
@@ -146,7 +172,7 @@ class FakeAgentExecutionHandler:
         )
         return AgentExecutionResult(
             stream_result=stream_result,
-            tokens=TokenAccumulator(),
+            tokens=tokens,
             subagents=SubagentTracker(),
             command=command,
         )
@@ -178,7 +204,10 @@ class FakeAgentExecutionHandler:
 
     @classmethod
     def success(
-        cls, produces: Sequence[tuple[str, bytes]] = (), says: str | None = None
+        cls,
+        produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
+        spent: PhaseUsage | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
@@ -196,8 +225,19 @@ class FakeAgentExecutionHandler:
         something is the exact shape of #1300 - three implement phases that had
         pushed their branch and only missed the report - and a double that
         could not express it left that combination untestable end to end.
+
+        ``spent`` is what it burned. Exit code 0, a ``says`` reporting
+        ``success: false`` and a non-zero ``spent`` is a phase that did real
+        work and then refused itself; it leaves through the same door a timeout
+        does and lost its counts the same way (#1262).
         """
-        return cls(interrupt=False, exit_code=0, produces=produces, says=says)
+        return cls(
+            interrupt=False,
+            exit_code=0,
+            produces=produces,
+            says=says,
+            spent=spent,
+        )
 
     @classmethod
     def failed(
@@ -205,6 +245,7 @@ class FakeAgentExecutionHandler:
         exit_code: int = 1,
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
+        spent: PhaseUsage | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
 
@@ -215,8 +256,19 @@ class FakeAgentExecutionHandler:
         express that, the only failures any test could drive were empty ones,
         and an empty workspace is the case where losing the output costs
         nothing (#1321).
+
+        ``spent`` is what it burned getting there. ``exit_code=124`` with a
+        non-zero ``spent`` is the timeout this exists for: those counts are the
+        only thing separating a phase killed mid-work from one that stalled
+        (#1262).
         """
-        return cls(interrupt=False, exit_code=exit_code, produces=produces, says=says)
+        return cls(
+            interrupt=False,
+            exit_code=exit_code,
+            produces=produces,
+            says=says,
+            spent=spent,
+        )
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
