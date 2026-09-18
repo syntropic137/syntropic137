@@ -453,6 +453,30 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             if kept_artifact_ids:
                 phase["artifact_id"] = kept_artifact_ids[0]
 
+            # What this phase spent before it died (#1262). The failed phase
+            # never gets a PhaseCompleted event, which is the ONLY thing that
+            # ever wrote these keys -- so every failed phase this projection
+            # has ever stored reports zero tokens, and the record an operator
+            # opens cannot tell a phase that stalled at 735 tokens from one
+            # killed mid-work at 300k. Both say exit 124.
+            #
+            # Stamped unconditionally, zeros included, because zero is the
+            # correct report for a phase whose agent never launched and is not
+            # a "not provided" to be skipped over. The total is summed from the
+            # four rather than carried as a fifth event field, so it cannot
+            # disagree with them.
+            failed_input = event_data.get("failed_phase_input_tokens", 0)
+            failed_output = event_data.get("failed_phase_output_tokens", 0)
+            failed_cache_creation = event_data.get("failed_phase_cache_creation_tokens", 0)
+            failed_cache_read = event_data.get("failed_phase_cache_read_tokens", 0)
+            phase["input_tokens"] = failed_input
+            phase["output_tokens"] = failed_output
+            phase["cache_creation_tokens"] = failed_cache_creation
+            phase["cache_read_tokens"] = failed_cache_read
+            phase["total_tokens"] = (
+                failed_input + failed_output + failed_cache_creation + failed_cache_read
+            )
+
             # The failed phase never gets a PhaseCompleted event, so without
             # this its duration_seconds is stuck at the 0.0
             # PhaseDetail.running() seeded it with -- reporting a timed-out
@@ -463,10 +487,21 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             if failed_duration is not None:
                 phase["duration_seconds"] = failed_duration
                 phase["completed_at"] = event_data.get("failed_at")
-                # Also roll into the execution total, which otherwise
-                # under-reports by exactly the failed phase's time -- it only
-                # accumulates from PhaseCompleted events.
-                self._aggregate_totals(existing, 0, 0, 0, 0, failed_duration)
+
+            # ONE roll-up for both, where before it was the duration alone: the
+            # execution totals only accumulate from PhaseCompleted, so they
+            # under-report by exactly the failed phase's time AND by exactly
+            # what it spent. `or 0.0` because a failure with no phase in flight
+            # has no duration to add, and adding nothing is the right answer
+            # rather than a reason to skip the tokens too.
+            self._aggregate_totals(
+                existing,
+                failed_input,
+                failed_output,
+                failed_cache_creation,
+                failed_cache_read,
+                failed_duration or 0.0,
+            )
 
         # Outside the phase lookup, and outside the orphan branch above, on
         # purpose: an artifact that was stored exists whether or not this

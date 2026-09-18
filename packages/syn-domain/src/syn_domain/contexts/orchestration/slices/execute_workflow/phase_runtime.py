@@ -37,6 +37,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.artifacts import AgentIdentity
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PhaseUsage,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_observed_branches,
 )
@@ -163,6 +166,18 @@ class PhaseRuntime:
         #: line. Popped on success so a completed phase leaves nothing behind.
         self._leader_native_ids: dict[tuple[str, str], str] = {}
         self._tokens: dict[str, TokenAccumulator] = {}
+        #: What each phase spent, in input/output/cache-creation/cache-read
+        #: order, as `FinalUsage.resolve` settled it: the harness's own terminal
+        #: totals when it reported them, and the deltas observed while it ran
+        #: when it was killed before reporting. So "auth" is the USUAL case, not
+        #: the only one - a timed-out phase's entry is an estimate, and that
+        #: estimate is the whole of what is known about what it cost (#1262).
+        #:
+        #: Written by `record_agent_run`, which runs BEFORE the exit-status
+        #: check that fails the phase, so an entry exists here for every phase
+        #: whose agent ran at all - including every one that then died.
+        #: `abandon_all` deliberately does not clear it: the failure path reads
+        #: it on the way out.
         self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
         #: The model each phase's harness announced on its own stream (#1284).
@@ -374,6 +389,25 @@ class PhaseRuntime:
         `PhaseTimings` for what reading it late cost (#1036).
         """
         return PhaseTimings(started_at=dict(self._started_at), session_ids=dict(self._session_ids))
+
+    def usage_for(self, phase_id: str | None) -> PhaseUsage:
+        """What a phase had spent by now, for a caller that is about to report it.
+
+        MUST be read before the caller's first await on a terminal path, for the
+        reason `timings` must be: `harvest` pops these, and concurrent
+        dispatches share the map. A frozen `PhaseUsage` rather than the live
+        accumulator is what makes that a snapshot instead of a promise.
+
+        Zeros for a phase whose agent never ran - it spent nothing, and there is
+        no "unknown" to distinguish; see `PhaseUsage`.
+        """
+        inp, out, cache_creation, cache_read = self._auth_tokens.get(phase_id or "", (0, 0, 0, 0))
+        return PhaseUsage(
+            input_tokens=inp,
+            output_tokens=out,
+            cache_creation_tokens=cache_creation,
+            cache_read_tokens=cache_read,
+        )
 
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""

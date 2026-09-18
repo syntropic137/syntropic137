@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# Runtime import: FailExecutionCommand defaults an absent usage to zeros rather
+# than carrying None into the aggregate, so the class is constructed here.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -82,6 +86,7 @@ class FailExecutionCommand:
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
         failed_phase_artifact_ids: tuple[str, ...] = (),
+        failed_phase_usage: PhaseUsage | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -111,6 +116,13 @@ class FailExecutionCommand:
         #: leaves this empty - the same answer as a phase that wrote nothing,
         #: and the same consequence either way.
         self.failed_phase_artifact_ids = failed_phase_artifact_ids
+        #: What the failed phase had spent when it died (#1262), zeros when its
+        #: agent never ran. Here rather than only in `error_message`, which is
+        #: where these counts lived: an exit 124 reporting `(tokens=190+545)` in
+        #: prose was a phase that had stalled, and an exit 124 with 171 messages
+        #: and 133 tool calls behind it needed a bigger budget. Same exit code,
+        #: opposite responses, and no field either could be sorted on.
+        self.failed_phase_usage = failed_phase_usage or PhaseUsage()
 
 
 class StartPhaseCommand:
