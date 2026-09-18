@@ -16,6 +16,11 @@
  *   - A request that arrives while one is outstanding does not start a second
  *     one. It runs once, after, and several arriving together still run once -
  *     bounded at one in flight and one behind it, never a queue.
+ *   - Asking for something ELSE is the same rule, not an exception to it. The
+ *     outstanding request is abandoned, but abandoning is not forgetting: it is
+ *     aborted, and the replacement still waits for it to settle. Discarding an
+ *     answer costs the database nothing, and a filter change is when a user
+ *     generates load fastest.
  *   - A poll is scheduled only from the completion of the previous request, so
  *     a poll CANNOT overlap one. There is no guard to get wrong, and no tick
  *     to skip, because a tick while busy never happens.
@@ -29,7 +34,9 @@
  *
  * Four verbs, and none of them expose the sequencing: a caller can say what it
  * wants fetched and when it is alive, and cannot observe or influence whether a
- * request is outstanding. So it cannot reintroduce the overlap.
+ * request is outstanding. So it cannot reintroduce the overlap. The one thing
+ * it IS told is when the answer it is fetching stopped being wanted, because
+ * only the caller can decide what not to render.
  *
  * The decisions the loop makes - run now or fold into the outstanding request,
  * what a settling answer means, when the next poll is due - are the exported
@@ -47,8 +54,19 @@ export interface SerialRefreshOptions {
    * Fetch the resource and apply the result. Awaited, so the loop knows when
    * the answer landed; a rejection is the caller's to report, and only ends
    * this attempt.
+   *
+   * `signal` aborts when the caller asks for something else instead, or goes
+   * away. Two things to do with it, and the second is not optional:
+   *
+   *   - pass it to the request, so the server stops computing an answer nobody
+   *     will read;
+   *   - check `signal.aborted` before applying anything, INCLUDING an error. It
+   *     is true exactly when what arrived is about something the caller has
+   *     stopped looking at, so applying it renders one page's data under
+   *     another page's controls, and reporting the abort itself shows the user
+   *     a failure that did not happen.
    */
-  fetch: () => Promise<void>
+  fetch: (signal: AbortSignal) => Promise<void>
   /**
    * Shortest gap between polls, or `null` to not poll at all. The real gap is
    * this or the last observed latency, whichever is longer. Changing it
@@ -71,25 +89,24 @@ export interface SerialRefreshLoop {
   reconfigure: (options: SerialRefreshOptions) => void
   /** The surface is on screen: poll, and watch for the tab being hidden. */
   activate: () => void
-  /** The surface is gone: stop scheduling and let go of the tab. */
+  /** The surface is gone: stop scheduling, drop the request, let go of the tab. */
   deactivate: () => void
 }
 
 interface LoopState {
-  fetch: () => Promise<void>
+  fetch: (signal: AbortSignal) => Promise<void>
   pollIntervalMs: number | null
-  /** A request has been issued and has not settled. */
-  inFlight: boolean
-  /** Someone asked while `inFlight`; run exactly once more on settle. */
+  /**
+   * The request that has been issued and has not settled, and the handle that
+   * abandons it. Non-null is what "busy" means here - a single field rather
+   * than a flag beside it, because two of them can disagree and this one
+   * decides whether a second request may start.
+   */
+  outstanding: AbortController | null
+  /** Someone asked while busy; run exactly once more on settle. */
   trailing: boolean
   /** How long the last completed request took. */
   latencyMs: number
-  /**
-   * Which request the loop is currently waiting on. Bumping it abandons the
-   * outstanding one: its answer may still arrive, but it no longer decides
-   * what happens next.
-   */
-  generation: number
   timer: ReturnType<typeof setTimeout> | null
   /** The surface has gone away; stop scheduling. */
   disposed: boolean
@@ -111,6 +128,7 @@ export type RefetchDecision =
   /**
    * One outstanding: fold into the single run that follows it. A twentieth
    * asker gets the same one run the first asker got - bounded, not queued.
+   * A change of what is being fetched folds too; it just aborts first.
    */
   | 'fold'
   /** The surface is gone; nobody is waiting for this answer. */
@@ -118,12 +136,6 @@ export type RefetchDecision =
 
 /** What a settling request means for the loop that is still running. */
 export type SettleDecision =
-  /**
-   * Something newer replaced this request while it was on the wire. Its answer
-   * must touch neither the bookkeeping nor the timing: the newer request owns
-   * both, and this latency is for a resource nobody is looking at.
-   */
-  | 'abandon'
   /** The surface went away while this was on the wire. */
   | 'stop'
   /** Someone asked while this was outstanding; that is the one run they get. */
@@ -156,11 +168,16 @@ export function decideRefetch(state: {
   return 'start'
 }
 
-export function decideOnSettle(
-  state: { readonly generation: number; readonly disposed: boolean; readonly trailing: boolean },
-  generation: number,
-): SettleDecision {
-  if (generation !== state.generation) return 'abandon'
+/**
+ * A settling request is always the one the loop is waiting on, because there is
+ * never another. That is why there is no "was this superseded" case here: a
+ * request the caller has moved on from is aborted and still awaited, so it
+ * settles while it is still the only one outstanding.
+ */
+export function decideOnSettle(state: {
+  readonly disposed: boolean
+  readonly trailing: boolean
+}): SettleDecision {
   if (state.disposed) return 'stop'
   if (state.trailing) return 'rerun'
   return 'schedule'
@@ -187,35 +204,37 @@ function scheduleNextPoll(state: LoopState): void {
 }
 
 function refetch(state: LoopState): void {
-  const decision = decideRefetch(state)
+  const decision = decideRefetch({
+    disposed: state.disposed,
+    inFlight: state.outstanding !== null,
+  })
   if (decision === 'ignore') return
   if (decision === 'fold') {
     state.trailing = true
     return
   }
 
-  state.inFlight = true
+  const outstanding = new AbortController()
+  state.outstanding = outstanding
   clearTimer(state)
-  const generation = ++state.generation
   const startedAt = Date.now()
 
   // `Promise.resolve().then(...)` so a fetcher that throws synchronously is
-  // handled the same as one that rejects, rather than escaping and leaving
-  // `inFlight` stuck true - which would wedge the loop permanently.
+  // handled the same as one that rejects, rather than escaping and leaving the
+  // loop busy forever - which would wedge it permanently.
   void Promise.resolve()
-    .then(() => state.fetch())
+    .then(() => state.fetch(outstanding.signal))
     .catch(() => {
       // The fetcher reports its own failures. A failed attempt still counts
       // as an attempt: it settled, so the next poll is scheduled normally.
     })
-    .finally(() => settle(state, generation, startedAt))
+    .finally(() => settle(state, startedAt))
 }
 
-function settle(state: LoopState, generation: number, startedAt: number): void {
-  const decision = decideOnSettle(state, generation)
-  if (decision === 'abandon') return
+function settle(state: LoopState, startedAt: number): void {
   state.latencyMs = Date.now() - startedAt
-  state.inFlight = false
+  state.outstanding = null
+  const decision = decideOnSettle(state)
   if (decision === 'stop') return
   if (decision === 'rerun') {
     state.trailing = false
@@ -227,24 +246,28 @@ function settle(state: LoopState, generation: number, startedAt: number): void {
 
 /**
  * `fetch` changes identity whenever what it would fetch changes - a new query,
- * a new id. That is the one case where asking again must NOT wait its turn:
- * what is outstanding is an answer about something the caller has stopped
- * looking at, and its result will be discarded either way. So it is abandoned
- * rather than waited for, and the caller's refetch starts the new request
- * immediately. Still one request in flight - a different one.
+ * a new id. The outstanding request is then an answer about something the
+ * caller has stopped looking at, so it is abandoned.
  *
- * Asking again for the SAME thing is the opposite case and does wait, because
- * there the outstanding request is already fetching exactly what was asked
- * for. That difference is what stops a page change costing two round trips
- * back to back on a slow endpoint.
+ * Abandoning it is not the same as being free to replace it. It is still on the
+ * wire and the database is still running the query, and starting the
+ * replacement now is two at once - the pile-up this loop exists to prevent,
+ * arriving by the one route a user can trigger as fast as they can type
+ * (#1095). Dropping the answer client-side does nothing about the work that
+ * produced it.
+ *
+ * So the new target waits its turn exactly like any other asker: one trailing
+ * refresh, dispatched when the outstanding request settles. The abort is what
+ * keeps that turn short - it asks for the predecessor to stop rather than
+ * merely ignoring it, so what the replacement waits for is a cancellation
+ * rather than a query nobody wants.
  */
-function retarget(state: LoopState, fetch: () => Promise<void>): void {
+function retarget(state: LoopState, fetch: (signal: AbortSignal) => Promise<void>): void {
   if (state.fetch === fetch) return
   state.fetch = fetch
-  if (!state.inFlight) return
-  state.generation += 1
-  state.inFlight = false
-  state.trailing = false
+  if (state.outstanding === null) return
+  state.outstanding.abort()
+  state.trailing = true
 }
 
 function reconfigure(state: LoopState, options: SerialRefreshOptions): void {
@@ -255,7 +278,7 @@ function reconfigure(state: LoopState, options: SerialRefreshOptions): void {
   //
   // A request in flight is the case that does: it schedules the next poll when
   // it settles, and scheduling here too would put a second timer on the loop.
-  if (!state.inFlight) scheduleNextPoll(state)
+  if (state.outstanding === null) scheduleNextPoll(state)
 }
 
 function onTabVisibilityChanged(state: LoopState): void {
@@ -281,6 +304,11 @@ function activate(state: LoopState): void {
 function deactivate(state: LoopState): void {
   state.disposed = true
   clearTimer(state)
+  // Nobody will read this answer either, for the same reason and at the same
+  // cost. `outstanding` is left set: it is cleared when the request settles,
+  // and clearing it here would declare the loop free while a request it has
+  // just abandoned is still on the wire.
+  state.outstanding?.abort()
   if (state.visibilityListener === null) return
   document.removeEventListener('visibilitychange', state.visibilityListener)
   state.visibilityListener = null
@@ -290,10 +318,9 @@ export function createSerialRefreshLoop(options: SerialRefreshOptions): SerialRe
   const state: LoopState = {
     fetch: options.fetch,
     pollIntervalMs: options.pollIntervalMs,
-    inFlight: false,
+    outstanding: null,
     trailing: false,
     latencyMs: 0,
-    generation: 0,
     timer: null,
     disposed: false,
     visibilityListener: null,

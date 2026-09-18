@@ -8,6 +8,11 @@
  * in flight per resource, a poll that arrives while its predecessor is
  * outstanding is folded rather than queued, and the gap between polls comes
  * from the latency actually observed rather than from a constant.
+ *
+ * "Never more than one" includes the case where the caller asks for something
+ * DIFFERENT, which is the one a user can trigger as fast as they can type. The
+ * fetchers below deliberately ignore the abort they are handed, so what these
+ * tests measure is the loop's own guarantee and not a fetcher's cooperation.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -25,16 +30,23 @@ function setVisibility(state: 'visible' | 'hidden'): void {
   Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
 }
 
-/** A fetcher that answers only when the test says so. */
+/**
+ * A fetcher that answers only when the test says so, and that does NOT give up
+ * when aborted - a request already past the point of cancellation, which is
+ * the case the loop may not rely on cooperation to survive.
+ */
 function controllableFetch(): {
-  fetch: () => Promise<void>
+  fetch: (signal: AbortSignal) => Promise<void>
   settleOldest: () => void
   calls: () => number
+  signalFor: (call: number) => AbortSignal
 } {
   const pending: Array<() => void> = []
+  const signals: AbortSignal[] = []
   const fetch = vi.fn(
-    () =>
+    (signal: AbortSignal) =>
       new Promise<void>((resolve) => {
+        signals.push(signal)
         pending.push(resolve)
       }),
   )
@@ -42,6 +54,32 @@ function controllableFetch(): {
     fetch,
     settleOldest: () => pending.shift()?.(),
     calls: () => fetch.mock.calls.length,
+    signalFor: (call) => signals[call],
+  }
+}
+
+/**
+ * How many requests were on the wire at the same moment, counted across every
+ * endpoint it wraps. Shared on purpose: "one at a time" is a property of the
+ * loop, so a replacement endpoint starting while its predecessor is still
+ * unsettled is exactly the violation, even though the two are different calls
+ * to different functions.
+ */
+function concurrencyWatch(): {
+  watch: (fetch: (signal: AbortSignal) => Promise<void>) => (signal: AbortSignal) => Promise<void>
+  max: () => number
+} {
+  let active = 0
+  let max = 0
+  return {
+    watch: (fetch) => (signal) => {
+      active += 1
+      max = Math.max(max, active)
+      return fetch(signal).finally(() => {
+        active -= 1
+      })
+    },
+    max: () => max,
   }
 }
 
@@ -66,28 +104,18 @@ describe('decideRefetch', () => {
 })
 
 describe('decideOnSettle', () => {
-  const live = { generation: 7, disposed: false, trailing: false }
-
-  it('abandons an answer to a request that has been superseded', () => {
-    expect(decideOnSettle(live, 6)).toBe('abandon')
-  })
-
-  it('abandons it even when the loop would otherwise have work to do', () => {
-    // The stale answer must not consume the trailing ask: that ask is waiting
-    // on the request that replaced it.
-    expect(decideOnSettle({ ...live, trailing: true }, 6)).toBe('abandon')
-  })
+  const live = { disposed: false, trailing: false }
 
   it('stops when the surface went away while the request was on the wire', () => {
-    expect(decideOnSettle({ ...live, disposed: true }, 7)).toBe('stop')
+    expect(decideOnSettle({ ...live, disposed: true })).toBe('stop')
   })
 
   it('reruns once for however many asks arrived while it was outstanding', () => {
-    expect(decideOnSettle({ ...live, trailing: true }, 7)).toBe('rerun')
+    expect(decideOnSettle({ ...live, trailing: true })).toBe('rerun')
   })
 
   it('schedules the next poll when nothing is pending', () => {
-    expect(decideOnSettle(live, 7)).toBe('schedule')
+    expect(decideOnSettle(live)).toBe('schedule')
   })
 })
 
@@ -211,7 +239,7 @@ describe('createSerialRefreshLoop', () => {
     loop.deactivate()
   })
 
-  it('starts the new request at once when what is being fetched changes', async () => {
+  it('holds the replacement until the request it replaces has settled', async () => {
     const stale = controllableFetch()
     const fresh = controllableFetch()
     const loop = createSerialRefreshLoop({ fetch: stale.fetch, pollIntervalMs: POLL_FLOOR_MS })
@@ -221,23 +249,111 @@ describe('createSerialRefreshLoop', () => {
     await flush()
     expect(stale.calls()).toBe(1)
 
-    // A new id: the outstanding answer is about something nobody is looking at
-    // any more, so asking again must not wait behind it.
+    // A new id. The outstanding answer is about something nobody is looking at
+    // any more - but it is still on the wire and the database is still running
+    // the query, so starting the replacement now is two at once. Discarding
+    // the answer when it lands does nothing about the work that produced it,
+    // and that work is what fell over in #1095.
     loop.reconfigure({ fetch: fresh.fetch, pollIntervalMs: POLL_FLOOR_MS })
     loop.refetch()
     await flush()
-    expect(fresh.calls()).toBe(1)
+    expect(fresh.calls()).toBe(0)
 
-    // The abandoned answer arrives late and decides nothing - in particular it
-    // does not report the loop idle, which would let the next ask open a second
-    // request alongside the one still on the wire.
+    // Six floor intervals of the user carrying on - more filter changes, SSE
+    // frames - while the abandoned request is still unsettled.
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(POLL_FLOOR_MS)
+      loop.refetch()
+    }
+    expect(fresh.calls()).toBe(0)
+
     stale.settleOldest()
     await flush()
+    expect(fresh.calls()).toBe(1)
+
+    // Exactly one: the reconfigure and every ask behind it are the single
+    // trailing run between them, not one run each.
+    fresh.settleOldest()
+    await flush()
+    expect(fresh.calls()).toBe(1)
+    expect(stale.calls()).toBe(1)
+
+    loop.deactivate()
+  })
+
+  it('never has two requests on the wire, across a change of what is fetched', async () => {
+    const wire = concurrencyWatch()
+    const stale = controllableFetch()
+    const fresh = controllableFetch()
+    const loop = createSerialRefreshLoop({
+      fetch: wire.watch(stale.fetch),
+      pollIntervalMs: POLL_FLOOR_MS,
+    })
+    loop.activate()
+
     loop.refetch()
     await flush()
+
+    loop.reconfigure({ fetch: wire.watch(fresh.fetch), pollIntervalMs: POLL_FLOOR_MS })
+    loop.refetch()
+    await flush()
+
+    stale.settleOldest()
+    await flush()
+    fresh.settleOldest()
+    await flush()
+
+    // The whole point of the PR in one number. Two is what was in
+    // pg_stat_activity; the client ignoring one of the answers did not make it
+    // one.
+    expect(wire.max()).toBe(1)
+    expect(stale.calls()).toBe(1)
     expect(fresh.calls()).toBe(1)
 
     loop.deactivate()
+  })
+
+  it('aborts the request it abandons, rather than only ignoring its answer', async () => {
+    const stale = controllableFetch()
+    const fresh = controllableFetch()
+    const loop = createSerialRefreshLoop({ fetch: stale.fetch, pollIntervalMs: POLL_FLOOR_MS })
+    loop.activate()
+
+    loop.refetch()
+    await flush()
+    expect(stale.signalFor(0).aborted).toBe(false)
+
+    loop.reconfigure({ fetch: fresh.fetch, pollIntervalMs: POLL_FLOOR_MS })
+    await flush()
+
+    // Told to stop, not merely left running: this is what stops the server
+    // computing a result nobody will read, and it is how the caller knows not
+    // to render the answer if it arrives anyway.
+    expect(stale.signalFor(0).aborted).toBe(true)
+
+    stale.settleOldest()
+    await flush()
+    expect(fresh.signalFor(0).aborted).toBe(false)
+
+    loop.deactivate()
+  })
+
+  it('aborts the outstanding request when the surface goes away', async () => {
+    const endpoint = controllableFetch()
+    const loop = createSerialRefreshLoop({ fetch: endpoint.fetch, pollIntervalMs: POLL_FLOOR_MS })
+    loop.activate()
+
+    loop.refetch()
+    await flush()
+    expect(endpoint.signalFor(0).aborted).toBe(false)
+
+    loop.deactivate()
+    expect(endpoint.signalFor(0).aborted).toBe(true)
+
+    // And settling it afterwards starts nothing: the surface is gone.
+    endpoint.settleOldest()
+    await vi.advanceTimersByTimeAsync(18_000)
+    expect(endpoint.calls()).toBe(1)
   })
 
   it('does not poll a hidden tab, and catches up once when it comes back', async () => {
