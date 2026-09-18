@@ -281,6 +281,74 @@ class _KeepEveryArtifact:
         return "".join(a.content for a in self.saved if a.execution_id == execution_id)
 
 
+class _RunIsNotProgressingError(BaseException):
+    """A run that has stopped making progress, raised so nothing can catch it.
+
+    A ``BaseException`` deliberately. ``run()`` catches ``Exception`` and turns
+    it into a failed execution, which would file this under "the run failed"
+    alongside every ordinary failure and lose the one thing it is reporting.
+    Nothing in production may absorb it, because it is not a fact about the
+    workflow - it is the fixture saying the test would otherwise hang.
+    """
+
+
+@dataclass
+class _WhatTheListKeepsHandingOut:
+    """The to-do item one run was last given, and how many times running."""
+
+    item: str | None = None
+    times: int = 0
+
+
+class _ATodoListThatCannotSpin(ExecutionTodoProjection):
+    """The real to-do projection, which stops when a run stops progressing.
+
+    WHY A TEST OF THIS DEFECT NEEDS ONE. A run whose workspace was torn down
+    out from under it does not crash. ``_handle_collect_artifacts`` finds no
+    workspace, logs "Skipping stale COLLECT_ARTIFACTS", and returns WITHOUT
+    advancing the item - so ``_drain_todo_list`` asks for it again, gets the
+    same one, and goes round. There is nothing in that loop that yields, so the
+    event loop never gets control back: the ``asyncio.wait_for`` below cannot
+    fire, and neither can any other timeout. The run does not fail, it spins,
+    and it takes the CI job with it.
+
+    That is exactly what the surviving run does when the other run's teardown
+    reaches its state, which is the thing these tests exist to catch. A test
+    that expresses its own subject as a hang is not a test that failed - it is
+    a test that cannot report. So the loop is bounded here: the same to-do item
+    handed out this many times running means the run has stopped progressing,
+    and that is said out loud.
+
+    The non-advancing skip branch is a defect of its own and not this file's to
+    fix; it is reachable in-process only once a runtime has lost a workspace it
+    should still be holding, which is the state #1311 produced.
+    """
+
+    #: Generous by two orders of magnitude: a healthy run is handed each of its
+    #: four to-do items once and never sees the same one twice running.
+    _PATIENCE = 50
+
+    def __init__(self, store: InMemoryProjectionStore) -> None:
+        super().__init__(store=store)
+        self._handed_out: dict[str, _WhatTheListKeepsHandingOut] = {}
+
+    async def get_pending(self, execution_id: str) -> list[TodoItem]:
+        pending = await super().get_pending(execution_id)
+        head = f"{pending[0].action}:{pending[0].phase_id}" if pending else None
+        seen = self._handed_out.setdefault(execution_id, _WhatTheListKeepsHandingOut())
+        seen.times = seen.times + 1 if head == seen.item else 1
+        seen.item = head
+        if seen.times > self._PATIENCE:
+            msg = (
+                f"{execution_id} was handed the same to-do item ({head}) "
+                f"{seen.times} times running without progressing. Its run is "
+                "livelocked - which is what a run looks like once another run's "
+                "teardown has taken the workspace it was still working in."
+            )
+            raise _RunIsNotProgressingError(msg)
+        return pending
+
+
 class _AnAgentThatSignsItsWork:
     """A harness that writes and announces something only ITS run could have.
 
@@ -430,7 +498,7 @@ async def _two_concurrent_runs() -> _BothRuns:
         controller=None,
         prompt_builder=prompts,
         command_builder=_echo_the_prompt,
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+        todo_projection=_ATodoListThatCannotSpin(store=InMemoryProjectionStore()),
         agent_handler=agent,  # type: ignore[arg-type]
     )
 
@@ -769,7 +837,7 @@ async def _run_one_ends_while_run_two_works(
         controller=None,
         prompt_builder=_APromptNamingItsRun(),
         command_builder=_echo_the_prompt,
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+        todo_projection=_ATodoListThatCannotSpin(store=InMemoryProjectionStore()),
         agent_handler=agent,  # type: ignore[arg-type]
     )
 
