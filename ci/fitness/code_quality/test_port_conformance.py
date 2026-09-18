@@ -43,14 +43,6 @@ _UNIMPLEMENTED: dict[str, str] = {
         "and no call site asks for it. Kept here rather than deleted because "
         "removing a published port is a separate decision from #1305."
     ),
-    "TokenInjectionPort": (
-        "DirectTokenInjectionAdapter and MemoryTokenInjectionAdapter are "
-        "paired in the manifest. SidecarTokenInjectionAdapter is not: its "
-        "inject() takes a required sidecar_handle the port has no slot for, "
-        "so it is genuinely a different operation rather than a drifted "
-        "spelling of this one. Widening the port to fit it would oblige every "
-        "other implementation to accept a sidecar handle it has no use for."
-    ),
 }
 
 
@@ -146,4 +138,17 @@ class TestEveryPortIsPaired:
         stale = sorted(name for name in _UNIMPLEMENTED if name not in declared)
         assert not stale, (
             "_UNIMPLEMENTED names ports that no longer exist; delete them: " + ", ".join(stale)
+        )
+
+    def test_unimplemented_does_not_shadow_a_real_pairing(self) -> None:
+        """The two tables must not overlap. A port in both is exempt from the
+        pairing check while appearing to satisfy it, so deleting its pairing
+        from the manifest would put it back to checked-by-nothing in silence
+        -- which is #1305 itself, one level up.
+        """
+        both = sorted(_manifest_names() & set(_UNIMPLEMENTED))
+        assert not both, (
+            "These are paired in the manifest, so they are implemented. Drop "
+            "their _UNIMPLEMENTED entries; if the note is about one adapter "
+            "that does NOT satisfy the port, it belongs in that adapter: " + ", ".join(both)
         )
