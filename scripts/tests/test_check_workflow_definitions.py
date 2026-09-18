@@ -1134,6 +1134,88 @@ class TestARenameMustNotLeaveANameBehind:
         )
         assert "bootstrap.md" in " ".join(violations)
 
+    def test_a_dotted_phase_id_is_read_whole_and_not_truncated(self, tmp_path: Path) -> None:
+        """The false positive half of #1355. `.` is legal in a phase id - the
+        production grammar is `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` - and the gate's
+        own copy of that grammar left it out. So `premise.v2` matched down to
+        its longest dot-free prefix `premise`, and a workflow whose first phase
+        is genuinely called `premise.v2` was told it references a phase it does
+        not have.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow(
+                "The report is at `artifacts/input/premise.v2.md`.", first_id="premise.v2"
+            ),
+        )
+
+        assert _gate_accepts(path), (
+            "precondition: `premise.v2` is a valid phase id, so this workflow is "
+            "valid and a failure below is attributable to the reference"
+        )
+
+        assert stale_phase_references(path) == [], (
+            "the gate invented a violation: `artifacts/input/premise.v2.md` names "
+            "the phase `premise.v2`, which this workflow has"
+        )
+
+    def test_a_stale_dotted_reference_is_not_rescued_by_an_existing_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """The false negative half of #1355, and the serious one: the gate said
+        a dead reference was live.
+
+        `premise.old` is exactly the name a half-finished rename leaves behind.
+        Truncated at the first dot it became `premise`, which DOES exist, so
+        the gate affirmatively certified a reference whose input directory is
+        empty at run time - the one thing `stale_phase_references` exists to
+        catch. A guard that is merely silent is a gap; a guard that reports OK
+        is worse than no guard, because it is believed.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/premise.old.md`."),
+        )
+
+        assert _gate_accepts(path), (
+            "precondition: this workflow is otherwise valid, so a failure below "
+            "is attributable to the reference and not to something else"
+        )
+        violations = stale_phase_references(path)
+
+        assert violations, (
+            "the gate accepted `artifacts/input/premise.old.md` in a workflow "
+            "whose only earlier phase is `premise`; there is no phase "
+            "`premise.old`, so that directory is empty at run time"
+        )
+        joined = " ".join(violations)
+        assert "premise.old" in joined, (
+            "must name the reference that does not resolve, IN FULL - reporting "
+            f"the prefix `premise` is the bug itself: {joined}"
+        )
+
+    def test_a_sentence_period_after_a_reference_is_not_part_of_the_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Admitting `.` to the reference charset made prose punctuation
+        ambiguous with the id itself, because the grammar permits a trailing
+        dot. An unfenced reference ending a sentence must still resolve.
+
+        Pinned so nobody "simplifies" this by stripping trailing dots off the
+        captured text: that would make a reference to `premise.` resolve to
+        `premise`, rebuilding the false negative above one character further
+        along.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow("The premise report is at artifacts/input/premise.md."),
+        )
+
+        assert stale_phase_references(path) == [], (
+            "the sentence period was read as part of the phase id, so a valid "
+            "reference was reported as naming a phase that does not exist"
+        )
+
     def test_a_shared_prompt_reference_is_not_a_misfiled_file(self, tmp_path: Path) -> None:
         """`shared://` prompts are named for the JOB and reused by phases with
         different ids - that is what the phase library is for - so the filename

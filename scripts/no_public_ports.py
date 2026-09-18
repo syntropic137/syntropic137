@@ -450,7 +450,7 @@ def publishes_in_shell(path: str, text: str) -> list[Publish]:
     for number, line in enumerate(text.splitlines(), start=1):
         for match in _PUBLISH_FLAG.finditer(line):
             argument = match.group(1).strip("\"'")
-            if _LOOKS_LIKE_A_PORT.match(argument):
+            if _LOOKS_LIKE_A_PORT.fullmatch(argument):
                 found.append(Publish(path, number, repr(argument), spec=argument))
     return found
 

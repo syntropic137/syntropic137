@@ -137,6 +137,33 @@ class TestValidation:
             RepositoryRef(owner="owner", name="")
 
 
+class TestATrailingNewlineIsNotPartOfAReference:
+    """#1355's defect, found in a second place by the sweep that fixed it.
+
+    Both patterns here are anchored `^...$`, so their author meant "the whole
+    string is a repository reference". Python's `$` also matches just before a
+    trailing newline, and `.match()` does not require reaching the end at all,
+    so `owner/repo\n` was accepted and became a RepositoryRef whose `name` was
+    `repo\n` - a reference that is not the repository it claims to be, and one
+    that then goes into a clone URL. `fullmatch` is the spelling that means
+    what the anchors say.
+    """
+
+    def test_a_slug_with_a_trailing_newline_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid repository slug"):
+            RepositoryRef.from_slug("owner/repo\n")
+
+    def test_a_url_with_a_trailing_newline_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid repository URL"):
+            RepositoryRef.from_url("https://github.com/owner/repo\n")
+
+    def test_the_name_never_carries_whitespace_into_a_clone_url(self) -> None:
+        """The hop that made it matter: the accepted value was not inspected
+        again, it was interpolated."""
+        with pytest.raises(ValueError):
+            RepositoryRef.from_slug("owner/repo\n").https_url  # noqa: B018
+
+
 class TestRoundTrip:
     """Verify slug -> RepositoryRef -> URL -> RepositoryRef -> slug roundtrip."""
 

@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseYamlDefinition,
     WorkflowDefinition,
+    is_phase_id,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
 
@@ -340,12 +341,44 @@ def grant_violations(path: Path) -> list[str]:
     return violations
 
 
+#: What ends an `artifacts/input/...` reference written in prose.
+#:
+#: Prompts are markdown, so a reference is nearly always fenced in backticks
+#: and often followed by a comma or a closing bracket. `\S+` would swallow all
+#: of that and turn every reference into a non-id.
+_REFERENCE_ENDS = r"\s`'\"),;\]}"
+
 #: A phase prompt naming the artifact directory of ANOTHER phase.
 #:
-#: The token charset excludes `<`, which is what keeps the boilerplate
-#: `artifacts/input/<phase-id>/` out of the results without a special case for
-#: it: a placeholder is not a reference and never matches.
-_INPUT_REF = re.compile(r"artifacts/input/([A-Za-z0-9_-]+)(?:\.md)?")
+#: This finds CANDIDATES only. It deliberately does not encode the phase-id
+#: grammar - `_referenced_phase` asks `is_phase_id` that - because the copy of
+#: the grammar that used to live here is what #1298 tripped over: it left the
+#: `.` out, so `artifacts/input/premise.old.md` matched its longest legal
+#: prefix `premise` and the gate reported a dead reference as a live one.
+#:
+#: The trailing `\.?` is a sentence period, not part of an id. Without it the
+#: unfenced `... at artifacts/input/premise.md.` reads as a reference to a
+#: phase named `premise.md.`, which the grammar does permit. Note which way
+#: that error runs: it invents a missing phase rather than resolving to an
+#: existing one, so a mistake here is loud. Do NOT "simplify" this by
+#: stripping trailing dots from the captured text instead - that turns a
+#: reference to `premise.` into a reference to `premise`, which is the #1298
+#: false negative rebuilt by hand.
+_INPUT_REF = re.compile(rf"artifacts/input/([^{_REFERENCE_ENDS}]+?)\.?(?=[{_REFERENCE_ENDS}]|$)")
+
+
+def _referenced_phase(tail: str) -> str | None:
+    """The phase id a prompt reference names, or None when it names no id.
+
+    `tail` is whatever followed `artifacts/input/`. Two shapes reach here,
+    because two are what the injection layer creates: the durable directory
+    `<phase-id>/...`, and the flat `<phase-id>.md` alias kept for one release
+    (#988). Anything else - a `<phase-id>` placeholder, a bare `artifacts/input/`,
+    a path that is not an id at all - names no phase, and saying so is the
+    whole job: the caller must never be handed a prefix of what it passed in.
+    """
+    head = tail.split("/", 1)[0].removesuffix(".md")
+    return head if is_phase_id(head) else None
 
 
 def stale_phase_references(path: Path, *, phase_library_dir: Path | None = None) -> list[str]:
@@ -397,7 +430,12 @@ def stale_phase_references(path: Path, *, phase_library_dir: Path | None = None)
             )
 
     for phase in definition.phases:
-        for named in sorted(set(_INPUT_REF.findall(phase.prompt_template or ""))):
+        referenced = {
+            named
+            for tail in _INPUT_REF.findall(phase.prompt_template or "")
+            if (named := _referenced_phase(tail)) is not None
+        }
+        for named in sorted(referenced):
             if named not in order_of:
                 violations.append(
                     f"phase '{phase.id}' is told to read artifacts/input/{named}, "
