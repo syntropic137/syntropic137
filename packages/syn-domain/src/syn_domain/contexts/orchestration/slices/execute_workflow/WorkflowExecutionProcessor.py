@@ -287,6 +287,21 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        finally:
+            # NOTHING LEAVES THIS METHOD STILL HOLDING A WORKSPACE, on any
+            # path. The same hazard as the one guarded inside `_fail_execution`,
+            # one level up and with more of the run inside it: the two terminal
+            # paths above each reap their own, but NEITHER OF THEM RUNS when a
+            # `CancelledError` unwinds out of `_drain_todo_list` - and that is
+            # the minutes an agent spends running, which is exactly where a
+            # shutdown lands. `except Exception` cannot see it; it is a
+            # BaseException.
+            #
+            # A sweep rather than a third special case, and it costs nothing to
+            # arrive here having already reaped: `abandon_all` clears what it
+            # took, so a second call finds nothing to close and does nothing.
+            # The cancellation goes on propagating afterwards, unswallowed.
+            await self._runtime.abandon_all("shutdown")
 
     async def _drain_todo_list(
         self,
@@ -479,36 +494,54 @@ class WorkflowExecutionProcessor:
         fail_cmd = failure.as_command(
             execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
         )
+        # THE REAP IS THE OUTER `finally`, AROUND THE DURABLE WRITE AS WELL AS
+        # THE SESSION REPORT. Cleanup runs whatever either of them did.
+        #
+        # `finally` rather than a second `except`, because `except Exception`
+        # is not a guarantee: `asyncio.CancelledError` inherits BaseException,
+        # so a shutdown arriving inside `journal.append` - or inside the local
+        # projection it drives - passes every `except` clause below untouched
+        # and leaves this function. With the reap inside the second block, that
+        # left the workspace container running after the run it belonged to was
+        # gone. An unreported session is a read-model inaccuracy; an unreleased
+        # workspace is a leaked container, and only one of them is still
+        # costing money an hour later.
+        #
+        # THIS IS A `finally` AND NEVER AN `except`. Nothing here catches the
+        # cancellation: it is reaped against and then allowed to keep
+        # propagating. A shutdown that carries on as though it were not
+        # cancelled is a worse bug than the container this guards.
         try:
-            aggregate.fail_execution(fail_cmd)
-            await self._journal.append(aggregate)
-        except EventsNotRecordedError:
-            # Nothing was written. The status this run died with is now
-            # unrecoverable, which is the failure #1319 is about - so it is
-            # logged as one, and NOT as "the projection is lagging".
-            logger.exception(
-                "Failure of execution %s was not durably recorded (exit_code=%s) - "
-                "the status this run died with is lost",
-                execution_id,
-                failure.exit_code,
-            )
-        except Exception:
-            # The event IS on the stream; only this run's local to-do list did
-            # not take it. An operator can still read what happened, and a read
-            # model that is behind must never hold a container open.
-            logger.exception(
-                "Failure of execution %s was recorded but the local to-do list did not apply it",
-                execution_id,
-            )
+            try:
+                aggregate.fail_execution(fail_cmd)
+                await self._journal.append(aggregate)
+            except EventsNotRecordedError:
+                # Nothing was written. The status this run died with is now
+                # unrecoverable, which is the failure #1319 is about - so it is
+                # logged as one, and NOT as "the projection is lagging".
+                logger.exception(
+                    "Failure of execution %s was not durably recorded (exit_code=%s) - "
+                    "the status this run died with is lost",
+                    execution_id,
+                    failure.exit_code,
+                )
+            except Exception:
+                # The event IS on the stream; only this run's local to-do list
+                # did not take it. An operator can still read what happened,
+                # and a read model that is behind must never hold a container
+                # open.
+                logger.exception(
+                    "Failure of execution %s was recorded but the local to-do "
+                    "list did not apply it",
+                    execution_id,
+                )
 
-        # Cleanup runs whatever the above did. `finally` rather than a second
-        # `except`, because a session report that is CANCELLED (shutdown) must
-        # still release the workspace - an unreported session is a read-model
-        # inaccuracy, an unreleased one is a leaked container.
-        try:
-            await self._runtime.report_failed(failure.reason)
-        except Exception:
-            logger.exception("Could not close the sessions of execution %s as failed", execution_id)
+            try:
+                await self._runtime.report_failed(failure.reason)
+            except Exception:
+                logger.exception(
+                    "Could not close the sessions of execution %s as failed", execution_id
+                )
         finally:
             await self._runtime.abandon_all("failure")
 

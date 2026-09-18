@@ -23,6 +23,7 @@ when the reap happened relative to it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -56,6 +57,17 @@ REAPED = "reaped"
 class _Timeline(list[str]):
     """What happened during one run, in the order it happened."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        #: The `context` each reap was asked for, in order. Recorded beside the
+        #: bare REAPED entry because WHICH path released the workspace is a
+        #: separate question from whether one did: "failure" is the failure
+        #: path having cleaned up after itself, and "shutdown" is the sweep at
+        #: the end of `run()` having found a workspace nobody released. Both
+        #: mean no container leaked; only the first means the failure path is
+        #: the reason.
+        self.reap_contexts: list[str] = []
+
     def watch(self, processor: WorkflowExecutionProcessor) -> None:
         """Instrument the two ends that must not swap: the store, and the reap."""
         journal = processor._journal  # pyright: ignore[reportPrivateUsage]
@@ -71,8 +83,9 @@ class _Timeline(list[str]):
         async def watched_report(_reason: str) -> None:
             self.append(REPORTED)
 
-        async def watched_abandon(_context: str) -> None:
+        async def watched_abandon(context: str) -> None:
             self.append(REAPED)
+            self.reap_contexts.append(context)
 
         repository.save = watched_save  # pyright: ignore[reportAttributeAccessIssue]
         runtime.report_failed = watched_report  # type: ignore[method-assign]
@@ -246,4 +259,106 @@ class TestAReadModelOutageCannotBlockCleanup:
         )
         assert _PROJECTION_BEHIND not in caplog.text, (
             "nothing was written, so nothing may be described as recorded"
+        )
+
+
+class TestACancelledShutdownStillReleasesTheWorkspace:
+    """`except Exception` is not a guarantee, and this is the gap it leaves.
+
+    `asyncio.CancelledError` inherits BaseException, so every `except
+    Exception` in the failure path is blind to it. That makes a shutdown the
+    one interruption which can arrive mid-teardown and be caught by nothing -
+    and the durable append #1319 added sits in front of the reap, so a
+    cancellation landing there used to leave the function with the workspace
+    still held. The container then outlives the process that was supposed to
+    remove it, which is a cost that keeps accruing after everyone has gone
+    home; the failure event it was protecting is lost either way.
+
+    Both tests assert the same two things, because either alone would pass a
+    broken implementation:
+
+      - the reap RAN, so nothing leaked;
+      - the `CancelledError` still came OUT. A shutdown that is absorbed and
+        continues as though it were not cancelled is worse than the leak - it
+        is a process ignoring the only instruction it was given. So these
+        guards are `finally`, never `except`.
+    """
+
+    @pytest.mark.anyio
+    async def test_a_cancellation_during_the_durable_append_still_reaps(self) -> None:
+        """Cancelled inside `journal.append`, between the write and the reap.
+
+        The narrowest window #1319 opened: the append is deliberately in front
+        of the teardown, so it is now the step a shutdown is most likely to
+        interrupt.
+        """
+        timeline = _Timeline()
+        processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
+        timeline.watch(processor)
+
+        repository = processor._journal._repository  # pyright: ignore[reportPrivateUsage]
+        permissive_save = repository.save
+
+        async def save_cancelled_by_shutdown(aggregate: object) -> None:
+            names = [type(e.event).__name__ for e in aggregate.get_uncommitted_events()]  # pyright: ignore[reportAttributeAccessIssue]
+            if "WorkflowFailedEvent" in names:
+                raise asyncio.CancelledError
+            await permissive_save(aggregate)
+
+        repository.save = save_cancelled_by_shutdown  # pyright: ignore[reportAttributeAccessIssue]
+
+        with pytest.raises(asyncio.CancelledError):
+            await processor.run(
+                workflow_id="wf-1319-order",
+                workflow_name="The failure outlives the container",
+                phases=_one_phase_workflow(),
+                inputs={},
+                execution_id="exec-1319-cancelled-append",
+            )
+
+        assert REAPED in timeline, (
+            "a shutdown during the append skipped the reap and leaked the workspace "
+            f"container - no `except Exception` can see a CancelledError: {list(timeline)}"
+        )
+        # WHICH path released it, not merely that something did. `run()` sweeps
+        # on the way out and would cover this leak too, so asserting only
+        # "REAPED" passes whether or not the failure path cleans up after
+        # itself - and the sweep is a backstop, not a licence for the path that
+        # holds the workspace to hand it over on a cancellation.
+        assert "failure" in timeline.reap_contexts, (
+            "the failure path let a CancelledError carry the workspace out with it "
+            "and left the process-wide sweep to notice the leak; the reap must be "
+            f"in a `finally` around the append, not after it: {timeline.reap_contexts}"
+        )
+
+    @pytest.mark.anyio
+    async def test_a_cancellation_while_the_agent_runs_still_reaps(self) -> None:
+        """Cancelled where a shutdown actually lands: inside the agent's run.
+
+        The failure path is not reached at all here - no `WorkflowFailed` is
+        ever built - so the reap cannot come from `_fail_execution`. This is
+        the same defect one level up, and it covers the minutes-long await
+        rather than the millisecond one above.
+        """
+        timeline = _Timeline()
+        processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
+        timeline.watch(processor)
+
+        async def agent_cancelled_by_shutdown(*_args: object, **_kwargs: object) -> None:
+            raise asyncio.CancelledError
+
+        processor._agent_handler.handle = agent_cancelled_by_shutdown  # type: ignore[method-assign]  # pyright: ignore[reportPrivateUsage]
+
+        with pytest.raises(asyncio.CancelledError):
+            await processor.run(
+                workflow_id="wf-1319-order",
+                workflow_name="The failure outlives the container",
+                phases=_one_phase_workflow(),
+                inputs={},
+                execution_id="exec-1319-cancelled-agent",
+            )
+
+        assert REAPED in timeline, (
+            "a shutdown while the agent was running left the workspace held: the "
+            f"terminal paths that reap are both behind `except Exception`: {list(timeline)}"
         )
