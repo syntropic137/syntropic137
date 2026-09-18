@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
+from syn_shared.diagnostics import name_exit_status
+
 if TYPE_CHECKING:
     from syn_adapters.storage.repositories import RepositoryAdapter
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -466,12 +468,12 @@ async def _docker_rm(filter_arg: str, label: str) -> str | None:
             logger.info("Removed %d orphaned %s container(s)", len(ids), label)
             return None
         logger.warning(
-            "docker rm -f exited %s for %s container(s) %s; some may still exist",
-            stop_proc.returncode,
+            "docker rm -f %s for %s container(s) %s; some may still exist",
+            name_exit_status(stop_proc.returncode),
             label,
             ids,
         )
-        return f"{label}: `docker rm -f` exited {stop_proc.returncode}"
+        return f"{label}: `docker rm -f` {name_exit_status(stop_proc.returncode)}"
     except Exception:
         # NOT debug. Losing docker entirely used to be a DEBUG line, and the
         # execution reconcile then failed every running execution on the

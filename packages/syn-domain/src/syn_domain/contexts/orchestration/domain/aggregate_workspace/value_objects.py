@@ -16,6 +16,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from syn_shared.diagnostics import SignalDeath
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -308,6 +309,16 @@ class ExecutionResult:
     stdout_lines: int = 0
     stderr_lines: int = 0
     timed_out: bool = False
+
+    #: The diagnostic for a command that was KILLED rather than finished,
+    #: captured by the backend at the moment it reaped the process and carried
+    #: here because the reap removes the container and nothing can be read
+    #: afterwards (#1295, #1319). None whenever the command exited normally,
+    #: and also whenever a backend has no way to capture one - a double, or the
+    #: in-memory adapter - so a reader must treat None as "nothing was
+    #: captured" rather than as "it was not killed"; ``exit_code`` remains the
+    #: thing that says which.
+    signal_death: SignalDeath | None = None
 
 
 @dataclass(frozen=True)

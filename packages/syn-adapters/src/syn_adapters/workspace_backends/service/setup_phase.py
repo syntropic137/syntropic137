@@ -30,6 +30,8 @@ from syn_shared.env_constants import (
     ENV_GIT_COMMITTER_NAME,
 )
 
+from syn_shared.diagnostics import name_exit_status
+
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
@@ -140,9 +142,9 @@ async def run_setup_phase(
             # a similar name runs alongside it and reading one as the other sent
             # an operator to a phase that had completed (#1236).
             logger.error(
-                "Secret-injection setup failed (workspace=%s, exit=%d): %s",
+                "Secret-injection setup failed (workspace=%s, %s): %s",
                 ws.workspace_id,
-                result.exit_code,
+                name_exit_status(result.exit_code),
                 result.stderr,
             )
 

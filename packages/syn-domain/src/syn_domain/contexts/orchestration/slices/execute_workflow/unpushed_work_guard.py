@@ -805,6 +805,10 @@ async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -
             # reader needs "it did not finish" either way, not a number.
             timed_out=result.timed_out
             or (command[0] == "timeout" and result.exit_code == _BOUND_FIRED_EXIT_CODE),
+            # Carried, not re-derived. The backend captured this at the moment
+            # it reaped the process; by the time this gate reports, the
+            # container it came from may already be gone (#1295).
+            signal_death=result.signal_death,
         ),
     )
 
