@@ -41,18 +41,15 @@ class _FinishedProc:
         return self._stdout, self._stderr
 
 
-async def _failure_message(
-    returncode: int | None, stdout: bytes = b"", stderr: bytes = b""
-) -> str:
+async def _failure_message(returncode: int | None, stdout: bytes = b"", stderr: bytes = b"") -> str:
     """Run the real helper against that subprocess and return what it raised."""
     proc = _FinishedProc(returncode, stdout, stderr)
 
     async def _spawn(*_args: object, **_kwargs: object) -> _FinishedProc:
         return proc
 
-    with patch("asyncio.create_subprocess_exec", new=_spawn):
-        with pytest.raises(RuntimeError) as raised:
-            await run_sidecar_container(_CMD)
+    with patch("asyncio.create_subprocess_exec", new=_spawn), pytest.raises(RuntimeError) as raised:
+        await run_sidecar_container(_CMD)
     return str(raised.value)
 
 
