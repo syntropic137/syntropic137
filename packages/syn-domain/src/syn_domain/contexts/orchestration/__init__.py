@@ -66,6 +66,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    PhaseUsage,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -204,6 +205,8 @@ __all__ = [
     # Value objects - workflow
     "PhaseDefinition",
     "PhaseExecutionType",
+    # What a phase spent, as the failure path reports it (#1262)
+    "PhaseUsage",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "SecurityPolicy",
