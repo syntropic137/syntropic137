@@ -44,11 +44,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
+    _read_only_mount,
     GitWorkspace,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+    _DispatchContext,
     WorkflowExecutionProcessor,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
@@ -243,16 +248,23 @@ class _Clone:
             == 0
         )
 
-    async def run_gate(self, *, delivers_repo_changes: bool = True) -> None:
+    async def run_gate(
+        self, *, delivers_repo_changes: bool = True, workspace: GitWorkspace | None = None
+    ) -> None:
         """Run the gate as `_PHASE_ID` - `implement`, which owns a branch.
 
         True is the default here because it is what `implement` declares, and
         because it is the reading every test above this line is about. The
         tests that pass False say so at the call, where the declaration is the
         thing under test (#1308).
+
+        ``workspace`` is for the tests that need the phase to have run
+        somewhere other than an ordinary writable checkout. Defaulting to this
+        clone's own is what makes "declared False and still failed" the
+        ordinary case rather than a contrived one.
         """
         await quarantine_unpushed_work(
-            self.workspace,
+            workspace if workspace is not None else self.workspace,
             execution_id=_EXECUTION_ID,
             phase_id=_PHASE_ID,
             delivers_repo_changes=delivers_repo_changes,
@@ -378,14 +390,20 @@ async def test_d_a_phase_that_changed_nothing_succeeds(clone: _Clone) -> None:
 
 
 # --------------------------------------------------------------------------
-# What the phase's own declaration decides (#1308).
+# What it takes to exempt a dirty tree (#1308).
 #
-# `test_b` above and `test_the_lockfile_a_build_tool_rewrote...` below stage
-# THE SAME EVIDENCE - one modified tracked file, uncommitted - and must end
-# differently. Nothing in the diff separates them, which is the whole finding:
-# on exec-e7e34af42553 a bootstrap phase ran `cargo check`, `Cargo.lock` was
-# rewritten, and the phase was failed for it. What separates them is
-# `delivers_repo_changes`, declared by the phase in the workflow definition.
+# `test_b` above and the two tests below stage THE SAME EVIDENCE - one
+# modified tracked file, uncommitted - and one of the three ends differently.
+# Nothing in the diff separates them, which is the whole finding: on
+# exec-e7e34af42553 a bootstrap phase ran `cargo check`, `Cargo.lock` was
+# rewritten, and the phase was failed for it.
+#
+# THE DECLARATION IS NOT WHAT SEPARATES THEM, and an earlier cut of this fix
+# said it was. `delivers_repo_changes: false` is a statement of intent by a
+# phase that still holds Bash and Write, so believing it on its own discards
+# an agent's real edit - #1184's exact failure, re-entered through the
+# exemption. What separates them is the declaration AND a read-only mount:
+# the phase disclaimed the change and was unable to make it.
 # --------------------------------------------------------------------------
 
 
@@ -409,25 +427,84 @@ def _rewrite_a_tracked_lockfile(clone: _Clone, content: str) -> None:
     )
 
 
-async def test_the_lockfile_a_build_tool_rewrote_does_not_fail_a_reporting_phase(
+async def test_a_declaration_alone_does_not_exempt_a_writable_repository(
     clone: _Clone,
 ) -> None:
-    """THE #1308 INCIDENT, in the shape it actually had.
+    """THE CORRECTION #1317 NEEDED, and the one that costs the exemption its bite.
+
+    A phase declaring it delivers no repository changes, in the ordinary
+    workspace every phase actually gets - a checkout the agent owns and can
+    write. The declaration says the dirty file is not a deliverable; nothing
+    says the agent did not write it, and in this workspace the agent could
+    have. So it is treated as work: the phase fails and the change is
+    quarantined where someone can fetch it back.
+
+    This is `test_b` with the declaration flipped and the outcome unchanged,
+    which is the point. The phases that declare False in this repository hold
+    Bash or Write, research-experiment-plan's `experiment` phase among them, so
+    the alternative is an agent-authored edit destroyed with the container by
+    a gate built to prevent exactly that. A phase failed for a lockfile is
+    recoverable in one retry; an edit dropped on the floor is not recoverable
+    at all, and nobody is told it happened.
+    """
+    _rewrite_a_tracked_lockfile(clone, "or was this an agent? nothing here can tell\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "or was this an agent? nothing here can tell"
+    ), "the change the declaration discounted was not kept anywhere"
+
+
+async def test_the_lockfile_a_build_tool_rewrote_does_not_fail_a_read_only_phase(
+    clone: _Clone,
+) -> None:
+    """THE #1308 INCIDENT, in the shape it will have once it can be exempted.
 
     A tracked lockfile, rewritten by a tool the phase ran while inspecting the
-    toolchain, in a phase whose deliverable is a markdown report. The phase
-    completes and nothing is quarantined: there was never a deliverable in this
-    working tree for the workspace's death to take.
+    toolchain, in a phase whose deliverable is a markdown report AND whose
+    checkout was mounted read-only. Both halves hold, so the phase completes
+    and nothing is quarantined: no agent in that container could have authored
+    the line, whatever the line says.
+
+    NOTHING MOUNTS THEM READ-ONLY TODAY, so this is the contract the
+    provisioning half has to satisfy rather than a path production takes -
+    hence the mount table comes from a double. Until it does, #1308's incident
+    gets the test above instead, which is a phase failed for its tool's churn,
+    and that is the honest trade: it is the cheaper of the two mistakes.
 
     The path is named `Cargo.lock` because that is what the incident named, and
     for no other reason - the gate is told nothing about filenames and must
-    not be. `test_b` proves the same path in the other declaration still fails.
+    not be.
     """
     _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
 
-    await clone.run_gate(delivers_repo_changes=False)
+    await clone.run_gate(
+        delivers_repo_changes=False,
+        workspace=_MountedReadOnly(clone.workspace, clone.path),
+    )
 
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_read_only_mount_does_not_exempt_a_phase_that_delivers_changes(
+    clone: _Clone,
+) -> None:
+    """The other half of "both, or neither".
+
+    A read-only mount is evidence about the agent, not permission to skip the
+    gate, so it cannot exempt a phase whose deliverable IS a branch. Without
+    this, reading the mount table first and the declaration never would pass
+    every other test here while switching #1184 off for `implement`.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an edit, in a phase that delivers edits\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(
+            delivers_repo_changes=True,
+            workspace=_MountedReadOnly(clone.workspace, clone.path),
+        )
 
 
 async def test_a_reporting_phase_that_committed_still_fails_and_keeps_its_work(
@@ -710,6 +787,40 @@ class _BreaksOn:
         return await self._inner.execute(command)
 
 
+class _MountedReadOnly:
+    """The real workspace, except the given paths are on read-only mounts.
+
+    The enforcement half of #1308's exemption, staged the only way a test can
+    stage it: a real read-only bind mount needs CAP_SYS_ADMIN, which neither
+    this suite nor the agent it stands in for has - that impossibility is the
+    entire reason the gate trusts the mount table and not the phase.
+
+    So `cat /proc/self/mountinfo` is answered with a table in the kernel's own
+    format and EVERY OTHER COMMAND IS REAL, including the git that reads the
+    dirty tree. What is substituted is the world the phase ran in, never the
+    gate's reading of it.
+    """
+
+    def __init__(self, inner: GitWorkspace, *read_only: Path) -> None:
+        self._inner = inner
+        self._read_only = read_only
+
+    def _table(self) -> str:
+        lines = ["21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"]
+        lines += [
+            f"{index} 21 0:{index} / {path} ro,relatime shared:{index} - ext4 /dev/sdb rw"
+            for index, path in enumerate(self._read_only, start=30)
+        ]
+        return "\n".join(lines) + "\n"
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if command[:1] == ["cat"] and command[1:] == ["/proc/self/mountinfo"]:
+            return ExecutionResult(
+                exit_code=0, success=True, duration_ms=0.0, stdout=self._table(), stderr=""
+            )
+        return await self._inner.execute(command)
+
+
 class _NoRepositories:
     """A reachable workspace holding no repositories at all.
 
@@ -732,7 +843,7 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object) -> None:
+    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
@@ -758,12 +869,15 @@ class _PhaseRun:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.processor._runtime._workspaces[_PHASE_ID] = workspace  # type: ignore[assignment]
-        self.processor._runtime.begin(
-            _PHASE_ID,
-            session_manager=self.session,  # type: ignore[arg-type]
-            started_at=datetime.now(UTC),
-        )
+        # `also_as` puts the SAME workspace behind a second phase id, which is
+        # what lets one dirty tree be completed twice under two declarations.
+        for phase_id in (_PHASE_ID, *([also_as] if also_as is not None else [])):
+            self.processor._runtime._workspaces[phase_id] = workspace  # type: ignore[assignment]
+            self.processor._runtime.begin(
+                phase_id,
+                session_manager=self.session,  # type: ignore[arg-type]
+                started_at=datetime.now(UTC),
+            )
 
     @property
     def workspace_still_held(self) -> bool:
@@ -797,6 +911,33 @@ class _PhaseRun:
             self.aggregate,
             self.phase_results,
             self.completed_phase_ids,
+        )
+
+    async def dispatch_complete(self, phase_id: str, phases: list[ExecutablePhase]) -> None:
+        """Complete `phase_id` THE WAY run() does: through `_dispatch`.
+
+        `complete()` above hands `_handle_complete_phase` a phase built at the
+        call site, which is the wrong end of the hop it is asserting on: the
+        real caller is `_dispatch`, which looks the phase up in `phase_map` by
+        the to-do item's id. That lookup is where a phase's declaration could
+        be read off a DIFFERENT phase, and a test that constructs the phase
+        itself can never see it (#1317 review, MEDIUM 3).
+        """
+        await self.processor._dispatch(
+            todo=TodoItem(
+                execution_id=_EXECUTION_ID,
+                action=TodoAction.COMPLETE_PHASE,
+                phase_id=phase_id,
+                session_id="sess-1",
+            ),
+            aggregate=self.aggregate,
+            phase_map={phase.phase_id: phase for phase in phases},
+            phase_results=self.phase_results,
+            all_artifact_ids=[],
+            completed_phase_ids=self.completed_phase_ids,
+            phase_outputs=PhaseOutputCache(),
+            repos=None,
+            dispatch_ctx=_DispatchContext(),
         )
 
     async def fail_the_way_the_engine_does(self, error: Exception) -> object:
@@ -926,11 +1067,13 @@ async def test_the_declaration_reaches_the_gate_from_the_phase_being_completed(
 
     What is asserted is therefore the aggregate being TOLD the phase completed,
     which is the outcome the incident got wrong - a phase that had done its job
-    reported as failed - with the dirty tree still sitting in the workspace and
-    only the phase's own declaration standing between the two.
+    reported as failed - with the dirty tree still sitting in the workspace.
+    The workspace is mounted read-only because the declaration alone no longer
+    exempts anything; both halves have to arrive for the hop to be visible at
+    all, and the declaration is the half that travels.
     """
     _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
-    run = _PhaseRun(clone.workspace)
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path))
 
     await run.complete(delivers_repo_changes=False)
 
@@ -1399,3 +1542,149 @@ def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
                 pushed_ref=pushed_ref,
                 push_error=push_error,
             )
+
+
+# --------------------------------------------------------------------------
+# The phase_map lookup (#1317 review, MEDIUM 3).
+#
+# Both tests below run ONE workspace holding ONE dirty tree through the real
+# `_dispatch`, twice, changing only which phase id the to-do item names. The
+# declarations are opposite, so a `_dispatch` that took the wrong entry out of
+# `phase_map` - the first, the last, the one being provisioned - swaps the two
+# outcomes, and neither test can be satisfied by the handler alone.
+# --------------------------------------------------------------------------
+
+_REPORTING_PHASE_ID = "bootstrap"
+
+
+def _two_phases_declaring_opposite_things() -> list[ExecutablePhase]:
+    """The phase map of a workflow with one of each, in that order."""
+    return [
+        ExecutablePhase(
+            phase_id=_REPORTING_PHASE_ID,
+            name="Check the toolchain",
+            order=1,
+            delivers_repo_changes=False,
+        ),
+        ExecutablePhase(
+            phase_id=_PHASE_ID,
+            name="Make the change",
+            order=2,
+            delivers_repo_changes=True,
+        ),
+    ]
+
+
+async def test_dispatch_reads_the_declaration_of_the_phase_the_todo_names(
+    clone: _Clone,
+) -> None:
+    """The reporting phase's own entry, found by id, in a read-only checkout.
+
+    `bootstrap` is first in the map and second would also be a passing
+    accident, so the companion test below names the other one against the same
+    map and the same tree.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten by cargo check\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    await run.dispatch_complete(_REPORTING_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_REPORTING_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_dispatch_does_not_lend_one_phases_declaration_to_another(
+    clone: _Clone,
+) -> None:
+    """The same map, the same tree, the same mount - the other phase id.
+
+    `implement` delivers a branch, so its dirty tree is work however
+    read-only the mount was and however its neighbour was declared. If this
+    quarantines nothing, the gate is reading a phase the to-do item did not
+    name, and every phase downstream of a reporting one has lost #1184.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an agent's edit, never committed\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.dispatch_complete(_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "an agent's edit, never committed"
+    )
+
+
+# --------------------------------------------------------------------------
+# Reading the mount table (#1308).
+#
+# The gate weakens itself on this answer, so every way of getting it wrong
+# costs work. The tables below are in the kernel's own format; the fields the
+# reader uses are the 5th and 6th, and everything either side of them is
+# present so that a reader counting from the wrong end fails here.
+# --------------------------------------------------------------------------
+
+_ROOT_MOUNT = "21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"
+
+
+@pytest.mark.parametrize(
+    ("table", "expected", "why"),
+    [
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount at the repository itself",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount ABOVE it still governs it",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,relatime - ext4 /dev/sdb rw",
+            False,
+            "a writable mount at the repository itself",
+        ),
+        (
+            _ROOT_MOUNT,
+            False,
+            "nothing but a writable root",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/application ro - ext4 /dev/sdb rw",
+            False,
+            "a LONGER sibling path is not this repository - prefix, not path, matching",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw\n"
+            "31 30 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw",
+            False,
+            "a WRITABLE mount nested inside a read-only one: the deepest wins",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw\n"
+            "31 30 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "and the same nesting the other way round",
+        ),
+        (
+            f"{_ROOT_MOUNT}\ntruncated nonsense\n"
+            "30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a line that is not a record is skipped, not guessed at",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,ro_something - ext4 /dev/sdb rw",
+            False,
+            "an option that merely STARTS with ro is not ro",
+        ),
+    ],
+)
+def test_the_mount_table_is_read_for_the_path_that_governs(
+    table: str, expected: bool, why: str
+) -> None:
+    """One repository path, nine tables, and the reading that decides the gate."""
+    assert _read_only_mount(table, "/workspace/repos/app") is expected, why
