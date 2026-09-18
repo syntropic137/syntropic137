@@ -21,6 +21,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
+from syn_shared.display import format_exit_code
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
@@ -140,9 +141,9 @@ async def run_setup_phase(
             # a similar name runs alongside it and reading one as the other sent
             # an operator to a phase that had completed (#1236).
             logger.error(
-                "Secret-injection setup failed (workspace=%s, exit=%d): %s",
+                "Secret-injection setup failed (workspace=%s, exit=%s): %s",
                 ws.workspace_id,
-                result.exit_code,
+                format_exit_code(result.exit_code),
                 result.stderr,
             )
 
@@ -249,7 +250,7 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
             "SECURITY: could not determine whether a staged codex credential "
             "remains (workspace=%s, exit=%s): %s",
             ws.workspace_id,
-            probe.exit_code,
+            format_exit_code(probe.exit_code),
             probe.stderr,
         )
         return _CredentialState.UNVERIFIABLE
@@ -286,7 +287,7 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
             ["rm", "-f", "--", _CODEX_STAGED_AUTH],
             timeout_seconds=_EXEC_TIMEOUT_SECONDS,
         )
-        attempts.append(f"exit={removal.exit_code}")
+        attempts.append(f"exit={format_exit_code(removal.exit_code)}")
         if removal.exit_code == 0:
             return _GuardOutcome(succeeded=True, attempts=tuple(attempts))
         logger.warning(
@@ -295,7 +296,7 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
             ws.workspace_id,
             attempt,
             _MAX_ATTEMPTS,
-            removal.exit_code,
+            format_exit_code(removal.exit_code),
             removal.stderr,
         )
         await _wait_before_retry(attempt)
@@ -436,8 +437,8 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
     )
     if cleanup.exit_code != 0:
         logger.warning(
-            "Secret cleanup script exited non-zero (exit=%d, workspace=%s): %s",
-            cleanup.exit_code,
+            "Secret cleanup script exited non-zero (exit=%s, workspace=%s): %s",
+            format_exit_code(cleanup.exit_code),
             ws.workspace_id,
             cleanup.stderr,
         )

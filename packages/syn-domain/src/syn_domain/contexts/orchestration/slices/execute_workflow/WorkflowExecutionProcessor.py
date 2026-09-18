@@ -80,6 +80,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -649,12 +650,11 @@ class WorkflowExecutionProcessor:
 
             if result.command.exit_code != 0:
                 reason = result.stream_result.error_reason
+                exit_code = format_exit_code(result.command.exit_code)
                 base = (
-                    f"Agent failed: {reason} "
-                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
+                    f"Agent failed: {reason} (phase={todo.phase_id}, exit_code={exit_code})"
                     if reason
-                    else f"Agent execution failed for phase {todo.phase_id} "
-                    f"(exit_code={result.command.exit_code})"
+                    else f"Agent execution failed for phase {todo.phase_id} (exit_code={exit_code})"
                 )
                 msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
                 logger.error(msg)

@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_shared.display import format_exit_code
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
@@ -493,7 +495,11 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    return (
+        "timed out, so it did not finish"
+        if failure.timed_out
+        else f"exited {format_exit_code(failure.exit_code)}"
+    )
 
 
 def _render_inspection_failure(
