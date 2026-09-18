@@ -1,10 +1,12 @@
 """The setup failure an operator reads must name WHICH setup and WHICH phase (#1236).
 
-Two different things are called "setup": the workflow phase commonly named
-"Prepare the workspace", and the ADR-024 secret-injection step that runs inside
-EVERY phase. Issue #1236 recorded an execution where the second one failed and
-the record said "Setup phase failed", so the operator went to the first one and
-found it green.
+Two different things are called "setup": the workflow's first phase, and the
+ADR-024 secret-injection step that runs inside EVERY phase. Issue #1236
+recorded an execution where the second one failed and the record said "Setup
+phase failed", so the operator went to the first one and found it green. That
+phase was then named "Prepare the workspace"; #1298 renamed it to "Check the
+task's premise" because it never prepared anything, which removes one reason to
+confuse the two but not the need for the message below to say which setup.
 
 These tests exercise the message an operator actually sees - the RuntimeError
 text that becomes the execution's ``error_message`` - not the value object that
@@ -30,7 +32,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 )
 
 #: The phase that failed in #1236. Distinct from any default a stub might carry,
-#: and distinct from the "Prepare the workspace" phase that completed.
+#: and distinct from the first phase, which completed.
 FAILING_PHASE_NAME = "Make the change"
 
 
@@ -110,7 +112,7 @@ async def test_setup_failure_names_the_secret_injection_step_and_the_phase() -> 
 
     # Names WHICH setup...
     assert "Secret-injection setup failed" in message
-    # ...and WHICH phase, so nobody goes looking at "Prepare the workspace".
+    # ...and WHICH phase, so nobody goes looking at the phase that ran first.
     assert f"phase '{FAILING_PHASE_NAME}'" in message
     # The bare wording that sent the operator to the wrong phase is gone.
     assert "Setup phase failed" not in message

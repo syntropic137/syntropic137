@@ -39,7 +39,14 @@ The description must contain:
 Write it for a reviewer who will not read the diff first. Lead with what the
 change claims, then the evidence for that claim.
 
-## Output
+## Write to `artifacts/output/open_pr.md`
 
+**This phase declares a markdown output artifact, so a run that writes
+nothing under `artifacts/output/` FAILS - after the work is done, and the
+work is lost with the workspace.** Write the file before you finish, even
+if the outcome was a refusal: a refusal is a deliverable and is often the
+most valuable one.
+
+The PR URL, or - if no PR was opened - why not, and the branch and commit that were left.
 The PR URL, the branch, and the commit. If no PR was opened, say why in one
 sentence at the top.

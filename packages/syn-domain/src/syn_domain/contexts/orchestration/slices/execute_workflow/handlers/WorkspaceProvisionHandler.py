@@ -530,8 +530,11 @@ class WorkspaceProvisionHandler:
 
         ``phase_name`` is here for the failure message alone. The ADR-024 setup
         step runs INSIDE every phase, so "setup failed" on its own points an
-        operator at the workflow phase usually called "Prepare the workspace" -
-        which is a different thing and, in #1236, had completed.
+        operator at the first workflow phase - which is a different thing and,
+        in #1236, had completed. That phase was then named "Prepare the
+        workspace", which is how it came to be read as the setup step at all;
+        it is now "Check the task's premise" (#1298), and the message still
+        has to say which setup because the ambiguity was never in the name.
 
         ``clone_repos=False`` (#1187) still hands the full repo list to
         ``SetupPhaseSecrets``, so the phase keeps its per-repo git credentials

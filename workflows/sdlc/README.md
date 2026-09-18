@@ -34,7 +34,7 @@ money?" an answerable question rather than a guess.
 
 ## Which implementation workflow: `implement` or `quickfix`?
 
-Two workflows produce a PR. `sdlc-implement-v1` runs four phases with an
+Two workflows produce a PR. `sdlc-implement-v2` runs four phases with an
 independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
 verification behind it at all.
 
@@ -148,7 +148,7 @@ lands - but do not expect it to prevent the failure today, and do not "fix" the
 gate by dropping the mount check, which would reopen the hole above.
 
 **Declare `false` on any phase whose output artifact is the deliverable** - a
-bootstrap, a premise check, a review, a verify, a plan, an `open_pr` phase that
+premise check, a review, a verify, a plan, an `open_pr` phase that
 only reads a ref. Across the workflows here that is every phase except
 `implement` and `quickfix`, which are the two that commit and push.
 

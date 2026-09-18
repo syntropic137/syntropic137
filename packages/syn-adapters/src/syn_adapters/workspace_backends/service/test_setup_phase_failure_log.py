@@ -1,10 +1,9 @@
 """The setup-failure LOG line must name which setup, too (#1236).
 
 Same defect as the operator-facing error in ``WorkspaceProvisionHandler``: this
-line said "Setup phase failed", which reads as the workflow phase named
-"Prepare the workspace" rather than the ADR-024 secret-injection step that runs
-inside every phase. No phase name is available at this layer, so the workspace
-id carries the "which run" half.
+line said "Setup phase failed", which reads as a workflow phase rather than the
+ADR-024 secret-injection step that runs inside every phase. No phase name is
+available at this layer, so the workspace id carries the "which run" half.
 """
 
 from __future__ import annotations

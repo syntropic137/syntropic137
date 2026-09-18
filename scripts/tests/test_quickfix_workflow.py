@@ -72,7 +72,7 @@ class TestTheGuardrailsSurviveIntoTheInstalledPrompt:
         "This is out of scope, stopping" strands the task. The redirect is what
         turns a refusal into routing.
         """
-        assert "sdlc-implement-v1" in (installed_phase.prompt_template or "")
+        assert "sdlc-implement-v2" in (installed_phase.prompt_template or "")
 
     def test_it_forbids_attempting_an_out_of_scope_task(
         self, installed_phase: PhaseDefinition
@@ -134,7 +134,7 @@ class TestTheCostSettingsReachTheInstalledPhase:
 
         Asserted as an exact value, not `is not None`: the number IS the scope
         guardrail. Raising it is how a task too big for this workflow gets
-        squeezed through it instead of being sent to `sdlc-implement-v1`, so a
+        squeezed through it instead of being sent to `sdlc-implement-v2`, so a
         change to it should have to be argued for in a diff.
 
         Neither 900 nor the old 1500 is a default anywhere on this path -
