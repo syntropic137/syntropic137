@@ -187,7 +187,7 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
 
     assert [p.phase_id for p in processor.phases] == [
-        "bootstrap",
+        "premise",
         "implement",
         "verify",
         "open_pr",

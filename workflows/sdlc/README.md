@@ -26,6 +26,13 @@ already load-bearing - a later phase reads an earlier one at
 `artifacts/input/<phase-id>.md` - so tying the filename to the id means a rename
 breaks loudly in one place instead of silently in two.
 
+`just check-workflows` enforces both halves (`stale_phase_references`), because
+for a decade this was prose and a rename broke neither. The half that costs a
+run is the second: a prompt still naming the OLD id gets an empty input
+directory at run time, reads nothing, and reports on it anyway. #1298's
+`bootstrap` -> `premise` rename had a downstream prompt to fix in each of four
+workflows, and nothing would have said so.
+
 **3. One job per phase.**
 A phase that researches AND plans stops researching early, because writing the
 plan feels like progress. Separate phases also give each its own workspace,
