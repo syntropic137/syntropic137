@@ -103,7 +103,8 @@ produced it. End your final message with these two lines, verbatim in shape:
 sentence on one line with no double quotes inside it, and `TASK_RESULT_END` is
 on its own line. Every detail belongs in the file you wrote, not here. Three
 runs of this workflow completed their document and were still failed because
-the block carried extra keys, long text or no terminator.
+the block had no `"success"` key (they wrote `"status": "complete"`), which the
+platform reads as an unreadable verdict.
 
 ```text
 TASK_RESULT: {"success": true, "comments": "Wrote artifacts/output/<file> with <n> sections."}
