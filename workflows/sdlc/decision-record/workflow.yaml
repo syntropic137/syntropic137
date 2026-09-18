@@ -1,0 +1,153 @@
+id: sdlc-decision-record-v1
+name: "SDLC: Decision record, falsified by experiment (v1)"
+description: >
+  Turn an open design question into a DECISION with its rationale, and then try
+  to break that decision by experiment before anyone builds on it. Six phases:
+  frame the problem and research several paths, a different model attacks the
+  paths, choose one and draft the plan, a different model reviews the decision,
+  run experiments aimed at falsifying it, write the final plan and decision
+  record.
+type: research
+classification: standard
+requires_repos: true
+
+# WHY THIS EXISTS, AND HOW IT DIFFERS FROM sdlc-research-experiment-plan-v1.
+#
+# research-experiment-plan answers "what is true, and what is still unknown?"
+# It writes ONE spec, reduces its unknowns by experiment, and plans. It never
+# chooses between alternatives: the approach emerges from the spec.
+#
+# This workflow answers "which way should we go, and are we sure?" It is built
+# for design questions where several paths are live and choosing is the hard
+# part - "how does the Captain interact with text", "where does this state live".
+# The operator asked for exactly this shape on 2026-09-18:
+#
+#   define the problem -> research a few possible paths -> adversarial analysis
+#   by codex -> decide and draft the plan -> another codex review -> experiments
+#   -> final plan with rationale, saved as the final artifact.
+#
+# THE ORDER IS THE POINT. Deciding BEFORE experimenting is deliberate, and it is
+# the opposite of research-experiment-plan. An experiment run without a decision
+# measures whatever looked interesting. An experiment run AFTER a decision has a
+# target: the load-bearing assumptions the decision rests on. The experiment
+# phase's job here is to try to prove the decision WRONG, and a decision that
+# survives that is worth more than one that was never tested.
+#
+# THE STANDING FAILURE MODES, carried over from research-experiment-plan:
+#
+# 1. A phase that researches AND decides starts deciding early, because forming
+#    a verdict feels like progress. So `options` is forbidden to recommend, and
+#    `decide` is the only phase allowed to choose.
+# 2. An agent asked whether something is true often answers from belief and
+#    reports it as a finding. So the experiment phase requires an ARTIFACT that
+#    only exists if the thing happened.
+# 3. Two models see every choice. The deciding model and the attacking model
+#    differ on purpose: a reviewer from the same family shares the same blind
+#    spots.
+#
+# THE FINAL ARTIFACT is a decision record, not only a plan: which paths were
+# considered, which was chosen, why, what evidence survived falsification, and
+# what would change the decision. A plan without its rationale cannot be
+# maintained, because the next person cannot tell a constraint from a guess.
+#
+# execution_type is sequential throughout: parallel is not implemented (#1039).
+
+phases:
+  # Phase ids are load-bearing: a later phase reads an earlier one's output at
+  # artifacts/input/<phase-id>/, so renaming a phase breaks the phase after it.
+
+  - id: options
+    name: Frame the problem and research the paths
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    skills:
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/purpose-and-scope@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/options.md
+
+  - id: attack-options
+    name: Codex attacks the paths
+    order: 2
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    # No allowed_tools: codex has no tool vocabulary, so a list here would be
+    # accepted and never applied. Its access comes from agent.sandbox, left at
+    # the full-access default, which is what lets it write its output file.
+    agent:
+      provider: codex
+      # The concrete model id, never an alias: an aliased model resolves to no
+      # rate and the run completes unpriced (#892).
+      model: gpt-5.6-sol
+    prompt_file: phases/attack-options.md
+
+  - id: decide
+    name: Choose a path and draft the plan
+    order: 3
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    # No Bash: this phase names experiments, it does not run them. With Bash it
+    # ran them anyway and hit its timeout with a finished decision.md unreported
+    # (exec-ab558ffa2190), and the review meant to sharpen them never happened.
+    allowed_tools: [Read, Grep, Glob, Write]
+    skills:
+      - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
+      - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/decide.md
+
+  - id: review-decision
+    name: Codex reviews the decision
+    order: 4
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+    prompt_file: phases/review-decision.md
+
+  - id: experiment
+    name: Try to falsify the decision by experiment
+    order: 5
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Bash, Write, Task]
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/experiment.md
+
+  - id: final
+    name: Final plan and decision record
+    order: 6
+    execution_type: sequential
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    allowed_tools: [Read, Grep, Glob, Write]
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/final.md
