@@ -192,13 +192,31 @@ _IDENTITY: Final[tuple[str, ...]] = (
     "GIT_COMMITTER_EMAIL=agent@agentic.local",
 )
 
-#: How long a remote is given to answer - to say where a branch is, and to
-#: take a quarantine push. Both are NETWORK calls on a path that runs while a
-#: phase is already failing and teardown is queued behind it, so an unreachable
-#: remote must cost a bounded wait rather than the container's remaining
-#: lifetime. Without a bound the wait is the backend's default execute timeout,
-#: which is an hour (#1231). `--kill-after` covers a transport
-#: helper that ignores the first signal.
+#: How long a command is given before it is cut off. EVERY command this module
+#: runs carries one of these, because this path runs while a phase is already
+#: failing and teardown is queued behind it: whatever it costs must be a
+#: bounded wait rather than the container's remaining lifetime. Without a
+#: bound the wait is not "however long the container has left" either - it is
+#: the backend's default execute timeout, which is an HOUR (#1231).
+#:
+#: TWO NUMBERS BECAUSE THEY ANSWER TWO QUESTIONS, and the local one being the
+#: larger is not a mistake: a remote that has not said hello in twenty seconds
+#: is not going to, while `add --all` re-hashing a cold, large worktree is
+#: this container doing real work and may legitimately take longer than that.
+#:
+#: THE LOCAL BOUND WAS THE HOLE. The remote pair were bounded first, on the
+#: reasoning that a local git command which hangs is a broken container and
+#: nothing here can help it. That was wrong, and repository-controlled code is
+#: why: `.gitattributes` names a `clean` filter, the repository's own config
+#: supplies the program, and both `git status` and `git add --all` run it over
+#: the worktree. A filter that sleeps then holds the preservation path open
+#: for the full hour - the unbounded failure that preserving the work exists
+#: to prevent, reached through the preserving. A repository big enough to
+#: exceed the bound honestly is reported as work that could not be preserved,
+#: which is the true answer and one an operator can act on.
+#:
+#: `--kill-after` covers a child that ignores the first signal - a transport
+#: helper, or a filter sitting in an uninterruptible read.
 #:
 #: Carried in argv through coreutils `timeout`, for the reason `_git_argv`
 #: already carries environment through `env`: the command stays self-contained
@@ -208,7 +226,46 @@ _IDENTITY: Final[tuple[str, ...]] = (
 #: a command that did not answer, which `_checked` already refuses to read as
 #: one.
 _REMOTE_TIMEOUT_SECONDS: Final[int] = 20
-_REMOTE_KILL_AFTER_SECONDS: Final[int] = 5
+_LOCAL_TIMEOUT_SECONDS: Final[int] = 30
+_KILL_AFTER_SECONDS: Final[int] = 5
+
+#: Hooks off, in front of every git command this module runs (#1231). A hook
+#: is a program the REPOSITORY supplies and git executes - `pre-push` on the
+#: quarantine push is the live one here, and it hangs that push exactly as a
+#: `clean` filter hangs `add`. This path empties a workspace the repository's
+#: owner never asked it to empty, at a moment when the budget is already
+#: spent, so there is no hook whose opinion is wanted and none is consulted.
+#:
+#: Worth having ON TOP OF the bound because it is the one COMPLETE
+#: neutralisation available: git looks for hooks in exactly one directory, so
+#: pointing that at a non-directory closes the entire class at once, leaves
+#: nothing partially covered, and needs no maintenance.
+#:
+#: FILTERS ARE NOT CLOSED THE SAME WAY, deliberately, and the asymmetry is the
+#: decision rather than an omission. A `clean` filter is named by the
+#: repository's `.gitattributes` and its program comes from the repository's
+#: config, so switching them off means reading that config, listing the driver
+#: names and overriding each: more repository-derived input, and more
+#: commands, on the path with the least budget left. The single switch that
+#: would do it, `--attr-source`, arrived in git 2.40 and the workspace image
+#: ships 2.39 - there, passing it fails every command and destroys the path it
+#: was meant to protect.
+#:
+#: It would also change WHAT gets preserved. git-lfs is a `clean` filter:
+#: neutralised, `add --all` stages the real bytes instead of the pointers and
+#: the quarantine push must then carry a whole worktree over the network
+#: inside `_REMOTE_TIMEOUT_SECONDS`. That trades "the work was saved" for "the
+#: push was too big" in every LFS repository, to close a case the bound has
+#: already closed.
+#:
+#: And hooks and filters are not the whole class in any event: `core.fsmonitor`,
+#: `credential.helper`, an `ext::` remote URL and textconv drivers are all
+#: programs a repository's config can hand to git. A list of `-c` overrides
+#: would close the ones known today and fall behind git's next release. The
+#: BOUND closes all of them, including the ones not yet invented, because it
+#: does not care what the program is - only how long it may take. The bound is
+#: the guarantee; hooks off is the extra that costs nothing.
+_HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 
 #: `timeout`'s documented exit code for "the bound fired". Named here because
 #: this module is what put the wrapper in the argv, so this module is what can
@@ -389,11 +446,20 @@ async def save_unpushed_work(
     and is wrong here: on this path an unexpected exception is still, exactly,
     "we could not look".
 
-    BOUNDED, because of WHEN it runs. Every command it issues either is local
-    or carries `_REMOTE_TIMEOUT_SECONDS` in its own argv, so the walk costs at
-    worst a fixed wait per repository per remote and cannot outlast the budget
-    that has already expired. See `_push`, which is the network call that was
-    missing its bound.
+    BOUNDED, because of WHEN it runs. EVERY command it issues carries a bound
+    in its own argv - see `_run`, which is the only place a command reaches
+    the workspace and therefore the only place the bound could be left off -
+    so the walk costs at worst a fixed wait per command and cannot outlast the
+    budget that has already expired.
+
+    "Every" and not "every network one" (#1231). A repository's own
+    `.gitattributes` can point `git add --all` and `git status` at a `clean`
+    filter that never returns, which made LOCAL commands the way to hang the
+    path that exists to stop this phase hanging. A bound that fires arrives
+    here as `WorkspaceInspectionFailedError` and leaves as
+    `SavedWork.unreadable`, carrying whatever earlier repositories were
+    already pushed: cut off is reported as a failure to preserve, never as
+    nothing to preserve.
     """
     try:
         await quarantine_unpushed_work(
@@ -634,8 +700,9 @@ async def _remote_tips(workspace: GitWorkspace, repo: str, branch: str) -> dict[
     for remote in (await _git(workspace, repo, "remote")).split():
         listing = await _checked(
             workspace,
-            _git_argv(repo, "ls-remote", remote, ref, timeout_seconds=_REMOTE_TIMEOUT_SECONDS),
+            _git_argv(repo, "ls-remote", remote, ref),
             doing=f"asking {remote} where {branch} is, in {repo}",
+            timeout_seconds=_REMOTE_TIMEOUT_SECONDS,
         )
         # Matched on the full refname rather than trusting ls-remote's pattern
         # matching, so `refs/heads/x` can never be answered by some other
@@ -887,7 +954,7 @@ async def _write_protected(workspace: GitWorkspace, repos: list[str]) -> frozens
     Failing the gate instead would break every backend that cannot cat a file
     in order to protect nothing.
     """
-    result = await workspace.execute(["cat", _MOUNT_TABLE])
+    result = await _run(workspace, ["cat", _MOUNT_TABLE])
     if not result.success or result.exit_code != 0:
         logger.info(
             "Could not read %s in this workspace (exit %d), so no repository can be "
@@ -1059,7 +1126,34 @@ def _dedup(shas: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(sha for sha in shas if sha))
 
 
-async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -> str:
+async def _run(
+    workspace: GitWorkspace, command: list[str], *, timeout_seconds: int | None = None
+) -> ExecutionResult:
+    """Run ``command`` in ``workspace`` under a time bound, and return its result.
+
+    THE ONLY PLACE this module hands a command to a workspace, which is what
+    makes the bound impossible to forget rather than merely present wherever
+    someone remembered it (#1231). It is `_checked`'s argument one level down:
+    that one exists so a caller cannot read an unanswered command as an
+    answer; this one exists so a caller cannot wait on one forever. Add a
+    command, get the check - and now get the bound too.
+
+    ``timeout_seconds`` defaults to the local bound because all but two of
+    these commands are local. The two that ask a remote pass the remote one
+    and say why at the call.
+
+    Read through the module global rather than as a parameter default so that
+    a test can lower either bound and have this obey it.
+    """
+    bound = _LOCAL_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    return await workspace.execute(
+        ["timeout", f"--kill-after={_KILL_AFTER_SECONDS}", str(bound), *command]
+    )
+
+
+async def _checked(
+    workspace: GitWorkspace, command: list[str], *, doing: str, timeout_seconds: int | None = None
+) -> str:
     """Run ``command`` and return its stdout, or raise if it did not succeed.
 
     THE ONE PLACE a command result becomes something this module reads, and
@@ -1082,43 +1176,46 @@ async def _checked(workspace: GitWorkspace, command: list[str], *, doing: str) -
         WorkspaceInspectionFailedError: the command failed, so it produced no
             verdict and this module refuses to invent one.
     """
-    result = await workspace.execute(command)
+    result = await _run(workspace, command, timeout_seconds=timeout_seconds)
     if result.success and result.exit_code == 0 and not result.timed_out:
         return result.stdout
     raise WorkspaceInspectionFailedError(
         doing=doing,
         failure=FailedWorkspaceCommand(
+            # The command as this module MEANT it, without the bound `_run`
+            # wrapped around it. The wrapper is this module's own machinery
+            # and naming it in the failure would put `timeout --kill-after=5
+            # 30` in front of the git command an operator is trying to read;
+            # `timed_out` below already carries everything it would tell them.
             command=tuple(command),
             exit_code=result.exit_code,
             stderr=result.stderr,
             # Two ways to be cut off and one word for it: the BACKEND says so
             # when it enforced its own limit, and `timeout` says so with an
-            # exit code when the bound this module put in the argv fired. A
-            # reader needs "it did not finish" either way, not a number.
-            timed_out=result.timed_out
-            or (command[0] == "timeout" and result.exit_code == _BOUND_FIRED_EXIT_CODE),
+            # exit code when the bound `_run` put in the argv fired. A reader
+            # needs "it did not finish" either way, not a number. Every
+            # command goes through `_run`, so 124 can be read this way
+            # whatever the command was.
+            timed_out=result.timed_out or result.exit_code == _BOUND_FIRED_EXIT_CODE,
         ),
     )
 
 
 def _git_argv(
-    repo: str,
-    *args: str,
-    index: str | None = None,
-    identity: bool = False,
-    timeout_seconds: int | None = None,
+    repo: str, *args: str, index: str | None = None, identity: bool = False
 ) -> list[str]:
-    """Argv for one git command in ``repo``.
+    """Argv for one git command in ``repo``, with no hook of the repository's own.
 
-    Environment and any time bound are carried in argv, via ``env`` and
-    ``timeout``, rather than through the execute() port's channels: the
-    command is then self-contained and behaves identically on any backend that
-    can merely run a process, including the doubles that only run one.
+    Environment is carried in argv, via ``env``, rather than through the
+    execute() port's channels: the command is then self-contained and behaves
+    identically on any backend that can merely run a process, including the
+    doubles that only run one. The time bound is `_run`'s, for the same reason
+    one level up - it belongs to every command and not only to git's.
 
-    ``timeout_seconds`` is for commands that touch a NETWORK. A local git
-    command that hangs is a broken container and nothing here can help it;
-    a remote that hangs is ordinary, and this path runs with teardown waiting
-    behind it.
+    `_HOOKS_OFF` goes on every command rather than only on `push`, the one
+    that runs a hook today: which subcommands consult hooks is git's business
+    and changes between releases, and a prefix applied to all of them cannot
+    be left off the one that starts to.
     """
     prefix: list[str] = []
     if index is not None:
@@ -1126,12 +1223,7 @@ def _git_argv(
     if identity:
         prefix.extend(_IDENTITY)
     env = ["env", *prefix] if prefix else []
-    bound = (
-        ["timeout", f"--kill-after={_REMOTE_KILL_AFTER_SECONDS}", str(timeout_seconds)]
-        if timeout_seconds is not None
-        else []
-    )
-    return [*bound, *env, "git", "-C", repo, *args]
+    return [*env, "git", *_HOOKS_OFF, "-C", repo, *args]
 
 
 async def _git(
@@ -1172,12 +1264,8 @@ async def _push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) ->
     which is the honest reading: the objects exist locally, the ref may or may
     not have landed, and the caller must not promise it did.
     """
-    return await workspace.execute(
-        _git_argv(
-            repo,
-            "push",
-            "origin",
-            f"{commit}:{ref}",
-            timeout_seconds=_REMOTE_TIMEOUT_SECONDS,
-        )
+    return await _run(
+        workspace,
+        _git_argv(repo, "push", "origin", f"{commit}:{ref}"),
+        timeout_seconds=_REMOTE_TIMEOUT_SECONDS,
     )

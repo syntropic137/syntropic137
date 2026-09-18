@@ -751,11 +751,26 @@ _UNREACHABLE = ExecutionResult(
 )
 
 
+def _unbounded(command: list[str]) -> list[str]:
+    """``command`` without the time bound the gate puts in front of every one.
+
+    `timeout --kill-after=<n> <n>` is three arguments the gate prepends to
+    everything it runs (#1231), so anything reading an argv positionally has
+    to step over them first.
+    """
+    return command[3:] if command[:1] == ["timeout"] else command
+
+
 def _operation(command: list[str]) -> str:
-    """What this argv is doing: the git subcommand, or the bare program."""
-    if "git" in command:
-        return command[command.index("git") + 3]  # git, -C, <repo>, <subcommand>
-    return command[0]
+    """What this argv is doing: the git subcommand, or the bare program.
+
+    Found after `-C <repo>` rather than at a fixed offset from `git`: the
+    `-c` overrides that disable hooks sit between the two and would move it.
+    """
+    argv = _unbounded(command)
+    if "-C" in argv:
+        return argv[argv.index("-C") + 2]
+    return argv[0]
 
 
 class _BreaksOn:
@@ -814,7 +829,7 @@ class _MountedReadOnly:
         return "\n".join(lines) + "\n"
 
     async def execute(self, command: list[str]) -> ExecutionResult:
-        if command[:1] == ["cat"] and command[1:] == ["/proc/self/mountinfo"]:
+        if _unbounded(command) == ["cat", "/proc/self/mountinfo"]:
             return ExecutionResult(
                 exit_code=0, success=True, duration_ms=0.0, stdout=self._table(), stderr=""
             )
