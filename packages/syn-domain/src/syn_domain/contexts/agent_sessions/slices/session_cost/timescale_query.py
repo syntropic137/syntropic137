@@ -27,6 +27,34 @@ from syn_shared.events import (
 
 # --- The four queries, all keyed by a session-id ARRAY -----------------------
 #
+# WHY THESE STILL READ RAW EVENTS, AND WHY THAT IS SAFE AT SCALE (#1338).
+#
+# All four filter `event_type`, which is in neither compress_segmentby
+# (session_id) nor compress_orderby (time), so inside a compressed chunk it
+# cannot be answered from an index - the segment is decompressed and filtered
+# row by row. #1338 asked whether that makes them the next /executions-style
+# latency bug. For the session-keyed paths the answer is no, and the reason is
+# the id they lead on rather than anything about event_type:
+#
+#   `session_id` IS the segmentby column. A compressed chunk stores one
+#   independently addressable segment per session_id, so `session_id = ANY($1)`
+#   discards whole segments before decompressing any of them. The work is
+#   proportional to the events of the sessions ON THE PAGE - bounded by the
+#   page size, not by the table.
+#
+# That is the property the execution-keyed equivalents in
+# orchestration/slices/execution_cost/ do NOT have, and it is the whole of the
+# difference between the two. So the rule for changing anything here: a query
+# in this file MUST keep leading on session_id. Re-keying one on execution_id
+# or on time alone returns identical numbers and every correctness test still
+# passes, while turning a page-bounded read into a scan of every chunk in
+# range. Pinned by
+# packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
+#
+# #1338 also shipped `idx_events_session_type (session_id, event_type, time)`,
+# which removes the per-row event_type recheck on the UNCOMPRESSED chunks. It
+# helps recent data and is not what makes these safe; the segmentby match is.
+#
 # WHY (issue #1114). `calculate` ran up to four round-trips per session, and the
 # sessions list endpoint called it once per row: `limit=50` cost 2.4s and
 # `limit=200` cost 8.3s, dead-linear at ~41ms per session, while the underlying

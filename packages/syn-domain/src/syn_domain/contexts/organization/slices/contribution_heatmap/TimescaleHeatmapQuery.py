@@ -88,6 +88,21 @@ scoped_events AS (
 
 # Activity markers keep EVENT-time scoping: a commit happens at an instant and
 # belongs on that day, whoever's session it was.
+#
+# ASSESSED UNDER #1338, which flagged the `event_type = GIT_COMMIT` filter
+# below as the same unindexable shape as the cost paths. It is the same filter
+# and it is not the same risk, because of WHERE it sits: `event_type` appears
+# only in a COUNT(*) FILTER over `scoped_events`, never in a WHERE clause that
+# has to find rows. The rows are already chosen by the time/session predicates
+# above - which lead on `time`, the partitioning column, so chunks outside the
+# window are never opened at all - and the filter then just decides which of
+# them to tally. There is no scan for it to widen.
+#
+# So the heatmap needs no index from #1338 and no read model: it is bounded by
+# its date window by construction. What WOULD break that is moving the
+# event_type test into `scoped_events` or `window_sessions` as a WHERE
+# predicate, which reads like a harmless optimisation and would make it a
+# filter on a non-segmentby column inside every compressed chunk in the range.
 _ACTIVITY_SCOPE = """
 scoped_events AS (
     SELECT session_id, execution_id, event_type, data, time

@@ -32,6 +32,33 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events (session_id, time 
 CREATE INDEX IF NOT EXISTS idx_events_type ON agent_events (event_type, time DESC);
 CREATE INDEX IF NOT EXISTS idx_events_execution ON agent_events (execution_id, time DESC);
 
+-- The two composite indexes the cost read paths need (#1338).
+--
+-- Every cost query pairs an id with an event_type: the session-cost batch
+-- queries are `session_id = ANY($1) AND event_type = $2`, the execution-cost
+-- ones are `execution_id = $1 AND event_type = $2`. Neither pair is served by
+-- the three indexes above, which lead on one column and then on `time` - so
+-- the id narrows the scan and `event_type` is then re-checked on every row the
+-- id matched.
+--
+-- WHAT THESE DO AND DO NOT FIX. They cover the UNCOMPRESSED chunks only.
+-- `event_type` is in neither compress_segmentby (session_id) nor
+-- compress_orderby (time), so inside a compressed chunk it cannot be answered
+-- from an index at all - the batch is decompressed and filtered row by row,
+-- whatever indexes exist on the hypertable. With a 1-day compression policy
+-- (below) that makes these indexes the fix for today's data and no fix at all
+-- for yesterday's.
+--
+-- For `session_id` that ceiling is survivable: session_id IS the segmentby
+-- column, so a compressed chunk discards whole segments it does not need
+-- before decompressing anything, and the work stays proportional to the
+-- sessions on the page. For `execution_id` it is not: execution_id is neither
+-- segmentby nor orderby, so an execution-keyed query decompresses every
+-- segment of every chunk in range. That path needs a read model, not an index
+-- (#1338, still open).
+CREATE INDEX IF NOT EXISTS idx_events_session_type ON agent_events (session_id, event_type, time DESC);
+CREATE INDEX IF NOT EXISTS idx_events_execution_type ON agent_events (execution_id, event_type, time DESC);
+
 -- GIN index on data for JSONB queries
 CREATE INDEX IF NOT EXISTS idx_events_data ON agent_events USING GIN (data);
 
