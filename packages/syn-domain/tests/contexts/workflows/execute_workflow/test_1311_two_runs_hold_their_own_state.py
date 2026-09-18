@@ -44,6 +44,22 @@ string naming its run, and its deliverable says which run wrote it. None of the
 three has a default, none is written down twice, and no run can produce the
 other's by accident - so an assertion that a run sees its own is an assertion
 that nothing crossed over.
+
+AND THEN THE TERMINAL PATHS, which is the half of this that the classes at the
+bottom of the file are about. Everything above drives two runs that both
+SUCCEED, and a run that succeeds gives up its state one phase at a time through
+`finalize`. The two ways a run ends early do not: `_cancel_execution` and
+`_fail_execution` each close every session the runtime holds and tear down
+every workspace it holds, in one loop, over everything, with no phase id and no
+execution id to narrow it by.
+
+So the terminal paths are where this class of defect outlives a partial fix.
+Keying every map by `(execution_id, phase_id)` would have made provisioning
+safe and left `abandon_all` iterating both runs' entries exactly as before -
+one run's cleanup closing a healthy run's session and destroying the container
+its agent was still working in. That they are correct now is a consequence of
+there being one runtime per run rather than of any key, and a consequence is
+the kind of thing that quietly stops holding.
 """
 
 from __future__ import annotations
@@ -56,6 +72,7 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
+from syn_domain.contexts.agent_sessions import SessionStatus
 from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
@@ -253,6 +270,15 @@ class _KeepEveryArtifact:
         stored = [a for a in self.saved if a.execution_id == execution_id]
         assert len(stored) == 1, f"fixture: {execution_id} stored {len(stored)} artifacts"
         return stored[0]
+
+    def content_for(self, execution_id: str) -> str:
+        """Everything this run stored, as one string; empty when it stored none.
+
+        Deliberately tolerant of the count where ``for_execution`` is not,
+        because a run that stored NOTHING is one of the outcomes under test and
+        it should read as a missing deliverable rather than as a broken fixture.
+        """
+        return "".join(a.content for a in self.saved if a.execution_id == execution_id)
 
 
 class _AnAgentThatSignsItsWork:
@@ -532,3 +558,349 @@ class TestNeitherRunTearsDownTheOther:
             phases = both.results[execution_id].phase_results
             assert [p.phase_id for p in phases] == [PHASE_ID]
             assert phases[0].status.value == "completed"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# The terminal paths: what one run's ending does to the run beside it.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class _HowARunEnds:
+    """One of the two ways a run can leave early, as its harness reports it.
+
+    There are exactly two, they leave through two different methods, and both
+    of those methods tear down by clearing EVERYTHING the runtime can reach -
+    they are handed no phase id and no execution id to narrow it with. That is
+    why the terminal paths are the place this defect outlives a fix to the
+    provisioning path: keying a map more finely does nothing for a loop that
+    iterates the whole map.
+
+    ``interrupt`` is the cancel signal. ``_handle_run_agent`` turns it into a
+    ``CancelExecutionCommand``, the aggregate goes to CANCELLED, the to-do list
+    empties and ``run()`` leaves through ``_cancel_execution`` →
+    ``report_cancelled`` → ``abandon_all``.
+
+    A non-zero ``exit_code`` raises out of ``_handle_run_agent`` instead, and
+    ``run()`` leaves through ``_fail_execution`` → ``report_failed`` →
+    ``abandon_all``.
+    """
+
+    label: str
+    interrupt: bool
+    exit_code: int
+    execution_status: str
+    session_status: SessionStatus
+
+
+#: Cancelled by an operator, which is what `syn control cancel` sends.
+BY_CANCEL = _HowARunEnds(
+    label="cancel",
+    interrupt=True,
+    exit_code=0,
+    execution_status="cancelled",
+    session_status=SessionStatus.CANCELLED,
+)
+
+#: Killed by its own agent's exit status. 42 rather than 1 so that a status
+#: read off the wrong run would have to have invented this number.
+BY_FAILURE = _HowARunEnds(
+    label="fail",
+    interrupt=False,
+    exit_code=42,
+    execution_status="failed",
+    session_status=SessionStatus.FAILED,
+)
+
+#: Why run one was cancelled, in words no other run has any way to produce.
+CANCEL_REASON = "cancelled by the operator watching run one"
+
+
+class _EverySessionKept(FakeSessionRepository):
+    """The session repository, with a way to ask what became of a run's session.
+
+    The session is where a teardown is legible from outside: closing it is the
+    FIRST thing both terminal paths do, before any workspace is touched, and it
+    is recorded on the session's own event stream. So "did the other run's
+    cancel reach this run" is answerable without asking the runtime anything
+    about its own bookkeeping.
+    """
+
+    async def for_execution(self, execution_id: str) -> AgentSessionAggregate:
+        rehydrated = [await self.get_by_id(session_id) for session_id in self.streams]
+        found = [s for s in rehydrated if s is not None and s.execution_id == execution_id]
+        assert len(found) == 1, f"fixture: {execution_id} opened {len(found)} sessions"
+        return found[0]
+
+
+class _OneRunGoesDownWhileTheOtherWorks:
+    """Two agents in one double: the run that ends, and the run that does not.
+
+    THE INTERLEAVE, and why each half of it is load-bearing.
+
+    Every run is held until all of them have reached their agent. That is the
+    state the terminal paths have to be safe in and the only one in which the
+    question means anything: both runs provisioned, both holding a workspace,
+    both with an open session. A cancel arriving when the other run happens to
+    be between phases cannot observe this defect at all.
+
+    The surviving run is then held FURTHER, until the doomed run's ``run()``
+    has returned - so its teardown is complete, not merely started, before the
+    survivor does anything else. What the survivor does next is write its
+    deliverable. That file therefore cannot have been written before the
+    teardown, and the workspace it is written into must still be open after it:
+    a run whose container was closed by the other run's cleanup has nothing to
+    write to and nothing left to collect.
+    """
+
+    def __init__(
+        self,
+        *,
+        doomed: str,
+        ending: _HowARunEnds,
+        everyone_launched: _Rendezvous,
+        doomed_run_returned: asyncio.Event,
+    ) -> None:
+        self._doomed = doomed
+        self._ending = ending
+        self._everyone_launched = everyone_launched
+        self._doomed_run_returned = doomed_run_returned
+        #: The session each run's agent was actually launched under, recorded
+        #: at the agent for the reason `_Launch` above is: it is what the
+        #: container ran as, not what the runtime believes it handed out.
+        self.sessions: dict[str, str] = {}
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        agent_env: dict[str, str],
+        claude_cmd: list[str],
+        session_id: str,
+        agent_model: str | None,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None = None,
+        runner: Runner | None = None,
+        on_launch: AgentLaunchObserver | None = None,
+    ) -> AgentExecutionResult:
+        execution_id = todo.execution_id
+        self.sessions[execution_id] = session_id
+        if on_launch is not None:
+            await on_launch()
+        await self._everyone_launched.hold(execution_id)
+
+        if execution_id == self._doomed:
+            return self._the_end_of_run_one(todo, session_id)
+
+        await self._doomed_run_returned.wait()
+        await workspace.inject_files(
+            [("artifacts/output/deliverable.md", DELIVERABLE[execution_id])]
+        )
+        return self._a_finished_phase(todo, session_id, exit_code=0, interrupt=False)
+
+    def _the_end_of_run_one(self, todo: TodoItem, session_id: str) -> AgentExecutionResult:
+        return self._a_finished_phase(
+            todo,
+            session_id,
+            exit_code=self._ending.exit_code,
+            interrupt=self._ending.interrupt,
+        )
+
+    def _a_finished_phase(
+        self, todo: TodoItem, session_id: str, *, exit_code: int, interrupt: bool
+    ) -> AgentExecutionResult:
+        return AgentExecutionResult(
+            stream_result=StreamResult(
+                line_count=0,
+                interrupt_requested=interrupt,
+                interrupt_reason=CANCEL_REASON if interrupt else None,
+                announced_model=ANNOUNCED[todo.execution_id],
+                verdict=AgentVerdict.from_agent_text(None),
+            ),
+            tokens=TokenAccumulator(),
+            subagents=SubagentTracker(),
+            command=AgentExecutionCompletedCommand(
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id or "",
+                session_id=session_id,
+                exit_code=exit_code,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class _OneRunEndedBesideOneThatDidNot:
+    """Two overlapping runs, one of which left through a terminal path."""
+
+    ending: _HowARunEnds
+    results: dict[str, WorkflowExecutionResult]
+    sessions: _EverySessionKept
+    artifacts: _KeepEveryArtifact
+    agent: _OneRunGoesDownWhileTheOtherWorks
+
+
+async def _run_one_ends_while_run_two_works(
+    ending: _HowARunEnds,
+) -> _OneRunEndedBesideOneThatDidNot:
+    """Drive two concurrent runs of one workflow, and end ONE of them.
+
+    One processor, as production has: ``BackgroundWorkflowDispatcher`` hands
+    the single instance to every dispatch it admits, so run one's cleanup and
+    run two's live state meet on the same object or they do not meet at all.
+    """
+    doomed_run_returned = asyncio.Event()
+    agent = _OneRunGoesDownWhileTheOtherWorks(
+        doomed=ONE,
+        ending=ending,
+        everyone_launched=_Rendezvous(parties=2),
+        doomed_run_returned=doomed_run_returned,
+    )
+    artifacts = _KeepEveryArtifact()
+    sessions = _EverySessionKept()
+    processor = WorkflowExecutionProcessor(
+        execution_repository=FakeExecutionRepository(),  # type: ignore[arg-type]
+        session_repository=sessions,  # type: ignore[arg-type]
+        workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
+        artifact_repository=artifacts,  # type: ignore[arg-type]
+        artifact_content_storage=None,
+        artifact_query=None,
+        conversation_storage=None,
+        observability_writer=None,
+        controller=None,
+        prompt_builder=_APromptNamingItsRun(),
+        command_builder=_echo_the_prompt,
+        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+        agent_handler=agent,  # type: ignore[arg-type]
+    )
+
+    async def _run(execution_id: str) -> WorkflowExecutionResult:
+        return await processor.run(
+            workflow_id=WORKFLOW_ID,
+            workflow_name="sdlc-implement",
+            phases=_the_phase(),
+            inputs=dict(INPUTS[execution_id]),
+            execution_id=execution_id,
+        )
+
+    async def _run_and_announce_the_end(execution_id: str) -> WorkflowExecutionResult:
+        """Run one, and say when it is all the way out.
+
+        In a ``finally`` so that a run which ends by raising still releases the
+        other one: a doomed run that deadlocked the survivor would fail this
+        file on a timeout, which says nothing about isolation.
+        """
+        try:
+            return await _run(execution_id)
+        finally:
+            doomed_run_returned.set()
+
+    one, two = await asyncio.wait_for(
+        asyncio.gather(_run_and_announce_the_end(ONE), _run(TWO)),
+        timeout=30,
+    )
+    return _OneRunEndedBesideOneThatDidNot(
+        ending=ending,
+        results={ONE: one, TWO: two},
+        sessions=sessions,
+        artifacts=artifacts,
+        agent=agent,
+    )
+
+
+_BOTH_TERMINAL_PATHS = pytest.mark.parametrize(
+    "ending", [BY_CANCEL, BY_FAILURE], ids=lambda e: e.label
+)
+
+
+class TestTheRunThatEndsActuallyEnds:
+    """The positive control, without which everything below is vacuous.
+
+    Every assertion in the next class is that something did NOT happen to run
+    two. Those all pass just as well against a run one that never reached a
+    terminal path at all - so what run one did has to be pinned first, in the
+    same scenario and from the same fixture.
+    """
+
+    @_BOTH_TERMINAL_PATHS
+    async def test_run_one_leaves_through_the_terminal_path_it_was_given(
+        self, ending: _HowARunEnds
+    ) -> None:
+        both = await _run_one_ends_while_run_two_works(ending)
+
+        assert both.results[ONE].status == ending.execution_status
+
+    @_BOTH_TERMINAL_PATHS
+    async def test_run_one_closes_its_own_session_on_the_way_out(
+        self, ending: _HowARunEnds
+    ) -> None:
+        """`report_cancelled`/`report_failed` ran and reached a live session
+        manager. That is the loop the next class is about; a scenario where it
+        found nothing to close would prove nothing by leaving run two alone."""
+        both = await _run_one_ends_while_run_two_works(ending)
+
+        session = await both.sessions.for_execution(ONE)
+        assert session.status == ending.session_status
+
+
+class TestTheRunBesideItIsUntouched:
+    """One run ending must not end the run next to it.
+
+    Both terminal paths close every session the runtime is holding and tear
+    down every workspace it is holding - each in one loop, over everything,
+    with nothing to narrow it by. While those loops ran over a runtime shared
+    by both dispatches, run one's cancel closed run two's session and destroyed
+    run two's container out from under a live agent. Run two then finished into
+    an empty runtime: nothing to collect from, nothing to complete, and a
+    session already recorded as cancelled by a cancel nobody had issued
+    against it.
+    """
+
+    @_BOTH_TERMINAL_PATHS
+    async def test_run_two_s_session_is_not_closed_by_run_one_s_teardown(
+        self, ending: _HowARunEnds
+    ) -> None:
+        """The session is the record of what happened to a run, and it is
+        closed once. Closed as cancelled by the run next door, a healthy run's
+        own completion is refused - and the operator reads the cancellation of
+        a run nobody cancelled."""
+        both = await _run_one_ends_while_run_two_works(ending)
+
+        session = await both.sessions.for_execution(TWO)
+        assert session.status == SessionStatus.COMPLETED
+
+    @_BOTH_TERMINAL_PATHS
+    async def test_run_two_keeps_the_workspace_it_is_still_working_in(
+        self, ending: _HowARunEnds
+    ) -> None:
+        """Run two writes its deliverable only AFTER run one has finished going
+        down, so this file exists only if the container survived the other
+        run's cleanup and the runtime still had the handle to collect it."""
+        both = await _run_one_ends_while_run_two_works(ending)
+
+        assert DELIVERABLE[TWO].decode() in both.artifacts.content_for(TWO)
+
+    @_BOTH_TERMINAL_PATHS
+    async def test_run_two_reaches_its_own_completion(self, ending: _HowARunEnds) -> None:
+        """Stated on the result as well as on the session, because they fail
+        apart: a run whose state was cleared mid-flight can still return
+        `completed` having silently collected and finalised nothing."""
+        both = await _run_one_ends_while_run_two_works(ending)
+
+        assert both.results[TWO].status == "completed"
+        assert [p.phase_id for p in both.results[TWO].phase_results] == [PHASE_ID]
+
+    async def test_a_failing_run_reports_its_own_session_and_not_the_other_s(self) -> None:
+        """The failure path reads the session id back out of the runtime to
+        name the phase that died (#1036). Read from a slot both runs wrote,
+        that names the HEALTHY run's session - so the failure is filed against
+        a session that did not fail, and the one that did looks clean.
+
+        Only the failure path builds a phase result this way; a cancel reports
+        the phases that had already completed, and run one has none.
+        """
+        both = await _run_one_ends_while_run_two_works(BY_FAILURE)
+
+        failed = both.results[ONE].phase_results
+        assert [p.phase_id for p in failed] == [PHASE_ID]
+        assert failed[0].session_id == both.agent.sessions[ONE]
+        assert failed[0].session_id != both.agent.sessions[TWO]
