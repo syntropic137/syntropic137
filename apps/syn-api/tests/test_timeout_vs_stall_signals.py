@@ -31,6 +31,7 @@ import pytest
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projections.session_tools import ToolOperation
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -56,6 +57,26 @@ PHASE_DIED_AT = PHASE_STARTED_AT + timedelta(seconds=BUDGET_SECONDS + 21)
 
 #: "Pushed 90 seconds before dying" - the reading that says it was working.
 PUSHED_AT = PHASE_DIED_AT - timedelta(seconds=90)
+
+#: What the overnight run had spent when it was killed: 735 tokens, against a
+#: budget measured in hours. The activity summary says the same thing about the
+#: same phase from the other side - four calls, no push - and the two readings
+#: are independent, which is what makes either one worth having.
+STALLED_SPEND = PhaseUsage(
+    input_tokens=190,
+    output_tokens=545,
+    cache_creation_tokens=13,
+    cache_read_tokens=27,
+)
+
+#: What the runs that genuinely needed a bigger cap had spent. Orders of
+#: magnitude away from the above, because that distance is the point.
+BUSY_SPEND = PhaseUsage(
+    input_tokens=180_400,
+    output_tokens=94_100,
+    cache_creation_tokens=22_000,
+    cache_read_tokens=1_400_000,
+)
 
 
 def _call(index: int, *, at: datetime) -> list[ToolOperation]:
@@ -120,6 +141,7 @@ async def _phase_as_an_api_client_sees_it(
     operations: list[ToolOperation],
     *,
     budgeted: bool = True,
+    spent: PhaseUsage | None = None,
 ) -> PhaseExecutionInfo:
     """Drive a timed-out phase from its events to the served response model.
 
@@ -129,7 +151,8 @@ async def _phase_as_an_api_client_sees_it(
     absent by construction, exactly as it is for a real exit 124.
 
     `budgeted=False` is the execution started without phase definitions, where
-    no budget was ever stated.
+    no budget was ever stated. `spent` is what the phase had burned when it was
+    killed; absent, it is the zeros a run that spent nothing reports.
     """
     store = InMemoryProjectionStore()
     projection = WorkflowExecutionDetailProjection(store)
@@ -172,6 +195,10 @@ async def _phase_as_an_api_client_sees_it(
             "failed_phase_id": PHASE_ID,
             "error_message": "Agent process exited with code 124",
             "failed_phase_duration_seconds": (PHASE_DIED_AT - PHASE_STARTED_AT).total_seconds(),
+            "failed_phase_input_tokens": (spent or PhaseUsage()).input_tokens,
+            "failed_phase_output_tokens": (spent or PhaseUsage()).output_tokens,
+            "failed_phase_cache_creation_tokens": (spent or PhaseUsage()).cache_creation_tokens,
+            "failed_phase_cache_read_tokens": (spent or PhaseUsage()).cache_read_tokens,
         }
     )
 
@@ -256,6 +283,58 @@ async def test_the_two_exit_124s_are_two_different_served_answers() -> None:
         "fixture: both died at the same instant, so elapsed cannot be what separates them"
     )
     assert busy != stalled, "two incidents that need opposite responses read identically"
+
+
+@pytest.mark.anyio
+async def test_what_a_timed_out_phase_spent_reaches_the_client() -> None:
+    """The counts an operator sorts on, read off the model a client receives.
+
+    These were zero for every failed phase until #1262, because only
+    `PhaseCompleted` ever wrote them and a phase killed at its timeout never
+    gets one. The cache pair is asserted with the rest because it does not take
+    the same route: `_map_phase_detail` prefers Lane 2 session cost for those
+    two and falls back to the phase's own, so they can be lost at a hop the
+    input and output counts never touch.
+    """
+    phase = await _phase_as_an_api_client_sees_it(_stalled_timeline(), spent=STALLED_SPEND)
+
+    assert phase.input_tokens == 190
+    assert phase.output_tokens == 545
+    assert phase.cache_creation_tokens == 13
+    assert phase.cache_read_tokens == 27
+    assert phase.total_tokens == 775, "the four summed, not one of them alone"
+
+
+@pytest.mark.anyio
+async def test_the_two_exit_124s_cost_visibly_different_amounts() -> None:
+    """735 tokens and 1.7 million, on the same exit code and the same budget.
+
+    The price is the second independent reading of the same distinction the
+    activity summary makes, and the one that answers "was this worth paying
+    again". A phase that reported zero either way answered nothing.
+    """
+    stalled = await _phase_as_an_api_client_sees_it(_stalled_timeline(), spent=STALLED_SPEND)
+    busy = await _phase_as_an_api_client_sees_it(_busy_timeline(), spent=BUSY_SPEND)
+
+    assert stalled.total_tokens == 775
+    assert busy.total_tokens == 1_696_500
+    assert stalled.total_tokens != busy.total_tokens
+
+
+@pytest.mark.anyio
+async def test_a_phase_that_spent_nothing_reports_zero_rather_than_nothing() -> None:
+    """Zero is a measurement here, and the field is present to carry it.
+
+    A phase whose process never got anywhere did spend nothing, and that is a
+    triage answer in its own right - it says the failure is upstream of the
+    agent. Which is also why none of these fields is nullable: there is no
+    "unknown" for a reader to have to interpret.
+    """
+    phase = await _phase_as_an_api_client_sees_it(_stalled_timeline())
+
+    assert phase.input_tokens == 0
+    assert phase.total_tokens == 0
+    assert phase.activity.operations_count == 4, "the other readings are unaffected"
 
 
 @pytest.mark.anyio
