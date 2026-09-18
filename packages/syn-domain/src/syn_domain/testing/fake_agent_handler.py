@@ -25,11 +25,11 @@ from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
     AgentVerdict,
+    PhaseUsage,
     StreamResult,
     SubagentTracker,
     TokenAccumulator,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
 from syn_shared.agents import AgentRunner
 
 if TYPE_CHECKING:

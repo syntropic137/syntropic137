@@ -56,6 +56,21 @@ class PhaseDetail:
     execution started without them; it is not a budget of zero.
     """
     error_message: str | None = None
+    observed_branches: list[object] | None = None
+    """How this phase's branches stood when it died (#1200), as stored.
+
+    Declared here because this projection WRITES it. It was being set on the
+    stored phase dict by the failure path while this model - the model that
+    same dict is built from and read back through - did not name it, so any
+    round-trip through ``from_dict``/``to_dict`` dropped it silently. A field
+    the write side does not declare is a field one refactor away from being
+    lost.
+
+    Plain data rather than ``BranchObservation``: the store round-trips these
+    as data and ``PhaseExecutionDetail.from_dict`` is the hop that rebuilds
+    the value objects. THREE-VALUED, and stays that way - readings, `[]` for
+    "read the workspace and nothing had moved", None for "nothing could look".
+    """
     deliverable_recovered: bool = False
     """True when this phase's deliverable was recovered from its transcript
     rather than read off the file it promised to write (#1195, #1300).
@@ -141,6 +156,7 @@ class PhaseDetail:
             "completed_at": self.completed_at,
             "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
+            "observed_branches": self.observed_branches,
             "deliverable_recovered": self.deliverable_recovered,
         }
 
@@ -163,5 +179,6 @@ class PhaseDetail:
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
+            observed_branches=data.get("observed_branches"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
         )
