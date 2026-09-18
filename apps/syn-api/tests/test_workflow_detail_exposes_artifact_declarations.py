@@ -8,7 +8,7 @@ hand-maintained response model that simply did not list them.
 
 Why that specific shape of bug is worth its own file: `p.get("output_artifact_types")`
 returns `None` for a missing key exactly as it does for a null value, so reading
-the endpoint led to the conclusion that no phase in `sdlc-implement-v1` declares
+the endpoint led to the conclusion that no phase in `sdlc-implement-v2` declares
 outputs -- and therefore that #1173's "a phase must produce what it declares"
 enforcement was inert on our main workflow. The declarations are there. The
 endpoint could not express the difference between "declares nothing" and "we
@@ -275,7 +275,7 @@ async def _install_sdlc_implement() -> None:
 class TestTheEndpointMatchesTheFileOnDisk:
     """The regression guard named in #1176.
 
-    Reading `sdlc-implement-v1` off this endpoint is how someone checks what a
+    Reading `sdlc-implement-v2` off this endpoint is how someone checks what a
     phase is wired to consume and produce. If the file and the response can
     disagree, that check is worthless, and it disagreed completely.
     """
@@ -304,7 +304,7 @@ class TestTheEndpointMatchesTheFileOnDisk:
         declared = _declared_in_yaml()
         await _install_sdlc_implement()
 
-        phases = _phases_by_id(await _get_workflow_json("sdlc-implement-v1"))
+        phases = _phases_by_id(await _get_workflow_json("sdlc-implement-v2"))
 
         assert set(phases) == set(declared)
         actual = {
@@ -314,12 +314,18 @@ class TestTheEndpointMatchesTheFileOnDisk:
         assert actual == declared
 
     async def test_the_phase_declaring_no_inputs_still_reports_the_key(self) -> None:
-        """`bootstrap` writes `input_artifacts: []` -- the real instance of the
-        empty-versus-absent case, in the workflow this issue was filed about."""
+        """`premise` writes `input_artifacts: []` -- the real instance of the
+        empty-versus-absent case, in the workflow this issue was filed about.
+
+        It is the FIRST phase, which is the only reason it has no inputs, and it
+        is named for its job rather than for the workspace preparation it never
+        did (#1298). Indexing it by id is what ties this test to the rename: the
+        phase used to be `bootstrap`.
+        """
         await _install_sdlc_implement()
 
-        bootstrap = _phases_by_id(await _get_workflow_json("sdlc-implement-v1"))["bootstrap"]
+        premise = _phases_by_id(await _get_workflow_json("sdlc-implement-v2"))["premise"]
 
-        assert "input_artifact_types" in bootstrap
-        assert bootstrap["input_artifact_types"] == []
-        assert bootstrap["output_artifact_types"] == ["markdown"]
+        assert "input_artifact_types" in premise
+        assert premise["input_artifact_types"] == []
+        assert premise["output_artifact_types"] == ["markdown"]

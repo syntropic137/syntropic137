@@ -49,7 +49,7 @@ class RepositoryRef:
         Raises:
             ValueError: If slug is not in ``owner/repo`` format.
         """
-        if not _SLUG_RE.match(slug):
+        if not _SLUG_RE.fullmatch(slug):
             raise ValueError(f"Invalid repository slug: '{slug}'. Expected 'owner/repo' format.")
         owner, name = slug.split("/", 1)
         return cls(owner=owner, name=name)
@@ -65,7 +65,7 @@ class RepositoryRef:
         Raises:
             ValueError: If URL doesn't match expected GitHub format.
         """
-        match = _URL_RE.match(url)
+        match = _URL_RE.fullmatch(url)
         if not match:
             raise ValueError(
                 f"Invalid repository URL: '{url}'. Expected 'https://github.com/owner/repo' format."

@@ -22,6 +22,7 @@ from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 from scripts.check_workflow_definitions import (
     _workflow_files,
     grant_violations,
+    stale_phase_references,
     validate_file,
 )
 
@@ -1001,3 +1002,244 @@ class TestContainerNestingIsNotOneFixedShape:
         the miss.
         """
         assert self._violations(tmp_path, prompt), label
+
+
+class TestARenameMustNotLeaveANameBehind:
+    """#1298. The `bootstrap` -> `premise` rename had to land in four workflows,
+    and in each one the phase AFTER it carried the old id in its prompt.
+
+    The two halves are one invariant with two failure times. A prompt file
+    named for the wrong phase is wrong when someone reads it; a prompt naming a
+    phase that does not exist is wrong at RUN time, as an empty input directory
+    that the phase reads and proceeds on. The second is the one that costs a
+    whole execution, and nothing in the repository looked for it - both rules
+    were prose in `workflows/sdlc/README.md`, and the reason it gives for the
+    first is precisely that a rename should "break loudly in one place instead
+    of silently in two".
+    """
+
+    def _workflow(self, prompt: str, first_id: str = "premise") -> dict[str, object]:
+        return {
+            "id": "renamed",
+            "name": "Renamed",
+            "requires_repos": False,
+            "phases": [
+                {
+                    "id": first_id,
+                    "name": "Check the premise",
+                    "order": 1,
+                    "prompt_template": "check it",
+                    "output_artifacts": ["markdown"],
+                },
+                {
+                    "id": "implement",
+                    "name": "Make the change",
+                    "order": 2,
+                    "prompt_template": prompt,
+                    "input_artifacts": ["markdown"],
+                },
+            ],
+        }
+
+    def test_a_prompt_naming_a_phase_that_does_not_exist_is_rejected(self, tmp_path: Path) -> None:
+        """The concrete #1298 failure: the phase was renamed, the prompt after
+        it was not. Nothing downstream can detect this - the declared input
+        artifact TYPE still resolves, because a type says nothing about whose
+        output it is."""
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/bootstrap.md`."),
+        )
+
+        assert _gate_accepts(path), (
+            "precondition: this workflow is otherwise valid, so a failure below "
+            "is attributable to the reference and not to something else"
+        )
+        violations = stale_phase_references(path)
+
+        assert violations, (
+            "the gate accepted a prompt telling a phase to read the output of a "
+            "phase this workflow does not have; at run time that directory is "
+            "empty and the phase reports on nothing (#1298)"
+        )
+        joined = " ".join(violations)
+        assert "implement" in joined, f"must name the phase holding the stale reference: {joined}"
+        assert "bootstrap" in joined, f"must name the reference that does not resolve: {joined}"
+
+    def test_a_prompt_naming_an_earlier_phase_is_accepted(self, tmp_path: Path) -> None:
+        """The negative control. A gate that rejects every `artifacts/input/`
+        reference would flag every multi-phase workflow in the repo and get
+        deleted within the week."""
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/premise.md`."),
+        )
+
+        assert stale_phase_references(path) == []
+
+    def test_a_prompt_naming_a_LATER_phase_is_rejected(self, tmp_path: Path) -> None:
+        """Existing is not enough - it has to have RUN. A phase reading the
+        output of one that comes after it gets the same empty directory as a
+        phase reading one that does not exist, and the id resolving makes it
+        look wired up."""
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/verify.md`."),
+        )
+        raw = yaml.safe_load(path.read_text())
+        raw["phases"].append({"id": "verify", "name": "Verify", "order": 3, "prompt_template": "x"})
+        path.write_text(yaml.safe_dump(raw))
+
+        violations = stale_phase_references(path)
+
+        assert violations, "a phase was told to read an artifact from a phase that runs after it"
+        assert "verify" in " ".join(violations)
+
+    def test_the_phase_id_placeholder_is_not_read_as_a_reference(self, tmp_path: Path) -> None:
+        """Every phase prompt in this repository carries the boilerplate
+        `artifacts/input/<phase-id>/` telling it where inputs live. If that
+        read as a reference the gate would fail every workflow it ships, which
+        is how a gate gets switched off rather than fixed."""
+        path = _write(
+            tmp_path,
+            self._workflow(
+                "The durable location is `artifacts/input/<phase-id>/`, and a "
+                "flat `artifacts/input/<phase-id>.md` alias also exists."
+            ),
+        )
+
+        assert stale_phase_references(path) == []
+
+    def test_a_prompt_file_named_for_another_phase_is_rejected(self, tmp_path: Path) -> None:
+        """README rule 2, which until now nothing enforced."""
+        (tmp_path / "bootstrap.md").write_text("check it")
+        path = _write(
+            tmp_path,
+            {
+                "id": "misfiled",
+                "name": "Misfiled",
+                "requires_repos": False,
+                "phases": [
+                    {"id": "premise", "name": "Premise", "order": 1, "prompt_file": "bootstrap.md"}
+                ],
+            },
+        )
+
+        violations = stale_phase_references(path)
+
+        assert violations, (
+            "phase 'premise' reads 'bootstrap.md' and the gate said nothing; a "
+            "rename that moves the id and not the file leaves the old name as "
+            "the only thing a reader sees"
+        )
+        assert "bootstrap.md" in " ".join(violations)
+
+    def test_a_dotted_phase_id_is_read_whole_and_not_truncated(self, tmp_path: Path) -> None:
+        """The false positive half of #1355. `.` is legal in a phase id - the
+        production grammar is `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` - and the gate's
+        own copy of that grammar left it out. So `premise.v2` matched down to
+        its longest dot-free prefix `premise`, and a workflow whose first phase
+        is genuinely called `premise.v2` was told it references a phase it does
+        not have.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow(
+                "The report is at `artifacts/input/premise.v2.md`.", first_id="premise.v2"
+            ),
+        )
+
+        assert _gate_accepts(path), (
+            "precondition: `premise.v2` is a valid phase id, so this workflow is "
+            "valid and a failure below is attributable to the reference"
+        )
+
+        assert stale_phase_references(path) == [], (
+            "the gate invented a violation: `artifacts/input/premise.v2.md` names "
+            "the phase `premise.v2`, which this workflow has"
+        )
+
+    def test_a_stale_dotted_reference_is_not_rescued_by_an_existing_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """The false negative half of #1355, and the serious one: the gate said
+        a dead reference was live.
+
+        `premise.old` is exactly the name a half-finished rename leaves behind.
+        Truncated at the first dot it became `premise`, which DOES exist, so
+        the gate affirmatively certified a reference whose input directory is
+        empty at run time - the one thing `stale_phase_references` exists to
+        catch. A guard that is merely silent is a gap; a guard that reports OK
+        is worse than no guard, because it is believed.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/premise.old.md`."),
+        )
+
+        assert _gate_accepts(path), (
+            "precondition: this workflow is otherwise valid, so a failure below "
+            "is attributable to the reference and not to something else"
+        )
+        violations = stale_phase_references(path)
+
+        assert violations, (
+            "the gate accepted `artifacts/input/premise.old.md` in a workflow "
+            "whose only earlier phase is `premise`; there is no phase "
+            "`premise.old`, so that directory is empty at run time"
+        )
+        joined = " ".join(violations)
+        assert "premise.old" in joined, (
+            "must name the reference that does not resolve, IN FULL - reporting "
+            f"the prefix `premise` is the bug itself: {joined}"
+        )
+
+    def test_a_sentence_period_after_a_reference_is_not_part_of_the_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Admitting `.` to the reference charset made prose punctuation
+        ambiguous with the id itself, because the grammar permits a trailing
+        dot. An unfenced reference ending a sentence must still resolve.
+
+        Pinned so nobody "simplifies" this by stripping trailing dots off the
+        captured text: that would make a reference to `premise.` resolve to
+        `premise`, rebuilding the false negative above one character further
+        along.
+        """
+        path = _write(
+            tmp_path,
+            self._workflow("The premise report is at artifacts/input/premise.md."),
+        )
+
+        assert stale_phase_references(path) == [], (
+            "the sentence period was read as part of the phase id, so a valid "
+            "reference was reported as naming a phase that does not exist"
+        )
+
+    def test_a_shared_prompt_reference_is_not_a_misfiled_file(self, tmp_path: Path) -> None:
+        """`shared://` prompts are named for the JOB and reused by phases with
+        different ids - that is what the phase library is for - so the filename
+        rule cannot apply to them without banning the feature."""
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        (lib / "summarize.md").write_text("summarize it")
+        path = _write(
+            tmp_path,
+            {
+                "id": "shared",
+                "name": "Shared",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "premise",
+                        "name": "Premise",
+                        "order": 1,
+                        "prompt_file": "shared://summarize",
+                    }
+                ],
+            },
+        )
+
+        assert stale_phase_references(path, phase_library_dir=lib) == [], (
+            "the phase library became unusable"
+        )

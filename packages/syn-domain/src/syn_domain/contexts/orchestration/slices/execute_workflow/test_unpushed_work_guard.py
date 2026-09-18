@@ -1554,7 +1554,7 @@ def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
 # outcomes, and neither test can be satisfied by the handler alone.
 # --------------------------------------------------------------------------
 
-_REPORTING_PHASE_ID = "bootstrap"
+_REPORTING_PHASE_ID = "premise"
 
 
 def _two_phases_declaring_opposite_things() -> list[ExecutablePhase]:
@@ -1562,7 +1562,7 @@ def _two_phases_declaring_opposite_things() -> list[ExecutablePhase]:
     return [
         ExecutablePhase(
             phase_id=_REPORTING_PHASE_ID,
-            name="Check the toolchain",
+            name="Check the task's premise",
             order=1,
             delivers_repo_changes=False,
         ),

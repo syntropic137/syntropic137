@@ -26,6 +26,13 @@ already load-bearing - a later phase reads an earlier one at
 `artifacts/input/<phase-id>.md` - so tying the filename to the id means a rename
 breaks loudly in one place instead of silently in two.
 
+`just check-workflows` enforces both halves (`stale_phase_references`), because
+for a decade this was prose and a rename broke neither. The half that costs a
+run is the second: a prompt still naming the OLD id gets an empty input
+directory at run time, reads nothing, and reports on it anyway. #1298's
+`bootstrap` -> `premise` rename had a downstream prompt to fix in each of four
+workflows, and nothing would have said so.
+
 **3. One job per phase.**
 A phase that researches AND plans stops researching early, because writing the
 plan feels like progress. Separate phases also give each its own workspace,
@@ -34,7 +41,7 @@ money?" an answerable question rather than a guess.
 
 ## Which implementation workflow: `implement` or `quickfix`?
 
-Two workflows produce a PR. `sdlc-implement-v1` runs four phases with an
+Two workflows produce a PR. `sdlc-implement-v2` runs four phases with an
 independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
 verification behind it at all.
 
@@ -148,7 +155,7 @@ lands - but do not expect it to prevent the failure today, and do not "fix" the
 gate by dropping the mount check, which would reopen the hole above.
 
 **Declare `false` on any phase whose output artifact is the deliverable** - a
-bootstrap, a premise check, a review, a verify, a plan, an `open_pr` phase that
+premise check, a review, a verify, a plan, an `open_pr` phase that
 only reads a ref. Across the workflows here that is every phase except
 `implement` and `quickfix`, which are the two that commit and push.
 

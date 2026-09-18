@@ -214,8 +214,15 @@ something, confirm the recording is durable rather than in-memory - an event
 constructed and never persisted has shipped here before, and every unit test
 passed.
 
-## Output
+## Write to `artifacts/output/verify.md`
 
+**This phase declares a markdown output artifact, so a run that writes
+nothing under `artifacts/output/` FAILS - after the work is done, and the
+work is lost with the workspace.** Write the file before you finish, even
+if the outcome was a refusal: a refusal is a deliverable and is often the
+most valuable one.
+
+The verdict, the gate output, the mutation results, and the exact head you verified.
 A verdict: is the change correct and complete, or not. The `preflight-agent` and
 unit-test output, each
 mutation and its result, and anything you could not verify. If you found a

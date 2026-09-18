@@ -126,7 +126,7 @@ def _try_parse_skill_shorthand(raw: str) -> _ParsedRefDict | None:
             "use the full URL form '<url>@<version>' or the verbose mapping form"
         )
         raise ValueError(msg)
-    match = _SKILL_SHORTHAND_RE.match(raw)
+    match = _SKILL_SHORTHAND_RE.fullmatch(raw)
     if match is not None:
         org, repo, skill, version = match.groups()
         return {
@@ -135,7 +135,7 @@ def _try_parse_skill_shorthand(raw: str) -> _ParsedRefDict | None:
             "version": version,
             "name_overridden": False,
         }
-    if _TWO_SEGMENT_RE.match(raw) is not None:
+    if _TWO_SEGMENT_RE.fullmatch(raw) is not None:
         msg = (
             f"skill reference {raw!r} names a repo but not a skill; "
             "expected 'org/repo/skill-name@version' or the verbose mapping form"
