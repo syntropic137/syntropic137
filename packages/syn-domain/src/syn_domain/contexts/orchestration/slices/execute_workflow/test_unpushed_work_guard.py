@@ -42,19 +42,19 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    _SCRATCH_INDEX,
-    _read_only_mount,
-    GitWorkspace,
-    quarantine_unpushed_work,
-    refuse_to_complete_unsaved_phase,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    _SCRATCH_INDEX,
+    GitWorkspace,
+    _read_only_mount,
+    quarantine_unpushed_work,
+    refuse_to_complete_unsaved_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
-    _DispatchContext,
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
