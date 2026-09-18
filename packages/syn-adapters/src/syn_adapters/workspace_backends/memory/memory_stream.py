@@ -62,7 +62,13 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         Yields:
             Pre-configured output lines
         """
-        del command, timeout_seconds, working_directory, environment, wrapper_name  # named for the port; unused here
+        del (
+            command,
+            timeout_seconds,
+            working_directory,
+            environment,
+            wrapper_name,
+        )  # named for the port; unused here
         lines = self._streams.get(handle.isolation_id, [])
         for line in lines:
             yield line

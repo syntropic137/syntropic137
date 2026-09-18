@@ -145,6 +145,5 @@ class TestEveryPortIsPaired:
         declared = _declared_ports()
         stale = sorted(name for name in _UNIMPLEMENTED if name not in declared)
         assert not stale, (
-            "_UNIMPLEMENTED names ports that no longer exist; delete them: "
-            + ", ".join(stale)
+            "_UNIMPLEMENTED names ports that no longer exist; delete them: " + ", ".join(stale)
         )

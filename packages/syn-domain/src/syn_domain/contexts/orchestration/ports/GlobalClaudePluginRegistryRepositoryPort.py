@@ -19,7 +19,9 @@ class GlobalClaudePluginRegistryRepositoryPort(Protocol):
     # RepositoryAdapter[TAggregate], which necessarily names it aggregate_id, and
     # Protocol matching compares parameter NAMES for anything not positional-only
     # -- so a domain-specific name here would leave this port unsatisfiable (#1305).
-    async def get_by_id(self, aggregate_id: str, /) -> GlobalClaudePluginRegistryAggregate | None: ...
+    async def get_by_id(
+        self, aggregate_id: str, /
+    ) -> GlobalClaudePluginRegistryAggregate | None: ...
 
     async def save(self, aggregate: GlobalClaudePluginRegistryAggregate) -> None: ...
 

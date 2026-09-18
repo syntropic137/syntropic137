@@ -12,11 +12,11 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
-    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
-        WorkflowExecutionRepositoryPort,
-    )
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
+    )
+    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
+        WorkflowExecutionRepositoryPort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
