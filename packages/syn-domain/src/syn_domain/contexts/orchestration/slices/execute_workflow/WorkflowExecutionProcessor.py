@@ -18,6 +18,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
+    RetryPhaseCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
@@ -28,6 +29,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     UnfinishedPhase,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    MISSING_TERMINAL_TURN_REASON,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseReportedFailureError,
@@ -679,6 +683,8 @@ class WorkflowExecutionProcessor:
                 # settled on. Two numbers for one phase, and nothing to say
                 # which the reader should believe.
                 logger.error(base)
+                if await self._retried_this_attempt(todo, aggregate, reason, base):
+                    return
                 raise RuntimeError(base)
 
             aggregate.agent_execution_completed(result.command)
@@ -688,6 +694,71 @@ class WorkflowExecutionProcessor:
                 todo, phase, workspace=launch.workspace, workflow_id=workflow_id
             )
             raise
+
+    async def _retried_this_attempt(
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        reason: str | None,
+        failure: str,
+    ) -> bool:
+        """Re-run this phase instead of failing the run, when both halves agree.
+
+        Returns True when the phase has been put back on the to-do list and the
+        caller should simply stop; False when the failure it was about to raise
+        is still the answer. So the caller gets one question and one name, and
+        never learns that there were two halves to it.
+
+        THE TWO HALVES, and why neither owns both. Whether the attempt deserves
+        another one is a reading of the agent's stream: only
+        `MISSING_TERMINAL_TURN_REASON` qualifies, because it is the one
+        `error_reason` that names no fault of the run's own - the stream simply
+        stopped before reporting usage. Every other value names something a
+        second attempt would hit again (a login that is not valid, a line that
+        does not parse) or something already decided (the phase's own
+        TASK_RESULT, which is checked above this and never reaches here). How
+        MANY attempts a phase may have is a rule about the execution, and the
+        aggregate answers that.
+
+        REFUSING STILL HAPPENS AND IS STILL RIGHT. The attempt does not
+        complete, nothing is reported for it, and no usage is invented for a
+        run that reported none. It is only that a phase which authors nothing -
+        every verify phase, by design, which is why #1111's deliverable salvage
+        can never reach this case - no longer takes the whole execution down
+        with it, and with it every phase that already ran and was already paid
+        for (#1335).
+        """
+        assert todo.phase_id is not None
+        if reason != MISSING_TERMINAL_TURN_REASON:
+            return False
+        if not aggregate.may_retry_phase(todo.phase_id):
+            logger.error(
+                "Phase %s has no attempts left; failing the execution (exec=%s)",
+                todo.phase_id,
+                todo.execution_id,
+            )
+            return False
+
+        # Before the aggregate is told, so a crash in between leaves a torn-down
+        # container and an un-retried phase rather than a live container nothing
+        # will ever close.
+        await self._runtime.abandon_phase(todo.execution_id, todo.phase_id, reason=failure)
+        aggregate.retry_phase(
+            RetryPhaseCommand(
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                reason=failure,
+            )
+        )
+        await self._journal.append(aggregate)
+        logger.warning(
+            "Retrying phase %s in place (attempt %d, exec=%s): %s",
+            todo.phase_id,
+            aggregate.attempts_for(todo.phase_id) + 1,
+            todo.execution_id,
+            failure,
+        )
+        return True
 
     async def _keep_unfinished_output(
         self,

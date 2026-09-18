@@ -277,6 +277,42 @@ class ExecutionTodoProjection(AutoDispatchProjection):
             ),
         )
 
+    async def on_phase_retry_scheduled(self, event_data: dict) -> None:
+        """Phase attempt abandoned → queue PROVISION_WORKSPACE for it again (#1335).
+
+        THE ONE HANDLER THAT MOVES A PHASE BACKWARDS, and the only one that is
+        allowed to. Every other writer merges `phase_progress` monotonically
+        because a lower rank arriving out of order is a stale writer; here the
+        lower rank IS the decision - the aggregate has said this phase runs
+        again from the top - so the phase's mark is SET rather than merged.
+        Merging it would leave the mark at whatever the dead attempt reached,
+        `get_pending` would filter the new item out as stale, and the retry
+        would go missing with nothing anywhere saying so.
+
+        Other phases' marks are left exactly as they are: the retried phase is
+        the only thing being reconsidered, and the phases already completed
+        keep their results and their cost - that is the whole point.
+        """
+        execution_id = event_data.get("execution_id", "")
+        if not execution_id:
+            return
+        phase_id = event_data.get("phase_id")
+        if not isinstance(phase_id, str):
+            return
+
+        async with self._lock_for(execution_id):
+            current, progress = await self._read_state(execution_id)
+            remaining = [t for t in current if t.phase_id != phase_id]
+            remaining.append(
+                TodoItem(
+                    execution_id=execution_id,
+                    action=TodoAction.PROVISION_WORKSPACE,
+                    phase_id=phase_id,
+                )
+            )
+            progress[phase_id] = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
+            await self._save_state(execution_id, remaining, progress)
+
     async def on_phase_completed(self, event_data: dict) -> None:
         """Phase completed → remove COMPLETE_PHASE to-do for this phase only.
 

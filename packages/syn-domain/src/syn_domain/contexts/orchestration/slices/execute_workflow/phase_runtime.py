@@ -297,11 +297,21 @@ class PhaseRuntime:
             self._announced_models[phase_id] = announced
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
+        #
+        # ADDED to whatever is already there, not assigned. Called exactly once
+        # per ATTEMPT, and a retried phase has two (#1335) - so an assignment
+        # would report the second attempt's spend as the phase's, and the first
+        # attempt's money would exist only in the observability lane, where
+        # nothing reconciles it against the phase. A phase that ran twice cost
+        # both runs; this is the only place that can still say so, because
+        # `harvest` and `usage_for` each take the entry exactly once, at the end
+        # of the last attempt.
+        prior = self._auth_tokens.get((execution_id, phase_id), (0, 0, 0, 0))
         self._auth_tokens[execution_id, phase_id] = (
-            result.command.input_tokens,
-            result.command.output_tokens,
-            result.command.cache_creation_tokens,
-            result.command.cache_read_tokens,
+            prior[0] + result.command.input_tokens,
+            prior[1] + result.command.output_tokens,
+            prior[2] + result.command.cache_creation_tokens,
+            prior[3] + result.command.cache_read_tokens,
         )
 
     def workspace_for(self, phase_id: str) -> ManagedWorkspace | None:
@@ -377,6 +387,47 @@ class PhaseRuntime:
                 source="processor",
             )
 
+        await self._release_container(phase_id)
+
+    async def abandon_phase(self, execution_id: str, phase_id: str, *, reason: str) -> None:
+        """Give up ONE attempt at a phase, so the same phase can be attempted again.
+
+        The third way a phase can stop, and the one that had no expression here
+        (#1335): `finalize` means the phase succeeded and `abandon_all` means
+        the execution is over, and neither describes "this attempt is finished
+        with and the phase is not".
+
+        Everything the dead attempt accumulated is given up, because the retry
+        runs under a NEW session in a NEW container and would otherwise inherit
+        it: the dead attempt's collected artifact ids would be reported as the
+        retry's output, and its harness accumulator as the retry's. The ONE
+        thing deliberately kept is `_auth_tokens`, which is what the attempt
+        SPENT - that money is gone whatever happens next, and the phase's
+        report is its two attempts summed. See `record_agent_run`.
+
+        The session is closed as FAILED, because it failed. A retry does not
+        make the attempt before it not have happened, and a phase that ran
+        twice must not read as one that ran once - that reading is how a retry
+        that has quietly become routine stays invisible.
+        """
+        session_mgr = self._session_managers.pop(phase_id, None)
+        if session_mgr is not None:
+            await session_mgr.complete_failure(error_message=reason)
+
+        await self._release_container(phase_id)
+
+        self._tokens.pop(phase_id, None)
+        self._artifact_ids.pop(phase_id, None)
+        self._started_at.pop(phase_id, None)
+        self._leader_native_ids.pop((execution_id, phase_id), None)
+
+    async def _release_container(self, phase_id: str) -> None:
+        """Give up the container side of a phase: probe it, import it, close it.
+
+        Shared by every path that ends ONE phase - completion and abandonment -
+        because the order in it is the load-bearing part and had no business
+        being written twice.
+        """
         workspace = self._workspaces.pop(phase_id, None)
         self._starting_points.forget(phase_id)
         session_id = self._session_ids.pop(phase_id, "")

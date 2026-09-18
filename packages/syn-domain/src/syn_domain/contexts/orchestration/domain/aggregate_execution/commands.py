@@ -145,6 +145,27 @@ class StartPhaseCommand:
         self.session_id = session_id
 
 
+class RetryPhaseCommand:
+    """Command to abandon this phase's current attempt and start another (#1335).
+
+    Carries `reason` because the aggregate refuses on the budget, not on the
+    fault: whether a fault is worth another attempt is a judgement about the
+    agent harness's stream and belongs to the slice that reads it, while how
+    many attempts a phase may have is a rule about the execution and belongs
+    here. The reason travels so the event can record it either way.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
+
+
 class CompletePhaseCommand:
     """Command to mark a phase as completed with metrics.
 
