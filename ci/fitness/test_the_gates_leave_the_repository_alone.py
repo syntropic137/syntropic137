@@ -217,6 +217,7 @@ def test_running_the_gates_does_not_modify_the_invoking_repository(
         "A gate built a git fixture in the repository it was invoked from instead "
         "of in its tmp_path. Naming the directory with -C or cwd= is not enough "
         "on its own: git resolves GIT_DIR first, and the pre-push hook exports it "
-        "from every worktree. See ci/fitness/conftest.py, which clears the "
-        "repository-location variables for the whole suite, and #1343."
+        "from every worktree. The repository-location variables are cleared for "
+        "every test run in the root conftest.py - see _forget_the_ambient_"
+        "repository there, and #1343."
     )
