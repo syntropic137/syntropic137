@@ -45,6 +45,17 @@ Two deliberate deviations from the issue's sketch:
   `git submodule status`. What merges is the gitlink in the commit; the checked
   out submodule working tree is not it, and can differ from it.
 
+A shallow submodule clone is not a problem, which is worth knowing because CI
+always has one: `actions/checkout` passes `--depth=1` to `git submodule update`
+whenever `fetch-depth` is 1, so the checkout the fitness job runs on holds the
+pointer commit and nothing behind it. A fetch that names no depth deepens the
+refs it brings to full history, and ancestry is then computable across the
+original graft point. Verified both ways against a depth-1 clone built the way
+checkout builds one: the merged pointer resolves as an ancestor, and #1329's
+resolves to `origin/fix/1318-independent-rebuild-track`. Do not add `--depth`
+here - it would preserve the truncation and reject every pointer that is not
+literally the tip of the default branch.
+
 Scope: the direct submodules `.gitmodules` declares, matching `check-submodules`,
 which is deliberately not `--recursive` because CI's own checkout leaves nested
 submodules uninitialized. Widening either means changing the checkouts first.
