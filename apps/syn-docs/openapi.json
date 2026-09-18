@@ -7425,6 +7425,10 @@
             ],
             "title": "Error Message"
           },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -7835,6 +7839,10 @@
             ],
             "title": "Error Message"
           },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -7904,6 +7912,16 @@
         ],
         "title": "ExportManifestResponse",
         "description": "Structured export of a workflow as a file manifest.\n\nEach key in ``files`` is a relative path; each value is the file content.\nThe CLI writes these to disk to produce an installable package or plugin."
+      },
+      "FailureClassification": {
+        "type": "string",
+        "enum": [
+          "platform",
+          "correct_refusal",
+          "unclassified"
+        ],
+        "title": "FailureClassification",
+        "description": "Why a failed execution ended: the machinery broke, or the work was refused.\n\nTHE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`\nand nothing else, so a phase that did three phases of real work, found a\ngenuine defect and correctly declined to ship it sat in the same bucket as\na segfault. Of 221 recorded failures an unknown fraction were the platform\nworking exactly as designed, which made every failure rate and every\nlost-spend figure computed from `failed` an upper bound of unknown\ntightness - and made the product look broken to the operator least able to\ncheck.\n\nTHE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a\nphase that ends on its own agent's `TASK_RESULT success=false` report is a\ndifferent fact from one that ends on an exit status, a timeout or a parse\nfailure, and `AgentVerdict` already knows which happened at the moment the\nrun is failed. This is where that fact is written down.\n\nTHE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,\nwhich is what analysts already sort failures into by hand.\n\nWHY `task` IS NOT A MEMBER. classify.md's third class - \"the request was\nwrong, too big for a phase, or impossible\" - is a judgement about the\nREQUEST, and nothing in the stored record supports it: the same exit code,\nthe same error text and the same refusal arise from a bad request and from\na good one the platform mishandled. Deriving it would be a guess, and\nclassify.md's own instruction for that case is to use the fourth bucket\nrather than attribute confidently. A member no code path can honestly\nproduce is a branch every reader has to reason about forever, so it is not\nhere. Whoever adds it must bring the evidence with it.\n\nTHE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep\nwhen changing anything here: `CORRECT_REFUSAL` is a POSITIVE claim, made\nonly where the agent's own readable `success=false` report is what ended\nthe run. Everything else - including a report nobody could read - is\n`PLATFORM`. So a path that forgets to classify itself lands on the answer\nthe system already gave, the failure tally stays the upper bound it has\nalways been, and no omission can ever manufacture evidence that the system\nwas working."
       },
       "FailurePatternResponse": {
         "properties": {

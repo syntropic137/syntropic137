@@ -192,6 +192,7 @@ def _build_execution_summary_response(
         duration_display=format_duration_seconds(duration_seconds),
         tool_call_count=e.tool_call_count,
         error_message=e.error_message,
+        failure_classification=e.failure_classification,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
     )
@@ -686,6 +687,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         unpriced_observation_count=detail.unpriced_observation_count,
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
+        failure_classification=detail.failure_classification,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,

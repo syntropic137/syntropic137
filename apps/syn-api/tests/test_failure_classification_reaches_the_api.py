@@ -1,0 +1,378 @@
+"""#1357: a correct refusal and a platform crash must not read as one number.
+
+Both end a run with `status="failed"`, and until this field existed that was
+everything the record said. So every failure rate computed off the domain -
+the retrospective workflow's own `classify` phase included - counted the
+quality gate WORKING as the platform breaking, and there was nothing in the
+event, the read model or the API response to recompute it from.
+
+THE PINNING TEST IS `TestTwoFailuresThatMustNotReadAlike`. Two executions, one
+killed by a platform error with no agent report at all and one failed on its
+agent's own `TASK_RESULT success=false`, driven through the SAME chain and
+asked whether they carry the same classification. They must not.
+
+The chain is real at every hop, because the defect this guards against is not
+in any one of them - it is a value that survives nine hops and is dropped at
+the tenth by a constructor that does not pass it:
+
+    the agent's text  ->  VerdictReader  ->  AgentVerdict
+      ->  PhaseReportedFailureError    (the only frame that still knows)
+      ->  failed_phase_outcome         ->  PhaseFailure
+      ->  FailExecutionCommand         ->  WorkflowExecutionAggregate
+      ->  WorkflowFailedEvent          ->  the list + detail projections
+      ->  WorkflowExecutionSummary / ...Detail
+      ->  ExecutionSummaryResponse / ExecutionDetailResponse
+
+Nothing here is hand-written at an intermediate hop: each stage is fed the
+previous stage's real output, so a hop that forgets the field fails these
+rather than being papered over by a fixture that already knows the answer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import pytest
+from event_sourcing import GenericDomainEvent
+
+from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    StartExecutionCommand,
+    WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    PhaseReportedFailureError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+    failed_phase_outcome,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import VerdictReader
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
+from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+    WorkflowExecutionListProjection,
+)
+
+if TYPE_CHECKING:
+    from syn_api.routes.executions.models import (
+        ExecutionDetailResponse,
+        ExecutionSummaryResponse,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
+
+pytestmark = pytest.mark.unit
+
+#: The run whose agent said, in the words the prompt asks for, that it would
+#: not do the task. The platform recorded that faithfully: the system WORKING.
+REFUSED_ID = "exec-refused-1357"
+#: The run whose container died with the agent never having reported anything.
+CRASHED_ID = "exec-crashed-1357"
+
+WORKFLOW_ID = "wf-1357"
+PHASE_ID = "implement"
+TOTAL_PHASES = 3
+
+_STARTED_AT = datetime(2026, 9, 18, 9, 0, tzinfo=UTC)
+_FAILED_AT = datetime(2026, 9, 18, 9, 40, tzinfo=UTC)
+
+#: What the refusing agent actually wrote, terminator and all, as its phase's
+#: stream delivered it. Read rather than asserted: `VerdictReader` is the thing
+#: that decides this text is a refusal, and a test that skipped it would be
+#: pinning its own opinion of the text instead of the platform's.
+_REFUSAL_MESSAGES = (
+    "The premise is false: the module the issue names was deleted in #1201.",
+    'TASK_RESULT: {"success": false, "comments": "premise false, refusing to '
+    'invent a fix"}\nTASK_RESULT_END',
+    "Stopping here rather than guessing.",
+)
+
+#: A marker with nothing readable under it. It refuses completion for the same
+#: reason a real refusal does, and it is NOT evidence the platform worked.
+_UNREADABLE_MESSAGES = ("TASK_RESULT: {success: probably not",)
+
+
+def _refusal_error() -> PhaseReportedFailureError:
+    """The exception a phase that reported `success=false` dies on."""
+    reader = VerdictReader()
+    for message in _REFUSAL_MESSAGES:
+        reader.read(message)
+    return PhaseReportedFailureError(phase_id=PHASE_ID, verdict=reader.verdict)
+
+
+def _unreadable_error() -> PhaseReportedFailureError:
+    """The exception a phase whose report nobody could parse dies on."""
+    reader = VerdictReader()
+    for message in _UNREADABLE_MESSAGES:
+        reader.read(message)
+    return PhaseReportedFailureError(phase_id=PHASE_ID, verdict=reader.verdict)
+
+
+def _crash_error() -> BaseException:
+    """A platform failure with no agent report anywhere near it."""
+    return RuntimeError("workspace container exited 137 before the agent reported")
+
+
+def _started(execution_id: str) -> WorkflowExecutionStartedEvent:
+    return WorkflowExecutionStartedEvent(
+        workflow_id=WORKFLOW_ID,
+        execution_id=execution_id,
+        workflow_name="implement-verify-report",
+        started_at=_STARTED_AT,
+        total_phases=TOTAL_PHASES,
+        inputs={},
+    )
+
+
+def _failed(execution_id: str, error: BaseException) -> WorkflowFailedEvent:
+    """The event the REAL aggregate emits for a run that died on `error`.
+
+    Every hop from the exception to the event is the production one: the
+    outcome derives the classification from the exception, `as_command` puts it
+    on the command, and `fail_execution` puts it on the event. A test that
+    constructed `WorkflowFailedEvent` directly would pass with any two of those
+    three broken.
+    """
+    outcome = failed_phase_outcome(
+        error,
+        phase_id=PHASE_ID,
+        started_at_by_phase={PHASE_ID: _STARTED_AT},
+        session_id_by_phase={},
+        now=_FAILED_AT,
+    )
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id=execution_id,
+            workflow_id=WORKFLOW_ID,
+            workflow_name="implement-verify-report",
+            total_phases=TOTAL_PHASES,
+            inputs={},
+        )
+    )
+    aggregate.fail_execution(
+        outcome.as_command(execution_id, completed_phases=0, total_phases=TOTAL_PHASES)
+    )
+    event = aggregate.get_uncommitted_events()[-1].event
+    assert event.event_type == "WorkflowFailed", event.event_type
+    return event
+
+
+@dataclass
+class _StubProjectionManager:
+    """The two projections the read path needs, and nothing it only reads soft.
+
+    Cost and tool counts both fail soft in the route, so their absence here
+    exercises the same path a Lane 2 outage does - which is deliberate: a
+    classification that only survives when Lane 2 is up is not in Lane 1.
+    """
+
+    store: InMemoryProjectionStore
+    workflow_execution_detail: WorkflowExecutionDetailProjection
+    workflow_execution_list: WorkflowExecutionListProjection
+
+
+async def _projections() -> _StubProjectionManager:
+    """Both views, built by replaying both runs' real event streams."""
+    store = InMemoryProjectionStore()
+    detail = WorkflowExecutionDetailProjection(store)
+    listing = WorkflowExecutionListProjection(InMemoryProjectionStore())
+
+    for execution_id, error in (
+        (REFUSED_ID, _refusal_error()),
+        (CRASHED_ID, _crash_error()),
+    ):
+        for projection in (detail, listing):
+            await projection.on_workflow_execution_started(_started(execution_id).model_dump())
+            await projection.on_workflow_failed(_failed(execution_id, error).model_dump())
+
+    return _StubProjectionManager(
+        store=store, workflow_execution_detail=detail, workflow_execution_list=listing
+    )
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, manager: _StubProjectionManager) -> None:
+    """Point the route module's lookups at `manager` instead of the real wiring."""
+    from syn_api import _wiring
+    from syn_api.routes.executions import queries
+
+    async def _noop_connect() -> None:
+        return None
+
+    monkeypatch.setattr(queries, "ensure_connected", _noop_connect)
+    monkeypatch.setattr(queries, "get_projection_mgr", lambda: manager)
+    monkeypatch.setattr(_wiring, "get_projection_mgr", lambda: manager)
+
+
+async def _detail(monkeypatch: pytest.MonkeyPatch, execution_id: str) -> ExecutionDetailResponse:
+    """Serve `GET /executions/{id}` off projections built from real events."""
+    from syn_api.routes.executions import queries
+
+    _serve(monkeypatch, await _projections())
+    return await queries.get_execution_endpoint(execution_id)
+
+
+async def _summaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, ExecutionSummaryResponse]:
+    """Serve `GET /executions`, keyed by execution id."""
+    from syn_api.routes.executions import queries
+
+    _serve(monkeypatch, await _projections())
+    # Every parameter passed explicitly: called outside FastAPI, the `Query(...)`
+    # defaults arrive as `Query` objects rather than as the values they describe.
+    response = await queries.list_executions_endpoint(
+        status=None,
+        statuses=None,
+        started_after=None,
+        started_before=None,
+        q=None,
+        page=1,
+        page_size=50,
+    )
+    return {e.workflow_execution_id: e for e in response.executions}
+
+
+class TestTwoFailuresThatMustNotReadAlike:
+    """The test from the issue. Everything else here supports this one."""
+
+    @pytest.mark.asyncio
+    async def test_a_crash_and_a_refusal_do_not_carry_the_same_classification(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        refused = await _detail(monkeypatch, REFUSED_ID)
+        crashed = await _detail(monkeypatch, CRASHED_ID)
+
+        assert refused.failure_classification != crashed.failure_classification, (
+            "a run whose agent reported success=false and a run whose container "
+            f"died both report failure_classification="
+            f"{refused.failure_classification!r}; every failure number computed "
+            "from this record counts the quality gate working as the platform "
+            "breaking (#1357)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_is_named_a_correct_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not merely different - named, so a tally can label it.
+
+        `!=` alone would be satisfied by two wrong answers, and the label is
+        the whole point: `classify.md` asks for this class to appear in the
+        tally WITH its name "so nobody optimises it away".
+        """
+        refused = await _detail(monkeypatch, REFUSED_ID)
+
+        assert refused.failure_classification is FailureClassification.CORRECT_REFUSAL
+
+    @pytest.mark.asyncio
+    async def test_the_crash_is_named_platform(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        crashed = await _detail(monkeypatch, CRASHED_ID)
+
+        assert crashed.failure_classification is FailureClassification.PLATFORM
+
+    @pytest.mark.asyncio
+    async def test_both_still_report_status_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The distinction is BESIDE `status`, never instead of it.
+
+        A refusal did not deliver, and every consumer that treats a failed run
+        as terminal - the realtime sentinel, the trigger guards, reconciliation
+        - is right to keep treating both alike. Splitting `status` would have
+        broken all of them to answer a question none of them asked.
+        """
+        refused = await _detail(monkeypatch, REFUSED_ID)
+        crashed = await _detail(monkeypatch, CRASHED_ID)
+
+        assert (refused.status, crashed.status) == ("failed", "failed")
+
+    @pytest.mark.asyncio
+    async def test_the_list_response_separates_them_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other endpoint, off the other projection, on the other model.
+
+        Failure rates get counted over the LIST, not one detail page at a time,
+        so a field that reaches only the detail response answers nobody.
+        """
+        summaries = await _summaries(monkeypatch)
+
+        assert summaries[REFUSED_ID].failure_classification is (
+            FailureClassification.CORRECT_REFUSAL
+        )
+        assert summaries[CRASHED_ID].failure_classification is FailureClassification.PLATFORM
+
+
+class TestWhatDoubtCountsAs:
+    @pytest.mark.asyncio
+    async def test_an_unreadable_report_is_not_a_correct_refusal(self) -> None:
+        """A block nobody could parse might have been a refusal. Might is not is.
+
+        `refuses_completion` is true for UNREADABLE and for FAILURE alike, so
+        the one exception class covers both and classifying off its type would
+        collapse them. This is the fail-closed direction: being wrong here
+        overstates our own failures, and being wrong the other way credits the
+        platform with a refusal nobody can read.
+        """
+        event = _failed(CRASHED_ID, _unreadable_error())
+
+        assert event.failure_classification is FailureClassification.PLATFORM
+
+    @pytest.mark.asyncio
+    async def test_a_failure_recorded_before_1357_replays_as_unclassified(self) -> None:
+        """Historical events have no field, and must load rather than guess.
+
+        The payload is a REAL failure event with the key removed, which is
+        exactly what the store holds for every run before this change. Both
+        readers - the projection that rebuilds the read model and the aggregate
+        that rehydrates from the stream - have to answer `unclassified` and
+        neither may raise: an event stream that will not replay is worse than a
+        number that will not split.
+        """
+        payload = _failed(REFUSED_ID, _refusal_error()).model_dump()
+        del payload["failure_classification"]
+
+        projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+        await projection.on_workflow_execution_started(_started(REFUSED_ID).model_dump())
+        await projection.on_workflow_failed(payload)
+        row = await projection.get_by_id(REFUSED_ID)
+
+        assert row is not None
+        assert row.failure_classification is FailureClassification.UNCLASSIFIED
+        assert row.status == "failed", "the run still failed; only the KIND is unknown"
+
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.on_execution_failed(GenericDomainEvent(**payload))
+
+        assert aggregate.failure_classification is FailureClassification.UNCLASSIFIED
+
+    @pytest.mark.asyncio
+    async def test_a_classification_this_reader_does_not_know_replays_as_unclassified(
+        self,
+    ) -> None:
+        """The other direction of the same contract: a NEWER writer.
+
+        A member added later, or a value corrupted in storage, must read as
+        unknown rather than raising `ValueError` and stopping the stream. This
+        is the reason `from_stored` exists instead of `FailureClassification(...)`
+        at each of the read sites.
+        """
+        payload = _failed(REFUSED_ID, _refusal_error()).model_dump()
+        payload["failure_classification"] = "task"
+
+        projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+        await projection.on_workflow_execution_started(_started(REFUSED_ID).model_dump())
+        await projection.on_workflow_failed(payload)
+        row = await projection.get_by_id(REFUSED_ID)
+
+        assert row is not None
+        assert row.failure_classification is FailureClassification.UNCLASSIFIED
