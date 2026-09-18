@@ -1,4 +1,3 @@
-# ruff: noqa: ARG002  — Protocol implementation; unused params are required by the interface.
 """Sync-safe test double for AgentExecutionHandler.
 
 The module-level type assertion at the bottom of this file ensures pyright verifies

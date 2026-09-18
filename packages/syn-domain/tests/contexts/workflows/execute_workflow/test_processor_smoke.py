@@ -29,9 +29,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
-    UpstreamRetryPolicy,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -47,6 +44,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+        UpstreamRetryPolicy,
     )
 
 
