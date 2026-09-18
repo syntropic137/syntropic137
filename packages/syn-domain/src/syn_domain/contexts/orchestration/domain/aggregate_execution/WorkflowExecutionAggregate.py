@@ -331,6 +331,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             observed_branches=(
                 None if command.observed_branches is None else list(command.observed_branches)
             ),
+            failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
         )
         self._apply(event)
 
