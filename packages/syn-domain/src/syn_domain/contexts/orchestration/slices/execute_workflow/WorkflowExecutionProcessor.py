@@ -29,6 +29,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     ArtifactCollector,
     UnfinishedPhase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    UpstreamRetryPolicy,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseReportedFailureError,
 )
@@ -154,8 +157,13 @@ class WorkflowExecutionProcessor:
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
+        retry_policy: UpstreamRetryPolicy | None = None,
     ) -> None:
         self._session_repo = session_repository
+        # How a phase answers a provider that is simply busy (#1303). Injected
+        # only so a test can collapse the backoff to zero; production takes the
+        # policy's own numbers and no caller chooses them.
+        self._retry_policy = retry_policy or UpstreamRetryPolicy()
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -599,18 +607,54 @@ class WorkflowExecutionProcessor:
             workspace_id=getattr(launch.workspace, "workspace_id", None),
             agent_model=phase.agent_config.model,
         )
-        result = await self._get_agent_handler().handle(
-            todo=todo,
-            workspace=launch.workspace,
-            agent_env=launch.agent_env,
-            claude_cmd=launch.claude_cmd,
-            session_id=session_id,
-            agent_model=phase.agent_config.model,
-            timeout_seconds=timeout,
-            collector=collector,
-            runner=runner,
-            on_launch=observer_for(launch.session_manager),
-        )
+        # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
+        # line treats a non-zero exit as final, and for every other cause it
+        # is. "Selected model is at capacity" is not a cause: the request was
+        # well-formed and the provider was full for a few seconds. Ending the
+        # run there discarded two completed phases twice in one window.
+        #
+        # Retried HERE, around the agent call and inside the same to-do item,
+        # because that is the only frame where nothing has been decided yet:
+        # the workspace is alive, the aggregate has been told nothing, and the
+        # attempt that failed produced no deliverable to protect. What the
+        # failed attempt DID spend is not lost either - `collector` is shared
+        # across attempts, so its Lane-2 records, which are what the cost
+        # ledger reads, already account for it.
+        #
+        # `interrupt_requested` short-circuits ahead of the policy: a cancelled
+        # phase exits non-zero, and re-running it would restart work an
+        # operator just stopped.
+        attempt = 1
+        while True:
+            result = await self._get_agent_handler().handle(
+                todo=todo,
+                workspace=launch.workspace,
+                agent_env=launch.agent_env,
+                claude_cmd=launch.claude_cmd,
+                session_id=session_id,
+                agent_model=phase.agent_config.model,
+                timeout_seconds=timeout,
+                collector=collector,
+                runner=runner,
+                on_launch=observer_for(launch.session_manager),
+            )
+            if result.command.exit_code == 0 or result.stream_result.interrupt_requested:
+                break
+            if not await self._retry_policy.wait_before_retry(
+                reason=result.stream_result.error_reason, attempt=attempt
+            ):
+                # Final, and `result` is the failed one: the reason it carries
+                # is reported below exactly as the agent gave it, whether the
+                # budget ran out or the failure never qualified.
+                break
+            attempt += 1
+            logger.warning(
+                "Upstream was busy (phase=%s): %s - attempt %d of %d",
+                todo.phase_id,
+                result.stream_result.error_reason,
+                attempt,
+                self._retry_policy.max_attempts,
+            )
 
         self._runtime.remember_leader(
             todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
