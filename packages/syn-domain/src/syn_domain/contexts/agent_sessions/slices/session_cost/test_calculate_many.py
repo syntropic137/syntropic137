@@ -17,8 +17,8 @@ from decimal import Decimal
 
 import pytest
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
-    _COUNT_BATCH_QUERY,
     _MIN_TIME_BATCH_QUERY,
     _SESSION_SUMMARY_BATCH_QUERY,
     _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
@@ -31,6 +31,12 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
 _Cell = int | str | Decimal | datetime | None
 _FakeRow = dict[str, _Cell]
 _MODEL = "claude-sonnet-4-5-20250929"
+
+#: Stands in for whatever SQL the tool-call tally issues. Keyed by what the
+#: query is FOR rather than by its text: which table holds the tally and how it
+#: is read belong to ``tool_call_counts``, and a test that pins the text here
+#: would have to be edited every time that module changes its mind (#1322).
+_TALLY = "<tool call tally>"
 
 
 def _summary_row(session_id: str, *, total_input: int | None = 1_000) -> _FakeRow:
@@ -75,8 +81,9 @@ class _CountingConnection:
         self.calls: list[str] = []
 
     async def fetch(self, query: str, *_args: object) -> list[_FakeRow]:
-        self.calls.append(query)
-        return self._rows_by_query.get(query, [])
+        key = _TALLY if tool_call_counts.TABLE in query else query
+        self.calls.append(key)
+        return self._rows_by_query.get(key, [])
 
 
 class _Acquire:
@@ -114,7 +121,7 @@ async def test_cost_for_fifty_sessions_takes_four_round_trips() -> None:
     q, pool = _query(
         {
             _SESSION_SUMMARY_BATCH_QUERY: [_summary_row(sid) for sid in ids],
-            _COUNT_BATCH_QUERY: [{"session_id": sid, "cnt": 3} for sid in ids],
+            _TALLY: [{"session_id": sid, "cnt": 3} for sid in ids],
             _MIN_TIME_BATCH_QUERY: [
                 {"session_id": sid, "started_at": datetime(2026, 9, 3, 5, 0, tzinfo=UTC)}
                 for sid in ids
@@ -131,7 +138,7 @@ async def test_cost_for_fifty_sessions_takes_four_round_trips() -> None:
     # 50 acquisitions, which is what made a page cost seconds.
     assert pool.conn.calls == [
         _SESSION_SUMMARY_BATCH_QUERY,
-        _COUNT_BATCH_QUERY,
+        _TALLY,
         _MIN_TIME_BATCH_QUERY,
     ]
     assert pool.acquisitions == 1
@@ -154,7 +161,7 @@ async def test_a_summary_without_tokens_falls_back_to_token_usage() -> None:
                 _summary_row("sess-b", total_input=None),
             ],
             _TOKEN_USAGE_FALLBACK_BATCH_QUERY: [_token_row("sess-b")],
-            _COUNT_BATCH_QUERY: [],
+            _TALLY: [],
             _MIN_TIME_BATCH_QUERY: [],
         }
     )
@@ -177,7 +184,7 @@ async def test_a_session_with_no_data_is_absent_not_zero() -> None:
         {
             _SESSION_SUMMARY_BATCH_QUERY: [_summary_row("sess-a")],
             _TOKEN_USAGE_FALLBACK_BATCH_QUERY: [],
-            _COUNT_BATCH_QUERY: [],
+            _TALLY: [],
             _MIN_TIME_BATCH_QUERY: [],
         }
     )
@@ -194,7 +201,7 @@ async def test_calculate_returns_the_same_answer_as_the_batch_it_delegates_to() 
     """One session is the degenerate case of many, and must stay that way."""
     rows: dict[str, list[_FakeRow]] = {
         _SESSION_SUMMARY_BATCH_QUERY: [_summary_row("sess-a")],
-        _COUNT_BATCH_QUERY: [{"session_id": "sess-a", "cnt": 2}],
+        _TALLY: [{"session_id": "sess-a", "cnt": 2}],
         _MIN_TIME_BATCH_QUERY: [
             {"session_id": "sess-a", "started_at": datetime(2026, 9, 3, 5, 0, tzinfo=UTC)}
         ],

@@ -26,6 +26,7 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.projection_stores.postgres_store import PostgresProjectionStore
+from syn_domain import tool_call_counts
 from syn_domain.storable_text import pg_safe
 
 pytestmark = pytest.mark.unit
@@ -438,6 +439,10 @@ class _AgentEventsWrites:
     def __init__(self) -> None:
         self.session_ids: list[str] = []
 
+    def transaction(self) -> _FakeTransaction:
+        """Both writers wrap the row and its tally in one transaction."""
+        return _FakeTransaction()
+
     async def copy_to_table(
         self, table: str, *, source: object, columns: list[str], format: str
     ) -> str:
@@ -454,6 +459,12 @@ class _AgentEventsWrites:
         return f"COPY {len(rows)}"
 
     async def execute(self, query: str, *args: object) -> str:
+        if tool_call_counts.TABLE in query:
+            # Every write path also updates the tool-call tally in the same
+            # transaction (#1322). That it is keyed by the STORED spelling is
+            # pinned by test_tool_call_tally_is_written_with_its_events.py;
+            # here it is simply not an agent_events row.
+            return "INSERT 0 1"
         assert "INSERT INTO agent_events" in query
         session_id = args[2]
         assert isinstance(session_id, str)
@@ -475,6 +486,14 @@ class _AgentEventsWrites:
             for stored in self.session_ids
             if stored == wanted
         ]
+
+
+class _FakeTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
 
 
 class _Store:

@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
@@ -154,7 +155,11 @@ class TestPriceGroupedSessionSummary:
 
 
 def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
-    async def fetch_side_effect(query: str, _execution_id: str, _event_type: str) -> list[_FakeRow]:
+    async def fetch_side_effect(query: str, *_args: object) -> list[_FakeRow]:
+        # The tool-call tally is read from its own table (#1322); these tests
+        # are about pricing and have no tool calls to serve.
+        if tool_call_counts.TABLE in query:
+            return []
         # _COST_BY_PHASE_QUERY groups by phase_id; no phase data in these tests.
         if "phase_id" in query:
             return []

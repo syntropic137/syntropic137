@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     CostField,
     SessionCost,
@@ -30,7 +31,6 @@ from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 from syn_shared.pricing import PricedAmount, PricingStatus
 
@@ -84,13 +84,6 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
 GROUP BY session_id, data->>'model'
-"""
-
-_TOOL_COUNT_BY_SESSION_QUERY = """
-SELECT session_id, COUNT(*) as cnt
-FROM agent_events
-WHERE event_type = $1
-GROUP BY session_id
 """
 
 _STARTED_AT_BY_SESSION_QUERY = """
@@ -174,7 +167,8 @@ class SessionCostQueryService:
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
-            tool_counts = await self._fetch_tool_counts(conn)
+            # From the tally, not from a COUNT(*) over agent_events (#1322).
+            tool_counts = await tool_call_counts.by_session(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started_map = await self._fetch_started_map(conn)
 
             results: list[SessionCost] = []
@@ -195,11 +189,6 @@ class SessionCostQueryService:
                 if built is not None:
                     results.append(built)
             return results
-
-    async def _fetch_tool_counts(self, conn: object) -> dict[str, int]:
-        """Fetch tool call counts per session."""
-        rows = await conn.fetch(_TOOL_COUNT_BY_SESSION_QUERY, TOOL_EXECUTION_COMPLETED)  # type: ignore[union-attr]
-        return {row["session_id"]: row["cnt"] for row in rows}  # type: ignore[index]
 
     async def _fetch_started_map(self, conn: object) -> dict[str, object]:
         """Fetch the earliest started_at timestamp per session."""
