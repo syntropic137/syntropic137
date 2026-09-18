@@ -34,11 +34,11 @@ from syn_shared.workspace_paths import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         ArtifactRepository,
@@ -839,12 +839,28 @@ class ArtifactCollector:
         """
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
+            ArtifactStorageError,
             CreateArtifactCommand,
         )
 
         artifact_type_enum = map_artifact_type(artifact_type)
 
-        # Upload content to object storage if configured (ADR-012)
+        # Upload content to object storage if configured (ADR-012).
+        #
+        # The event below carries this storage_uri, and a consumer that reacts
+        # to it fetches the bytes straight away - so a read of the object has
+        # to return them before we get here (#700). That is the port's
+        # contract rather than a step in this method: the domain should not
+        # know how a backend establishes readability, only that a returned URI
+        # can be read. A backend that cannot confirm it raises
+        # ArtifactStorageError, and we leave storage_uri None - the artifact is
+        # still whole, because the event embeds the content either way.
+        #
+        # ONLY that exception. A bare `except Exception` here would swallow our
+        # own bugs - a bad keyword argument to upload() would read as a backend
+        # outage and silently downgrade every artifact to event-store-only,
+        # forever, with a warning nobody reads. Degrading is a response to
+        # storage being unavailable, not to this method being wrong.
         storage_uri: str | None = None
         if self._content_storage is not None:
             try:
@@ -870,10 +886,10 @@ class ArtifactCollector:
                         "size_bytes": result.size_bytes,
                     },
                 )
-            except Exception as e:
+            except ArtifactStorageError as e:
                 logger.warning(
-                    "Failed to upload artifact to object storage, "
-                    "content will be stored in event store only",
+                    "Artifact content is not readable from object storage, "
+                    "content will be stored in the event store only",
                     extra={"artifact_id": artifact_id, "error": str(e)},
                 )
 

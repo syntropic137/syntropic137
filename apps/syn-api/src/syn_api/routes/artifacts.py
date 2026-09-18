@@ -684,8 +684,11 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
 
     a = result.value
 
-    # The metadata projection lists the artifact but object storage hasn't received
-    # the bytes yet — a race between ArtifactCreatedEvent and the MinIO upload (#700).
+    # The metadata projection lists the artifact but has no content to answer
+    # with. It is no longer the upload that lags: upload does not report success
+    # until the write is readable, so ArtifactCreatedEvent never publishes a
+    # storage_uri ahead of its bytes (#700). What remains is read-model
+    # catch-up - the row is there before the content that fills it.
     # Signal retry-later instead of a misleading 200-with-null body.
     if a.content is None and a.size_bytes and a.size_bytes > 0:
         raise HTTPException(

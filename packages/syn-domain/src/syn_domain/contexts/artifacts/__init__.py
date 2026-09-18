@@ -49,6 +49,7 @@ from syn_domain.contexts.artifacts.domain.services import (
 )
 from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
+    ArtifactStorageError,
 )
 from syn_domain.contexts.artifacts.slices.create_artifact import (
     MIN_ARTIFACT_CONTENT_LENGTH,
@@ -76,6 +77,7 @@ __all__ = [
     "ArtifactCreationTimeRecoveredEvent",
     "ArtifactQueryService",
     "ArtifactQueryServiceProtocol",
+    "ArtifactStorageError",
     "ArtifactType",
     "ArtifactUploadedEvent",
     "ContentType",
