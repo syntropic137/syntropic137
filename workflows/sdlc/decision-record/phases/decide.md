@@ -4,6 +4,13 @@ You have the framing and paths (`artifacts/input/options/options.md`) and a
 different model's attack on them (`artifacts/input/attack-options/attack.md`).
 This is the only phase allowed to choose.
 
+**You do not run experiments.** You name them, and the experiment phase runs
+them after a second model has reviewed them. Running them here spends this
+phase's budget on work that has not been reviewed yet; a phase that did exactly
+that timed out with its decision written but never delivered. If a question is
+answerable by reading the repository, read it and cite it; if it needs
+something run, it is an assumption with a falsifying experiment.
+
 > **Where to find that input.** The durable location is the directory
 > `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
 > `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
@@ -56,6 +63,12 @@ each is verified, and what is out of scope. Mark every step that depends on an
 assumption in the list above.
 
 ## Write to `artifacts/output/decision.md`
+
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
 
 ## Citing code
 

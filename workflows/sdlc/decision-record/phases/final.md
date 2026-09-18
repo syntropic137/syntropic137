@@ -44,6 +44,12 @@ file). Where a finding and a measurement disagree, the measurement wins.
 
 ## Write `artifacts/output/decision-record.md` - the final artifact
 
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
+
 A standalone document. Whoever reads it should not need the others, though
 every risky claim still points at the evidence behind it. It contains:
 
