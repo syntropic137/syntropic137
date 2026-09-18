@@ -57,9 +57,7 @@ async def _statements_issued(*, filtered: bool) -> list[str]:
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    await TimescaleHeatmapQuery(pool).query(
-        _START, _END, {"exec-1"} if filtered else None
-    )
+    await TimescaleHeatmapQuery(pool).query(_START, _END, {"exec-1"} if filtered else None)
     return issued
 
 
@@ -70,11 +68,7 @@ def _scans_joined_to_a_session_set(statements: Sequence[str]) -> list[str]:
     deliberate, because a session's summary can land after the window closes -
     so the window is not a predicate on it and nothing else bounds it.
     """
-    return [
-        s
-        for s in statements
-        if re.search(r"FROM\s+agent_events\s+a\s+JOIN", s, re.IGNORECASE)
-    ]
+    return [s for s in statements if re.search(r"FROM\s+agent_events\s+a\s+JOIN", s, re.IGNORECASE)]
 
 
 @pytest.mark.parametrize("filtered", [False, True])
