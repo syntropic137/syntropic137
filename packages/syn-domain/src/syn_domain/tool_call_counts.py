@@ -47,6 +47,18 @@ definition of what the rows should be - ``ensure_ready`` calls it rather than
 carrying a second copy of the same SELECT. A read model that survived a
 projection rebuild still holding yesterday's numbers is the failure this
 module is now built to prevent (#1322).
+
+Being reconstructible is not the same as being reconstructed, and the two
+places that have to reach ``rebuild`` are both here:
+
+- ``ToolCallCountsProjection`` puts the tally in the coordinator's registry
+  alongside every other read model, so a version bump or an operator's
+  ``rebuild_projection`` recounts it instead of walking past it.
+- ``ensure_ready`` runs at every startup, from ``AgentEventStore.initialize``.
+  Deliberately NOT from the branch that auto-creates tables: production sets
+  ``SYN_SKIP_AUTO_CREATE_TABLES=true`` and applies migrations by hand, and
+  migration 004 creates this table EMPTY. Creating tables and repairing a read
+  model are different jobs and must not share a switch.
 """
 
 from __future__ import annotations
@@ -54,10 +66,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from event_sourcing import CheckpointedProjection, ProjectionResult
+
 from syn_shared.events import TOOL_EXECUTION_COMPLETED
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+    from event_sourcing import (
+        DispatchContext,
+        DomainEvent,
+        EventEnvelope,
+        ProjectionCheckpointStore,
+    )
 
 #: The table this module owns. Created by ``ensure_ready`` and mirrored, for
 #: installs that apply migrations by hand, in
@@ -178,6 +199,25 @@ class SqlConnection(Protocol):
     async def fetchval(self, query: str, /, *args: object) -> object: ...
 
     def transaction(self) -> SqlTransaction: ...
+
+
+class SqlPoolAcquire(Protocol):
+    """A borrowed connection, returned to the pool when the block exits."""
+
+    async def __aenter__(self) -> SqlConnection: ...
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object, /) -> object: ...
+
+
+class SqlPool(Protocol):
+    """A source of connections. ``asyncpg.Pool`` satisfies it.
+
+    Here for the same reason ``SqlConnection`` is: the rebuild lifecycle hands
+    this module no connection, only the pool it was wired with, and a double
+    has to be able to stand in for it.
+    """
+
+    def acquire(self) -> SqlPoolAcquire: ...
 
 
 @dataclass(frozen=True)
@@ -313,3 +353,96 @@ async def by_execution(
 def _counts(rows: Sequence[SqlRow], key: str) -> dict[str, int]:
     """Index ``(key, cnt)`` result rows by their key."""
     return {str(row[key]): int(str(row["cnt"])) for row in rows}
+
+
+#: The name the checkpoint store, ``/health`` and
+#: ``SubscriptionCoordinator.rebuild_projection`` know this read model by.
+PROJECTION_NAME = "tool_call_counts"
+
+
+class ToolCallCountsNotWiredError(RuntimeError):
+    """A rebuild was asked of a tally projection that has no database."""
+
+    def __init__(self, projection_name: str) -> None:
+        super().__init__(
+            f"Projection '{projection_name}' was registered without a database pool, "
+            "so its rebuild cannot recount from agent_events. Pass the observability "
+            "pool to create_coordinator_service()."
+        )
+
+
+class ToolCallCountsProjection(CheckpointedProjection):
+    """The tally's seat in the platform's projection-rebuild lifecycle.
+
+    Every other read model here is rebuilt by replaying the event store into
+    it. This one must not be. The count is written in the SAME transaction as
+    the ``agent_events`` row it counts (``record``), so a replay that handled
+    ``tool_execution_completed`` again would double every number. What the
+    tally needs from the lifecycle is the other half of it: ``clear_all_data``,
+    the hook the coordinator calls when a read model is to be discarded and
+    rebuilt - on a version bump, and on an operator's ``rebuild_projection``.
+    For this table "discard and rebuild" is one statement, and it already has a
+    name: ``rebuild``.
+
+    Registering it is the whole point. Before this, a platform rebuild reached
+    twenty-four read models and silently skipped the twenty-fifth: the operator
+    rebuilt the projections, this table kept whatever it held - often nothing,
+    because the same rebuild had truncated it - and every session reported zero
+    tool calls with nothing anywhere saying so.
+
+    ``handle_event`` therefore SKIPs, which advances the checkpoint and touches
+    no rows. The subscription is declared all the same, and declared as the one
+    event the tally is derived from, because that is the true answer to "what
+    feeds this read model" and it is what a reader of the registry needs. It is
+    not a claim that the events are counted here; they are counted at the write
+    that creates them, which is the property that makes this table incapable of
+    drifting from ``agent_events`` in the first place.
+    """
+
+    VERSION = 1
+
+    def __init__(self, pool: SqlPool | None = None) -> None:
+        self._pool = pool
+
+    def get_name(self) -> str:
+        return PROJECTION_NAME
+
+    def get_version(self) -> int:
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        return {TOOL_EXECUTION_COMPLETED}
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[DomainEvent],  # noqa: ARG002
+        checkpoint_store: ProjectionCheckpointStore,  # noqa: ARG002
+        context: DispatchContext | None = None,  # noqa: ARG002
+    ) -> ProjectionResult:
+        """Nothing to do per event: this tool call was counted as it was stored.
+
+        SKIP rather than SUCCESS so the coordinator advances the checkpoint
+        itself. A projection that reported SUCCESS would be claiming it had
+        saved a checkpoint, and this one has no reason to open a transaction.
+        """
+        return ProjectionResult.SKIP
+
+    async def clear_all_data(self) -> None:
+        """Recount from ``agent_events`` - the rebuild, in full.
+
+        Emptying the table is what the coordinator asks of every other
+        projection, because a replay is about to refill it. No replay will
+        refill this one, so emptying alone would leave the deployment showing
+        zero tool calls forever. ``rebuild`` empties and refills atomically,
+        which is both halves in the one place they are already correct
+        together.
+
+        A projection wired with no pool cannot do it and says so. Silence here
+        is the exact failure being fixed: the rebuild would report success and
+        the read model would be wrong.
+        """
+        if self._pool is None:
+            raise ToolCallCountsNotWiredError(PROJECTION_NAME)
+        async with self._pool.acquire() as conn:
+            await rebuild(conn)
+

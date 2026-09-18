@@ -7,7 +7,6 @@ import logging
 import asyncpg
 
 from syn_adapters.events.models import EXPECTED_COLUMNS
-from syn_domain import tool_call_counts
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +56,6 @@ class EventStoreSchema:
             await self._create_table(conn)
             await self._create_indexes(conn)
             await self._configure_compression(conn)
-            # The tool-call tally the list endpoints read instead of counting
-            # compressed chunks (#1322). Fills itself whenever it is found
-            # blank - on the first startup after the feature shipped, and
-            # equally on the first startup after a rebuild truncated it - so an
-            # install with history never starts reporting every session as
-            # having made zero tool calls.
-            await tool_call_counts.ensure_ready(conn)
 
         await self.validate(conn)
 

@@ -2,11 +2,15 @@
 
 ``/sessions`` and ``/executions`` read their tool-call column from
 ``agent_tool_call_counts``, a tally maintained incrementally in the same
-transaction as the events it counts. A blank tally repairs itself: the API
-notices at startup and refills it. A tally that has rows in it and the WRONG
-rows does not, and cannot - telling a wrong count from a right one costs
-exactly the recount, so nothing cheap can be asked first. That is what this is
-for.
+transaction as the events it counts.
+
+A blank tally repairs itself, in every configuration: ``AgentEventStore``
+refills it at startup whether or not ``SYN_SKIP_AUTO_CREATE_TABLES`` is set,
+and ``rebuild_projection tool_call_counts`` recounts it on demand. A tally
+that has rows in it and the WRONG rows does neither, and cannot - telling a
+wrong count from a right one costs exactly the recount, so nothing cheap can
+be asked first. That is what this is for, and it is the same recount either
+way.
 
 Run it when the numbers are not believable: after an import that wrote
 ``agent_events`` by some path that did not maintain the tally, after a restore

@@ -39,6 +39,7 @@ from syn_adapters.events.store_write import (
 from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
+from syn_domain import tool_call_counts
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,26 @@ class AgentEventStore:
         )
 
     async def initialize(self) -> None:
-        """Initialize connection pool and create schema if needed."""
+        """Open the pool, ready the schema, and repair the tool-call tally.
+
+        TWO STEPS, NOT ONE, and the reason is the flag. ``ensure_schema``
+        auto-creates ``agent_events`` only when
+        ``SYN_SKIP_AUTO_CREATE_TABLES`` is unset, because a deployment that
+        applies migrations by hand does not want DDL invented under it. That
+        is a statement about who owns the DDL.
+
+        The tally is a different question: not "does this table exist" but
+        "does this read model hold the right rows". Migration 004 creates
+        ``agent_tool_call_counts`` EMPTY, and an empty tally is not a missing
+        number, it is a wrong one - every session on the page reporting zero
+        tool calls, indefinitely, with nothing in the logs. So the repair runs
+        on every startup in every configuration, which is what makes "a blank
+        tally repairs itself at startup" a true statement about the deployment
+        we actually ship rather than about the development default (#1322).
+
+        Cheap when there is nothing to do: one index probe that stops at the
+        first row. See ``tool_call_counts.ensure_ready``.
+        """
         if self._initialized:
             return
 
@@ -90,6 +110,7 @@ class AgentEventStore:
 
         async with self.pool.acquire() as conn:
             await self._schema.ensure_schema(conn)  # type: ignore[arg-type]  # asyncpg PoolConnectionProxy is compatible with Connection
+            await tool_call_counts.ensure_ready(conn)  # type: ignore[arg-type]  # asyncpg satisfies the protocol
 
         self._initialized = True
         logger.info("AgentEventStore initialized")
