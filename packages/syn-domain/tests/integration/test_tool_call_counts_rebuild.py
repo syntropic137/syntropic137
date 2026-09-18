@@ -20,8 +20,14 @@ hypertable. Compression is why the old query was slow; it has no bearing on
 which rows a ``GROUP BY`` returns, and a plain table lets this run anywhere
 Postgres runs. Everything the tally itself touches is the real thing.
 
+The last two go further and drive the LIFECYCLES that have to reach the
+recount - the coordinator's ``rebuild_projection`` and
+``AgentEventStore.initialize`` with auto-creation off - because the recount
+being correct was never the problem; being called was.
+
 Each test gets its own schema, so this never sees - or damages - the
-``agent_events`` other integration tests share.
+``agent_events`` other integration tests share. The startup test gets its own
+database instead, for a reason it explains.
 
     uv run pytest -m integration \\
         packages/syn-domain/tests/integration/test_tool_call_counts_rebuild.py
@@ -30,7 +36,8 @@ Each test gets its own schema, so this never sees - or damages - the
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import asyncpg
@@ -294,3 +301,126 @@ async def test_a_rebuild_cannot_run_past_an_uncommitted_increment(pool: asyncpg.
     async with pool.acquire() as conn:
         assert await _stored_tally(conn) == await _reference_tally(conn)
         assert await _stored_tally(conn) == _EXPECTED_TALLY | {("sess-new", "exec-new"): 1}
+
+
+# ---------------------------------------------------------------------------
+# The two lifecycles that have to reach the recount
+#
+# Everything above calls ``ensure_ready`` and ``rebuild`` directly, and those
+# functions were never the defect. The defect was that in the configuration we
+# deploy, nothing called them: the tally was not in the projection registry, and
+# startup repaired it only from the branch ``SYN_SKIP_AUTO_CREATE_TABLES=true``
+# skips. So these two drive the entry points production drives, and check the
+# rows that come out against the same ``GROUP BY``.
+#
+# They reach into ``syn_adapters`` from a ``syn-domain`` test, which the
+# layering rule permits for tests and not for ``src``, and which is the point:
+# the expectations these check against are the ones above, and a copy of
+# ``_EXPECTED_TALLY`` in another package is a copy that drifts.
+# ---------------------------------------------------------------------------
+
+
+def _registered_projections(pool: asyncpg.Pool) -> list[object]:
+    """The projection registry production builds, built the way production builds it.
+
+    ``event_store`` and ``projection_store`` are placeholders because
+    ``rebuild_projection`` uses neither - it deletes a checkpoint and calls the
+    projection's own ``clear_all_data``. The pool is the argument that matters
+    and it is the real one.
+    """
+    from syn_adapters.subscriptions import create_coordinator_service
+
+    service = create_coordinator_service(
+        event_store=cast("Any", object()),
+        projection_store=cast("Any", object()),
+        pool=pool,
+    )
+    return service._projections
+
+
+async def test_the_application_projection_rebuild_recounts_the_tally(pool: asyncpg.Pool) -> None:
+    """``rebuild_projection tool_call_counts``, end to end, against real rows.
+
+    This is the operator action the read model was invisible to. An unregistered
+    projection raises ``KeyError`` here, so reaching the rows at all is half the
+    assertion; the other half is that they are the rows the history justifies
+    rather than the wrong ones this test put there.
+    """
+    from event_sourcing import MemoryCheckpointStore, SubscriptionCoordinator
+
+    async with pool.acquire() as conn:
+        await tool_call_counts.ensure_ready(conn)
+        await conn.execute(f"UPDATE {tool_call_counts.TABLE} SET tool_calls = 9999")
+        await conn.execute(f"DELETE FROM {tool_call_counts.TABLE} WHERE session_id = 'sess-c'")
+
+    coordinator = SubscriptionCoordinator(
+        event_store=cast("Any", object()),
+        checkpoint_store=MemoryCheckpointStore(),
+        projections=cast("Any", _registered_projections(pool)),
+    )
+    await coordinator.rebuild_projection(tool_call_counts.PROJECTION_NAME)
+
+    async with pool.acquire() as conn:
+        assert await _stored_tally(conn) == _EXPECTED_TALLY
+        assert await _stored_tally(conn) == await _reference_tally(conn)
+
+
+@pytest.fixture
+async def hand_migrated_dsn(test_infrastructure) -> AsyncGenerator[str]:  # shared fixture
+    """A database set up the way a production deploy sets one up.
+
+    Its own DATABASE, not its own schema, because ``EventStoreSchema.validate``
+    looks ``agent_events`` up in ``public`` specifically - so a startup test
+    that hid in a private schema would fail before it reached the tally.
+
+    ``agent_events`` and the tally table are created here, by hand, as an
+    operator running the migrations creates them; the tally is left EMPTY, the
+    state a projection rebuild or a restore leaves behind. Nothing else is
+    prepared: what happens next is entirely ``AgentEventStore.initialize``.
+    """
+    name = f"tally_startup_{uuid4().hex[:10]}"
+    admin = await asyncpg.connect(test_infrastructure.timescaledb_url)
+    await admin.execute(f"CREATE DATABASE {name}")
+
+    parts = urlsplit(test_infrastructure.timescaledb_url)
+    dsn = urlunsplit(parts._replace(path=f"/{name}"))
+
+    setup = await asyncpg.connect(dsn)
+    try:
+        await setup.execute(_AGENT_EVENTS_DDL)
+        await _seed(setup, _SEEDED_HISTORY)
+        await setup.execute(tool_call_counts.CREATE_TABLE_SQL)
+        await setup.execute(tool_call_counts.CREATE_INDEX_SQL)
+        assert await _stored_tally(setup) == {}
+    finally:
+        await setup.close()
+
+    yield dsn
+
+    await admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
+    await admin.close()
+
+
+async def test_the_deployed_startup_path_repairs_a_blank_tally(hand_migrated_dsn: str) -> None:
+    """Auto-creation off - the one configuration that used to skip the repair.
+
+    ``skip_auto_create=True`` is what ``SYN_SKIP_AUTO_CREATE_TABLES=true``
+    produces and is what we ship. Before this fix, coming up against exactly
+    this database left the tally as it found it and every session on the
+    dashboard reported zero tool calls, indefinitely, with nothing in the logs.
+    """
+    from syn_adapters.events.schema import EventStoreSchema
+    from syn_adapters.events.store import AgentEventStore
+
+    store = AgentEventStore(hand_migrated_dsn, schema=EventStoreSchema(skip_auto_create=True))
+    try:
+        await store.initialize()
+    finally:
+        await store.close()
+
+    conn = await asyncpg.connect(hand_migrated_dsn)
+    try:
+        assert await _stored_tally(conn) == _EXPECTED_TALLY
+        assert await _stored_tally(conn) == await _reference_tally(conn)
+    finally:
+        await conn.close()

@@ -56,8 +56,9 @@ places that have to reach ``rebuild`` are both here:
   ``rebuild_projection`` recounts it instead of walking past it.
 - ``ensure_ready`` runs at every startup, from ``AgentEventStore.initialize``.
   Deliberately NOT from the branch that auto-creates tables: production sets
-  ``SYN_SKIP_AUTO_CREATE_TABLES=true`` and applies migrations by hand, and
-  migration 004 creates this table EMPTY. Creating tables and repairing a read
+  ``SYN_SKIP_AUTO_CREATE_TABLES=true``, so the deployment most likely to have
+  had its tally emptied - by a rebuild, a restore, an operator - was the one
+  configuration that skipped the repair. Creating tables and repairing a read
   model are different jobs and must not share a switch.
 """
 
@@ -445,4 +446,3 @@ class ToolCallCountsProjection(CheckpointedProjection):
             raise ToolCallCountsNotWiredError(PROJECTION_NAME)
         async with self._pool.acquire() as conn:
             await rebuild(conn)
-
