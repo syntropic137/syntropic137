@@ -4,6 +4,13 @@ You have the framing and paths (`artifacts/input/options/options.md`) and a
 different model's attack on them (`artifacts/input/attack-options/attack.md`).
 This is the only phase allowed to choose.
 
+**You do not run experiments.** You name them, and the experiment phase runs
+them after a second model has reviewed them. Running them here spends this
+phase's budget on work that has not been reviewed yet; a phase that did exactly
+that timed out with its decision written but never delivered. If a question is
+answerable by reading the repository, read it and cite it; if it needs
+something run, it is an assumption with a falsifying experiment.
+
 > **Where to find that input.** The durable location is the directory
 > `artifacts/input/<phase-id>/`, holding whatever the previous phase wrote under
 > `artifacts/output/`. A flat `artifacts/input/<phase-id>.md` alias also exists
