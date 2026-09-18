@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_api.routes.executions.queries import _map_phase_detail, _map_phase_to_response
+from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
 from syn_api.types import PhaseExecution
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     PhaseExecutionDetail,

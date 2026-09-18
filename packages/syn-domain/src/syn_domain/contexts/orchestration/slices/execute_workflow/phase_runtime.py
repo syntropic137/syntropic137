@@ -37,6 +37,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.artifacts import AgentIdentity
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    PhaseUsage,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_observed_branches,
 )
@@ -163,7 +166,31 @@ class PhaseRuntime:
         #: line. Popped on success so a completed phase leaves nothing behind.
         self._leader_native_ids: dict[tuple[str, str], str] = {}
         self._tokens: dict[str, TokenAccumulator] = {}
-        self._auth_tokens: dict[str, tuple[int, int, int, int]] = {}
+        #: What each phase spent, in input/output/cache-creation/cache-read
+        #: order, as `FinalUsage.resolve` settled it: the harness's own terminal
+        #: totals when it reported them, and the deltas observed while it ran
+        #: when it was killed before reporting. So "auth" is the USUAL case, not
+        #: the only one - a timed-out phase's entry is an estimate, and that
+        #: estimate is the whole of what is known about what it cost (#1262).
+        #:
+        #: Written by `record_agent_run`, which runs BEFORE the exit-status
+        #: check that fails the phase, so an entry exists here for every phase
+        #: whose agent ran at all - including every one that then died.
+        #:
+        #: Keyed by (execution_id, phase_id), NOT phase_id alone, for the reason
+        #: `_leader_native_ids` above is: two concurrent runs of the same
+        #: workflow share a phase id, so a phase-only key lets one run report
+        #: the OTHER run's spend. That is worse here than a wrong leader, which
+        #: only costs an import - these counts are the whole basis for telling a
+        #: stalled phase from one that needed a bigger budget (#1262), and a
+        #: number attributed to the wrong execution reads as measurement.
+        #:
+        #: TAKEN, never merely read: `harvest` pops the entry on the success
+        #: path and `usage_for` pops it on the failure path, which between them
+        #: are every way a phase ends. `abandon_all` clears nothing here on
+        #: purpose - it runs AFTER `usage_for` on the failure path, so clearing
+        #: it there would erase the counts the run is on its way out to report.
+        self._auth_tokens: dict[tuple[str, str], tuple[int, int, int, int]] = {}
         self._artifact_ids: dict[str, list[str]] = {}
         #: The model each phase's harness announced on its own stream (#1284).
         #: Held here rather than re-read at collection time because the stream
@@ -174,13 +201,15 @@ class PhaseRuntime:
         #: the same two hazards that moved `last_agent_message` onto the event
         #: stream in #1300.
         #:
-        #: `record_agent_run` is handed an `execution_id` and does not use it,
-        #: which looks like the fix is one line away. It is not. EVERY map on
-        #: this object is keyed the same way - `_workspaces`, `_envs`,
-        #: `_cmds`, `_session_ids`, `_tokens`, `_artifact_ids`, `_started_at` -
-        #: and `finalize`, which clears them, is not given an execution id at
-        #: all. Fixing this field alone would close one instance of the class
-        #: and leave the rest open while looking settled. Tracked as #1311.
+        #: Still open, and deliberately. `_auth_tokens` above was re-keyed
+        #: because its reader was being written at the same time, so the right
+        #: signature cost nothing; this one is not the same shape. EVERY
+        #: remaining map on this object is keyed by phase alone - `_workspaces`,
+        #: `_envs`, `_cmds`, `_session_ids`, `_tokens`, `_artifact_ids`,
+        #: `_started_at` - and `finalize`, which clears them, is not given an
+        #: execution id at all. Re-keying this field alone would close one
+        #: instance of the class and leave the rest open while looking settled.
+        #: Tracked as #1311, with the concurrency it needs under #865.
         self._announced_models: dict[str, str] = {}
         self._started_at: dict[str, datetime] = {}
 
@@ -253,7 +282,7 @@ class PhaseRuntime:
         self,
         phase_id: str,
         *,
-        execution_id: str,  # noqa: ARG002 - see the note below
+        execution_id: str,
         result: AgentExecutionResult,
     ) -> None:
         """Keep what the agent produced until the phase reports or dies."""
@@ -268,7 +297,7 @@ class PhaseRuntime:
             self._announced_models[phase_id] = announced
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
-        self._auth_tokens[phase_id] = (
+        self._auth_tokens[execution_id, phase_id] = (
             result.command.input_tokens,
             result.command.output_tokens,
             result.command.cache_creation_tokens,
@@ -308,13 +337,20 @@ class PhaseRuntime:
         """
         return self._workspaces
 
-    def harvest(self, phase_id: str) -> PhaseHarvest:
-        """Take everything a completing phase accumulated, and stop holding it."""
+    def harvest(self, execution_id: str, phase_id: str) -> PhaseHarvest:
+        """Take everything a completing phase accumulated, and stop holding it.
+
+        ``execution_id`` names WHOSE phase this is, which `phase_id` alone does
+        not: concurrent runs of one workflow share phase ids, so the counts are
+        held per run. It is the caller's to-do item's, so it always belongs to
+        the run doing the completing. The other fields here are still keyed by
+        phase alone and so are still shared - that is #1311, not this.
+        """
         self._tokens.pop(phase_id, None)
         return PhaseHarvest(
             started_at=self._started_at.pop(phase_id, datetime.now(UTC)),
             artifact_ids=self._artifact_ids.pop(phase_id, []),
-            auth_tokens=self._auth_tokens.pop(phase_id, None),
+            auth_tokens=self._auth_tokens.pop((execution_id, phase_id), None),
         )
 
     async def finalize(
@@ -374,6 +410,41 @@ class PhaseRuntime:
         `PhaseTimings` for what reading it late cost (#1036).
         """
         return PhaseTimings(started_at=dict(self._started_at), session_ids=dict(self._session_ids))
+
+    def usage_for(self, execution_id: str, phase_id: str | None) -> PhaseUsage:
+        """What THIS run's phase had spent, for a caller about to report it.
+
+        ``execution_id`` is half the identity of the answer and not context.
+        Concurrent dispatches share this object, and two runs of one workflow
+        share phase ids like "implement", so a phase-only question has no single
+        true answer: it returns whichever run recorded last. The caller always
+        has the id - it is the failing run's own - so asking with it costs a
+        parameter and removes the case entirely.
+
+        TAKES the entry rather than reading it, the way `harvest` does on the
+        success path. Between them those are every way a phase ends, so nothing
+        is left behind for a processor that outlives the run - and since the
+        failure path never harvests, a read that left the entry in place would
+        make this map grow for the life of the process. One read per phase is
+        what the counts are for: this is the last frame in which anything can
+        ask (#1262).
+
+        MUST still be called before the caller's first await on a terminal path,
+        for the reason `timings` must be. A frozen `PhaseUsage` rather than the
+        live accumulator is what makes that a snapshot instead of a promise.
+
+        Zeros for a phase whose agent never ran - it spent nothing, and there is
+        no "unknown" to distinguish; see `PhaseUsage`.
+        """
+        inp, out, cache_creation, cache_read = self._auth_tokens.pop(
+            (execution_id, phase_id or ""), (0, 0, 0, 0)
+        )
+        return PhaseUsage(
+            input_tokens=inp,
+            output_tokens=out,
+            cache_creation_tokens=cache_creation,
+            cache_read_tokens=cache_read,
+        )
 
     async def observe(self, phase_id: str | None) -> ObservedBranches | None:
         """Where a dying phase's branches stand, or None when nobody looked."""

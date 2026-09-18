@@ -331,6 +331,17 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             observed_branches=(
                 None if command.observed_branches is None else list(command.observed_branches)
             ),
+            failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
+            # Spread into four named fields HERE, once, rather than carried as
+            # a nested object: every sibling `failed_phase_*` field on this
+            # event is flat, and the projection that reads them reads flat
+            # keys. The total is deliberately not a fifth field - it is derived
+            # from these four wherever it is wanted, so it cannot disagree with
+            # them (#1262).
+            failed_phase_input_tokens=command.failed_phase_usage.input_tokens,
+            failed_phase_output_tokens=command.failed_phase_usage.output_tokens,
+            failed_phase_cache_creation_tokens=command.failed_phase_usage.cache_creation_tokens,
+            failed_phase_cache_read_tokens=command.failed_phase_usage.cache_read_tokens,
         )
         self._apply(event)
 

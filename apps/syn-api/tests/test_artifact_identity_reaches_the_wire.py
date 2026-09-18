@@ -176,6 +176,11 @@ async def test_the_list_endpoint_names_them_on_the_wire():
 
     response = await list_artifacts_endpoint(
         workflow_id="wf-1284",
+        # Every declared parameter is named, and must be: called directly
+        # rather than over HTTP, FastAPI never resolves the defaults, so an
+        # omitted one arrives as a truthy `Query` object and filters the
+        # collection down to nothing rather than not filtering at all.
+        execution_id=None,
         phase_id=None,
         session_id=None,
         artifact_type=None,

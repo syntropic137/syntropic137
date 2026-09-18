@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 
 
@@ -120,6 +121,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
@@ -182,6 +184,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         session_mgr.mark_launched.assert_not_awaited()
@@ -234,6 +237,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
 

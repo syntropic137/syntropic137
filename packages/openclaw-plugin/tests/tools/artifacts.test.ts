@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SyntropicClient } from "../../src/client.js";
 import { synGetArtifact, synListArtifacts } from "../../src/tools/artifacts.js";
-import { artifactDetail, artifactList } from "../fixtures/responses.js";
+import { artifactDetail, artifactList, artifactListPaged } from "../fixtures/responses.js";
 
 const mockFetch = vi.fn<typeof globalThis.fetch>();
 let client: SyntropicClient;
@@ -34,8 +34,24 @@ describe("synListArtifacts", () => {
     expect(result.content).toContain("4.0 KB");
   });
 
+  it("reports the page count from the collection size, not the rows returned", async () => {
+    // `total` means "artifacts matching every filter", which is the number this
+    // header divides. With 137 across pages of 50 the answer is 3 and the caller
+    // is on 2 - none of which can be read off `artifacts.length`. This is the
+    // #1204 envelope the endpoint has answered with since c467de3b; the
+    // executions tool was pinned against it and this one never was.
+    mockFetch.mockResolvedValueOnce(jsonResponse(artifactListPaged));
+
+    const result = await synListArtifacts(client, { page: 2 });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("## Artifacts (137 total, page 2/3)");
+  });
+
   it("handles empty list", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([]));
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ artifacts: [], total: 0, page: 1, page_size: 50 }),
+    );
 
     const result = await synListArtifacts(client, {});
     expect(result.content).toBe("No artifacts found.");

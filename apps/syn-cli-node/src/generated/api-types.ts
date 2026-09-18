@@ -439,6 +439,13 @@ export interface paths {
          * List Artifacts Endpoint
          * @description List artifacts with optional filtering.
          *
+         *     ``execution_id`` is declared here rather than left to the client because an
+         *     undeclared query parameter is dropped, not refused (#1306): a real id, a
+         *     nonsense id and no filter at all returned the same unfiltered page, so "this
+         *     run's deliverable" resolved to whatever any run wrote most recently. The
+         *     same defect #1263 fixed on ``/sessions``, on the surface where it decides
+         *     what a phase reads.
+         *
          *     The window is named after ``created_at`` because that is the timestamp an
          *     artifact has; the siblings bound ``started_at`` and spell it
          *     ``started_after``. The validation is the same one (#1186): a bound with no
@@ -1929,6 +1936,8 @@ export interface components {
             id: string;
             /** Workflow Id */
             workflow_id: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
             /** Artifact Type */
@@ -3386,6 +3395,58 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * PhaseActivityInfo
+         * @description What a phase was DOING when it ended, and against what budget (#1262).
+         *
+         *     THE ANSWER TO "was it busy or was it stuck", for the one failure that
+         *     cannot answer it itself. A phase killed on its deadline exits 124, and so
+         *     does a phase that hung; the two need opposite responses - dispatch a
+         *     continuation with a bigger budget, or do not pay for that run a second
+         *     time - and until this model existed nothing in the execution record
+         *     separated them. An operator had to open the transcript, and four runs in
+         *     one day were triaged without one.
+         *
+         *     Read as a whole, the fields are the triage:
+         *
+         *     * many operations and a push moments before the end - it was working, and
+         *       the budget was too short;
+         *     * a handful of operations and no push for most of an hour - it stalled,
+         *       and a bigger budget buys another stalled hour;
+         *     * ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,
+         *       as against a 124 reported well inside the budget, which is some other
+         *       death wearing the same exit code.
+         *
+         *     Every field is a READING, never a verdict. Nothing here says "stalled":
+         *     that word is a judgement about intent, and these are four measurements
+         *     that let a reader make it.
+         *
+         *     AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+         *     The activity readings come from Lane 2, which fails soft, and a lookup that
+         *     raised or found no database once produced zero operations and no push -
+         *     which is precisely the shape of a stall. The feature built to stop an
+         *     operator being told "do not pay for this again" on no evidence was
+         *     manufacturing exactly that signal out of its own outage.
+         *     ``telemetry_available`` says whether the timeline was read at all, and the
+         *     readings taken from it are null when it was not.
+         */
+        PhaseActivityInfo: {
+            /**
+             * Telemetry Available
+             * @default false
+             */
+            telemetry_available: boolean;
+            /** Operations Count */
+            operations_count?: number | null;
+            /** Last Push At */
+            last_push_at?: string | null;
+            /** Seconds Since Last Push */
+            seconds_since_last_push?: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+        };
+        /**
          * PhaseDefinitionResponse
          * @description Phase definition within a workflow template.
          */
@@ -3499,6 +3560,7 @@ export interface components {
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
+            activity?: components["schemas"]["PhaseActivityInfo"];
         };
         /**
          * PhaseMetrics
@@ -6326,6 +6388,8 @@ export interface operations {
             query?: {
                 /** @description Filter by workflow ID */
                 workflow_id?: string | null;
+                /** @description Filter by execution ID */
+                execution_id?: string | null;
                 /** @description Filter by phase ID */
                 phase_id?: string | null;
                 /** @description Filter by session ID */
