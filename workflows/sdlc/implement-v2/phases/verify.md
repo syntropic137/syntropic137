@@ -271,3 +271,33 @@ So verify the claim against the artifact, not the prose:
 
 A right conclusion resting on invented evidence is more dangerous than an
 honest gap, because it looks finished.
+
+## A defect you find is repaired, not fatal
+
+A `fix` phase runs after you, reads this report, and repairs what you name. Then
+a second verification pass checks the repair. So finding a defect no longer ends
+the run and discards the work - it starts the repair.
+
+This changes how to write the finding, not how hard to look. **Write each
+blocking defect as an instruction a fix phase can act on**, not as a verdict:
+
+- name the file and line
+- state what is wrong in one sentence
+- state what would close it
+
+"The tests are insufficient" strands the work. "`test_cancel_isolation` builds
+one execution, so it cannot fail for the reason #1311 exists; it needs a second
+concurrent execution and an assertion that its runtime state is untouched" gets
+fixed in one edit.
+
+Two things not to do with this:
+
+- **Do not lower the bar** because a repair is available. A defect you wave
+  through is one the second pass inherits with less budget to catch it.
+- **Do not widen it either.** The fix phase is scoped to exactly what you name,
+  and the run has already spent most of its budget reaching you. Findings that
+  are genuinely optional belong under a heading that says so, clearly separated
+  from what blocks delivery.
+
+Mark plainly which findings block and which do not. The fix phase will treat
+everything you call blocking as required work.
