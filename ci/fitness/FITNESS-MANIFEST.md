@@ -29,6 +29,7 @@ Run both: `just fitness`
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
 | 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
+| 14 | Gate Innocence | test_running_the_gates_does_not_modify_the_invoking_repository | the suite itself is the population | Enforced |
 
 ### 11. Typed Boundaries (#1268, ADR-063)
 
@@ -176,6 +177,42 @@ could not repair as a gate bug rather than as a verdict. Condition 2 of the
 ADR-062 amendment, applied to the local graph: "cannot tell" must not reach a
 reader as "no".
 
+### 14. Gate Innocence (#1343)
+
+Running the gates must leave the repository they were run from exactly as they
+found it.
+
+This one was not reasoned to, it was hit. The submodule-reachability gates build
+git fixtures - `first`, `merged-pointer`, a `feature/not-merged` branch - and
+those names turned up in the reflog of a real checkout: `main` force-moved off
+`origin/main` onto a synthetic commit, the feature branch moved off its own head,
+179 foreign files left untracked. The run reported 706 passed. One `.git` backs
+every worktree, so `main` moved for all of them, and the next `git push origin
+main` would have pushed the fixture.
+
+**`-C` and `cwd=` were already there and did not help.** git resolves `GIT_DIR`
+from the environment before it looks at either, and git exports `GIT_DIR` to
+every hook it runs from a worktree - `.githooks/pre-push` runs `just preflight`,
+and preflight runs this suite. So the fix is not at the call sites: `conftest.py`
+clears the repository-location variables once, for the whole suite, in
+`pytest_configure` rather than a fixture, because collection imports modules that
+ask git things before any fixture could run.
+
+**The gate asserts the property, not the outcome.** Every gate passed while the
+repository was being rewritten, so "does the suite pass" was green throughout and
+tells you nothing. This one records the invoking repository's refs, runs the
+suite, and compares byte for byte. It runs the suite against a repository built
+for the purpose - running it against this checkout to see whether it corrupts
+this checkout is the bug, not a test of it - and launches the child the way the
+hook does, `GIT_DIR` and all.
+
+**The population is the suite, not the two modules that were caught.** Narrowing
+it to the gates that visibly shell out to git would be cheaper and would have a
+hole: a gate reaches git through what it imports as readily as through its own
+`subprocess` call. Every module under `ci/fitness/` must report tests in the
+child's results, so a gate cannot leave the population by quietly collecting
+nothing.
+
 ### 12. Request Contract Honesty (#1313)
 
 A request that asks for something the server does not implement must be told
@@ -239,6 +276,12 @@ Legacy: some tests define config inline. Being consolidated into
 `fitness_exceptions.toml` for single-source-of-truth.
 
 ## Test Inventory
+
+### Suite-wide (`ci/fitness/`)
+
+| Test | What it enforces | Principle |
+|------|------------------|-----------|
+| test_the_gates_leave_the_repository_alone | Running any gate leaves the invoking repository's refs unchanged | 14 |
 
 ### Event Sourcing (`ci/fitness/event_sourcing/`)
 
