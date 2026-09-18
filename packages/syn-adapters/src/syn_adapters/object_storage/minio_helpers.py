@@ -8,10 +8,11 @@ List operations are in minio_queries.py.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from syn_adapters.object_storage.protocol import (
     DownloadError,
@@ -26,58 +27,97 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: How long a write may take to become readable before we call the upload failed.
-#: MinIO itself is read-after-write consistent, so in practice the first stat
+#: MinIO itself is read-after-write consistent, so in practice the first read
 #: answers; the budget is here for S3-compatible backends that are not, and for
-#: a bucket that is briefly serving a stale index.
+#: a bucket that is briefly serving a previous value at the key.
 READABLE_TIMEOUT_SECONDS = 10.0
 
 _POLL_INITIAL_SECONDS = 0.05
 _POLL_MAX_SECONDS = 1.0
 
-
-def _is_missing(exc: Exception) -> bool:
-    """Whether a stat failure means "not there yet" rather than "broken"."""
-    error_msg = str(exc).lower()
-    return "nosuchkey" in error_msg or "not found" in error_msg
+#: Enough of a digest to identify it in a log line without printing all 64.
+_DIGEST_PREFIX = 12
 
 
-async def _readable_size(client: Minio, bucket_name: str, key: str) -> int | None:
-    """Size the backend will currently serve for `key`, or None if it has none."""
+class _Served(NamedTuple):
+    """What a read of a key actually returned, summarised for comparison."""
+
+    sha256: str
+    size_bytes: int
+
+
+async def _read_served(client: Minio, bucket_name: str, key: str) -> _Served | None:
+    """Summarise the bytes the backend serves for `key`, or None if it serves none.
+
+    This downloads. A `stat_object` would be cheaper and would answer a
+    different question - see `await_readable_content` for why the cheaper
+    question is the wrong one.
+    """
     loop = asyncio.get_event_loop()
     try:
-        stat = await loop.run_in_executor(
+        payload = await loop.run_in_executor(
             None,
-            partial(client.stat_object, bucket_name, key),
+            partial(do_download, client, bucket_name, key),
         )
+    except ObjectNotFoundError:
+        return None
     except Exception as exc:
-        if _is_missing(exc):
-            return None
         raise UploadError(f"Failed to confirm upload of {key}: {exc}", key=key) from exc
-    return stat.size
+    return _Served(sha256=hashlib.sha256(payload).hexdigest(), size_bytes=len(payload))
 
 
-async def await_object_readable(
+def _describe(served: _Served | None) -> str:
+    """How to name what a read saw, in the error a caller will have to act on."""
+    if served is None:
+        return "missing"
+    return f"{served.size_bytes} bytes hashing sha256:{served.sha256[:_DIGEST_PREFIX]}"
+
+
+async def await_readable_content(
     client: Minio,
     bucket_name: str,
     key: str,
-    expected_size: int,
+    expected_sha256: str,
 ) -> None:
-    """Block until `key` serves `expected_size` bytes to a reader.
+    """Block until a GET of `key` returns bytes hashing to `expected_sha256`.
 
-    `put_object` returning means the backend accepted the write, not that the
-    next reader can see it. Anything that publishes a pointer to the object
-    needs the stronger fact - `ArtifactCreatedEvent` carries a `storage_uri`,
-    and a consumer that reacts to it and fetches immediately was getting a 404
-    or a short object (#700). Confirming here is what lets every caller treat a
-    returned upload as durable without knowing how that was established.
+    THE GUARANTEE IS READABILITY, NOT DURABILITY. Returning means a read issued
+    now got exactly the bytes that were written. It says nothing about
+    surviving the loss of a disk, a node or a site: that is a property of how
+    the backend is deployed, not something any client call can establish.
+    MinIO in distributed mode commits a write to erasure-coding write quorum
+    before `put_object` returns, and a single-node single-drive MinIO - what
+    `just dev` runs - has no redundancy at all and never will, whatever this
+    function returns. So do not read "durable" into a successful upload, and do
+    not write it in a docstring above one.
 
-    Size is checked, not just existence, because a short read is the same
-    failure as a missing one to the consumer and is far harder to spot.
+    Readability is nonetheless exactly the fact #700 needs. `put_object`
+    returning means the backend accepted the write; `ArtifactCreatedEvent` then
+    publishes a `storage_uri`, and a consumer that reacts to the event and
+    fetches immediately was getting a 404 or a short object.
+
+    IT READS THE OBJECT, AND THAT IS THE POINT. This check used to be a
+    `stat_object` compared against the written length. A HEAD establishes that
+    some metadata record of that size exists, which is a weaker claim than it
+    looks and is passed by all three things that actually go wrong here: a HEAD
+    answered from an index while the GET still 404s, a truncated object whose
+    HEAD reports the full written length anyway, and a PREVIOUS object of the
+    same size still being served at the key. One digest over the bytes a reader
+    would receive rules out all three at once, so none of them needs a case of
+    its own.
+
+    The cost is one extra GET per upload. Artifacts are markdown deliverables,
+    and the alternative is publishing a URI the platform cannot stand behind.
+
+    Args:
+        client: Minio client instance.
+        bucket_name: Storage bucket name.
+        key: Object key that was just written.
+        expected_sha256: Hex SHA-256 of the bytes that were written.
 
     Raises:
-        UploadError: If `key` is not readable at `expected_size` within
-            `READABLE_TIMEOUT_SECONDS`, or if the backend fails the check
-            outright.
+        UploadError: If `key` does not serve those bytes within
+            `READABLE_TIMEOUT_SECONDS`, or if the read fails outright.
     """
     loop = asyncio.get_event_loop()
     # Read at call time so the budget is one knob, tunable in one place.
@@ -86,14 +126,14 @@ async def await_object_readable(
     delay = _POLL_INITIAL_SECONDS
 
     while True:
-        size = await _readable_size(client, bucket_name, key)
-        if size == expected_size:
+        served = await _read_served(client, bucket_name, key)
+        if served is not None and served.sha256 == expected_sha256:
             return
         if loop.time() + delay > deadline:
-            seen = "missing" if size is None else f"{size} bytes"
             raise UploadError(
-                f"Upload of {key} was accepted but is still {seen} after "
-                f"{timeout_seconds}s (expected {expected_size} bytes)",
+                f"Upload of {key} was accepted but a read still returns "
+                f"{_describe(served)} after {timeout_seconds}s "
+                f"(expected sha256:{expected_sha256[:_DIGEST_PREFIX]})",
                 key=key,
             )
         await asyncio.sleep(delay)

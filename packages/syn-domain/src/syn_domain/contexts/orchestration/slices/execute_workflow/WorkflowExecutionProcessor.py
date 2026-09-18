@@ -90,7 +90,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
+    from syn_domain.contexts.artifacts.ports import (
         ArtifactContentStoragePort,
     )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (

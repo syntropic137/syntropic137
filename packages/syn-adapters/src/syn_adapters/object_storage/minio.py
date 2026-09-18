@@ -35,7 +35,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.minio_helpers import (
-    await_object_readable as _await_object_readable,
+    await_readable_content as _await_readable_content,
 )
 from syn_adapters.object_storage.minio_helpers import (
     do_download as _do_download,
@@ -248,15 +248,18 @@ class MinioStorage:
             content_type: MIME type. Auto-detected if not provided.
             metadata: Custom metadata.
 
-        Returns when the content is readable, not merely accepted - see
-        `await_object_readable` for why the difference matters (#700).
+        Returns once a read of `key` returns these exact bytes, not merely once
+        the backend accepted the write - see `await_readable_content` for why
+        that difference matters (#700), and for what it deliberately does NOT
+        promise: readability is not durability, and no client call can
+        establish durability.
 
         Returns:
             UploadResult with key, size, and ETag.
 
         Raises:
-            UploadError: If the upload fails, or if the written object does not
-                become readable at its full size.
+            UploadError: If the upload fails, or if a read of the written key
+                does not return the written bytes.
         """
         await self._ensure_bucket()
         client = self._get_client()
@@ -265,7 +268,12 @@ class MinioStorage:
             None,
             partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
         )
-        await _await_object_readable(client, self._bucket_name, key, len(content))
+        await _await_readable_content(
+            client,
+            self._bucket_name,
+            key,
+            hashlib.sha256(content).hexdigest(),
+        )
         return result
 
     async def download(self, key: str) -> bytes:

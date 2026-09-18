@@ -7,11 +7,18 @@ because `put_object` returning only means the backend accepted the write.
 These tests drive the real chain - `ArtifactCollector` -> `MinioArtifactStorage`
 -> `MinioStorage` - against a client that reproduces the window, and assert
 from the position of that consumer rather than from either end of it.
+
+The guarantee under test is READABILITY: a read issued the moment the event
+exists returns the bytes the event describes. Durability is a property of how
+the backend is deployed and cannot be established from the client, so nothing
+here claims it - see `await_readable_content`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import hashlib
+from itertools import repeat
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
@@ -25,13 +32,23 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 
 if TYPE_CHECKING:
     import io
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
 pytestmark = pytest.mark.unit
 
 BUCKET = "syn-artifacts"
 CONTENT = "# Deliverable\nthe bytes a consumer will ask for"
 EXPECTED_BYTES = CONTENT.encode("utf-8")
+EXPECTED_SHA256 = hashlib.sha256(EXPECTED_BYTES).hexdigest()
+
+#: A PREVIOUS value at the same key, the same length as the new one. Same
+#: length is the whole point: it is what a size comparison cannot tell apart.
+STALE_BYTES = b"S" * len(EXPECTED_BYTES)
+
+#: Long enough that a checker which consumes only ONE read leaves the rest of
+#: the divergence standing for the consumer behind it. A checker that actually
+#: reads content keeps reading until it matches, and so absorbs all of it.
+DIVERGENT_READS = 3
 
 
 class _NoSuchKey(Exception):
@@ -41,14 +58,49 @@ class _NoSuchKey(Exception):
         super().__init__(f"NoSuchKey: {key} does not exist")
 
 
-class _Stat:
-    def __init__(self, size: int) -> None:
-        self.size = size
+class _Visibility(NamedTuple):
+    """One read's worth of backend state, as HEAD and as GET see it.
+
+    They are separate fields because on a real backend they disagree: HEAD is
+    answered from a metadata index, GET has to find the bytes. Every way the
+    old size-only check was wrong is a `_Visibility` whose `head` is honest and
+    whose `get` is not.
+    """
+
+    head: int | None
+    """Size a `stat_object` reports, or None for NoSuchKey."""
+
+    get: bytes | None
+    """Bytes a `get_object` serves, or None for NoSuchKey."""
+
+
+def _nothing_yet() -> _Visibility:
+    """The write has not landed anywhere a reader can see it."""
+    return _Visibility(head=None, get=None)
+
+
+def _short(payload: bytes) -> _Visibility:
+    """Consistently truncated - HEAD and GET agree, and both are short."""
+    return _Visibility(head=len(payload), get=payload)
+
+
+def _head_lies(get: bytes | None) -> _Visibility:
+    """HEAD reports the full written size; the GET behind it does not deliver.
+
+    This is the shape a size comparison cannot see, whether the bytes are
+    absent, truncated, or simply the previous ones.
+    """
+    return _Visibility(head=len(EXPECTED_BYTES), get=get)
 
 
 class _PutResult:
     def __init__(self, etag: str) -> None:
         self.etag = etag
+
+
+class _Stat:
+    def __init__(self, size: int) -> None:
+        self.size = size
 
 
 class _Response:
@@ -66,30 +118,22 @@ class _Response:
 
 
 class _LaggingMinio:
-    """A MinIO client whose accepted writes are not immediately readable.
+    """A MinIO client whose accepted write is not yet what a read returns.
 
-    `reads_before_visible` is how many read attempts answer "not there" before
-    the object appears; `None` means it never does. Counting READS rather than
-    seconds is what makes this an ordering test instead of a race against a
-    clock: whoever reads first is the one that meets the gap, so a caller that
-    publishes before confirming is the caller that gets caught.
+    `window` scripts the reads that follow the put: each entry is one read
+    attempt's view of the key, and HEAD and GET are served from it
+    independently. When the script runs out, reads see what was written.
+    An endless script (`repeat(...)`) is a write that never becomes readable.
 
-    `truncated_reads` is the other half of the same window - the object is
-    there, but short. A consumer cannot tell that from a complete read without
-    knowing the expected size.
+    Counting READS rather than seconds is what makes this an ordering test
+    instead of a race against a clock: whoever reads first is the one that
+    meets the gap, so a caller that publishes before confirming - or confirms
+    without reading - is the caller that gets caught.
     """
 
-    def __init__(
-        self,
-        *,
-        reads_before_visible: int | None = 0,
-        truncated_reads: int = 0,
-    ) -> None:
-        self._reads_before_visible = reads_before_visible
-        self._truncated_reads = truncated_reads
+    def __init__(self, window: Iterable[_Visibility] = ()) -> None:
+        self._window = iter(window)
         self._objects: dict[str, bytes] = {}
-        self._pending_reads: dict[str, int] = {}
-        self._pending_truncations: dict[str, int] = {}
         self.reads: list[str] = []
 
     def bucket_exists(self, bucket_name: str) -> bool:
@@ -108,37 +152,26 @@ class _LaggingMinio:
         metadata: dict[str, str] | None = None,
     ) -> _PutResult:
         self._objects[key] = data.read()
-        if self._reads_before_visible is None:
-            self._pending_reads[key] = -1  # never becomes visible
-        else:
-            self._pending_reads[key] = self._reads_before_visible
-        self._pending_truncations[key] = self._truncated_reads
         return _PutResult(etag="etag-for-" + key)
 
-    def _serve(self, key: str) -> bytes | None:
+    def _next_view(self, key: str) -> _Visibility:
         """What this read sees, consuming one step of the window."""
         self.reads.append(key)
-        if key not in self._objects:
-            return None
-        pending = self._pending_reads.get(key, 0)
-        if pending != 0:
-            if pending > 0:
-                self._pending_reads[key] = pending - 1
-            return None
-        truncations = self._pending_truncations.get(key, 0)
-        if truncations > 0:
-            self._pending_truncations[key] = truncations - 1
-            return self._objects[key][:1]
-        return self._objects[key]
+        written = self._objects.get(key)
+        settled = _Visibility(
+            head=None if written is None else len(written),
+            get=written,
+        )
+        return next(self._window, settled)
 
     def stat_object(self, bucket_name: str, key: str) -> _Stat:
-        payload = self._serve(key)
-        if payload is None:
+        size = self._next_view(key).head
+        if size is None:
             raise _NoSuchKey(key)
-        return _Stat(size=len(payload))
+        return _Stat(size=size)
 
     def get_object(self, bucket_name: str, key: str) -> _Response:
-        payload = self._serve(key)
+        payload = self._next_view(key).get
         if payload is None:
             raise _NoSuchKey(key)
         return _Response(payload)
@@ -154,12 +187,14 @@ class _FetchingRepository:
 
     def __init__(self, storage: MinioStorage) -> None:
         self._storage = storage
+        self.events: list[object] = []
         self.fetched: list[bytes] = []
         self.failures: list[str] = []
         self.uris: list[str | None] = []
 
     async def save(self, aggregate: object) -> None:
         for envelope in aggregate.get_uncommitted_events():  # type: ignore[attr-defined]
+            self.events.append(envelope.event)
             uri = getattr(envelope.event, "storage_uri", None)
             self.uris.append(uri)
             if uri is None:
@@ -216,7 +251,7 @@ async def test_consumer_of_the_created_event_can_read_the_bytes() -> None:
     The window is one read wide, so whoever reads first absorbs it. Publishing
     before confirming makes that first reader the consumer.
     """
-    client = _LaggingMinio(reads_before_visible=1)
+    client = _LaggingMinio(window=[_nothing_yet()])
     storage = _storage_for(client)
     repo = _FetchingRepository(storage)
 
@@ -229,7 +264,55 @@ async def test_consumer_of_the_created_event_can_read_the_bytes() -> None:
 
 async def test_consumer_is_not_handed_a_short_object() -> None:
     """A truncated read is the same broken promise as a missing one."""
-    client = _LaggingMinio(truncated_reads=1)
+    client = _LaggingMinio(window=[_short(EXPECTED_BYTES[:1])])
+    storage = _storage_for(client)
+    repo = _FetchingRepository(storage)
+
+    await _collect_one(repo, storage)
+
+    assert repo.failures == []
+    assert repo.fetched == [EXPECTED_BYTES]
+
+
+@pytest.mark.parametrize(
+    ("what_the_get_serves", "label"),
+    [
+        (None, "the GET 404s"),
+        (EXPECTED_BYTES[:5], "the GET is truncated"),
+    ],
+)
+async def test_a_head_of_the_right_size_does_not_make_the_bytes_readable(
+    what_the_get_serves: bytes | None,
+    label: str,
+) -> None:
+    """HEAD reporting the written length is not evidence a reader gets it.
+
+    A confirmation built on `stat_object` passes here on its first call and
+    hands the rest of the window to the consumer, which is exactly the consumer
+    #700 is about. Only a confirmation that reads the bytes waits this out.
+    """
+    client = _LaggingMinio(window=[_head_lies(what_the_get_serves)] * DIVERGENT_READS)
+    storage = _storage_for(client)
+    repo = _FetchingRepository(storage)
+
+    await _collect_one(repo, storage)
+
+    assert repo.failures == [], f"{label}, and the consumer was handed the URI anyway"
+    assert repo.fetched == [EXPECTED_BYTES]
+
+
+async def test_a_stale_object_of_the_same_size_is_not_mistaken_for_the_new_one() -> None:
+    """The key already held something the same length, and it is still served.
+
+    Nothing 404s and nothing is short, so every signal short of the content
+    itself says the write is visible. The consumer gets the PREVIOUS artifact's
+    bytes under the new artifact's URI - silent, and wrong in the worst way,
+    because it reads as success at every layer.
+    """
+    assert len(STALE_BYTES) == len(EXPECTED_BYTES), "the stale object must be the same size"
+    assert STALE_BYTES != EXPECTED_BYTES
+
+    client = _LaggingMinio(window=[_head_lies(STALE_BYTES)] * DIVERGENT_READS)
     storage = _storage_for(client)
     repo = _FetchingRepository(storage)
 
@@ -241,7 +324,7 @@ async def test_consumer_is_not_handed_a_short_object() -> None:
 
 async def test_upload_does_not_report_success_before_the_write_is_readable() -> None:
     """The guarantee the port states, at the adapter that has to keep it."""
-    client = _LaggingMinio(reads_before_visible=2)
+    client = _LaggingMinio(window=[_nothing_yet(), _nothing_yet()])
     storage = _storage_for(client)
 
     await storage.upload("artifacts/thing.md", EXPECTED_BYTES)
@@ -252,11 +335,21 @@ async def test_upload_does_not_report_success_before_the_write_is_readable() -> 
 @pytest.mark.usefixtures("short_budget")
 async def test_upload_fails_when_the_write_never_becomes_readable() -> None:
     """Never return a URI the adapter cannot stand behind."""
-    client = _LaggingMinio(reads_before_visible=None)
+    client = _LaggingMinio(window=repeat(_nothing_yet()))
     storage = _storage_for(client)
 
-    with pytest.raises(UploadError, match="still missing"):
+    with pytest.raises(UploadError, match="a read still returns missing"):
         await storage.upload("artifacts/lost.md", EXPECTED_BYTES)
+
+
+@pytest.mark.usefixtures("short_budget")
+async def test_upload_fails_when_the_key_only_ever_serves_the_previous_object() -> None:
+    """A permanently stale key fails the upload rather than publishing its URI."""
+    client = _LaggingMinio(window=repeat(_head_lies(STALE_BYTES)))
+    storage = _storage_for(client)
+
+    with pytest.raises(UploadError, match="a read still returns .* bytes hashing sha256:"):
+        await storage.upload("artifacts/stale.md", EXPECTED_BYTES)
 
 
 @pytest.mark.usefixtures("short_budget")
@@ -264,9 +357,11 @@ async def test_unconfirmable_upload_leaves_the_event_whole_without_a_uri() -> No
     """Degrade to event-store-only rather than advertise bytes we cannot serve.
 
     The content is embedded in the event either way, so the artifact survives;
-    what must not survive is a storage_uri pointing at nothing.
+    what must not survive is a storage_uri pointing at nothing. Assert the
+    surviving half, not just the absent one - "no URI" is only defensible
+    because the bytes and their hash are still on the event.
     """
-    client = _LaggingMinio(reads_before_visible=None)
+    client = _LaggingMinio(window=repeat(_nothing_yet()))
     storage = _storage_for(client)
     repo = _FetchingRepository(storage)
 
@@ -274,3 +369,42 @@ async def test_unconfirmable_upload_leaves_the_event_whole_without_a_uri() -> No
 
     assert repo.uris == [None]
     assert repo.failures == []
+    (saved,) = repo.events
+    assert saved.content == CONTENT  # type: ignore[attr-defined]
+    assert saved.content_hash == EXPECTED_SHA256  # type: ignore[attr-defined]
+    assert saved.size_bytes == len(EXPECTED_BYTES)  # type: ignore[attr-defined]
+
+
+async def test_a_caller_bug_is_not_degraded_into_a_missing_uri() -> None:
+    """Only a storage failure downgrades the artifact; our own bugs surface.
+
+    The old `except Exception` could not tell these apart, so a broken call
+    into the port would have logged a storage warning and written every
+    artifact without a URI, indefinitely and silently.
+    """
+
+    class _BrokenPort:
+        async def upload(self, *args: object, **kwargs: object) -> object:
+            raise TypeError("upload() got an unexpected keyword argument 'phase_id'")
+
+    repo = _FetchingRepository(_storage_for(_LaggingMinio()))
+    collector = ArtifactCollector(
+        repository=repo,
+        content_storage=_BrokenPort(),
+        query_service=None,
+    )
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await collector.create_artifact(
+            artifact_id="artifact-700",
+            workflow_id="wf-1",
+            phase_id="phase-1",
+            execution_id="exec-1",
+            session_id="sess-1",
+            artifact_type="report",
+            content=CONTENT,
+            title="Deliverable",
+            agent=UNREPORTED_AGENT,
+        )
+
+    assert repo.events == [], "nothing should have been saved"

@@ -20,8 +20,9 @@ from syn_adapters.storage.artifact_storage.minio_helpers import (
     parse_s3_key,
 )
 
-# Import StorageResult from domain (not local definition)
-from syn_domain.contexts.artifacts.ports import StorageResult
+# Import the port's result and failure types from the domain (not local
+# definitions) - the port declares the contract, this adapter satisfies it.
+from syn_domain.contexts.artifacts.ports import ArtifactStorageError, StorageResult
 
 if TYPE_CHECKING:
     from syn_adapters.object_storage.minio import MinioStorage
@@ -29,13 +30,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class StorageError(Exception):
-    """Raised when a storage operation fails."""
+class StorageError(ArtifactStorageError):
+    """Raised when a storage operation fails.
 
-    pass
+    An ``ArtifactStorageError`` so callers can catch the port's failure type
+    instead of ``Exception``; kept as a distinct name because it is already
+    exported and raised throughout this adapter.
+    """
 
 
-class ArtifactNotFoundError(Exception):
+class ArtifactNotFoundError(ArtifactStorageError):
     """Raised when an artifact is not found in storage."""
 
     def __init__(self, artifact_id: str) -> None:
