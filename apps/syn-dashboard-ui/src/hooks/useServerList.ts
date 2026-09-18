@@ -21,8 +21,8 @@
  * three units and none of them is reachable from a page:
  *
  *   - `useListQuery`    what to ask for, and which collection that is
- *   - `useLatestPage`   asking, one request at a time, and ignoring answers
- *                       that were overtaken
+ *   - `useLatestPage`   asking, one request at a time, and dropping the query
+ *                       the caller has moved on from
  *   - `useLiveRefresh`  when to ask again
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
@@ -42,7 +42,7 @@ export interface UseServerListOptions<TRow> {
    * Fetch one page. Must be referentially stable (wrap in `useCallback`) -
    * it is a dependency of the fetch effect.
    */
-  fetchPage: (query: ListQuery) => Promise<ListPage<TRow>>
+  fetchPage: (query: ListQuery, signal?: AbortSignal) => Promise<ListPage<TRow>>
   /**
    * Identity of any narrowing the caller applies inside `fetchPage` that this
    * hook cannot see, such as Sessions' `workflow_id`. Changing it re-fetches

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getSession } from '../api/sessions'
 import type { SessionResponse } from '../types'
 import { useLiveTimer } from './useLiveTimer'
@@ -25,44 +25,50 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showConversationLog, setShowConversationLog] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
 
   const isRunning = session?.status === 'running'
   const now = useLiveTimer(isRunning)
 
-  // No "cancel the previous request" step: `useSerialRefresh` does not start a
-  // second one while the first is outstanding, so there is never a previous
-  // request to cancel (#1095). The controller is still how the timeout below
-  // and unmount stop a request that IS outstanding.
-  const fetchSession = useCallback((): Promise<void> => {
-    if (!sessionId) return Promise.resolve()
+  // No "cancel the previous request" step, and no controller of its own for
+  // navigating away: `useSerialRefresh` never has two outstanding at once, and
+  // it aborts the one it abandons when the session being viewed changes or the
+  // view unmounts (#1095). What is left here is the one reason to give up that
+  // the loop cannot know about - the server taking too long - so this
+  // controller exists for the timeout and is chained to the loop's signal.
+  const fetchSession = useCallback(
+    (signal: AbortSignal): Promise<void> => {
+      if (!sessionId) return Promise.resolve()
 
-    const controller = new AbortController()
-    abortRef.current = controller
+      const controller = new AbortController()
+      signal.addEventListener('abort', () => controller.abort())
 
-    // Track whether the abort was triggered by our timeout (vs intentional unmount/navigation)
-    let didTimeout = false
-    const timeoutId = setTimeout(() => {
-      didTimeout = true
-      controller.abort()
-    }, FETCH_TIMEOUT_MS)
+      // Which of the two aborted it decides whether the user hears about it.
+      let didTimeout = false
+      const timeoutId = setTimeout(() => {
+        didTimeout = true
+        controller.abort()
+      }, FETCH_TIMEOUT_MS)
 
-    return getSession(sessionId, controller.signal)
-      .then((data) => {
-        setSession(data)
-        setError(null)
-        setLoading(false)
-      })
-      .catch((err) => {
-        // Intentional aborts (navigation) — skip all state updates
-        if (err.name === 'AbortError' && !didTimeout) return
-        setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
-        setLoading(false)
-      })
-      .finally(() => {
-        clearTimeout(timeoutId)
-      })
-  }, [sessionId])
+      return getSession(sessionId, controller.signal)
+        .then((data) => {
+          if (signal.aborted) return
+          setSession(data)
+          setError(null)
+          setLoading(false)
+        })
+        .catch((err) => {
+          // Abandoned by the loop: not a failure, and about a session nobody
+          // is looking at any more.
+          if (signal.aborted) return
+          setError(didTimeout ? 'Request timed out — the API may be overloaded' : err.message)
+          setLoading(false)
+        })
+        .finally(() => {
+          clearTimeout(timeoutId)
+        })
+    },
+    [sessionId],
+  )
 
   // Poll while non-terminal; pauses while the tab is hidden (#1048), and never
   // issues a poll on top of one that has not come back (#1095).
@@ -74,7 +80,6 @@ export function useSessionData(sessionId: string | undefined): UseSessionDataRes
   // Initial fetch, and again whenever the session being viewed changes.
   useEffect(() => {
     refetch()
-    return () => abortRef.current?.abort()
   }, [refetch, fetchSession])
 
   return { session, loading, error, now, showConversationLog, setShowConversationLog }

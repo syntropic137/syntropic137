@@ -51,11 +51,17 @@ export function useDashboardData(): UseDashboardDataResult {
   const isConnected = !loading
 
   const fetchMetrics = useCallback(
-    (): Promise<void> =>
-      getMetrics()
-        .then((next) => setMetrics(next))
-        .catch(console.error)
-        .finally(() => setLoading(false)),
+    (signal: AbortSignal): Promise<void> =>
+      getMetrics(undefined, signal)
+        .then((next) => {
+          if (!signal.aborted) setMetrics(next)
+        })
+        .catch((error) => {
+          if (!signal.aborted) console.error(error)
+        })
+        .finally(() => {
+          if (!signal.aborted) setLoading(false)
+        }),
     [],
   )
 

@@ -144,25 +144,44 @@ describe('useLatestPage', () => {
     expect((lastPage - 1) * pageSize + result.current.result.rows.length).toBe(total)
   })
 
-  it('discards a response that was overtaken by a later query', async () => {
+  it('opens no second request when the query changes with a page still pending', async () => {
     const first = deferred<ListPage<{ id: string }>>()
     const second = deferred<ListPage<{ id: string }>>()
     const responses = [first, second]
-    const fetchPage = vi.fn(() => responses.shift()!.promise)
+    const signals: (AbortSignal | undefined)[] = []
+    let active = 0
+    let maxActive = 0
+    const fetchPage = vi.fn((_query: ListQuery, signal?: AbortSignal) => {
+      signals.push(signal)
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      return responses.shift()!.promise.finally(() => {
+        active -= 1
+      })
+    })
 
     const pageTwo: ListQuery = { page: 2, page_size: LIST_PAGE_SIZE }
     const { result, rerender } = renderHook(({ query }) => useLatestPage(fetchPage, query), {
       initialProps: { query: FIRST_PAGE },
     })
 
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(1))
+
+    // Paging while page 1 is still on the wire - a filter change, a page
+    // button, twice on an endpoint slow enough to make it likely. Page 1's
+    // query is still running on the server whatever the browser does with its
+    // answer, so page 2 may not be issued alongside it (#1095).
     rerender({ query: pageTwo })
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
+    await act(async () => {})
+    expect(fetchPage).toHaveBeenCalledTimes(1)
 
-    second.resolve(page(['page-2-row'], 120))
-    await waitFor(() => expect(result.current.result.rows).toEqual([{ id: 'page-2-row' }]))
+    // Not merely left running: told to stop, which is also how this hook knows
+    // the answer is about a query nobody is asking any more.
+    expect(signals[0]?.aborted).toBe(true)
 
-    // Page 1's answer arrives late. Rendering it would put another page's rows
-    // under the current page's controls.
+    // Page 1's answer arrives. Rendering it would put another page's rows
+    // under the current page's controls, and reporting it settled would show
+    // them as though they were what page 2 returned.
     //
     // Resolved inside `act`, which returns only once React has run what
     // settling that promise scheduled AND committed the result. Awaiting a
@@ -174,9 +193,23 @@ describe('useLatestPage', () => {
     await act(async () => {
       first.resolve(page(['page-1-row'], 999))
     })
+    expect(result.current.result.rows).toEqual([])
+    expect(result.current.loading).toBe(true)
 
+    // And only now is page 2 asked for - exactly once, for the rerender and
+    // the refetch it triggered between them.
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+    expect(fetchPage.mock.calls.at(-1)?.[0]).toBe(pageTwo)
+
+    await act(async () => {
+      second.resolve(page(['page-2-row'], 120))
+    })
     expect(result.current.result.rows).toEqual([{ id: 'page-2-row' }])
     expect(result.current.result.total).toBe(120)
+
+    // The number #1095 is about: two of these were in pg_stat_activity, and a
+    // browser discarding one of the answers did not make it one.
+    expect(maxActive).toBe(1)
   })
 
   it('refetches when the query changes identity', async () => {

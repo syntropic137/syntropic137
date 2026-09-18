@@ -2,10 +2,15 @@
  * The answer to the most recent query, and only that one - kept current.
  *
  * Four things ask these lists to refetch - the filter bar, paging, SSE and the
- * poll that keeps running rows ticking - so responses overlap routinely. An
- * earlier one landing late would put another page's rows on screen under the
- * current page's controls, so a response that has been overtaken is discarded
- * rather than rendered.
+ * poll that keeps running rows ticking. An answer to a query the caller has
+ * moved on from would put another page's rows on screen under the current
+ * page's controls, so it is discarded rather than rendered.
+ *
+ * Which answers those are is not decided here. `useSerialRefresh` aborts the
+ * request it abandons when the query changes, so `signal.aborted` IS the
+ * question "has this been overtaken" - already answered, by the only thing
+ * that knows. This hook used to count its own requests and compare, which was
+ * a second opinion on the same fact and could differ from it.
  *
  * Asking again lives here too, rather than in a timer beside this hook, for a
  * reason worth keeping: a timer outside cannot see the fetch this hook does on
@@ -21,7 +26,7 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
 import { useSerialRefresh } from './useSerialRefresh'
 
@@ -37,7 +42,9 @@ export interface LatestPageState<TRow> {
 
 /**
  * @param fetchPage Must be referentially stable (wrap in `useCallback`) - it
- *   is a dependency of the fetch effect.
+ *   is a dependency of the fetch effect. Pass `signal` on to the request: the
+ *   answer is discarded either way, but only the signal stops the server
+ *   producing it.
  * @param query Refetched whenever this changes identity, so it must be
  *   memoised: `useListQuery` returns one that is.
  * @param pollIntervalFor Shortest gap between polls given the rows currently on
@@ -47,28 +54,33 @@ export interface LatestPageState<TRow> {
  *   slow the endpoint is actually being.
  */
 export function useLatestPage<TRow>(
-  fetchPage: (query: ListQuery) => Promise<ListPage<TRow>>,
+  fetchPage: (query: ListQuery, signal?: AbortSignal) => Promise<ListPage<TRow>>,
   query: ListQuery,
   pollIntervalFor: (rows: TRow[]) => number | null = () => null,
 ): LatestPageState<TRow> {
   const [result, setResult] = useState<ListPage<TRow>>(EMPTY_PAGE)
   const [loading, setLoading] = useState(true)
-  const latestRequest = useRef(0)
 
-  const fetchLatest = useCallback(() => {
-    const request = ++latestRequest.current
-    const isLatest = () => request === latestRequest.current
-    return fetchPage(query)
-      .then((next) => {
-        if (isLatest()) setResult(next)
-      })
-      .catch((error) => {
-        if (isLatest()) console.error(error)
-      })
-      .finally(() => {
-        if (isLatest()) setLoading(false)
-      })
-  }, [fetchPage, query])
+  const fetchLatest = useCallback(
+    (signal: AbortSignal) =>
+      fetchPage(query, signal)
+        .then((next) => {
+          if (!signal.aborted) setResult(next)
+        })
+        .catch((error) => {
+          // Including the abort itself: the request was cancelled on purpose,
+          // and reporting it as a failure of this list would be a lie about a
+          // query nobody asked for any more.
+          if (!signal.aborted) console.error(error)
+        })
+        .finally(() => {
+          // Left loading on purpose when overtaken. The replacement is what
+          // this list is waiting for now, and clearing the flag here would
+          // show the previous query's rows as though they were settled.
+          if (!signal.aborted) setLoading(false)
+        }),
+    [fetchPage, query],
+  )
 
   const { refetch } = useSerialRefresh({
     fetch: fetchLatest,

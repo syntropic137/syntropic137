@@ -56,20 +56,32 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
   const isRunning = execution?.status === 'running'
   const now = useLiveTimer(isRunning)
 
-  const fetchExecution = useCallback((): Promise<void> => {
-    if (!executionId) return Promise.resolve()
-    return getExecution(executionId)
-      .then((exec) => {
-        setExecution(exec)
-        // A poll that succeeds clears the last one's failure. Without this the
-        // first transient 502 in a run latched `error` for the life of the
-        // page, and the detail view rendered "Execution not found" on top of
-        // execution data that was still refreshing underneath it (#1048).
-        setError(null)
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
-  }, [executionId])
+  // `signal` aborts when the execution being viewed changes. Every branch below
+  // checks it, because all three would otherwise describe the PREVIOUS
+  // execution: its data under this one's id, its failure, or a settled state
+  // that belongs to a request this view is no longer waiting on.
+  const fetchExecution = useCallback(
+    (signal: AbortSignal): Promise<void> => {
+      if (!executionId) return Promise.resolve()
+      return getExecution(executionId, signal)
+        .then((exec) => {
+          if (signal.aborted) return
+          setExecution(exec)
+          // A poll that succeeds clears the last one's failure. Without this the
+          // first transient 502 in a run latched `error` for the life of the
+          // page, and the detail view rendered "Execution not found" on top of
+          // execution data that was still refreshing underneath it (#1048).
+          setError(null)
+        })
+        .catch((err) => {
+          if (!signal.aborted) setError(err.message)
+        })
+        .finally(() => {
+          if (!signal.aborted) setLoading(false)
+        })
+    },
+    [executionId],
+  )
 
   // SSE only fires on lifecycle transitions; tokens/cost/duration update
   // continuously, so poll while non-terminal (#1048) - but never on top of a
