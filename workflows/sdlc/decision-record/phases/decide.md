@@ -64,6 +64,12 @@ assumption in the list above.
 
 ## Write to `artifacts/output/decision.md`
 
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
+
 ## Citing code
 
 Every `file:line` reference MUST be the path from the repository root, exactly
