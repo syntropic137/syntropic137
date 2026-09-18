@@ -551,14 +551,9 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            # THE STATUS FIRST AND ALWAYS, then stderr if there was any. This
-            # read `stderr or <exit code>`, so any stderr at all REPLACED the
-            # status - and a setup script that fails has usually printed
-            # something, which made the case that needed the code most the one
-            # case that dropped it. #1295 is exactly that: killed by SIGSEGV,
-            # and the -11 saying so never reached the stored record. The two
-            # facts answer different questions ("how did it end", "what did it
-            # say"), so neither can stand in for the other.
+            # THE STATUS FIRST AND ALWAYS, then stderr if there was any: this
+            # read `stderr or <exit code>`, so a failure that printed anything
+            # dropped the status, which is how #1295's -11 escaped the record.
             stderr = setup_result.stderr.strip()
             detail = f"exit code {format_exit_code(setup_result.exit_code)}"
             detail += f": {stderr}" if stderr else " (no stderr output)"
