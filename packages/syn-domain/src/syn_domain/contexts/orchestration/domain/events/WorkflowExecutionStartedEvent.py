@@ -7,6 +7,16 @@ from typing import Any
 
 from event_sourcing import DomainEvent, event
 
+#: Where the dispatched task lives inside ``inputs``.
+#:
+#: A run is dispatched with a task and a set of inputs, and the task is folded
+#: into the inputs under this key before the event is written -- it is what
+#: ``$ARGUMENTS`` resolves to in a phase prompt. Named here, beside the event
+#: whose payload carries it, because the side that writes it and the side that
+#: reads it back out have to agree; a second literal spelled somewhere else is
+#: how they stop agreeing.
+TASK_INPUT_KEY = "task"
+
 
 @event("WorkflowExecutionStarted", "v1")
 class WorkflowExecutionStartedEvent(DomainEvent):
