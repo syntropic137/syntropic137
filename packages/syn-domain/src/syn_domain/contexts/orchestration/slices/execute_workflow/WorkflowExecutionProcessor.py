@@ -22,8 +22,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    observer_for,
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
+    run_phase_agent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
@@ -49,9 +49,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
     ProvisionResult,
     WorkspaceProvisionHandler,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
-    ObservabilityCollector,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
@@ -71,7 +68,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     ExecutionRepository,
     PhaseOutputCache,
     PromptBuilder,
-    Runner,
     SessionRepository,
     TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
@@ -82,7 +78,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     refuse_to_complete_unsaved_phase,
 )
-from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -594,69 +589,22 @@ class WorkflowExecutionProcessor:
         session_id = todo.session_id or ""
         launch = self._runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
-        timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
-        # Raises on an unknown or removed provider instead of defaulting to
-        # the claude parser. The execution boundary
-        # (_build_agent_config_from_phase) already rejected it, so reaching
-        # that raise means a new entry point skipped the gate.
-        runner: Runner = runner_for_provider(phase.agent_config.provider, phase_id=phase.phase_id)
 
-        collector = ObservabilityCollector(
-            writer=self._observability_writer,
-            session_id=session_id,
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workspace_id=getattr(launch.workspace, "workspace_id", None),
-            agent_model=phase.agent_config.model,
-        )
         # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
-        # line treats a non-zero exit as final, and for every other cause it
-        # is. "Selected model is at capacity" is not a cause: the request was
-        # well-formed and the provider was full for a few seconds. Ending the
-        # run there discarded two completed phases twice in one window.
-        #
-        # Retried HERE, around the agent call and inside the same to-do item,
-        # because that is the only frame where nothing has been decided yet:
-        # the workspace is alive, the aggregate has been told nothing, and the
-        # attempt that failed produced no deliverable to protect. What the
-        # failed attempt DID spend is not lost either - `collector` is shared
-        # across attempts, so its Lane-2 records, which are what the cost
-        # ledger reads, already account for it.
-        #
-        # `interrupt_requested` short-circuits ahead of the policy: a cancelled
-        # phase exits non-zero, and re-running it would restart work an
-        # operator just stopped.
-        attempt = 1
-        while True:
-            result = await self._get_agent_handler().handle(
-                todo=todo,
-                workspace=launch.workspace,
-                agent_env=launch.agent_env,
-                claude_cmd=launch.claude_cmd,
-                session_id=session_id,
-                agent_model=phase.agent_config.model,
-                timeout_seconds=timeout,
-                collector=collector,
-                runner=runner,
-                on_launch=observer_for(launch.session_manager),
-            )
-            if result.command.exit_code == 0 or result.stream_result.interrupt_requested:
-                break
-            if not await self._retry_policy.wait_before_retry(
-                reason=result.stream_result.error_reason, attempt=attempt
-            ):
-                # Final, and `result` is the failed one: the reason it carries
-                # is reported below exactly as the agent gave it, whether the
-                # budget ran out or the failure never qualified.
-                break
-            attempt += 1
-            logger.warning(
-                "Upstream was busy (phase=%s): %s - attempt %d of %d",
-                todo.phase_id,
-                result.stream_result.error_reason,
-                attempt,
-                self._retry_policy.max_attempts,
-            )
+        # line treats the result as final, and for every cause but one it is;
+        # `run_phase_agent` is what makes that true, by not returning until
+        # there is no further attempt to come. How many attempts that took, and
+        # which failures earn one, are settled in `agent_attempts` and are not
+        # facts this function has any use for.
+        result = await run_phase_agent(
+            handler=self._get_agent_handler(),
+            todo=todo,
+            phase=phase,
+            launch=launch,
+            session_id=session_id,
+            observability=self._observability_writer,
+            retry_policy=self._retry_policy,
+        )
 
         self._runtime.remember_leader(
             todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
