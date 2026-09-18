@@ -155,6 +155,41 @@ Rules:
   `@event`-decorated classes
 - `ci/fitness/event_sourcing/conftest.py` - `aggregate_files()` discovery
 
+## Amendment (2026-09-18, #1336): a fitness function may use the network
+
+The pytest half of this standard was written as AST analysis, and until #1336
+every test in `ci/fitness/` was pure, local and offline. #1336 is a property that
+cannot be expressed that way, so the standard is widened rather than the property
+dropped.
+
+The property: a submodule pointer recorded in this repo must already be merged
+into that submodule's own default branch. Only the submodule's remote knows
+whether it has. Every offline formulation inspects the local clone, which was
+populated by the commit under test, so it answers "yes" in exactly the case that
+is wrong -- a green gate over nothing, which is what the issue was filed about.
+
+**A networked fitness function is permitted when all three hold:**
+
+1. The property is about the state of something outside this checkout, so no
+   local-only formulation can decide it. Convenience is not a reason; a check
+   that could read a file instead must read the file.
+2. It **fails** when the network is unavailable, carrying the underlying tool's
+   own error. It must never skip and must never pass. A gate that goes quiet when
+   it cannot see is worse than no gate, because the absence reads as approval.
+3. It is reached only through `just preflight`, which is already a networked
+   target (`check-default-workspace-image` pulls the pinned image;
+   `check-pinned-image-channels` queries the registry). That is what keeps the
+   new requirement at zero for every environment that could run preflight before.
+
+The consequence is explicit: `just fitness` no longer runs offline, and was
+already inside a `preflight` that did not. Environments without network -- an
+agent workspace container, notably -- do not run `fitness` at all today, for want
+of a toolchain, so nothing that used to be checked there has stopped being
+checked.
+
+First and currently only instance:
+`ci/fitness/infrastructure/test_submodule_pointer_reachability.py`.
+
 ## Consequences
 
 **Positive:**
@@ -209,6 +244,7 @@ Infrastructure:
 - `ci/fitness/infrastructure/test_compose_consistency.py`
 - `ci/fitness/infrastructure/test_phase_definition_roundtrip.py`
 - `ci/fitness/infrastructure/test_proxy_hostname_agreement.py`
+- `ci/fitness/infrastructure/test_submodule_pointer_reachability.py`
 
 ### Configuration
 - `fitness.toml` - APSS metric thresholds

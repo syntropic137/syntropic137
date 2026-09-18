@@ -28,6 +28,7 @@ Run both: `just fitness`
 | 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
+| 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
 
 ### 11. Typed Boundaries (#1268, ADR-063)
 
@@ -125,6 +126,41 @@ were verified by reintroducing the real defect: an earlier substring-based
 version PASSED with #1039 restored, because the command builder mentions
 `allowed_tools` whether or not the handler ever sets it. It now asserts the
 keyword is passed at the constructor call.
+
+### 13. Pointer Reachability (#1336)
+
+A submodule pointer recorded in this repo must already be merged into that
+submodule's own default branch.
+
+Nothing asked before. CI checks the submodule out by SHA, finds it, builds and
+goes green whether or not that SHA lives only on a feature branch of the
+submodule repo; `check-submodules` asks whether the submodule is initialized and
+at its recorded commit, which it is. Merging such a PR leaves main pointing into
+an unmerged branch, and every fresh clone breaks as soon as that branch is
+deleted or rebased. #1329 is the live instance: green, and unmergeable for
+exactly this reason.
+
+**This gate uses the network, and that is the decision, not an accident.** The
+property is "has the submodule change landed upstream", and only upstream knows.
+Every offline spelling of it interrogates the local clone, which was populated by
+the commit under test, so it would report green over precisely the state #1336
+describes. There is no honest offline version, only a reassuring one -- see the
+ADR-062 amendment.
+
+It is affordable because `fitness-invariants` runs inside `just preflight`, and
+preflight already pulls the pinned workspace image and queries the registry. In
+CI the owner is the `architectural-fitness` job, which checks out with
+`submodules: true` and runs `just preflight`.
+
+**There is deliberately no skip.** An unreachable remote is a FAILED test
+carrying git's own stderr. A gate that goes quiet exactly when it cannot see is
+the failure mode the issue was filed about, and it would be this one.
+
+The failure message is most of the value: it names the submodule, the SHA, and
+the branches that do contain it, so the reader learns "your submodule PR has not
+merged yet" rather than "something is wrong". Three shapes are distinguished --
+on another branch, on no branch at all (never pushed), and absent from the remote
+(rebased away and collected).
 
 ### 12. Request Contract Honesty (#1313)
 
