@@ -71,6 +71,20 @@ class PhaseDetail:
     the value objects. THREE-VALUED, and stays that way - readings, `[]` for
     "read the workspace and nothing had moved", None for "nothing could look".
     """
+    exit_code: int | None = None
+    """What this phase's process exited with, or ``None`` when nothing
+    observed a status (#1319).
+
+    Declared here for the reason ``observed_branches`` above gives, and it is
+    the same hop: the failure path WRITES this onto the stored phase, and a
+    field this model does not name is dropped by the very next
+    ``to_dict``/``from_dict`` round-trip without a word.
+
+    ``None`` IS NOT 0. 0 is a process that ran and exited cleanly; ``None``
+    covers a phase stranded by a restart, a failure with no process behind it,
+    and every phase stored before this field existed. 124 (budget reached) and
+    -11 (killed) are why the number is kept rather than a flag.
+    """
     deliverable_recovered: bool = False
     """True when this phase's deliverable was recovered from its transcript
     rather than read off the file it promised to write (#1195, #1300).
@@ -157,6 +171,7 @@ class PhaseDetail:
             "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
             "observed_branches": self.observed_branches,
+            "exit_code": self.exit_code,
             "deliverable_recovered": self.deliverable_recovered,
         }
 
@@ -180,5 +195,6 @@ class PhaseDetail:
             timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
             observed_branches=data.get("observed_branches"),
+            exit_code=data.get("exit_code"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
         )

@@ -30,10 +30,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
     UnfinishedPhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
     PhaseReportedFailureError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
+    record_failure_and_release,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -285,6 +289,21 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        finally:
+            # NOTHING LEAVES THIS METHOD STILL HOLDING A WORKSPACE, on any
+            # path. The same hazard as the one guarded inside `_fail_execution`,
+            # one level up and with more of the run inside it: the two terminal
+            # paths above each reap their own, but NEITHER OF THEM RUNS when a
+            # `CancelledError` unwinds out of `_drain_todo_list` - and that is
+            # the minutes an agent spends running, which is exactly where a
+            # shutdown lands. `except Exception` cannot see it; it is a
+            # BaseException.
+            #
+            # A sweep rather than a third special case, and it costs nothing to
+            # arrive here having already reaped: `abandon_all` clears what it
+            # took, so a second call finds nothing to close and does nothing.
+            # The cancellation goes on propagating afterwards, unswallowed.
+            await self._runtime.abandon_all("shutdown")
 
     async def _drain_todo_list(
         self,
@@ -375,8 +394,20 @@ class WorkflowExecutionProcessor:
         The aggregate is already in CANCELLED status - no new command needed.
         """
         cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
+        # Guarded for the reason the failure path below is: the reap is what
+        # stops a container outliving the run, and a session report that raises
+        # must not be what skips it. ExecutionCancelledEvent is already on the
+        # stream by the time this runs (_handle_cancel_signal appended it), so
+        # unlike the failure path there is no ordering to correct here - only
+        # the teardown to make unconditional.
+        try:
+            await self._runtime.report_cancelled(cancellation.reason)
+        except Exception:
+            logger.exception(
+                "Could not close the sessions of execution %s as cancelled", execution_id
+            )
+        finally:
+            await self._runtime.abandon_all("cancel")
         return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _complete_execution(
@@ -409,7 +440,12 @@ class WorkflowExecutionProcessor:
         failed_phase_id: str | None = None,
         kept_artifact_ids: list[str] | None = None,
     ) -> WorkflowExecutionResult:
-        """Close open sessions, save failure event, and return failed result.
+        """Describe why this run died, hand it to be recorded, and return the result.
+
+        Everything before that hand-off is a READ OF THE DYING PHASE, and each
+        one is the last chance to take it: `record_failure_and_release` reaps
+        the workspaces, and the answers do not survive the reap. That is why
+        they are gathered here rather than in there.
 
         ``failed_phase_id`` comes from the run's own _DispatchContext so
         it always belongs to THIS execution, even with concurrent runs
@@ -453,17 +489,16 @@ class WorkflowExecutionProcessor:
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
-
-        fail_cmd = failure.as_command(
-            execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
+        await record_failure_and_release(
+            failure,
+            aggregate=aggregate,
+            journal=self._journal,
+            runtime=self._runtime,
+            execution_id=execution_id,
+            completed_phases=len(completed_phase_ids),
+            total_phases=len(phases),
         )
-        try:
-            aggregate.fail_execution(fail_cmd)
-            await self._journal.append(aggregate)
-        except Exception as save_err:
-            logger.error("Failed to save failure event: %s", save_err)
+
         return failure.execution_result(
             workflow_id,
             execution_id,
@@ -660,14 +695,23 @@ class WorkflowExecutionProcessor:
                 logger.error(refusal)
                 raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
 
-            if result.command.exit_code != 0:
+            # The completion and the status it completed with. Both are present
+            # or neither is: a run with no observed status either raised in the
+            # handler or was cancelled, and a cancelled one returned at the
+            # `interrupt_requested` check above (#1341). Stated once, here,
+            # rather than re-derived at each use below.
+            command = result.command
+            exit_code = result.exit_code
+            assert command is not None and exit_code is not None, (
+                "a run reaching the outcome check must carry its completion and status"
+            )
+
+            if exit_code != 0:
                 reason = result.stream_result.error_reason
                 base = (
-                    f"Agent failed: {reason} "
-                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
+                    f"Agent failed: {reason} (phase={todo.phase_id}, exit_code={exit_code})"
                     if reason
-                    else f"Agent execution failed for phase {todo.phase_id} "
-                    f"(exit_code={result.command.exit_code})"
+                    else f"Agent execution failed for phase {todo.phase_id} (exit_code={exit_code})"
                 )
                 # The token counts used to be appended here as
                 # `(tokens=190+545)`, and that string was the ONLY record of
@@ -679,9 +723,17 @@ class WorkflowExecutionProcessor:
                 # settled on. Two numbers for one phase, and nothing to say
                 # which the reader should believe.
                 logger.error(base)
-                raise RuntimeError(base)
+                # The status goes with the exception, not only into its message.
+                # This is the ONLY frame that holds it: the aggregate is never
+                # told the run completed on this path, so
+                # `AgentExecutionCompletedEvent` - the one event carrying
+                # `exit_code` - is never written for a phase that exited
+                # non-zero. Which is to say every status that actually
+                # distinguishes the outcomes (124, -11) was durably recorded
+                # nowhere, and only 0 ever survived (#1319).
+                raise NonZeroExitError(base, exit_code=exit_code)
 
-            aggregate.agent_execution_completed(result.command)
+            aggregate.agent_execution_completed(command)
             await self._journal.append(aggregate)
         except Exception:
             dispatch_ctx.kept_artifact_ids = await self._keep_unfinished_output(

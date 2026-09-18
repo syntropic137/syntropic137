@@ -1022,6 +1022,16 @@ class PhaseExecution(BaseModel):
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
     """
+    exit_code: int | None = None
+    """What this phase's process exited with, or null if nothing observed one.
+
+    The end of the chain the status travels: event -> projection record ->
+    read model -> here (#1319). `null` is "nothing observed a status" - which
+    includes every phase that did not fail - and is not the claim that it
+    exited 0. 124 means the phase reached its time budget and -11 that it was
+    killed, which is the distinction a client needs to decide between
+    continuing the work and retrying it.
+    """
     observed_branches: list[BranchObservationInfo] | None = None
     """Where this failed phase's branches stood when it died (#1200).
 

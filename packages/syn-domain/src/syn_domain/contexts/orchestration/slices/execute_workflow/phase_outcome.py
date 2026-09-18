@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
     describe_observed_branches,
+    exit_code_of,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -111,6 +112,16 @@ class PhaseFailure:
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
     about rather than one the caller names again alongside it."""
+    exit_code: int | None = None
+    """What the process behind this failure exited with, None when nothing
+    observed one (#1319).
+
+    NONE IS NOT ZERO, and the distinction is the whole point. 0 says the
+    process ran and exited cleanly; None says nobody was left to watch it -
+    an execution stranded by an API restart, a failure with no process behind
+    it at all. The two call for opposite responses, so None is persisted as
+    absent rather than coerced to a number, exactly as `observed_branches`
+    above keeps "nobody could read it" apart from "read it, nothing moved"."""
     usage: PhaseUsage = field(default_factory=PhaseUsage)
     """What the failing phase had spent when it died (#1262).
 
@@ -162,6 +173,7 @@ class PhaseFailure:
             total_phases=total_phases,
             failed_phase_duration_seconds=self.duration_seconds,
             observed_branches=self.observed_branches,
+            exit_code=self.exit_code,
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
         )
@@ -242,6 +254,10 @@ def failed_phase_outcome(
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
     reason = describe_exception(error)
+    # Read from the exception for the same reason `reason` is: one derivation,
+    # four sinks. A call site that dug the status out of the message string
+    # would be the fifth answer this module exists to prevent (#1319).
+    exit_code = exit_code_of(error)
     if observed is not None:
         reason = f"{reason}\n\n{describe_observed_branches(observed)}"
     kept = tuple(kept_artifact_ids)
@@ -251,6 +267,7 @@ def failed_phase_outcome(
         error_type=type(error).__name__,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
+        exit_code=exit_code,
         artifact_ids=kept,
         usage=spent,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
@@ -260,6 +277,7 @@ def failed_phase_outcome(
             session_id_by_phase.get(phase_id or "", ""),
             reason,
             ended_at=ended_at,
+            exit_code=exit_code,
             artifact_ids=kept,
             usage=spent,
         ),
@@ -272,6 +290,7 @@ def failed_phase_result(
     session_id: str,
     error_message: str,
     ended_at: DateTime,
+    exit_code: int | None = None,
     artifact_ids: tuple[str, ...] = (),
     usage: PhaseUsage | None = None,
 ) -> PhaseResult | None:
@@ -302,6 +321,7 @@ def failed_phase_result(
         session_id=session_id,
         error_message=error_message,
         completed_at=ended_at,
+        exit_code=exit_code,
         artifact_id=artifact_ids[0] if artifact_ids else None,
         usage=usage,
     )

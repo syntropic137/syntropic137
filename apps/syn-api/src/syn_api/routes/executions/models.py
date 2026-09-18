@@ -93,6 +93,22 @@ class PhaseExecutionInfo(BaseModel):
     none. Defaulting the first to the second reports a loss that did not happen
     (#1176).
     """
+    exit_code: int | None = None
+    """What this phase's process exited with, or null if nothing observed one.
+
+    THE STATUS, NOT A SUMMARY OF IT (#1319). `status: failed` says the phase
+    did not succeed; this says how, and the three common answers need opposite
+    handling - 0 finished, 124 reached its time budget and the work should be
+    continued, a negative value was killed by that signal and should be
+    retried. Before this field the number existed only inside the prose of
+    `error_message`, and only while the read model was queryable at all.
+
+    THREE-VALUED, same contract as the fields around it: `null` means nothing
+    observed a status - every phase that did not fail, a phase stranded by an
+    API restart, a failure with no process behind it, an execution predating
+    the field - and is not the same claim as 0. A phase that SUCCEEDED says so
+    in `status`; this field is for the runs where that is not the answer.
+    """
     observed_branches: list[BranchObservationInfo] | None = None
     """Where this phase's branches stood when it failed (#1200).
 

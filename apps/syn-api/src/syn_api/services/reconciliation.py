@@ -311,6 +311,15 @@ async def _reconcile_one(
                 failed_phase_id=aggregate.running_phase_id,
                 completed_phases=summary.completed_phases,
                 total_phases=summary.total_phases,
+                # NO `exit_code`, deliberately (#1319). This path runs because
+                # the process that was watching the agent is gone, so nothing
+                # here observed a status and None says exactly that. The
+                # tempting fix is to `docker inspect` the container before the
+                # reap below removes it - do not: the container's PID 1 is
+                # `sleep infinity`, so its status reports the signal that
+                # stopped the container, not what the agent did. That number
+                # would be indistinguishable from a real reading and would
+                # make every orphan look like it died the same way.
             )
         )
         await repository.save(aggregate)

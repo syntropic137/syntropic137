@@ -3550,6 +3550,8 @@ export interface components {
             };
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Exit Code */
+            exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Operations */

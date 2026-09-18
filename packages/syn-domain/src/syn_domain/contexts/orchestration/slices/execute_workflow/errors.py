@@ -31,6 +31,93 @@ def describe_exception(error: BaseException) -> str:
     return str(error).strip() or f"{type(error).__name__} (no message)"
 
 
+def exit_code_of(error: BaseException) -> int | None:
+    """The exit status of the process behind `error`, or None if nothing saw one.
+
+    THE ONE PLACE THAT DECIDES IT, for the reason `describe_exception` above is
+    the one place that decides a failure's description: the exit status reaches
+    four sinks, and a second reader of it is a second answer waiting to happen.
+
+    None is not 0. A phase that ran and exited cleanly and a phase nobody was
+    left alive to observe are opposite situations - the first needs no action
+    and the second needs a retry - and #1319 is what it costs to report them as
+    the same thing. So an exception that carries no status reports None, and
+    None is stored as absent the whole way to the API.
+
+    It reads an ATTRIBUTE rather than matching exception classes, and that is
+    deliberate: the exceptions that know a status do not and should not share a
+    base. `SkillInstallFailed` belongs to the skills hierarchy in `_shared`,
+    which slices may import but which may not import a slice back. An attribute
+    is the one contract both sides can honour without one of them depending on
+    the other, and it is opt-in - storing `self.exit_code` is the whole of it.
+
+    A `bool` is rejected because `isinstance(True, int)` is True and `exit_code
+    = True` is a mistake, not a status of 1.
+    """
+    code: object = getattr(error, "exit_code", None)
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
+
+
+class NonZeroExitError(RuntimeError):
+    """A process a phase depended on exited non-zero, and this CARRIES the code.
+
+    THE FAILURE THIS EXISTS TO STOP (#1319). The exit status was known at the
+    moment of the raise and spent entirely on a message string - `RuntimeError(
+    f"... exit_code={code}")` - so the number reached an operator only as prose
+    inside a failure whose read model might never be queryable. Two containers
+    died during the read-model outage in #1318 and neither status was
+    recoverable afterwards, because the platform that destroyed them had
+    written the number nowhere durable.
+
+    0, 124 and -11 demand OPPOSITE responses - the run finished, the run hit
+    its budget and should continue, the run was killed and should be retried -
+    so "the status is unavailable" is the single answer that serves none of
+    them. Carrying it as an int is what lets `exit_code_of` put it on the
+    durable failure event rather than leaving it to be grepped out of a
+    sentence.
+
+    Subclasses `RuntimeError` because it replaces bare `RuntimeError`s at every
+    site that already knew a status; callers that catch the general failure
+    keep catching this one.
+    """
+
+    def __init__(self, message: str, *, exit_code: int) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class ExitStatusUnavailableError(RuntimeError):
+    """The agent's process ended and NOTHING observed what it exited with.
+
+    THE LIE THIS REPLACES (#1319). The status was read off the workspace, and
+    the workspace reports None when no stream ever completed - a container
+    removed out from under us, a stream that never started, a backend that lost
+    the process. Every one of those fell through to `return 0`, so the case
+    where we know LEAST became indistinguishable from a clean exit. An operator
+    reading 0 concludes the phase finished and moves on; that is a lie they act
+    on, and it is worse than an error.
+
+    Deliberately carries NO `exit_code` attribute, which is not an omission but
+    the mechanism: `exit_code_of` reads that attribute and reports None without
+    it, so the durable failure event records the status as ABSENT. A durable
+    None is honest - it says "retry, nobody was watching" - and it is the one
+    answer that does not send someone the wrong way.
+
+    Subclasses `RuntimeError` alongside `NonZeroExitError` so every caller that
+    already catches a phase's failure catches this one too.
+    """
+
+    def __init__(self, phase_id: str, *, lines_seen: int) -> None:
+        super().__init__(
+            f"Agent exit status unavailable for phase {phase_id}: no completed stream "
+            f"reported one (lines={lines_seen}). The container may have been removed "
+            f"externally; the status is recorded as unknown rather than as a clean exit."
+        )
+        self.phase_id = phase_id
+
+
 class WorkflowNotFoundError(Exception):
     """Raised when a workflow is not found."""
 

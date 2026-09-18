@@ -47,6 +47,17 @@ def _as_float(value: object) -> float | None:
     return float(value) if isinstance(value, int | float) else None
 
 
+def _as_exit_code(value: object) -> int | None:
+    """A process exit status, or None when the event carried none.
+
+    None rather than 0, unlike ``_as_int`` beside it, and the difference is the
+    point: a token count nobody reported is a phase that spent nothing, but an
+    exit status nobody reported is not a clean exit (#1319). ``bool`` is
+    excluded because it is an ``int`` and no exit status is True.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _as_str(value: object) -> str | None:
     """A text field, or None when absent."""
     return value if isinstance(value, str) else None
@@ -90,6 +101,17 @@ class FailedPhaseRecord:
 
     duration_seconds: float | None = None
     """Seconds the phase ran, or None when nothing measured it."""
+
+    exit_code: int | None = None
+    """What the phase's process exited with, or None when nothing saw it.
+
+    THE ONLY SURFACE THAT CAN STILL ANSWER IT. The platform removes the
+    workspace container when it reaps, so nothing can be asked afterwards, and
+    ``AgentExecutionCompleted`` - the only other event carrying a status - is
+    written exclusively on the zero-exit path. Every value that actually
+    separates the outcomes, 124 from -11 from a refusal, reached a durable
+    record nowhere until this one (#1319).
+    """
 
     failed_at: str | None = None
 
@@ -140,6 +162,7 @@ class FailedPhaseRecord:
             cache_creation_tokens=_as_int(event_data.get("failed_phase_cache_creation_tokens")),
             cache_read_tokens=_as_int(event_data.get("failed_phase_cache_read_tokens")),
             duration_seconds=_as_float(event_data.get("failed_phase_duration_seconds")),
+            exit_code=_as_exit_code(event_data.get("exit_code")),
             failed_at=_as_str(event_data.get("failed_at")),
         )
 
@@ -159,6 +182,11 @@ class FailedPhaseRecord:
         phase.cache_creation_tokens = self.cache_creation_tokens
         phase.cache_read_tokens = self.cache_read_tokens
         phase.total_tokens = self.total_tokens
+
+        # Written unconditionally, None included: "nothing observed a status"
+        # is what this failure knows about the phase, and leaving a stale value
+        # standing would report a clean exit for a phase nobody watched.
+        phase.exit_code = self.exit_code
 
         # PhaseDetail names one artifact and the primary deliverable is stored
         # first, matching what the success path writes (#1321).
