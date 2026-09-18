@@ -67,6 +67,11 @@ phases:
     input_artifacts: []
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash]
     skills:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -84,6 +89,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
       # The CONCRETE model id, not the `gpt-5.6` alias. An aliased model
@@ -99,6 +109,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash]
     agent:
       provider: claude
@@ -114,6 +129,11 @@ phases:
     # Longest budget in the workflow: this phase runs things, and running things
     # is slower than reading them.
     timeout_seconds: 3600
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Bash, Write, Task]
     agent:
       provider: claude
@@ -127,6 +147,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Write]
     agent:
       provider: claude
@@ -140,6 +165,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Write]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -158,6 +188,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     agent:
       provider: codex
       model: gpt-5.6-sol
@@ -170,6 +205,11 @@ phases:
     input_artifacts: [markdown]
     output_artifacts: [markdown]
     timeout_seconds: 2400
+    # Its deliverable is a report, not a branch. The gate exempts an
+    # uncommitted change here only once the repo is also mounted read-only,
+    # which production does not do yet (#1308, #1342), so this declaration is
+    # correct but not yet in effect. See workflows/sdlc/README.md.
+    delivers_repo_changes: false
     allowed_tools: [Read, Grep, Glob, Write]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4

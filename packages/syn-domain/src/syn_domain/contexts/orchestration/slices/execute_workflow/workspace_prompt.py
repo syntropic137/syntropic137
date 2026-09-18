@@ -53,6 +53,58 @@ NOT a relaxation of #1167. That check still fails a phase that writes nothing,
 and must: it is what catches a phase that silently did nothing. This removes
 the reason a correct phase had to trip it, rather than teaching the check to
 look away.
+
+WHY THE RESULT BLOCK IS ONE COMPLETE FENCE PER OUTCOME (#1324). #1256 made
+``TASK_RESULT_END`` mandatory and this prompt was not updated to match, so the
+only fence carrying the terminator carried no JSON, and the two fences carrying
+JSON carried no terminator. An agent copying either one could not arrive at a
+complete block: the parts were in different fences and it had to assemble them.
+exec-138d516b91e8 wrote valid JSON, omitted the terminator and lost the run;
+three runs and $20.44 in forty minutes went the same way.
+
+So each outcome gets one fence holding the whole block - marker, literal JSON
+and terminator already on its own line - and the fences are the last instruction
+before the sign-off, because the rule they state is about the last thing in the
+reply. The consequence of dropping the terminator is stated immediately ABOVE
+them rather than in a paragraph below, since an agent that skims to the first
+code fence never reads what follows the examples.
+
+WHY THE JSON IS LITERAL, AND WHAT THAT COSTS. A first fix for #1324 kept the
+fences unparseable by making ``comments`` a ``<"...">`` slot, so that quoting
+the prompt could never be mistaken for obeying it. That reintroduces the defect
+it was meant to fix, one step later: an agent that copies the fence UNCHANGED
+has written no readable verdict and loses the run, which is the same lost run as
+before, now charged to faithful copying rather than to assembly.
+
+The two properties cannot both hold, and this is worth stating plainly because
+it is the first thing the next reader will try to fix. A fence that is copyable
+verbatim IS, by construction, byte-identical to a real report; `phase_verdict`
+is delimited rather than located, so it cannot tell a pasted block from a quoted
+one - there is nothing to tell apart. "Copyable verbatim" and "inert when
+quoted" are therefore mutually exclusive, and no wording recovers both.
+
+WHICH SIDE THIS TAKES, AND WHY IT IS SAFE. The literal side, because the two
+costs are not the same size and not the same kind:
+
+  - The slot charges EVERY agent on EVERY phase a substitution step, on the
+    common path where the work was done and only the report is left. That is
+    the step #1324 exists because agents demonstrably get wrong.
+  - Literal JSON charges only an agent that closes a SECOND complete block it
+    did not mean as its report. Under `phase_verdict`'s precedence
+    (FAILURE > SUCCESS) that resolves to FAILURE.
+
+Both are fail-closed, and that is the property that makes the trade safe rather
+than merely cheaper. Quoting this prompt can only move a verdict UP the
+precedence, toward refusal; it can never manufacture a completion, and it can
+never take back a reported failure - which is the whole of what #1256 exists to
+protect. The prompt therefore says outright that a closed block is a report
+wherever it sits and that only one may be written, since reducing how often that
+second block gets closed is the part still available to the emitter.
+
+Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
+copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
+#1324 - and that the rendered prompt, read whole by the production reader, never
+yields SUCCESS.
 """
 
 from __future__ import annotations
@@ -193,35 +245,40 @@ the previous phase failed - report this in your output.
 ## Task Result (REQUIRED)
 
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
-three parts, and it is read as your result only when all three are there:
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-```
-TASK_RESULT: <-- replace this with one of the JSON objects below
-TASK_RESULT_END
-```
-
-If you completed the task successfully, the JSON object is:
-
-```
-{{"success": true, "comments": "Brief summary of what was accomplished"}}
-```
-
-If you could NOT complete the task (blocked, missing access, error, etc.):
-
-```
-{{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
-```
-
-Examples of failure reasons:
+A failure reason is specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-The `TASK_RESULT_END` line is what marks the block as your result rather than a
-mention of one, so write it. Without it your phase is failed as unreadable
-instead of completed. With it you are free to quote, explain or discuss this
-format anywhere else in your reply - nothing outside a closed block is read.
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out the other one to explain the
+format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
+
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
+
+You completed the task - copy both lines:
+
+```
+TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplished"}}
+TASK_RESULT_END
+```
+
+You could NOT complete the task, because you were blocked, lacked access, or hit
+an error - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 
