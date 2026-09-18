@@ -81,6 +81,7 @@ class FailExecutionCommand:
         total_phases: int,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        failed_phase_artifact_ids: tuple[str, ...] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -99,6 +100,17 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase had already written, kept out of its workspace
+        #: before this failure tore it down (#1321). `()` when it wrote nothing
+        #: collectable, which is every failure that got this far before.
+        #:
+        #: NOT three-valued, unlike the field above: "nothing was kept" and
+        #: "nobody looked" need no telling apart here, because the collection
+        #: is attempted on every path that reaches this command and cannot
+        #: raise. Failing to store an artifact is logged where it happens and
+        #: leaves this empty - the same answer as a phase that wrote nothing,
+        #: and the same consequence either way.
+        self.failed_phase_artifact_ids = failed_phase_artifact_ids
 
 
 class StartPhaseCommand:
