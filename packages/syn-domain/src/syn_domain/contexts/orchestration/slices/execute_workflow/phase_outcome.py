@@ -20,7 +20,7 @@ going up. Growing an excepted file is how an exception becomes permanent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
+    PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
@@ -41,7 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 if TYPE_CHECKING:
     from datetime import datetime as DateTime
@@ -121,6 +122,32 @@ class PhaseFailure:
     it at all. The two call for opposite responses, so None is persisted as
     absent rather than coerced to a number, exactly as `observed_branches`
     above keeps "nobody could read it" apart from "read it, nothing moved"."""
+    usage: PhaseUsage = field(default_factory=PhaseUsage)
+    """What the failing phase had spent when it died (#1262).
+
+    A SIXTH SINK, and the one the other five made the case for. The phase's
+    `PhaseResult`, the `FailExecutionCommand`, and from there the failure event
+    and the read model an operator actually opens all have to carry these
+    counts, and until they did the only place the numbers survived was inside
+    `error_message`, as the prose `(tokens=190+545)` - readable by a human and
+    by nothing else. A phase killed at its timeout having spent 735 tokens was
+    not working; one killed having spent 300k needed a bigger budget. Both
+    reported exit 124 and zeros.
+
+    Defaults to zeros rather than None for the reason `PhaseUsage` gives: an
+    execution that died before any phase ran spent nothing, and that is a
+    measurement, not an absence."""
+
+    artifact_ids: tuple[str, ...] = ()
+    """What was kept out of the failing phase's workspace before it was torn
+    down (#1321), `()` when it wrote nothing collectable.
+
+    A fifth sink, and here for the reason the other four are. A failed phase
+    could not name an artifact at all, so one kept from it would be stored and
+    pointed at by nothing: the execution's artifact list, the phase's own
+    record and the failure event each has to carry it, and each deciding
+    separately which ids belong to the failed phase is how they would come to
+    disagree."""
 
     def as_command(
         self, execution_id: str, *, completed_phases: int, total_phases: int
@@ -147,6 +174,8 @@ class PhaseFailure:
             failed_phase_duration_seconds=self.duration_seconds,
             observed_branches=self.observed_branches,
             exit_code=self.exit_code,
+            failed_phase_artifact_ids=self.artifact_ids,
+            failed_phase_usage=self.usage,
         )
 
     def execution_result(
@@ -187,6 +216,8 @@ def failed_phase_outcome(
     session_id_by_phase: Mapping[str, str],
     now: DateTime | None = None,
     observed: ObservedBranches | None = None,
+    kept_artifact_ids: Sequence[str] = (),
+    usage: PhaseUsage | None = None,
 ) -> PhaseFailure:
     """What a failed run reports, derived from the exception that ended it.
 
@@ -204,6 +235,19 @@ def failed_phase_outcome(
     saying the output contract was unmet stays exactly as loud, and where the
     branches stand follows it as a separate paragraph (#1200). None - nothing
     could be read - reads the same as it did before this existed.
+
+    `kept_artifact_ids` is what survived the phase - the files it had already
+    written, taken out of the workspace before this path abandoned it (#1321).
+    It is an argument rather than something this function looks up because only
+    the caller knows the collection happened; what this function decides is
+    that every sink reports the same list.
+
+    `usage` is what the phase had spent (#1262), and it is an argument for the
+    same reason: the counts live on the runtime the caller holds, and only the
+    caller is at the one point in its teardown where they are still readable.
+    What this function decides is that the phase's own result and the command
+    the aggregate stores report the same figures - the split that let the
+    result report zeros while the message reported the truth.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
@@ -216,12 +260,16 @@ def failed_phase_outcome(
     exit_code = exit_code_of(error)
     if observed is not None:
         reason = f"{reason}\n\n{describe_observed_branches(observed)}"
+    kept = tuple(kept_artifact_ids)
+    spent = usage or PhaseUsage()
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
         exit_code=exit_code,
+        artifact_ids=kept,
+        usage=spent,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
         result=failed_phase_result(
             phase_id,
@@ -230,6 +278,8 @@ def failed_phase_outcome(
             reason,
             ended_at=ended_at,
             exit_code=exit_code,
+            artifact_ids=kept,
+            usage=spent,
         ),
     )
 
@@ -241,11 +291,22 @@ def failed_phase_result(
     error_message: str,
     ended_at: DateTime,
     exit_code: int | None = None,
+    artifact_ids: tuple[str, ...] = (),
+    usage: PhaseUsage | None = None,
 ) -> PhaseResult | None:
     """The `PhaseResult` for a phase that failed, or None if it never started.
 
     A phase with no recorded start produces no result: inventing one would put a
     phase into the execution's results that never ran.
+
+    `artifact_ids` is what was kept from it (#1321). `PhaseResult` names one
+    artifact, so the first is the one it names - the same convention the
+    success path uses, and for the same reason: the primary deliverable is
+    stored first.
+
+    `usage` is what it spent before it died (#1262), and it reaches the result
+    whole rather than as five counts, so this hop cannot pass four of them and
+    forget the total.
     """
     if phase_id is None or started_at is None:
         return None
@@ -261,6 +322,8 @@ def failed_phase_result(
         error_message=error_message,
         completed_at=ended_at,
         exit_code=exit_code,
+        artifact_id=artifact_ids[0] if artifact_ids else None,
+        usage=usage,
     )
 
 

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseResult,
     PhaseStatus,
+    PhaseUsage,
 )
 
 
@@ -69,6 +70,8 @@ class PhaseResultBuilder:
         error_message: str,
         completed_at: datetime | None = None,
         exit_code: int | None = None,
+        artifact_id: str | None = None,
+        usage: PhaseUsage | None = None,
     ) -> PhaseResult:
         """Build a failed PhaseResult.
 
@@ -78,13 +81,33 @@ class PhaseResultBuilder:
 
         ``exit_code`` defaults to None rather than to a number because most
         failures have no process behind them at all, and None says so (#1319).
+        ``artifact_id`` names what was kept out of the phase before the run was
+        torn down (#1321). A failed phase could carry no artifact at all, which
+        is why a phase that wrote a 1322-line deliverable and then botched its
+        ``TASK_RESULT`` showed ``artifact_ids: []``. It stays optional because
+        most failures have nothing to point at.
+
+        ``usage`` is what the phase had spent when it died (#1262). Omitting it
+        is how this builder reported zeros for every failed phase ever run,
+        while the numbers sat in the accumulator and in the exception's own
+        message - so a stall and a genuine overrun both arrived as exit 124 with
+        nothing to tell them apart. ``None`` means the caller has nothing to
+        report rather than a phase that spent nothing; both render as zeros,
+        because for tokens those are the same claim (see ``PhaseUsage``).
         """
+        spent = usage or PhaseUsage()
         return PhaseResult(
             phase_id=phase_id,
             status=PhaseStatus.FAILED,
             started_at=started_at,
             completed_at=completed_at or datetime.now(UTC),
+            artifact_id=artifact_id,
             session_id=session_id,
+            input_tokens=spent.input_tokens,
+            output_tokens=spent.output_tokens,
+            cache_creation_tokens=spent.cache_creation_tokens,
+            cache_read_tokens=spent.cache_read_tokens,
+            total_tokens=spent.total_tokens,
             error_message=error_message,
             exit_code=exit_code,
         )

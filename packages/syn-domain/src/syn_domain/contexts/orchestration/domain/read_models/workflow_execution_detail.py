@@ -64,6 +64,21 @@ class PhaseExecutionDetail:
     completed_at: datetime | str | None = None
     """When the phase completed."""
 
+    timeout_seconds: int | None = None
+    """The wall-clock budget this phase was given, in seconds.
+
+    Carried to the API boundary for one reason: an exit 124 with no budget
+    beside it cannot be told from any other death that reports 124, and the
+    two need opposite responses - a bigger budget, or do not pay for this run
+    again (#1262). Read against ``duration_seconds``, which is the other half
+    of that comparison and is right above.
+
+    ``None`` means the run stated no phase definitions, not a budget of zero.
+    Same hop rule as every field around it: the projection writes it, this
+    model carries it, and the API serves it, because a value that stops at any
+    one of the three reaches no reader.
+    """
+
     error_message: str | None = None
     """Error message if phase failed."""
 
@@ -126,6 +141,7 @@ class PhaseExecutionDetail:
             "duration_seconds": self.duration_seconds,
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
+            "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
             "deliverable_recovered": self.deliverable_recovered,
             "observed_branches": (
@@ -160,6 +176,7 @@ class PhaseExecutionDetail:
             duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             observed_branches=_observed_branches(data.get("observed_branches")),
