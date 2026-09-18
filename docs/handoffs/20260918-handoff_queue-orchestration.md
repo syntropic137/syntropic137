@@ -14,7 +14,9 @@ The operating cadence is in the `/loop` prompt the owner re-issues each cycle. T
 
 **Deployed:** `v0.29.1-beta.2` on the VPS (`syn-api`, `syn-gateway`). Carries #1327, the fix for the TASK_RESULT regression that cost $316 over 34 runs.
 
-**Verified working:** run `exec-bdba3a81d70b` completed premise -> implement -> verify cleanly on beta.2. The `implement` phase was failing 35% of runs on beta.1; it now finishes and reports.
+**Verified working:** #1327's fix. The unreadable-TASK_RESULT failure in `implement` was 39% of spend before the beta.2 deploy (18 runs, $155.14) and has not recurred since it (deploy at 18:44:24Z, confirmed from the host).
+
+**Not verified working:** delivery. `exec-bdba3a81d70b`, previously cited here as proof, passed premise, implement and verify, then **failed at `open_pr`** and delivered nothing. It is an instance of #1358, not evidence against it. Post-deploy, 1 of 8 finished runs delivered (12%), and 6 of the 7 failures died at `open_pr` ($60.82, 83% of post-deploy loss). Fixing the early failure is what exposed the later one.
 
 **In flight:** #1311, #1305, #1298, #1292.
 
@@ -23,11 +25,12 @@ The operating cadence is in the `/loop` prompt the owner re-issues each cycle. T
 - **#1349 vs #1331** - two competing branches for #1295. Only one should land; #1349 looks like the fuller fix.
 - **syntropic137/event-sourcing-platform#307** - unblocks #1329.
 
-**Next priorities, in order.** The owner confirmed performance and failure fixes come before new features:
-1. **#1318** - a projection rebuild starves all 24 other projections. Currently the top item; see "Important Context".
-2. **Step-level retry** - #1344 (codex blip) and #1347 (phase timeout). Together these are 26% of all loss.
-3. **#1345** - ships the `agent_events` index through migrations rather than by hand.
-4. Then the rest of the merge queue: #1346, #1348, #1325, #1330, #1314.
+**Next priorities, in order.** The owner confirmed performance and failure fixes come before new features. Revised after measuring post-deploy:
+1. **#1358 rework loop** - live on the VPS, source in PR #1361. Validate it: no run has yet reached the case it exists for (verify finds a blocker, fix repairs it).
+2. **Step-level retry** - #1344 (codex blip) and #1347 (phase timeout). The beta.3 content. See the correction under "Rationale" for why its share of loss is now about 10%, not 26%.
+3. **#1318** - a projection rebuild starves all 24 other projections. Land it before beta.3 if beta.3 carries a projection version bump; see "Important Context".
+4. **#1345** - ships the `agent_events` index through migrations rather than by hand.
+5. Then the rest of the merge queue: #1346, #1348, #1325, #1330, #1314.
 
 ## Files Affected
 
@@ -42,6 +45,8 @@ This handoff adds one file. The orchestration itself touches no source; it merge
 **Why priorities are cost-ranked, not frequency-ranked.** The most frequent failure is usually the cheapest, because it fails early before any expensive phase ran. The one worth fixing first dies *late* and discards work that already succeeded. A class that happened twice and cost $27 outranks one that happened nine times and cost $3. Every failure tally you produce should report both, and rank by cost.
 
 **Why "retry the step, not the run" is the highest-leverage fix.** Measured across 59 failures since the beta.1 deploy: 63% was one regression (now fixed), and the next 26% ($128) was two instances of the same missing feature - a transient external condition destroying an entire execution rather than the step it hit. Landing #1344 and #1347 removes a quarter of the loss without fixing any new bug. That distinction - *cost shape* rather than bug count - is what makes the product feel unusable, and it is the right thing to argue for.
+
+**Correction, measured after the beta.2 deploy:** the 26% was a share of a loss dominated by the TASK_RESULT regression. With that fixed, the retry class was 1 run and $7.50, 10% of post-deploy loss, and #1358 was 83%. Retry is still the right beta.3 content. It is no longer where most of the money goes. A share of loss changes whenever a larger class is fixed, so re-measure after every deploy before ranking by it.
 
 **Why a version bump is not a release.** `docs/deployment/test-deploy.md` is the runbook. A test deploy moves images to a host and produces no git tag, no GitHub Release, no npm publish. Seven `v0.28.0-beta.*` prereleases were once created in 48 hours, one per test deploy, none marking anything a reader cared about. Build, transfer, repoint, recreate. Nothing else.
 
