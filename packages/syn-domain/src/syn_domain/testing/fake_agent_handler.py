@@ -72,6 +72,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        error_reason: str | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -110,6 +111,15 @@ class FakeAgentExecutionHandler:
         #: production reader of that report and not a fixture's idea of it
         #: (#1256).
         self._says = says
+        #: What the stream processor concluded was wrong with this run, as the
+        #: real ones write it onto ``StreamResult.error_reason``. Expressible
+        #: because it is not decoration on the exit code but a distinct input
+        #: to a distinct decision: only one value of it -
+        #: ``MISSING_TERMINAL_TURN_REASON`` - describes a run with no fault of
+        #: its own, and only that value earns the phase another attempt
+        #: (#1335). A double that could not say which reason it failed for
+        #: could not drive either side of that.
+        self._error_reason = error_reason
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -153,6 +163,7 @@ class FakeAgentExecutionHandler:
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
+            error_reason=self._error_reason,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -246,6 +257,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        error_reason: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
 
@@ -261,6 +273,9 @@ class FakeAgentExecutionHandler:
         non-zero ``spent`` is the timeout this exists for: those counts are the
         only thing separating a phase killed mid-work from one that stalled
         (#1262).
+
+        ``error_reason`` is what the stream processor concluded, and it decides
+        whether this failure is worth another attempt: see the field.
         """
         return cls(
             interrupt=False,
@@ -268,6 +283,7 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            error_reason=error_reason,
         )
 
     @classmethod

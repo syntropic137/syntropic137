@@ -440,9 +440,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             )
             raise ValueError(msg)
         if not self.may_retry_phase(command.phase_id):
-            msg = (
-                f"Phase {command.phase_id} has used all {MAX_PHASE_ATTEMPTS} of its attempts"
-            )
+            msg = f"Phase {command.phase_id} has used all {MAX_PHASE_ATTEMPTS} of its attempts"
             raise ValueError(msg)
 
         event = PhaseRetryScheduledEvent(
@@ -719,7 +717,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._running_phase_id = None
 
     @event_sourcing_handler("PhaseRetryScheduled")
-    def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:
+    def on_phase_retry_scheduled(self, _event: PhaseRetryScheduledEvent) -> None:
         """Apply PhaseRetryScheduledEvent — the attempt is over, the phase is not.
 
         `_running_phase_id` is cleared because no attempt is running until the
