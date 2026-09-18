@@ -21,17 +21,19 @@
  * three units and none of them is reachable from a page:
  *
  *   - `useListQuery`    what to ask for, and which collection that is
- *   - `useLatestPage`   asking, and ignoring answers that were overtaken
+ *   - `useLatestPage`   asking, one request at a time, and dropping the query
+ *                       the caller has moved on from
  *   - `useLiveRefresh`  when to ask again
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
+import { useCallback, useEffect, useRef } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
 import type { TimeWindow } from '../types'
 import { LIST_PAGE_SIZE, useListQuery } from './useListQuery'
 import { useLatestPage } from './useLatestPage'
-import { useLiveRefresh } from './useLiveRefresh'
+import { listPollIntervalMs, useLiveRefresh } from './useLiveRefresh'
 
 export { LIST_PAGE_SIZE }
 
@@ -40,7 +42,7 @@ export interface UseServerListOptions<TRow> {
    * Fetch one page. Must be referentially stable (wrap in `useCallback`) -
    * it is a dependency of the fetch effect.
    */
-  fetchPage: (query: ListQuery) => Promise<ListPage<TRow>>
+  fetchPage: (query: ListQuery, signal?: AbortSignal) => Promise<ListPage<TRow>>
   /**
    * Identity of any narrowing the caller applies inside `fetchPage` that this
    * hook cannot see, such as Sessions' `workflow_id`. Changing it re-fetches
@@ -89,13 +91,24 @@ export function useServerList<TRow>({
   isTerminal,
 }: UseServerListOptions<TRow>): UseServerListResult<TRow> {
   const { query, ...filters } = useListQuery(scopeKey)
-  const { result, loading, refetch } = useLatestPage(fetchPage, query)
-  const { connected, lastEventAt } = useLiveRefresh({
-    refetch,
-    liveEvents,
-    rows: result.rows,
-    isTerminal,
-  })
+
+  // The stream is subscribed before the page is fetched, because whether it is
+  // connected decides how often the page may poll. SSE frames reach the refetch
+  // through a ref rather than the other way round - the alternative is a cycle,
+  // since the cadence also depends on the rows the fetch returns.
+  const refetchRef = useRef<() => void>(() => {})
+  const onChanged = useCallback(() => refetchRef.current(), [])
+  const { connected, lastEventAt } = useLiveRefresh({ onChanged, liveEvents })
+
+  const pollIntervalFor = useCallback(
+    (rows: TRow[]) => listPollIntervalMs(rows, isTerminal, connected),
+    [isTerminal, connected],
+  )
+  const { result, loading, refetch } = useLatestPage(fetchPage, query, pollIntervalFor)
+
+  useEffect(() => {
+    refetchRef.current = refetch
+  }, [refetch])
 
   return {
     ...filters,
