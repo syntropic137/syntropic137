@@ -1,6 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
-import { Layout } from './components'
+import { FeedbackMount, Layout } from './components'
 import {
   ArtifactDetail,
   ArtifactList,
@@ -38,6 +38,14 @@ export function App() {
           <Route path="insights/*" element={<Insights />} />
         </Route>
       </Routes>
+      {/*
+        One mount for the whole app, so the floating button and the
+        Ctrl+Shift+F hotkey work on every page (#105, ADR-016). A sibling of
+        <Routes>, not a wrapper: it is fixed-position, and it needs
+        useLocation() to know what the current page is about, which only
+        works inside the router.
+      */}
+      <FeedbackMount />
     </BrowserRouter>
   )
 }
