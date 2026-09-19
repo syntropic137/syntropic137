@@ -1,4 +1,3 @@
-# ruff: noqa: ARG002  — Protocol implementation; unused params are required by the interface.
 """Sync-safe test double for AgentExecutionHandler.
 
 The module-level type assertion at the bottom of this file ensures pyright verifies
@@ -72,6 +71,9 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        reason: str | None = None,
+        uses_tools: Sequence[str] = (),
+        attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -110,6 +112,26 @@ class FakeAgentExecutionHandler:
         #: production reader of that report and not a fixture's idea of it
         #: (#1256).
         self._says = says
+        #: Why the harness itself failed, as the stream processors report it -
+        #: "codex reported: Selected model is at capacity...", "API overloaded
+        #: (HTTP 529)", "Authentication failed". Until this double could say
+        #: one, every failure it could express was a bare exit code, and the
+        #: processor decides what a failure MEANS from this string (#1303).
+        self._reason = reason
+        #: Tools this agent CALLS, by name, announcing each on the collector
+        #: exactly as the real stream processors do. None by default, which is
+        #: the honest default: an agent that called nothing.
+        #:
+        #: Here because "did this attempt get anywhere" is answered from those
+        #: announcements (#1303), and a failure that called a tool first is a
+        #: different fact from one that never started - the first cannot be
+        #: re-run against the workspace it already changed. A double that could
+        #: not express a tool call could not tell the two apart, so every test
+        #: of that rule would have been driving the same case twice.
+        self._uses_tools = tuple(uses_tools)
+        #: What this agent does on each successive attempt, when that changes
+        #: between them. See ``scripted``.
+        self._attempts = tuple(attempts)
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -132,6 +154,23 @@ class FakeAgentExecutionHandler:
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.runners.append(runner)
+        if self._attempts:
+            # The script decides this attempt; the outer double stays the one
+            # the test inspects, so `call_count` counts attempts across all of
+            # them rather than per entry.
+            attempt = self._attempts[min(len(self.calls) - 1, len(self._attempts) - 1)]
+            return await attempt.handle(
+                todo,
+                workspace,
+                agent_env,
+                claude_cmd,
+                session_id,
+                agent_model,
+                timeout_seconds,
+                collector,
+                runner,
+                on_launch,
+            )
         if self._produces:
             await workspace.inject_files(list(self._produces))
         # Every factory below except ``never_launched`` describes a run whose
@@ -140,6 +179,13 @@ class FakeAgentExecutionHandler:
         # looking like one that never started (#1047, #1065).
         if self._launches and on_launch is not None:
             await on_launch()
+        for index, tool_name in enumerate(self._uses_tools):
+            if collector is not None:
+                await collector.record_tool_started(
+                    tool_name=tool_name,
+                    tool_use_id=f"{session_id}-{len(self.calls)}-{index}",
+                    input_preview="",
+                )
         tokens = TokenAccumulator()
         tokens.record(
             self._spent.input_tokens,
@@ -153,6 +199,7 @@ class FakeAgentExecutionHandler:
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
+            error_reason=self._reason,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -246,6 +293,8 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        reason: str | None = None,
+        uses_tools: Sequence[str] = (),
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
 
@@ -261,6 +310,10 @@ class FakeAgentExecutionHandler:
         non-zero ``spent`` is the timeout this exists for: those counts are the
         only thing separating a phase killed mid-work from one that stalled
         (#1262).
+
+        ``uses_tools`` are the tools it called before failing. A busy upstream
+        that arrives after one of them is not retried, because the rerun would
+        start from a workspace the first attempt had already changed (#1303).
         """
         return cls(
             interrupt=False,
@@ -268,7 +321,26 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            reason=reason,
+            uses_tools=uses_tools,
         )
+
+    @classmethod
+    def scripted(cls, *attempts: FakeAgentExecutionHandler) -> FakeAgentExecutionHandler:
+        """An agent whose behaviour CHANGES between attempts at the same phase.
+
+        Each positional argument is one attempt, in order; the last repeats for
+        any attempt beyond it. So ``scripted(failed(...), success(...))`` is an
+        agent that fails once and then succeeds, and ``scripted(failed(...))``
+        is one that fails every time it is asked.
+
+        A phase used to get exactly one attempt, so a double with one fixed
+        outcome could say everything there was to say. Retrying a busy upstream
+        (#1303) makes "what happened the SECOND time" a real question, and a
+        test that cannot vary the answer cannot tell a retry that recovered
+        from one that never happened.
+        """
+        return cls(attempts=attempts)
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
