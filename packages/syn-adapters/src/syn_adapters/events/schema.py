@@ -11,6 +11,74 @@ from syn_shared.events import GIT_COMMIT
 
 logger = logging.getLogger(__name__)
 
+# THE ROLLUP'S KEY, AND WHY IT IS A CONSTRAINT WITH NULLS NOT DISTINCT.
+#
+# `execution_id` is nullable, so the key has to say what two NULLs mean. A
+# plain UNIQUE says "distinct", which would give unattributed telemetry one
+# rollup row per event and lose the bound the whole table exists to provide.
+# This key originally bought the opposite answer with an expression,
+# `COALESCE(execution_id, '')` - and that also merged a genuine EMPTY-STRING
+# execution id into the unattributed row, because COALESCE maps both to the
+# same ''. Two rows that name different things became one (#1371).
+#
+# `NULLS NOT DISTINCT` (PostgreSQL 15+; production is 16.15) says exactly the
+# intended thing and nothing more: NULL groups with NULL, '' groups with '',
+# and the two never meet. It is also the grain ROLLUP_BACKFILL_SQL's
+# `GROUP BY` already produced, so the backfill's own rows can no longer
+# collide with each other on the way in.
+#
+# It is a CONSTRAINT rather than a bare index so both ON CONFLICT clauses can
+# name it. `ON CONFLICT (day, session_id, execution_id)` would have to INFER
+# an arbiter index, and inference matches on columns, so it cannot express
+# "the NULLS NOT DISTINCT one" - a second unique index on these columns would
+# make it ambiguous, and it gives a reader nothing to check the clause
+# against. `ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key` names the
+# one object below, and fails loudly if it is ever not there.
+#
+# REPLACING IT ON A DATABASE THAT ALREADY HAS THE OLD ONE. Leaving both would
+# leave the defect: the old expression index would go on merging NULL with ''
+# whatever the new key says. So the old object is dropped and the new one
+# added - guarded, because ALTER TABLE ... ADD CONSTRAINT has no IF NOT
+# EXISTS and ensure_schema() runs at every API startup; unguarded, every
+# restart would rebuild the index.
+#
+# The guard asks for the key we want (unique, on this name, nulls not
+# distinct) rather than merely for the name, so a database holding the old
+# expression index, a hand-made wrong one, or nothing at all all take the
+# same path to the same place.
+#
+# SAFE WHILE THE TRIGGER IS LIVE, for two reasons that both matter:
+#   - it runs inside _create_day_rollup's single transaction, which also
+#     re-attaches the trigger and therefore holds ACCESS EXCLUSIVE on
+#     agent_events. A concurrent insert blocks on that lock rather than
+#     observing a rollup with no key at all.
+#   - the new key is strictly FINER than the old one: any two rows the
+#     COALESCE index kept apart differ under this one too. So the build
+#     cannot fail on existing data, and no deployment needs a repair step.
+ROLLUP_KEY_SQL = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_index i ON i.indexrelid = c.conindid
+        WHERE c.conrelid = 'agent_event_day_rollup'::regclass
+          AND c.conname = 'agent_event_day_rollup_key'
+          AND c.contype = 'u'
+          AND i.indnullsnotdistinct
+    ) THEN
+        RETURN;
+    END IF;
+
+    ALTER TABLE agent_event_day_rollup
+        DROP CONSTRAINT IF EXISTS agent_event_day_rollup_key;
+    DROP INDEX IF EXISTS agent_event_day_rollup_key;
+    ALTER TABLE agent_event_day_rollup
+        ADD CONSTRAINT agent_event_day_rollup_key
+        UNIQUE NULLS NOT DISTINCT (day, session_id, execution_id);
+END $$;
+"""
+
 # The trigger that keeps agent_event_day_rollup in step with agent_events
 # (#1253). `day` uses the SAME expression the heatmap buckets with, so the
 # rollup's days are the heatmap's days by construction rather than by
@@ -26,7 +94,7 @@ BEGIN
         NEW.time,
         CASE WHEN NEW.event_type = '{GIT_COMMIT}' THEN 1 ELSE 0 END
     )
-    ON CONFLICT (day, session_id, (COALESCE(execution_id, ''))) DO UPDATE
+    ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO UPDATE
     SET first_time = LEAST(agent_event_day_rollup.first_time, EXCLUDED.first_time),
         commits    = agent_event_day_rollup.commits + EXCLUDED.commits;
     RETURN NULL;
@@ -46,7 +114,7 @@ SELECT
     COUNT(*) FILTER (WHERE event_type = '{GIT_COMMIT}')
 FROM agent_events
 GROUP BY 1, 2, 3
-ON CONFLICT (day, session_id, (COALESCE(execution_id, ''))) DO NOTHING;
+ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO NOTHING;
 """
 
 
@@ -186,8 +254,10 @@ class EventStoreSchema:
         A half-populated rollup is not reachable.
 
         Everything else here is re-run every startup and is O(1): CREATE ...
-        IF NOT EXISTS resolves to a catalogue lookup, and CREATE OR REPLACE
-        FUNCTION rewrites one pg_proc row. Re-attaching the trigger still takes
+        IF NOT EXISTS resolves to a catalogue lookup, ROLLUP_KEY_SQL to one
+        more (it returns without touching the table once the key is the one it
+        wants - see its comment), and CREATE OR REPLACE FUNCTION rewrites one
+        pg_proc row. Re-attaching the trigger still takes
         ACCESS EXCLUSIVE, so ingestion still pauses for it, but it pauses for a
         catalogue write rather than for a scan. It is re-attached rather than
         skipped so that a change to the trigger's definition - which rows it
@@ -218,10 +288,7 @@ class EventStoreSchema:
                     commits      BIGINT      NOT NULL DEFAULT 0
                 )
             """)
-            await conn.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS agent_event_day_rollup_key
-                ON agent_event_day_rollup (day, session_id, (COALESCE(execution_id, '')))
-            """)
+            await conn.execute(ROLLUP_KEY_SQL)
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rollup_session_day
                 ON agent_event_day_rollup (session_id, day)

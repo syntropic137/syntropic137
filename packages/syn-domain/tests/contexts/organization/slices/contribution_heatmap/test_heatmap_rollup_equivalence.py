@@ -732,7 +732,7 @@ class TestTheBackfillIsNotPaidAtEveryStartup:
             await conn.execute(
                 "DELETE FROM agent_event_day_rollup "
                 "WHERE day = $1 AND session_id = $2 "
-                "AND COALESCE(execution_id, '') = COALESCE($3, '')",
+                "AND execution_id IS NOT DISTINCT FROM $3",
                 victim["day"],
                 victim["session_id"],
                 victim["execution_id"],

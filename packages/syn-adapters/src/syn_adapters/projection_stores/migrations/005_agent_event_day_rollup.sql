@@ -68,11 +68,32 @@ CREATE TABLE IF NOT EXISTS agent_event_day_rollup (
     commits      BIGINT      NOT NULL DEFAULT 0
 );
 
--- execution_id is nullable, so the key is on COALESCE(...,'') rather than the
--- column: a plain UNIQUE would treat every NULL as distinct and the rollup
--- would grow one row per event for unattributed telemetry.
-CREATE UNIQUE INDEX IF NOT EXISTS agent_event_day_rollup_key
-    ON agent_event_day_rollup (day, session_id, (COALESCE(execution_id, '')));
+-- THE KEY. execution_id is nullable, so it has to say what two NULLs mean. A
+-- plain UNIQUE says "distinct", which would give unattributed telemetry one
+-- rollup row per event and lose the bound this table exists to provide.
+--
+-- This was originally written as a unique index on COALESCE(execution_id, ''),
+-- which bought that answer but also merged a genuine EMPTY-STRING execution id
+-- into the unattributed row - COALESCE maps both to '' (#1371). NULLS NOT
+-- DISTINCT (PostgreSQL 15+; production is 16.15) says the intended thing and
+-- nothing more, and it is the grain the backfill's GROUP BY already produced.
+--
+-- A CONSTRAINT and not a bare index, so both ON CONFLICT clauses below can
+-- name it instead of inferring an arbiter: inference matches on columns and
+-- cannot express "the NULLS NOT DISTINCT one".
+--
+-- EventStoreSchema._create_day_rollup() is what actually runs, and it does
+-- this under a guard - ADD CONSTRAINT has no IF NOT EXISTS, and it runs at
+-- every API startup. That guard also DROPS a COALESCE index left by an
+-- earlier deploy: leaving both in place would leave the defect, since the old
+-- index would go on merging NULL with '' whatever this one says. It is safe
+-- while the trigger is live because it shares that function's single
+-- transaction, and because this key is strictly finer than the old one - any
+-- two rows COALESCE kept apart differ under it too, so the build cannot fail
+-- on existing data.
+ALTER TABLE agent_event_day_rollup
+    ADD CONSTRAINT agent_event_day_rollup_key
+    UNIQUE NULLS NOT DISTINCT (day, session_id, execution_id);
 
 -- Serves the "did this session exist before the window" anti-join.
 CREATE INDEX IF NOT EXISTS idx_rollup_session_day
@@ -90,7 +111,7 @@ BEGIN
         NEW.time,
         CASE WHEN NEW.event_type = 'git_commit' THEN 1 ELSE 0 END
     )
-    ON CONFLICT (day, session_id, (COALESCE(execution_id, ''))) DO UPDATE
+    ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO UPDATE
     SET first_time = LEAST(agent_event_day_rollup.first_time, EXCLUDED.first_time),
         commits    = agent_event_day_rollup.commits + EXCLUDED.commits;
     RETURN NULL;
@@ -113,7 +134,7 @@ SELECT
     COUNT(*) FILTER (WHERE event_type = 'git_commit')
 FROM agent_events
 GROUP BY 1, 2, 3
-ON CONFLICT (day, session_id, (COALESCE(execution_id, ''))) DO NOTHING;
+ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO NOTHING;
 
 COMMIT;
 
