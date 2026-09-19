@@ -22,7 +22,7 @@ import importlib
 import importlib.metadata
 import json
 import re
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,6 +31,9 @@ import syn_collector
 from syn_collector.collector import version as version_module
 from syn_collector.collector.service import create_app
 from syn_collector.collector.store import InMemoryObservabilityStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 #: Captured before anything is patched: the release really installed here, and
 #: therefore the one string that must not surface once its metadata is gone.
@@ -104,9 +107,7 @@ def test_health_reports_the_unavailable_state_explicitly(
 def test_no_fabricated_release_reaches_a_client(metadata_unavailable: None) -> None:
     """Nothing version-shaped on either surface a client reads."""
     app = create_app(store=InMemoryObservabilityStore())
-    rendered = json.dumps(TestClient(app).get("/health").json()) + json.dumps(
-        app.openapi()["info"]
-    )
+    rendered = json.dumps(TestClient(app).get("/health").json()) + json.dumps(app.openapi()["info"])
 
     assert INSTALLED not in rendered
     assert LOOKS_LIKE_A_RELEASE.search(rendered) is None, rendered

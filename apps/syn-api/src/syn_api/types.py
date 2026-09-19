@@ -17,8 +17,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    computed_field,
     SerializerFunctionWrapHandler,
+    computed_field,
     model_serializer,
 )
 

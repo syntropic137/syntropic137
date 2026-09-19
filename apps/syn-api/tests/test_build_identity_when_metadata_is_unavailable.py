@@ -28,7 +28,7 @@ import importlib
 import importlib.metadata
 import json
 import re
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -36,6 +36,9 @@ from httpx import ASGITransport, AsyncClient
 import syn_api
 from syn_api import build_info
 from syn_api.main import create_app
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 #: Captured before anything is patched: the release this test run really has
 #: installed, and therefore the one string that must NOT surface once the
