@@ -26,11 +26,11 @@ This document gives you the evidence behind that, ranked by the money each fix w
 
 | Cause | Runs | USD lost | Issue |
 |---|---:|---:|---|
-| Phase timeout (exit 124), mostly implement phases | 12 | 155.91 | #1231, #1262 (closed) |
+| Phase timeout (exit 124), mostly implement phases | 12 | 155.91 | #1231 (fix delivered in PR #1366, blocked only on a fitness split), #1262 (closed) |
 | Unreadable `TASK_RESULT` block on a phase that finished its work | 4 | 46.12 | #1324 |
 | Phase declared an output and wrote none | 4 | 39.41 | #1300 (closed) |
 | Unpushed-work guard (correct; the work was quarantined) | 3 | 38.79 | #1308 |
-| Guard could not inspect the workspace (`git for-each-ref` failed) | 2 | 30.79 | none found |
+| Guard could not inspect the workspace (`git for-each-ref` failed) | 2 | 30.79 | #1295 family (fix held on the owner's choice of #1349 vs #1331) |
 | Codex stream ended without `turn.completed` | 3 | 25.15 | #1335 |
 | Credential-removal probe | 2 | 17.45 | #1293 |
 
@@ -56,10 +56,16 @@ They are ranked by recovered spend per unit of effort. The first item changes ev
   - Phases before *k* are not billed again.
   - The new attempt is linked to the original.
   - It is proven on a real failure that has kept artifacts, e.g. `exec-e4a12b683e6f`, which failed in phase 5 of 6.
+- **Resume has two halves, and only one is priced above.** Resuming from the failed phase recovers the phases that completed before it. For `exec-d9ec05de3174` that is USD 19.56. It does not recover spend lost *inside* the failed phase: that phase's USD 77.35 would be spent again on a restart. Saving that part means continuing the agent's own session. That is harness work behind a port, in agentic-primitives. The syn137 queue plans a decision-record run on resume covering both halves plus a runaway guard, after beta.3 deploys.
 
 ### P0-2. Do not fail a phase that did its work because its status block is malformed (#1324)
 
-- If the declared output exists and the only defect is an absent or unreadable `TASK_RESULT`, either complete the phase with a warning, or re-prompt once for the block and fail only if that also fails.
+- **Already in progress:** branch `fix/1324-status-key-alias` (@9cb1a8ee) adds a narrow alias for the observed shape. The rule is posted on #1324:
+  - `success` present: unchanged.
+  - `success` absent and `status` exactly `completed` or `failed`: aliased.
+  - Anything else: unreadable.
+- The two ideas below build on that branch; they don't replace it.
+- If the declared output exists and the block is still unreadable, either complete the phase with a warning, or re-prompt once for the block and fail only if that also fails.
 - Three decision-record phases and one implement-v2 phase failed this way today with their deliverable complete. Every failing block used `status` where the parser needs `success`.
 - Two further fixes would help: show the exact block again at the end of the injected prompt, since agents summarise whatever the prompt ends on; and make the parser's error name the missing key.
 
@@ -68,22 +74,23 @@ They are ranked by recovered spend per unit of effort. The first item changes ev
 - `exec-d9ec05de3174`'s experiment phase ran nine parallel subagents and spent **USD 77.35** before its timeout ended it.
 - `timeout_seconds` bounds time. Once a phase fans out, it does not bound money.
 - The ask is a per-phase `max_cost_usd` that ends the phase cleanly: artifacts collected, and the outcome recorded as distinct from both failure and timeout. Related: #85.
+- **Check this before specifying the cap:** execution and phase cost appear in the API only at phase end. One run held at USD 0.44 mid-phase, then jumped when the phase completed. A live cap needs usage accounted while the phase runs. The observability collector probably has it; confirm first.
 
 ### P1-4. Timeouts should end cleanly (the largest dollar class: 12 runs, USD 156)
 
 - #1347 retries a timed-out phase, but a retry that hits the same limit fails the same way. What helps is making the limit survivable:
   - **Warn the agent before the limit.** Inject a message like "10 minutes left: commit and write your deliverable now" at about 85% of `timeout_seconds`. `syn control inject` already exists as the mechanism.
-  - **Collect the output at the limit, the way a finish does.** This covers #1231: a timeout currently destroys unpushed commits.
+  - **Collect the output at the limit, the way a finish does.** This covers #1231: a timeout currently destroys unpushed commits. The fix is delivered in PR #1366, which is blocked only on a fitness split (`unpushed_work_guard.py` is 852 lines against a 750-line floor).
 - On the DreamShip side, implement work has moved off the platform to local agents with Codex review until this lands.
 
 ### P1-5. Transient infrastructure failures should retry, not end the run
 
 | Failure | Status |
 |---|---|
-| Codex capacity (#1303) | PR #1344 in review, planned for beta.3 |
+| Codex capacity (#1303) | PR #1344, held to next week. Narrowed to retry only an attempt that did no work (capacity at launch), so it will not help a capacity failure mid-run. |
 | Codex stream without `turn.completed` (#1335) | 3 runs |
 | Credential-removal probe (#1293) | 2 runs |
-| Unpushed-work guard could not run `git for-each-ref` | 2 runs; no issue yet; the messages are on `exec-481b9739dc9d` and `exec-bc6152200eb8` |
+| Unpushed-work guard could not run `git for-each-ref` | 2 runs (`exec-481b9739dc9d`, `exec-bc6152200eb8`). This is the #1295 family: workspace inspection commands dying on the host (`find` exited 2 on `exec-d9ec05de3174`, -11 elsewhere). The fix is held on the owner's choice of #1349 vs #1331. |
 
 Each of these currently ends the execution on one failed call.
 
@@ -102,11 +109,14 @@ This is the operator's review step. Every decision-record defect was found at fu
 3. Make `syn workflow install` read its own definition back, with a retry. A read immediately after install returned the old prompts.
 4. Add lint rules to `check_workflow_definitions.py` for the defects above.
 
+**A review step has to name the change's concrete risks.** Steered cross-model reviews rejected 3 of 3 PR heads that implement-v2's own verify step had certified as "correct and complete". In two of them, verify had described the exact defect and still called the change correct. A generic correctness pass certifies whatever it reads.
+
 ### P2-8. Measure it
 
 - Add completion rate and cost per delivered execution, per workflow, as first-class numbers: syntropic137-5c's USD 127-per-delivery figure should be on a dashboard, not rediscovered by hand.
 - Set a target, for example 80% completion per workflow, and report each fix above against it.
-- #1357 (failure classification) is closed. That makes these numbers trustworthy for the first time.
+- #1357 (failure classification) is closed, and its fix #1367 is merged as 8584f971. The numbers become trustworthy **only once beta.3 is deployed, and only for executions after that.** Everything earlier reads "unclassified".
+- The deployed version is not visible from the health check: `/api/v1/health` has no version field, and `/api/v1/openapi.json` reports `0.5.1`. Today the only reliable source is the container's image tag, e.g. `docker inspect syn137-api`. Adding the release to the health response would let agents gate on a deploy without shell access.
 
 ### Also open, noted without re-ranking
 
