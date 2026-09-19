@@ -67,14 +67,46 @@ from syn_domain.storable_text import pg_safe
 # hook (insert_batch uses COPY, which no application hook sees).
 #
 # EQUIVALENCE WITH THE QUERIES THIS REPLACED.
-#   - rollup.day is time_bucket('1 day', time)::date, the same expression the
-#     old statements grouped by, so `day BETWEEN $1 AND $2` selects exactly the
-#     rows `time >= $1 AND time < $2 + 1 day` did.
+#   - rollup.day is the UTC calendar day of `time` (see the contract below), so
+#     `day BETWEEN $1 AND $2` selects exactly the rows `time >= $1 AND
+#     time < $2 + 1 day` did, for a caller whose window is UTC days.
 #   - a rollup row exists for every (day, session, execution) triple that has
 #     an event, and for no other, so COUNT(DISTINCT execution_id) per day is
 #     unchanged and so is the set of days that appear at all.
 #   - first_time is MIN(time) of the triple, so MIN(first_time) per session is
 #     MIN(time) per session.
+
+# THE DAY IS A UTC DAY. THAT IS THE CONTRACT (#1371).
+#
+# `start` and `end` name UTC calendar days, every `day` returned is a UTC
+# calendar day, and an event belongs to the UTC day its `time` falls in. There
+# is no per-user or per-server zone anywhere on this path, by design: the
+# rollup row is written once, by whichever connection happened to insert the
+# event, and can never be re-decided afterwards - so the day it is filed under
+# has to be a fact about the instant and nothing else.
+#
+# That makes the spelling below load-bearing, not stylistic. A timestamptz cast
+# with a bare `::date` resolves in the CONNECTION's TimeZone, so `started_at::date`
+# would attribute a session to whatever day the READING connection thought it
+# was - which for an 01:00Z start under America/Los_Angeles is the day before
+# the one the WRITING trigger filed its rollup row under. Sessions would then
+# land on a day whose executions and commits came from somewhere else.
+#
+# `AT TIME ZONE 'UTC'` is therefore the same expression the writer uses, and is
+# meant to stay that way: it is `utc_day()` in syn_adapters/events/schema.py,
+# and test_day_rollup_utc_day.py fails if the two ever drift apart. They cannot
+# share one definition directly - the package dependency runs adapters ->
+# domain, not back - so that test is what holds them together.
+
+
+def _utc_day(timestamp_expr: str) -> str:
+    """The UTC calendar day of a `timestamptz` SQL expression.
+
+    Character-for-character `utc_day()` in syn_adapters/events/schema.py, which
+    is what writes `agent_event_day_rollup.day`. See the contract above.
+    """
+    return f"({timestamp_expr} AT TIME ZONE 'UTC')::date"
+
 
 # A session is counted on the day it STARTED. Membership and start time both
 # come from ONE date-bounded read of the rollup, and nothing joins back to the
@@ -166,7 +198,7 @@ ORDER BY day
 # this number and the metric card's.
 _SESSIONS_QUERY = f"""
 WITH {_WINDOW_STARTS}
-SELECT started_at::date AS day, COUNT(*) AS sessions
+SELECT {_utc_day("started_at")} AS day, COUNT(*) AS sessions
 FROM session_start
 GROUP BY day
 ORDER BY day
@@ -206,7 +238,7 @@ scoped_events AS (
 ),
 {CANONICAL_SESSION_USAGE_CTE}
 SELECT
-    s.started_at::date AS day,
+    {_utc_day("s.started_at")} AS day,
     u.model AS model,
     SUM(u.vendor_cost_usd) AS vendor_cost_usd,
     SUM(u.input_tokens) AS input_tokens,

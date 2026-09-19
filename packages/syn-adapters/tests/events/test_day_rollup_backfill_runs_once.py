@@ -4,14 +4,18 @@ WHY THIS TEST EXISTS
 
 `EventStoreSchema.ensure_schema()` runs on EVERY API startup. `ROLLUP_BACKFILL_SQL`
 is a GROUP BY over ALL of agent_events - it decompresses every chunk, and it
-grows with the data - and it runs inside a transaction that has taken ACCESS
+grows with the data - and it runs inside a transaction that has taken SHARE ROW
 EXCLUSIVE on agent_events for the CREATE TRIGGER. Run unconditionally, every
 restart blocks all event ingestion for the length of a full scan.
 
-The defect is invisible to a correctness test: `ON CONFLICT DO NOTHING` makes
-the re-run a no-op, so the DATA is identical either way. The only observable
+The defect is invisible to a correctness test: the backfill recomputes each row
+from the raw events, so the DATA is identical either way. The only observable
 difference is whether the statement was issued. So this test watches the
 statements.
+
+The OTHER half of the gate - that a rollup whose trigger went missing is NOT
+treated as complete - is in test_day_rollup_reconciles_a_dead_trigger.py, which
+uses the same fake.
 
 It is a unit test on purpose. The integration job that would exercise the real
 trigger does not run on pull requests into `main` (see .github/workflows/ci.yml:
@@ -76,19 +80,33 @@ class CatalogueConnection:
     def __init__(self) -> None:
         self.executed: list[str] = []
         self._relations: set[str] = set()
+        self._enabled_triggers: set[str] = set()
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
         created = re.search(r"CREATE TABLE IF NOT EXISTS (\w+)", sql)
         if created:
             self._relations.add(created.group(1))
+        # Triggers are tracked the same way and for the same reason: the gate
+        # now asks whether one is attached and enabled, and answering that from
+        # anywhere but the DDL executed would let a startup that never creates
+        # the trigger still look healthy.
+        attached = re.search(r"CREATE TRIGGER (\w+)", sql)
+        if attached:
+            self._enabled_triggers.add(attached.group(1))
+        detached = re.search(r"DROP TRIGGER IF EXISTS (\w+)", sql)
+        if detached:
+            self._enabled_triggers.discard(detached.group(1))
 
     async def fetchval(self, sql: str, *_args: object) -> bool:
-        asked = re.search(r"to_regclass\('(\w+)'\) IS NOT NULL", sql)
-        if asked is None:
-            msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
-            raise AssertionError(msg)
-        return asked.group(1) in self._relations
+        relation = re.search(r"to_regclass\('(\w+)'\) IS NOT NULL", sql)
+        if relation is not None:
+            return relation.group(1) in self._relations
+        trigger = re.search(r"FROM pg_trigger\b.*?tgname = '(\w+)'", sql, re.DOTALL)
+        if trigger is not None:
+            return trigger.group(1) in self._enabled_triggers
+        msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
+        raise AssertionError(msg)
 
     async def fetch(self, _sql: str, *_args: object) -> list[dict[str, str]]:
         return _VALID_AGENT_EVENTS_SCHEMA
@@ -102,6 +120,18 @@ class CatalogueConnection:
     def forget_relation(self, name: str) -> None:
         """Make the catalogue report a table as gone, as a rollback would."""
         self._relations.discard(name)
+
+    def forget_trigger(self, name: str) -> None:
+        """Make the catalogue report a trigger as dropped or disabled.
+
+        One method for both, because `_rollup_is_complete()` asks one question -
+        "is something still maintaining this table" - and a dropped trigger and
+        a disabled one are the same answer to it. Whether PostgreSQL spells the
+        difference as an absent pg_trigger row or as `tgenabled = 'D'` is the
+        real database's business, and the real database is what
+        test_heatmap_rollup_reconciliation.py asks.
+        """
+        self._enabled_triggers.discard(name)
 
 
 def _trigger_statements(conn: CatalogueConnection) -> list[str]:

@@ -43,18 +43,34 @@
 --
 -- WHY THE WHOLE MIGRATION IS ONE TRANSACTION
 --
--- CREATE TRIGGER takes ACCESS EXCLUSIVE on agent_events, so concurrent
--- inserts block until this commits. The backfill therefore sees exactly the
--- rows the trigger did not, with no window in between where an event is
--- counted twice or not at all. The cost is that ingest is blocked for the
--- length of one full scan of agent_events - plan the deploy for it.
+-- CREATE TRIGGER takes SHARE ROW EXCLUSIVE on agent_events (PostgreSQL uses
+-- ShareRowExclusiveLock here, not ACCESS EXCLUSIVE as this file used to say -
+-- it still conflicts with INSERT, which is the property that matters), so
+-- concurrent inserts block until this commits. The backfill therefore sees
+-- exactly the rows the trigger did not, with no window in between where an
+-- event is counted twice or not at all. The cost is that ingest is blocked for
+-- the length of one full scan of agent_events - plan the deploy for it.
 --
 -- That cost is paid ONCE. EventStoreSchema._create_day_rollup(), which is
 -- what actually runs, wraps exactly these statements in one transaction and
--- skips the backfill when the table already exists - and because it is one
--- transaction, the table existing proves the backfill committed. Without that
--- gate the scan would be repeated at every API startup, blocking ingestion
--- each time, for a result ON CONFLICT DO NOTHING already made a no-op.
+-- skips the backfill when the rollup is KNOWN COMPLETE - the table exists AND
+-- the trigger below is still attached and enabled. Either half missing sends
+-- it to the backfill, which recomputes (see its ON CONFLICT) and so repairs a
+-- rollup that fell behind while the trigger was gone, as well as filling an
+-- empty one. Without that gate the scan would be repeated at every API
+-- startup, blocking ingestion each time, for nothing.
+--
+-- It also takes pg_advisory_xact_lock() before reading any of that, so two
+-- replicas starting at once queue rather than both scanning.
+
+-- WHY `day` IS SPELLED WITH `AT TIME ZONE 'UTC'` (#1371)
+--
+-- `timestamptz::date` - and `time_bucket('1 day', ts)::date` with it, since
+-- time_bucket returns a timestamptz - resolves in the CONNECTION's TimeZone.
+-- The trigger sees each event once, so a writer connected under a non-UTC zone
+-- would file it under the wrong day permanently. `AT TIME ZONE 'UTC'` yields a
+-- plain timestamp whose ::date depends on nothing. The heatmap's read side
+-- uses the identical expression; UTC is the stated contract on both ends.
 
 BEGIN;
 
@@ -99,21 +115,28 @@ ALTER TABLE agent_event_day_rollup
 CREATE INDEX IF NOT EXISTS idx_rollup_session_day
     ON agent_event_day_rollup (session_id, day);
 
--- `day` is derived with the SAME expression the heatmap's queries used to
--- bucket with, so the rollup's days are the queries' days by construction.
+-- `day` is derived with the SAME expression the heatmap's read side buckets
+-- with, so the rollup's days are the queries' days by construction.
 CREATE OR REPLACE FUNCTION agent_event_day_rollup_apply() RETURNS TRIGGER AS $$
 BEGIN
     INSERT INTO agent_event_day_rollup (day, session_id, execution_id, first_time, commits)
     VALUES (
-        time_bucket('1 day', NEW.time)::date,
+        (NEW.time AT TIME ZONE 'UTC')::date,
         NEW.session_id,
         NEW.execution_id,
         NEW.time,
         CASE WHEN NEW.event_type = 'git_commit' THEN 1 ELSE 0 END
     )
+    -- The WHERE suppresses the no-op update. Without it every event after the
+    -- first for a triple rewrites the row with the values already in it -
+    -- LEAST(x, x) and commits + 0 - costing a new tuple, its index entries and
+    -- the WAL for both. Most events are neither a commit nor the earliest of
+    -- their triple.
     ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO UPDATE
     SET first_time = LEAST(agent_event_day_rollup.first_time, EXCLUDED.first_time),
-        commits    = agent_event_day_rollup.commits + EXCLUDED.commits;
+        commits    = agent_event_day_rollup.commits + EXCLUDED.commits
+    WHERE EXCLUDED.first_time < agent_event_day_rollup.first_time
+       OR EXCLUDED.commits <> 0;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -123,18 +146,24 @@ CREATE TRIGGER agent_events_day_rollup
     AFTER INSERT ON agent_events
     FOR EACH ROW EXECUTE FUNCTION agent_event_day_rollup_apply();
 
--- Backfill everything already stored. ON CONFLICT DO NOTHING makes re-running
--- this migration a no-op rather than a double count.
+-- Backfill everything already stored, and RECONCILE whatever is already here.
+-- The SELECT is a complete aggregate over all of agent_events, so EXCLUDED is
+-- the whole truth for a triple rather than a delta - which is what makes
+-- overwriting safe, makes re-running this converge rather than merely not
+-- double-count, and lets it repair rows that fell short while the trigger was
+-- detached.
 INSERT INTO agent_event_day_rollup (day, session_id, execution_id, first_time, commits)
 SELECT
-    time_bucket('1 day', time)::date,
+    (time AT TIME ZONE 'UTC')::date,
     session_id,
     execution_id,
     MIN(time),
     COUNT(*) FILTER (WHERE event_type = 'git_commit')
 FROM agent_events
 GROUP BY 1, 2, 3
-ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO NOTHING;
+ON CONFLICT ON CONSTRAINT agent_event_day_rollup_key DO UPDATE
+SET first_time = EXCLUDED.first_time,
+    commits    = EXCLUDED.commits;
 
 COMMIT;
 
