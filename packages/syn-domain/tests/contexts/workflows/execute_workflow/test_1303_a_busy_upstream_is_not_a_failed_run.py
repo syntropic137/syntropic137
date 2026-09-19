@@ -78,7 +78,7 @@ class TestABusyUpstreamIsRetried:
         what that cost.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+            FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
             FakeAgentExecutionHandler.success(says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
@@ -107,7 +107,7 @@ class TestABusyUpstreamIsRetried:
         open on every claude phase, which is most of them.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.failed(reason=OVERLOADED),
+            FakeAgentExecutionHandler.failed(stream_error=OVERLOADED),
             FakeAgentExecutionHandler.success(says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
@@ -136,7 +136,7 @@ class TestAPermanentFailureStaysPermanent:
         destroyed the only sentence that says what to do about it.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)
+            FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 
@@ -170,7 +170,7 @@ class TestAPermanentFailureStaysPermanent:
         #1303 from being a fix that costs more than the bug.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.failed(reason=NOT_LOGGED_IN)
+            FakeAgentExecutionHandler.failed(stream_error=NOT_LOGGED_IN)
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 
@@ -206,7 +206,7 @@ class TestAPermanentFailureStaysPermanent:
         help.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Bash"]),
+            FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY, uses_tools=["Bash"]),
             FakeAgentExecutionHandler.success(says=SUCCEEDED),
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
@@ -239,7 +239,7 @@ class TestAPermanentFailureStaysPermanent:
         over, work somebody just stopped.
         """
         fake = FakeAgentExecutionHandler.scripted(
-            FakeAgentExecutionHandler(interrupt=True, exit_code=1, reason=AT_CAPACITY)
+            FakeAgentExecutionHandler(interrupt=True, exit_code=1, stream_error=AT_CAPACITY)
         )
         processor = _make_processor(fake, retry_policy=NO_WAITING)
 

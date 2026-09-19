@@ -71,7 +71,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
-        reason: str | None = None,
+        stream_error: str | None = None,
         uses_tools: Sequence[str] = (),
         attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
@@ -79,6 +79,14 @@ class FakeAgentExecutionHandler:
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
+        #: What went wrong with the STREAM, as both real stream processors
+        #: report it: an ``is_error`` result line from claude, a malformed or
+        #: unterminated stream from codex. Independent of ``exit_code``,
+        #: because in production the two come apart in both directions - and
+        #: the combination that has no other way to be expressed is the one
+        #: #1367 is about: a readable refusal whose telemetry is broken is not
+        #: evidence the quality gate worked.
+        self._stream_error = stream_error
         #: The last thing this agent said on its stream, as the real stream
         #: processors would have captured it. Independent of ``produces``
         #: because in production the two come apart: #1300 is agents that
@@ -112,12 +120,6 @@ class FakeAgentExecutionHandler:
         #: production reader of that report and not a fixture's idea of it
         #: (#1256).
         self._says = says
-        #: Why the harness itself failed, as the stream processors report it -
-        #: "codex reported: Selected model is at capacity...", "API overloaded
-        #: (HTTP 529)", "Authentication failed". Until this double could say
-        #: one, every failure it could express was a bare exit code, and the
-        #: processor decides what a failure MEANS from this string (#1303).
-        self._reason = reason
         #: Tools this agent CALLS, by name, announcing each on the collector
         #: exactly as the real stream processors do. None by default, which is
         #: the honest default: an agent that called nothing.
@@ -199,7 +201,7 @@ class FakeAgentExecutionHandler:
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
-            error_reason=self._reason,
+            error_reason=self._stream_error,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -255,6 +257,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
@@ -277,6 +280,12 @@ class FakeAgentExecutionHandler:
         ``success: false`` and a non-zero ``spent`` is a phase that did real
         work and then refused itself; it leaves through the same door a timeout
         does and lost its counts the same way (#1262).
+
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, with exit code 0 regardless. That pairing is not a
+        contradiction either: the process ended fine and its telemetry did
+        not, which is what stops a refusal beside it counting as a correct
+        one (#1367).
         """
         return cls(
             interrupt=False,
@@ -284,6 +293,7 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            stream_error=stream_error,
         )
 
     @classmethod
@@ -293,7 +303,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
-        reason: str | None = None,
+        stream_error: str | None = None,
         uses_tools: Sequence[str] = (),
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
@@ -311,6 +321,11 @@ class FakeAgentExecutionHandler:
         only thing separating a phase killed mid-work from one that stalled
         (#1262).
 
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, as ``StreamResult.error_reason`` carries it. The processor
+        decides what a failure MEANS from that string, which is how a busy
+        upstream is told apart from a real one (#1303).
+
         ``uses_tools`` are the tools it called before failing. A busy upstream
         that arrives after one of them is not retried, because the rerun would
         start from a workspace the first attempt had already changed (#1303).
@@ -321,7 +336,7 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
-            reason=reason,
+            stream_error=stream_error,
             uses_tools=uses_tools,
         )
 

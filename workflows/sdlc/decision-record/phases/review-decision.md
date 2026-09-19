@@ -52,6 +52,10 @@ pass with the change reverted; a step resting on an assumption not marked.
 Findings most severe first, each with the fact, `file:line`, your evidence,
 and a specific fix. End with the **revised assumption list** the experiment
 phase should run: the kept ones, the rewritten ones, and the missing ones.
+**Rank it by how much the decision depends on each, and mark the top five at
+most as `TEST`**; the rest are recorded but not run. The experiment phase has one
+hour and runs one probe per `TEST` assumption, so a list of nine is a list the
+phase cannot finish (a run spent USD 77 and timed out trying).
 
 ## Citing code
 

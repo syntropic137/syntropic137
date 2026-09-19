@@ -219,7 +219,7 @@ class TestWhichResultTheCallerGets:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(says="done"),
                 ]
             )
@@ -236,7 +236,7 @@ class TestWhichResultTheCallerGets:
         the message an operator reads, so a retry that replaced it with its own
         summary would hide the cause of every exhausted failure."""
         handler = _RecordingHandler(
-            scripted=FakeAgentExecutionHandler.failed(exit_code=1, reason=AT_CAPACITY)
+            scripted=FakeAgentExecutionHandler.failed(exit_code=1, stream_error=AT_CAPACITY)
         )
 
         result = await _run(handler)
@@ -259,7 +259,7 @@ class TestWhatNeverReachesThePolicy:
         refusal rather than on the rule under test.
         """
         handler = _RecordingHandler(
-            scripted=FakeAgentExecutionHandler(exit_code=0, reason=AT_CAPACITY)
+            scripted=FakeAgentExecutionHandler(exit_code=0, stream_error=AT_CAPACITY)
         )
 
         result = await _run(handler)
@@ -278,7 +278,9 @@ class TestWhatNeverReachesThePolicy:
         just stopped.
         """
         handler = _RecordingHandler(
-            scripted=FakeAgentExecutionHandler(interrupt=True, exit_code=1, reason=AT_CAPACITY)
+            scripted=FakeAgentExecutionHandler(
+                interrupt=True, exit_code=1, stream_error=AT_CAPACITY
+            )
         )
 
         result = await _run(handler)
@@ -296,7 +298,7 @@ class TestWhatNeverReachesThePolicy:
         three.
         """
         handler = _RecordingHandler(
-            scripted=FakeAgentExecutionHandler.failed(exit_code=1, reason=BAD_LOGIN)
+            scripted=FakeAgentExecutionHandler.failed(exit_code=1, stream_error=BAD_LOGIN)
         )
 
         result = await _run(handler)
@@ -317,8 +319,8 @@ class TestWhatIsBuiltOncePerPhaseAndNotOncePerAttempt:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -342,7 +344,7 @@ class TestWhatIsBuiltOncePerPhaseAndNotOncePerAttempt:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -369,7 +371,7 @@ class TestTheProviderChoosesTheParser:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -402,8 +404,8 @@ class TestOneDeadlineForTheWholePhase:
             takes_seconds=600.0,
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             ),
@@ -434,7 +436,7 @@ class TestOneDeadlineForTheWholePhase:
             clock=clock,
             takes_seconds=1_000_000.0,
             scripted=FakeAgentExecutionHandler(
-                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)]
             ),
         )
 
@@ -461,7 +463,7 @@ class TestOneDeadlineForTheWholePhase:
             clock=clock,
             takes_seconds=590.0,
             scripted=FakeAgentExecutionHandler(
-                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)]
             ),
         )
 
@@ -497,7 +499,7 @@ class TestOnlyALaunchThatNeverStartedIsRetried:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -519,7 +521,7 @@ class TestOnlyALaunchThatNeverStartedIsRetried:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Bash"]),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY, uses_tools=["Bash"]),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -545,7 +547,9 @@ class TestOnlyALaunchThatNeverStartedIsRetried:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, says="Working on it."),
+                    FakeAgentExecutionHandler.failed(
+                        stream_error=AT_CAPACITY, says="Working on it."
+                    ),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -566,8 +570,8 @@ class TestOnlyALaunchThatNeverStartedIsRetried:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Edit"]),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY, uses_tools=["Edit"]),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -598,7 +602,7 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -625,7 +629,7 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
             takes_seconds=3565.0,
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             ),
@@ -655,7 +659,7 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
             clock=clock,
             takes_seconds=25.0,
             scripted=FakeAgentExecutionHandler(
-                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)]
             ),
         )
 
@@ -702,7 +706,7 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -737,9 +741,9 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                 ]
             )
         )
@@ -771,7 +775,7 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
                 attempts=[
-                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
                     FakeAgentExecutionHandler.success(),
                 ]
             )
@@ -805,7 +809,7 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         clock = FakeClock()
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
-                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)]
             )
         )
 

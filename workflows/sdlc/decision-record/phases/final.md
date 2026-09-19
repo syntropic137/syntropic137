@@ -36,6 +36,10 @@ of them.
   mark it STILL UNKNOWN.
 - If an assumption is **STILL UNKNOWN**, every step resting on it is marked as
   such, with what would settle it.
+- An assumption whose summary row still says **PENDING**, or that has no verdict
+  file at all, was never settled: the experiment phase stopped before it. Treat
+  it as STILL UNKNOWN, and say in the record that it was not tested, not that
+  it was tested and came back unknown.
 
 ## Dispose of every review finding
 
@@ -80,6 +84,10 @@ honest work.
 
 One line: ready to implement; ready once the operator ratifies the decision; or
 blocked on a named, specific unknown. Saying it is blocked is a correct outcome.
+**"Ready" is allowed only if no load-bearing assumption is still unknown,
+untested or pending** - or if you have amended the decision and plan so that
+they no longer depend on it, and said how. Otherwise the line is "blocked on",
+naming each one and what would settle it.
 This workflow exists to make a decision that holds up, not to manufacture the
 appearance of one.
 
