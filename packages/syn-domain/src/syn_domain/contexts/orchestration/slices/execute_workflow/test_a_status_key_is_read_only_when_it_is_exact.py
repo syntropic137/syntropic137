@@ -38,9 +38,10 @@ MUTATION RECORD (each row was shown red before being kept):
     each other at all, fails the ``status``-beside-``success`` matrix;
   - decoding with a plain `json.JSONDecoder()` - the reading before duplicate
     members were noticed - fails every repeated-``status`` row;
-  - dropping ``value is outermost`` from `_decode_payload` fails the nested
-    row, and moving the repeat guard ahead of the contract fails the rows
-    where a repeat sits beside a written ``success``;
+  - accumulating the repeat across `_decode_payload`'s hook calls rather than
+    overwriting it - ``repeated = repeated or ...`` - fails the nested row,
+    and moving the repeat guard ahead of the contract fails the rows where a
+    repeat sits beside a written ``success``;
   - returning ``cls(VerdictStatus.UNREADABLE, ...)`` from `_from_report` as it
     did before fails every positive row;
   - dropping ``via_status_alias=True`` fails the refusal-wording test;

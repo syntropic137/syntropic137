@@ -642,29 +642,26 @@ def _decode_payload(text: str, at: int) -> _DecodedPayload:
     carried out on the `_Report` instead of being asked of the value.
 
     ONLY THE OUTERMOST OBJECT IS ASKED, because a repeated key under
-    ``comments`` or ``detail`` is not a block naming its own outcome twice. The
-    hook runs on every object in the value and an object can only be finished
-    after its members are, so the top-level one is always the LAST call.
-    Checking the decoded value against it is what makes that a fact about THIS
-    value rather than an assumption about the parser's route through it - and
-    it answers the value that is no object at all, an array or a bare string,
-    which matches nothing and repeats nothing.
+    ``comments`` or ``detail`` is a malformed note and not a block naming its
+    own outcome twice. That falls out of the hook rather than being tested
+    for: it runs on every object in the value, and an object cannot be
+    finished before its members are, so the outermost one is always the LAST
+    call and the answer left standing is its own. Accumulating across the
+    calls - ``repeated = repeated or ...`` - is the way to get this wrong, and
+    it would refuse a block whose top-level outcome is perfectly exact.
 
     Raises `ValueError` when no complete JSON value begins at ``at``, exactly
     as `json.JSONDecoder.raw_decode` does.
     """
-    no_object = object()
-    outermost: object = no_object
     repeated = False
 
     def keep_the_member_list(members: list[tuple[str, object]]) -> object:
-        nonlocal outermost, repeated
+        nonlocal repeated
         repeated = sum(1 for key, _ in members if key == _ALIAS_KEY) > 1
-        outermost = dict(members)
-        return outermost
+        return dict(members)
 
     value, ends_at = json.JSONDecoder(object_pairs_hook=keep_the_member_list).raw_decode(text, at)
-    return _DecodedPayload(value, ends_at, repeats_status=repeated and value is outermost)
+    return _DecodedPayload(value, ends_at, repeats_status=repeated)
 
 
 def _payload_starts(text: str, after: int) -> int:
