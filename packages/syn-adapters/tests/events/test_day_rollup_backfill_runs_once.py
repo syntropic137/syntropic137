@@ -79,11 +79,17 @@ class CatalogueConnection:
 
     def __init__(self) -> None:
         self.executed: list[str] = []
+        #: Every statement in the order it was sent, asked and issued alike.
+        #: `executed` cannot serve: half the gate's decisions are fetchvals, and
+        #: the property that the advisory lock is taken BEFORE the first read
+        #: is a fact about the two interleaved.
+        self.calls: list[str] = []
         self._relations: set[str] = set()
         self._enabled_triggers: set[str] = set()
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
+        self.calls.append(sql)
         created = re.search(r"CREATE TABLE IF NOT EXISTS (\w+)", sql)
         if created:
             self._relations.add(created.group(1))
@@ -99,6 +105,7 @@ class CatalogueConnection:
             self._enabled_triggers.discard(detached.group(1))
 
     async def fetchval(self, sql: str, *_args: object) -> bool:
+        self.calls.append(sql)
         relation = re.search(r"to_regclass\('(\w+)'\) IS NOT NULL", sql)
         if relation is not None:
             return relation.group(1) in self._relations
