@@ -307,3 +307,27 @@ Two things not to do with this:
 
 Mark plainly which findings block and which do not. The fix phase will treat
 everything you call blocking as required work.
+
+## Report completion to the workflow
+
+Your task in this phase is to deliver an honest verification report, not to
+make the candidate pass. If you can identify the candidate and write
+`artifacts/output/verify.md`, end with `TASK_RESULT success=true` even when the
+candidate is BLOCKED.
+
+This includes a normal code, test, or design defect; a failing gate; and an
+environment limitation that prevents only part of verification, such as an
+unavailable database. Put each such item under a `BLOCKING` heading with the
+file and line or affected command, the root cause, the exact action required,
+and what would prove it closed. `success=true` means the verification report
+was delivered so the `fix` phase can run; it does not mean the candidate was
+certified.
+
+Use `TASK_RESULT success=false` only when verification itself could not run at
+all: for example, the implementation artifact is missing or unreadable, the
+exact branch and SHA cannot be fetched or checked out, or no verification
+artifact can be written. Do not use `success=false` merely because the
+candidate failed or because one requested check could not run.
+
+Do not open or attempt to open a pull request. Only the `open_pr` phase may do
+that.

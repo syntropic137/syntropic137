@@ -253,3 +253,41 @@ class TestTheCleanPathStaysCheap:
     def test_reverify_does_not_repeat_the_whole_review(self, prompts: dict[str, str]) -> None:
         prompt = prompts["reverify"].lower()
         assert "do not re-run the whole review" in prompt
+
+
+class TestVerifyHandsOffInsteadOfEndingTheRun:
+    """A verify phase that reports a defect as its own failure kills the run.
+
+    The platform fails any phase whose agent ends on `TASK_RESULT success=false`
+    (`phase_verdict.py`), and the prompt injected into every phase tells the
+    agent that being "blocked" or hitting "an error" means `success=false`. So
+    unless verify is told otherwise, a real finding - or a database the
+    workspace cannot start - reads as blocked, the verify phase fails, and fix
+    never runs. That is the #1358 failure again, one phase earlier. It happened
+    in production on 2026-09-19 (exec-3173a246c698): verify found a genuine
+    blocker, ended success=false, and $17.44 of work stopped before repair.
+    """
+
+    def test_a_blocked_candidate_is_still_a_delivered_report(self, prompts: dict[str, str]) -> None:
+        assert (
+            "end with `TASK_RESULT success=true` even when the candidate is BLOCKED"
+            in prompts["verify"]
+        )
+
+    def test_failure_is_reserved_for_verification_that_could_not_run(
+        self, prompts: dict[str, str]
+    ) -> None:
+        assert (
+            "Use `TASK_RESULT success=false` only when verification itself could not run at all"
+            in prompts["verify"]
+        )
+
+    def test_a_partial_environment_limitation_is_a_finding_not_a_failure(
+        self, prompts: dict[str, str]
+    ) -> None:
+        verify = prompts["verify"]
+        assert "an environment limitation that prevents only part of verification" in verify
+        assert "such as an unavailable database" in verify
+
+    def test_only_open_pr_opens_a_pull_request(self, prompts: dict[str, str]) -> None:
+        assert "Only the `open_pr` phase may do that." in prompts["verify"]
