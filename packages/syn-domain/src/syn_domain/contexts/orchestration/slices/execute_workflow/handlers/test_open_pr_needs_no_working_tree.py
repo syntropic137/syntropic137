@@ -665,6 +665,14 @@ def _run_gh(
 #:   protects #1256: quoting these bytes can only refuse a phase, never
 #:   complete one. Argued in `workspace_prompt`'s docstring, pinned by
 #:   `test_the_prompt_can_never_manufacture_a_completion`.
+#: * #1324 a third time, and the bytes move again. Literal fences fixed what an
+#:   agent copying them writes and nothing about an agent that writes its own
+#:   schema instead: exec-cd5e75eaeb63 pushed its commit and then reported
+#:   `{"status": "completed", ...}`, which named no `success` at all. The key
+#:   and its value type are now a rule stated above the fences rather than
+#:   something only demonstrated inside them. Shared, seen by every phase, and
+#:   prose only - no fence changed, so the manufacture-a-completion guarantee
+#:   above is untouched.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -761,6 +769,13 @@ the previous phase failed - report this in your output.
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
 three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
 after it - and it is read as your result only when all three are there.
+
+**The key that carries your outcome is named `success`, never `status`, and its
+value is the JSON boolean `true` or `false`** - not the quoted string `"true"`,
+not a number, and not a word like `completed`. Agents that invented their own
+key here have lost finished, pushed work: `success` is the field the
+orchestrator reads, and a block naming the outcome anything else is not
+guaranteed to be read at all.
 
 A failure reason is specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"

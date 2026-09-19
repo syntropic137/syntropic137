@@ -372,6 +372,11 @@ class _CodexRows:
     def __init__(self) -> None:
         self.rows: list[_Row] = []
 
+    def note_agent_activity(self) -> None:
+        # Part of the recorder protocol; it writes no row, so nothing in this
+        # file - which is entirely about rows and their timestamps - reads it (#1303).
+        return
+
     async def record_tool_started(
         self, tool_name: str, tool_use_id: str, input_preview: str
     ) -> None:

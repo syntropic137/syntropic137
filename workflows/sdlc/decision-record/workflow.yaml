@@ -64,7 +64,7 @@ phases:
     output_artifacts: [markdown]
     timeout_seconds: 2400
     delivers_repo_changes: false
-    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    allowed_tools: [Read, Grep, Glob, Bash, Write, Edit]
     skills:
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/purpose-and-scope@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -99,7 +99,10 @@ phases:
     output_artifacts: [markdown]
     timeout_seconds: 2400
     delivers_repo_changes: false
-    allowed_tools: [Read, Grep, Glob, Bash, Write]
+    # No Bash: this phase names experiments, it does not run them. With Bash it
+    # ran them anyway and hit its timeout with a finished decision.md unreported
+    # (exec-ab558ffa2190), and the review meant to sharpen them never happened.
+    allowed_tools: [Read, Grep, Glob, Write, Edit]
     skills:
       - syntropic137/software-leverage-points/principles-and-patterns@1348146ae5fd1659f2022b3c2bef0218292348d4
       - syntropic137/software-leverage-points/architecture@1348146ae5fd1659f2022b3c2bef0218292348d4
@@ -143,7 +146,7 @@ phases:
     output_artifacts: [markdown]
     timeout_seconds: 2400
     delivers_repo_changes: false
-    allowed_tools: [Read, Grep, Glob, Write]
+    allowed_tools: [Read, Grep, Glob, Write, Edit]
     agent:
       provider: claude
       model: opus

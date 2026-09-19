@@ -52,9 +52,32 @@ pass with the change reverted; a step resting on an assumption not marked.
 Findings most severe first, each with the fact, `file:line`, your evidence,
 and a specific fix. End with the **revised assumption list** the experiment
 phase should run: the kept ones, the rewritten ones, and the missing ones.
+**Rank it by how much the decision depends on each, and mark the top five at
+most as `TEST`**; the rest are recorded but not run. The experiment phase has one
+hour and runs one probe per `TEST` assumption, so a list of nine is a list the
+phase cannot finish (a run spent USD 77 and timed out trying).
 
 ## Citing code
 
 Every `file:line` reference MUST be the path from the repository root, exactly
 as `git ls-files` prints it. An abbreviated path is not a smaller citation, it
 is an unusable one: a reader cannot follow it and a checker cannot verify it.
+
+## End with exactly this, and nothing after it
+
+Your document is the deliverable; the status block only says whether you
+produced it. End your final message with these two lines, verbatim in shape:
+`"success"` and `"comments"` are the only keys, the comment is one short
+sentence on one line with no double quotes inside it, and `TASK_RESULT_END` is
+on its own line. Every detail belongs in the file you wrote, not here. Three
+runs of this workflow completed their document and were still failed because
+the block had no `"success"` key (they wrote `"status": "complete"`), which the
+platform reads as an unreadable verdict.
+
+```text
+TASK_RESULT: {"success": true, "comments": "Wrote artifacts/output/<file> with <n> sections."}
+TASK_RESULT_END
+```
+
+If you could not produce the document, use `"success": false` and say why in
+the comment.
