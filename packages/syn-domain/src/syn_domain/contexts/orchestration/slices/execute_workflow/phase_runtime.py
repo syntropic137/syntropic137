@@ -41,6 +41,9 @@ from syn_domain.contexts.artifacts import AgentIdentity
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseUsage,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
+    PhaseStartingPoints,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
     describe_observed_branches,
@@ -51,7 +54,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
     remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    PhaseStartingPoints,
     save_unpushed_work,
 )
 

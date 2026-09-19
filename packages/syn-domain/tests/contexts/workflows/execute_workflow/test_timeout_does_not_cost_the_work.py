@@ -47,7 +47,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard as guard
+from syn_domain.contexts.orchestration.slices.execute_workflow import workspace_git
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
 )
@@ -57,7 +57,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_wor
     _MountedReadOnly,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    GitWorkspace,
     refuse_to_complete_unsaved_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
@@ -75,6 +74,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
         _Clone,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
     )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -400,7 +402,7 @@ async def test_a_remote_that_never_answers_cannot_hold_the_save_open(
     it, against a bound of one, so the elapsed time is the assertion. Anything
     near thirty means nothing cut it off.
     """
-    monkeypatch.setattr(guard, "_REMOTE_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(workspace_git, "REMOTE_TIMEOUT_SECONDS", 1)
     processor = await _provisioned(clone)
     clone.commit("state_machine.py", "an hour of work\n")
     clone.hang_the_remote(seconds=30)
@@ -446,7 +448,7 @@ async def test_a_clean_filter_that_never_returns_cannot_hold_the_save_open(
     confident statement nobody checked - and would cost the work just as
     silently as the hang.
     """
-    monkeypatch.setattr(guard, "_LOCAL_TIMEOUT_SECONDS", 3)
+    monkeypatch.setattr(workspace_git, "LOCAL_TIMEOUT_SECONDS", 3)
     processor = await _provisioned(clone)
     clone.commit("state_machine.py", "an hour of work\n")
     clone.hang_the_clean_filter(seconds=30)

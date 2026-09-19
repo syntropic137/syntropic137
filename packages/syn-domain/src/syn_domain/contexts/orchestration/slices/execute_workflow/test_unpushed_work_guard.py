@@ -47,7 +47,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
-    GitWorkspace,
     _read_only_mount,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
@@ -62,6 +61,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
+    )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
