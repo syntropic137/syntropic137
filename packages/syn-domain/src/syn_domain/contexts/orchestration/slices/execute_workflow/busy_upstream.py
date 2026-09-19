@@ -94,6 +94,18 @@ _BUSY_UPSTREAM_REASONS: frozenset[str] = frozenset(
 #: with one they cannot.
 _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 
+#: The smallest timeout that still MEANS a timeout downstream. The workspace
+#: provider reads a falsey one as no bound at all -
+#: `if not timeout_seconds: return False` in `providers/base.py` - so a
+#: remaining budget that truncates to `0` would not produce a short attempt,
+#: it would produce an UNBOUNDED one, which is strictly worse than the
+#: overrun it came from. No attempt should ever be dispatched this close to
+#: its deadline (`_MIN_USEFUL_ATTEMPT_SECONDS` is what stops one being), but
+#: the floor is applied where the number is produced regardless: a bound that
+#: matters this much should not depend on every caller having got the
+#: arithmetic right.
+_MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
+
 
 def _upstream_was_busy(reason: str | None) -> bool:
     """Whether ``reason`` is, in full, the upstream reporting its own capacity."""
@@ -140,6 +152,20 @@ class PhaseAttempts:
         return max(self._deadline - self._clock.monotonic(), 0.0)
 
     @property
+    def attempt_timeout_seconds(self) -> int:
+        """Whole seconds to hand the handler, read AT the moment of dispatch.
+
+        Not at the moment of deciding to dispatch: between the two the clock
+        keeps running, and this is the number that actually bounds the process.
+
+        Never zero - see `_MIN_MEANINGFUL_TIMEOUT_SECONDS` for why zero is the
+        one value that must not escape here. Callers get a timeout they can
+        pass on without knowing any of that, which is the point of reading it
+        from here rather than truncating `seconds_left` themselves.
+        """
+        return max(int(self.seconds_left), _MIN_MEANINGFUL_TIMEOUT_SECONDS)
+
+    @property
     def attempt(self) -> int:
         """Which attempt is running, 1-based. For logging, not for deciding."""
         return self._attempt
@@ -166,6 +192,17 @@ class PhaseAttempts:
         if not self._may_retry(reason=reason, work_done=work_done, delay=delay):
             return False
         await self._clock.sleep(delay)
+        # ASKED AGAIN, because the check above was a forecast and this is the
+        # outcome. `sleep(delay)` does not promise to return after `delay`: the
+        # host can suspend, the scheduler can run long, and the loop can be
+        # busy. Whatever the cause, the deadline is read from the clock and the
+        # clock has moved. Before this second check the answer was already
+        # committed to - the caller was told to go again and handed whatever
+        # `seconds_left` had become, which on an overshoot is 0, which the
+        # provider reads as NO TIMEOUT. So an oversleep did not merely waste
+        # the budget, it removed the bound the budget existed to impose.
+        if not self._affords_an_attempt():
+            return False
         self._attempt += 1
         return True
 
@@ -181,7 +218,17 @@ class PhaseAttempts:
             return False
         # The backoff is spent from the same deadline, so an attempt is only
         # affordable if paying for the wait still leaves it room to run.
-        return self.seconds_left - delay >= _MIN_USEFUL_ATTEMPT_SECONDS
+        return self._affords_an_attempt(after_waiting=delay)
+
+    def _affords_an_attempt(self, *, after_waiting: float = 0.0) -> bool:
+        """Whether the deadline still buys an attempt worth starting.
+
+        One rule, read twice: with ``after_waiting`` set it is a forecast of
+        what the budget will be once a backoff is paid for, and with the
+        default it is the fact of what the budget IS. Written once so the two
+        readings cannot drift into disagreeing about what "affordable" means.
+        """
+        return self.seconds_left - after_waiting >= _MIN_USEFUL_ATTEMPT_SECONDS
 
 
 @dataclass(frozen=True)

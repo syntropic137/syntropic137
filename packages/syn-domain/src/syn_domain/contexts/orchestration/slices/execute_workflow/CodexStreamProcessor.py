@@ -291,6 +291,10 @@ class CodexObservabilityRecorder(Protocol):
     ``EventStreamProcessor.ObservabilityRecorder``.
     """
 
+    def note_agent_activity(self) -> None:
+        """See ``ObservabilityCollector.note_agent_activity`` (#1303)."""
+        ...
+
     async def record_tool_started(
         self,
         tool_name: str,
@@ -854,6 +858,15 @@ class CodexStreamProcessor:
         if not isinstance(item, dict):
             return
 
+        # Before the type is read, and regardless of what it turns out to be.
+        # Codex opens an item when it BEGINS the work, so any start at all -
+        # an `agent_message` that never completes, a side-effecting type this
+        # branch has never heard of - is the model having got somewhere. Only
+        # the two below are worth an observation; all of them are worth the
+        # fact, and that fact is what decides whether the whole prompt may be
+        # run a second time over whatever the item did (#1303).
+        self._collector.note_agent_activity()
+
         item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
 
@@ -877,6 +890,12 @@ class CodexStreamProcessor:
         item = event.get("item")
         if not isinstance(item, dict):
             return
+
+        # And on completion too, not only on the start - some codex versions
+        # announce a `file_change` only once it has happened (#1064), so the
+        # completion can be the first and last the stream says about a
+        # workspace mutation. Same rule as the start: any type counts.
+        self._collector.note_agent_activity()
 
         item_type = item.get("type")
         if item_type == CodexItemType.COMMAND_EXECUTION:

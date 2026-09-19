@@ -78,7 +78,7 @@ class ObservabilityCollector:
         self._phase_id = phase_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
-        self._saw_tool_use = False
+        self._saw_agent_activity = False
 
     @property
     def has_writer(self) -> bool:
@@ -86,28 +86,65 @@ class ObservabilityCollector:
         return self._writer is not None
 
     @property
-    def saw_tool_use(self) -> bool:
-        """Whether this phase's agent has been seen to invoke a tool yet (#1303).
+    def saw_agent_activity(self) -> bool:
+        """Whether this phase's agent has been seen to do ANYTHING yet (#1303).
 
-        The one place that knows. Both stream processors announce every tool op
-        here and nowhere else in common - claude from `tool_use` blocks, codex
-        from `item.started`/`item.completed` - so this is the only answer that
-        does not have to be asked per harness.
+        The one place that knows, and deliberately the crudest question that
+        can be asked: not "did a tool run", not "did the agent speak", but "did
+        this stream carry any sign of the model having started". Both stream
+        processors converge here - claude from assistant content and hook
+        events, codex from `item.started`/`item.completed` - so this is the
+        only answer that does not have to be asked per harness.
 
-        Set BEFORE the writer check below, deliberately: this records what the
-        AGENT did, which is true whether or not anyone is persisting it. Reading
-        it off a stored observation instead would make a run with no
-        observability writer - every unit test, and local dev - look like a run
-        in which no agent ever touched anything.
+        FALSE IS THE STRONG CLAIM, and it is the one a retry rests on: the
+        attempt was a launch that never started, so re-running the same prompt
+        against the same workspace repeats nothing. Every contributor below
+        therefore reports what it SAW rather than what it recognised. An
+        assistant turn counts whatever its content blocks turn out to be, a
+        codex item counts whatever type it turns out to be, and a hook event
+        counts at all. Recognising the shape is how the narrower `saw_tool_use`
+        this replaced came to answer False for thinking-only turns,
+        hook-delivered tool calls and item types nobody had taught it - each of
+        them an attempt that HAD got somewhere, reported as one that had not,
+        and re-run over its own side effects.
+
+        Set BEFORE the writer check on every method below, deliberately: this
+        records what the AGENT did, which is true whether or not anyone is
+        persisting it. Reading it off a stored observation instead would make a
+        run with no observability writer - every unit test, and local dev -
+        look like a run in which no agent ever touched anything.
 
         Cumulative across the attempts of one phase, because the collector is:
         once an attempt has got somewhere, that is still true of the phase on
         the attempt after it.
         """
-        return self._saw_tool_use
+        return self._saw_agent_activity
+
+    def note_agent_activity(self) -> None:
+        """Record that the agent was seen doing something, whatever it was.
+
+        For the stream processors, which see events this collector is never
+        told about: a turn whose content is only thinking, a content block of a
+        type the parser has no branch for, a codex item type that did not exist
+        when the parser was written. None of those is an observation to record -
+        there is nothing meaningful to store - but every one of them is proof
+        the model started, which is the whole of what `saw_agent_activity` is
+        asked for.
+
+        Idempotent, and one-way: nothing un-sees activity.
+        """
+        self._saw_agent_activity = True
 
     async def record_hook_event(self, enriched: dict[str, Any]) -> None:
-        """Record an enriched hook event to observability."""
+        """Record an enriched hook event to observability.
+
+        Counted as activity whatever the event says. A hook fires from inside
+        the agent's own process, so its mere arrival is proof the harness got
+        as far as running the agent - and the tool calls claude reports THIS
+        way rather than as `tool_use` blocks are exactly the side effects a
+        rerun would repeat (#1303).
+        """
+        self.note_agent_activity()
         if self._writer is None:
             return
 
@@ -167,7 +204,11 @@ class ObservabilityCollector:
         input_preview: str,
     ) -> None:
         """Record tool execution started."""
-        self._saw_tool_use = True
+        # Recorded when the tool is ANNOUNCED, not when it returns, so this can
+        # only run ahead of the side effect and never behind it. Running ahead
+        # costs a retry that would have been safe; running behind would repeat
+        # work that was not.
+        self.note_agent_activity()
         if self._writer is None:
             return
 
@@ -196,7 +237,7 @@ class ObservabilityCollector:
         # announce a `file_change` only once it has happened (#1064). That is a
         # workspace mutation, so it counts, and counting only starts would miss
         # exactly the tool op that already changed something.
-        self._saw_tool_use = True
+        self.note_agent_activity()
         if self._writer is None:
             return
 
@@ -219,7 +260,14 @@ class ObservabilityCollector:
         agent_name: str,
         tool_use_id: str,
     ) -> None:
-        """Record subagent started."""
+        """Record subagent started.
+
+        A subagent is a whole agent run, so a phase that started one has
+        unambiguously got somewhere. Marked here as well as at the hook that
+        usually precedes it because the native `Task` tool path reaches this
+        method without one (#1303).
+        """
+        self.note_agent_activity()
         if self._writer is None:
             return
 
@@ -244,7 +292,12 @@ class ObservabilityCollector:
         success: bool | None,
         tools_used: dict[str, int] | None,
     ) -> None:
-        """Record subagent stopped."""
+        """Record subagent stopped.
+
+        Counted for the same reason a start is, and separately from it: a
+        truncated stream can deliver the completion whose start never arrived.
+        """
+        self.note_agent_activity()
         if self._writer is None:
             return
 
@@ -341,7 +394,12 @@ class ObservabilityCollector:
         event_type: str,
         enriched: dict[str, Any],
     ) -> None:
-        """Record an embedded event (e.g., git hook events from tool output)."""
+        """Record an embedded event (e.g., git hook events from tool output).
+
+        These are scanned out of a tool's OUTPUT, so the work they describe -
+        a commit, a push - has already happened by the time one is seen.
+        """
+        self.note_agent_activity()
         if self._writer is None:
             return
 

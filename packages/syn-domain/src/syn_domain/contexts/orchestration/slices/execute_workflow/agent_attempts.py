@@ -80,33 +80,42 @@ def _attempt_is_settled(result: AgentExecutionResult) -> bool:
 def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityCollector) -> bool:
     """Whether this phase's agent has done anything a rerun would have to redo.
 
-    Two witnesses, and between them they cover the three ways an attempt stops
-    being a launch that never started:
+    ASKED IN THE DIRECTION THAT FAILS SAFE. The question a retry actually needs
+    answered is the negative one - "did this attempt do NOTHING" - and the
+    honest way to answer it is to look for any sign of life and report its
+    absence, never to look for the particular signs a parser happens to
+    recognise and read their absence as silence. Those are the same answer only
+    while the parser knows every shape the harness emits, which it does not and
+    cannot: a `thinking` block, a hook-delivered tool call, a codex item type
+    shipped next month. Each is an attempt that got somewhere; each was silence
+    to the narrower predicate this replaced; and each bought a rerun of the
+    whole prompt over the workspace it had already changed.
 
-    - ``collector.saw_tool_use`` - a TOOL CALL, and with it any WORKSPACE
-      CHANGE or external side effect. Trustworthy for three reasons: it is
-      recorded from both harnesses' streams at the one point they converge, it
-      is recorded when the tool is ANNOUNCED rather than when it returns, and
-      the announcement precedes the effect. So the record can only run ahead of
-      the side effect, never behind it - and running ahead costs a retry that
-      would have been safe, while running behind would repeat work that was
-      not.
-    - ``last_agent_message is not None`` - an ASSISTANT TURN, for the attempt
-      that spoke without calling anything. ``None`` on this field already means
-      "the agent said nothing at all on this stream", which is a fact the
-      artifact path depends on (#1195), so it is read here rather than
-      re-derived.
+    So the two witnesses are both evidence the attempt recorded ANYWAY, and
+    both are deliberately unselective:
 
-    Both are evidence the attempt recorded for other reasons. Neither is a flag
-    set by the retry path for the retry path, which would be a claim about work
-    rather than a trace of it.
+    - ``collector.saw_agent_activity`` - set by any assistant turn with any
+      content, any hook event, any subagent lifecycle event, and any codex
+      ``item.started`` / ``item.completed`` of any type. See that property for
+      why each counts. It is the primary witness and the one that scales: a new
+      event shape is covered by the branch that already forwards it here, not
+      by remembering to teach this function about it.
+    - ``last_agent_message is not None`` - an ASSISTANT TURN, kept because it
+      catches the one path that reaches the caller without touching the
+      collector at all: a claude terminal ``result`` line carrying the agent's
+      words. ``None`` on this field already means "the agent said nothing on
+      this stream", a fact the artifact path depends on (#1195), so it is read
+      here rather than re-derived.
+
+    Neither is a flag set by the retry path for the retry path, which would be
+    a claim about work rather than a trace of it.
 
     Deliberately NOT token counts: a request that reached the model and was
     refused for capacity can carry input tokens, and that is a bill, not work
     to preserve. Treating it as work would stop the retry this module exists
     for from ever happening.
     """
-    return collector.saw_tool_use or result.stream_result.last_agent_message is not None
+    return collector.saw_agent_activity or result.stream_result.last_agent_message is not None
 
 
 async def run_phase_agent(
@@ -157,8 +166,11 @@ async def run_phase_agent(
             claude_cmd=launch.claude_cmd,
             session_id=session_id,
             agent_model=phase.agent_config.model,
-            # What is LEFT of the phase's budget, not what it started with.
-            timeout_seconds=int(attempts.seconds_left),
+            # What is LEFT of the phase's budget, not what it started with,
+            # and read on this line rather than when the retry was agreed to:
+            # the backoff before it can overshoot, and a timeout computed
+            # before the overshoot would be one the deadline no longer covers.
+            timeout_seconds=attempts.attempt_timeout_seconds,
             collector=collector,
             runner=runner,
             on_launch=observer_for(launch.session_manager),
