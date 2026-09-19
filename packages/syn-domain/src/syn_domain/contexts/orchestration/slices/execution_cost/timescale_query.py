@@ -51,8 +51,11 @@ from syn_shared.events import (
 # means a maintained read model keyed by execution_id - a tally with its own
 # rebuild story, as #1322 did for tool counts - or re-keying these onto the
 # session ids of the execution, since session_id IS the segmentby column and
-# the session-cost path next door is bounded for exactly that reason. Neither
-# is a query change, which is why neither is in #1338's first pass.
+# the session-cost path next door discards whole segments for exactly that
+# reason. That would make these NARROWER, not bounded: the session-cost path
+# has no bound on the events within a session either, and caps only the number
+# of ids per round-trip. Neither is a query change, which is why neither is in
+# #1338's first pass.
 #
 # It is NOT currently known to be slow: #1322 measured the tool-count scan at
 # 60,562 buffers / 905ms for one page, and these were never measured. Treat the

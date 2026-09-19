@@ -27,33 +27,42 @@ from syn_shared.events import (
 
 # --- The four queries, all keyed by a session-id ARRAY -----------------------
 #
-# WHY THESE STILL READ RAW EVENTS, AND WHY THAT IS SAFE AT SCALE (#1338).
+# WHY THESE STILL READ RAW EVENTS, AND WHAT THAT DOES AND DOES NOT BOUND
+# (#1338).
 #
 # All four filter `event_type`, which is in neither compress_segmentby
 # (session_id) nor compress_orderby (time), so inside a compressed chunk it
 # cannot be answered from an index - the segment is decompressed and filtered
 # row by row. #1338 asked whether that makes them the next /executions-style
-# latency bug. For the session-keyed paths the answer is no, and the reason is
-# the id they lead on rather than anything about event_type:
+# latency bug. These are NARROWER than the execution-keyed paths, for a reason
+# that is about the id they lead on rather than about event_type:
 #
 #   `session_id` IS the segmentby column. A compressed chunk stores one
 #   independently addressable segment per session_id, so `session_id = ANY($1)`
-#   discards whole segments before decompressing any of them. The work is
-#   proportional to the events of the sessions ON THE PAGE - bounded by the
-#   page size, not by the table.
+#   discards whole segments before decompressing any of them. Sessions that are
+#   not on the page are never touched.
 #
-# That is the property the execution-keyed equivalents in
-# orchestration/slices/execution_cost/ do NOT have, and it is the whole of the
-# difference between the two. So the rule for changing anything here: a query
-# in this file MUST keep leading on session_id. Re-keying one on execution_id
-# or on time alone returns identical numbers and every correctness test still
-# passes, while turning a page-bounded read into a scan of every chunk in
-# range. Pinned by
+# NARROWER IS NOT BOUNDED, and this comment used to say bounded. Nothing here
+# limits the events WITHIN a selected session: a session that emitted a million
+# events is a million rows decompressed and filtered, for one row of output.
+# What is bounded is the number of sessions per round-trip, and only because
+# `calculate_many` caps it - see MAX_SESSIONS_PER_QUERY. Before that cap the
+# only limit was `le=200` on the HTTP query parameter, which is not where these
+# queries run and does not constrain any other caller.
+#
+# The per-session ceiling is the part still outstanding, and it is the same
+# shape of debt as the execution-keyed paths next door: only a maintained
+# per-session read model removes it.
+#
+# The rule for changing anything here: a query in this file MUST keep leading
+# on session_id. Re-keying one on execution_id or on time alone returns
+# identical numbers and every correctness test still passes, while giving up
+# the segment discard and reading every chunk in range. Pinned by
 # packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
 #
 # #1338 also shipped `idx_events_session_type (session_id, event_type, time)`,
 # which removes the per-row event_type recheck on the UNCOMPRESSED chunks. It
-# helps recent data and is not what makes these safe; the segmentby match is.
+# helps recent data, and it does not change either bound above.
 #
 # WHY (issue #1114). `calculate` ran up to four round-trips per session, and the
 # sessions list endpoint called it once per row: `limit=50` cost 2.4s and
@@ -136,6 +145,20 @@ FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
 GROUP BY session_id
 """
+
+#: The most session ids `calculate_many` will bind into one round-trip.
+#:
+#: Each of the four queries above decompresses every segment it selects, so the
+#: work of one round-trip grows with the number of ids in the array. Something
+#: has to cap that array, and until #1338 the only thing that did was `le=200`
+#: on the sessions-list HTTP parameter - a constraint on one caller, in a layer
+#: these queries know nothing about, silently absent from every other caller
+#: and from every direct use of the query service.
+#:
+#: 200 is that page cap restated where the query runs, so the HTTP path behaves
+#: exactly as it did (a full page is still one round-trip) and a caller asking
+#: for more pays extra round-trips rather than one unbounded one.
+MAX_SESSIONS_PER_QUERY = 200
 
 
 def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
@@ -468,27 +491,35 @@ class TimescaleSessionCostQuery:
         return (await self.calculate_many([session_id])).get(session_id)
 
     async def calculate_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
-        """Calculate cost for many sessions in a fixed number of round-trips.
+        """Calculate cost for many sessions, four round-trips per batch.
 
-            Sessions with no cost data are absent from the result, exactly as
-            ``calculate`` returns ``None`` for them. Order is not meaningful; the
-            caller indexes by session id - by the STORED id, which is what the
-            result is keyed by and what the rows carry.
+        Sessions with no cost data are absent from the result, exactly as
+        ``calculate`` returns ``None`` for them. Order is not meaningful; the
+        caller indexes by session id - by the STORED id, which is what the
+        result is keyed by and what the rows carry.
 
-            # agent_events holds every id in its stored (sanitised) form, because
-        # AgentEvent's validator applies pg_safe on the way in. A read binds text
-        # against those columns, so it has to ask for the same spelling or it
-        # matches nothing and reports that as "nothing was recorded" (#1241).
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
+
+        ANY NUMBER OF IDS IS ACCEPTED; NO NUMBER OF IDS IS ONE QUERY. Ids are
+        taken ``MAX_SESSIONS_PER_QUERY`` at a time, so the size of each array
+        bound into the four queries is capped here rather than trusted to the
+        caller. Up to a full page that is the single batch it always was; past
+        it, the caller pays another four round-trips instead of handing the
+        database an array of unbounded length. See the comment on that
+        constant for why this layer is where the cap belongs.
         """
         ids = list(dict.fromkeys(pg_safe(sid) for sid in session_ids))
-        if not ids:
-            return {}
-        page = await self._fetch_page(ids)
         results: dict[str, SessionCost] = {}
-        for sid in ids:
-            cost = self._cost_for(sid, page)
-            if cost is not None:
-                results[sid] = cost
+        for start in range(0, len(ids), MAX_SESSIONS_PER_QUERY):
+            batch = ids[start : start + MAX_SESSIONS_PER_QUERY]
+            page = await self._fetch_page(batch)
+            for sid in batch:
+                cost = self._cost_for(sid, page)
+                if cost is not None:
+                    results[sid] = cost
         return results
 
     async def _fetch_page(self, ids: list[str]) -> _PageRows:

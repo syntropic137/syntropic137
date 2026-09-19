@@ -49,13 +49,16 @@ CREATE INDEX IF NOT EXISTS idx_events_execution ON agent_events (execution_id, t
 -- (below) that makes these indexes the fix for today's data and no fix at all
 -- for yesterday's.
 --
--- For `session_id` that ceiling is survivable: session_id IS the segmentby
+-- For `session_id` that ceiling is narrower: session_id IS the segmentby
 -- column, so a compressed chunk discards whole segments it does not need
--- before decompressing anything, and the work stays proportional to the
--- sessions on the page. For `execution_id` it is not: execution_id is neither
--- segmentby nor orderby, so an execution-keyed query decompresses every
--- segment of every chunk in range. That path needs a read model, not an index
--- (#1338, still open).
+-- before decompressing anything, and a session that is not on the page is
+-- never read. It is narrower and not bounded - nothing limits the events
+-- within a session that IS on the page, and the number of sessions per
+-- round-trip is capped by the query service (MAX_SESSIONS_PER_QUERY), not by
+-- anything here. For `execution_id` not even that holds: execution_id is
+-- neither segmentby nor orderby, so an execution-keyed query decompresses
+-- every segment of every chunk in range. Both paths need a read model, not an
+-- index (#1338, still open).
 CREATE INDEX IF NOT EXISTS idx_events_session_type ON agent_events (session_id, event_type, time DESC);
 CREATE INDEX IF NOT EXISTS idx_events_execution_type ON agent_events (execution_id, event_type, time DESC);
 
