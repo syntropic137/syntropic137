@@ -49,6 +49,10 @@ async def test_health_reports_the_installed_release() -> None:
     build = (await _health_body())["build"]
 
     assert build["version"] == INSTALLED
+    # The state is published on the normal path too, not only when metadata is
+    # missing: a client that branches on it must be able to read it always, and
+    # it must track the release rather than being set by hand beside it.
+    assert build["version_status"] == "installed"
 
 
 @pytest.mark.unit

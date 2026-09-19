@@ -50,6 +50,30 @@ def test_openapi_info_version_is_the_installed_release() -> None:
 
 
 @pytest.mark.unit
+def test_health_says_the_release_is_installed(client: TestClient) -> None:
+    """The state is published on the normal path too, not only when it is missing.
+
+    A client branching on ``version_status`` must be able to read it always,
+    and it must track the release rather than being a second value set beside
+    it by hand - which is the arrangement this whole issue is about.
+    """
+    assert client.get("/health").json()["version_status"] == "installed"
+
+
+@pytest.mark.unit
+def test_the_package_dunder_agrees_with_what_it_serves() -> None:
+    """``syn_collector.__version__`` was a hardcoded "0.1.0" next to this accessor.
+
+    It contradicted the very metadata /health and openapi.json already
+    reported, so the package that claimed to have removed the two-homes drift
+    still had it. One source or it drifts again.
+    """
+    import syn_collector
+
+    assert syn_collector.__version__ == INSTALLED
+
+
+@pytest.mark.unit
 def test_health_and_openapi_cannot_disagree(client: TestClient) -> None:
     """Equal to each other AND to the package: equality alone would still hold
     if both went back to sharing one constant, which is the arrangement that
