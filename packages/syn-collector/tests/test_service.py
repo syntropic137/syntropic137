@@ -40,12 +40,18 @@ class TestHealthEndpoint:
 
         The exact payload, so a field added or dropped is caught here. It gained
         `version` in #1380 - see test_collector_build_identity.py for why that
-        value cannot be a literal.
+        value cannot be a literal - and then `version_status`, which says
+        whether `version` could be read at all rather than leaving a client to
+        infer it from a null.
         """
         response = test_client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "healthy", "version": version("syn-collector")}
+        assert response.json() == {
+            "status": "healthy",
+            "version": version("syn-collector"),
+            "version_status": "installed",
+        }
 
 
 class TestEventsEndpoint:
