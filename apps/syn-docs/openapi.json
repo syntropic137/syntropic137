@@ -5940,9 +5940,16 @@
       "BuildInfo": {
         "properties": {
           "version": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Version",
-            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3')."
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null."
           },
           "image_tag": {
             "anyOf": [
@@ -5967,12 +5974,23 @@
             ],
             "title": "Commit",
             "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
+          },
+          "version_status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "unavailable"
+            ],
+            "title": "Version Status",
+            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means importlib.metadata had no such distribution, version is null, and nothing has been invented to fill it.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "version"
+          "version",
+          "version_status"
         ],
         "title": "BuildInfo",
         "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in two places from that one source: this block on ``GET /health``,\nand ``openapi.json``'s ``info.version``. Both used to be, or were derived\nfrom, a hardcoded literal that had drifted twenty releases behind the\ninstalled package."

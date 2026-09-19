@@ -2020,9 +2020,9 @@ export interface components {
         BuildInfo: {
             /**
              * Version
-             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3').
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
              */
-            version: string;
+            version: string | null;
             /**
              * Image Tag
              * @description Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one — which is a different fact from an unknown tag, and is reported as such.
@@ -2033,6 +2033,12 @@ export interface components {
              * @description Git commit the image was built from, stamped at image build time. Null when the build did not stamp one.
              */
             commit?: string | null;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means importlib.metadata had no such distribution, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
         };
         /**
          * CancelRequest
