@@ -2287,7 +2287,7 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across every version-carrying file (manifests, schemas, uv.lock)
+# Bump version across every version-carrying file (manifests, schemas, uv.lock, openapi.json)
 bump-version version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2298,6 +2298,19 @@ bump-version version:
     echo ""
     echo "Regenerating uv.lock..."
     uv lock
+    echo ""
+    # openapi.json became version-carrying in #1380: info.version is now read
+    # from the installed package instead of a literal that had drifted twenty
+    # releases. That is the point of the fix, and it means the committed spec -
+    # and the CLI and dashboard types generated from it - go stale on every
+    # bump. `just codegen-check` would catch that, but only after the release
+    # PR is already open, so it is regenerated here instead.
+    #
+    # The sync is what makes the metadata report the new version; without it
+    # codegen would faithfully re-emit the old one.
+    echo "Reinstalling and regenerating the API contract..."
+    uv sync --quiet
+    just codegen
     echo ""
     python3 scripts/workflows/bump_version.py --check
 

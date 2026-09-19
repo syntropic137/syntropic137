@@ -1,4 +1,5 @@
 import { api, unwrap } from "../client/typed.js";
+import type { components } from "../generated/api-types.js";
 import type { CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { BOLD, DIM, GREEN, RED, YELLOW, style } from "../output/ansi.js";
@@ -50,15 +51,30 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
   return lines;
 }
 
+/** Which build answered. The release always; the image tag and commit only
+ * when the image build stamped them, since an unstamped build reports null and
+ * printing "commit: null" tells a reader nothing they can act on. */
+function buildLine(build: components["schemas"]["BuildInfo"]): string {
+  const stamps = [build.image_tag, build.commit].filter((s): s is string => Boolean(s));
+  return `syn-api ${build.version}` + (stamps.length > 0 ? ` (${stamps.join(", ")})` : "");
+}
+
 export const healthCommand: CommandDef = {
   name: "health",
   description: "Check API server health status",
   handler: async () => {
     const data = unwrap(await api.GET("/health"), "Health check");
 
-    // Health endpoint returns { [key: string]: string } in the spec
-    const status = data["status"] ?? "";
-    const mode = data["mode"] ?? "";
+    const status = data.status ?? "";
+    const mode = data.mode ?? "";
+
+    // FIRST, above the verdict. `syn health` is how an agent or an operator
+    // answers "is the new build live yet?", and until #1380 the API could not
+    // tell them: openapi.json claimed 0.5.1 against a 0.29.1b3 deployment and
+    // /health said nothing, leaving `docker inspect` over SSH as the only
+    // read. Printing it below a "Degraded" line would bury the answer in the
+    // case it is most needed.
+    print(style(buildLine(data.build), DIM));
 
     if (status === "healthy" && mode === "full") {
       print(style("Healthy", BOLD, GREEN) + " — all systems operational");

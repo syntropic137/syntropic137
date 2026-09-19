@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.5.1"
+    "version": "0.29.0"
   },
   "paths": {
     "/workflows": {
@@ -5451,9 +5451,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -5939,6 +5937,46 @@
         "title": "BranchObservationInfo",
         "description": "One branch of a failed phase's workspace, as git had it (#1200).\n\nTHE ANSWER TO \"WHERE DO I LOOK\", made machine-readable. A phase can push\ncomplete work and still fail - most often because it wrote no deliverable,\nwhich #1167 correctly refuses to pass - and the failure then named no\nbranch, so nothing pointed at commits that were merged by hand twice in one\nday once a human found them.\n\nEVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the\nREMOTE ITSELF answered, asked while the workspace was still alive, and\n`remote_commit_at_phase_start` is where this clone's tracking ref pointed\nwhen the phase was handed that workspace. The two differing means the ref\nmoved. It does NOT mean this phase moved it, and no field here says so: a\npush carries no author, so the same evidence is produced by a concurrent\nprocess or a person. Two earlier versions of this claimed otherwise.\n\nA RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the\nrepository - the ref moved, or commits are sitting on no remote. The FIELD\nis three-valued and the two empty answers must not be merged: absent/null\nmeans nothing could look, `[]` means the workspace was read and every\nbranch is exactly where the phase found it. Only a moved ref can be\nrecovered by fetching."
       },
+      "BuildInfo": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3')."
+          },
+          "image_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Tag",
+            "description": "Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one \u2014 which is a different fact from an unknown tag, and is reported as such."
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit",
+            "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "BuildInfo",
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in two places from that one source: this block on ``GET /health``,\nand ``openapi.json``'s ``info.version``. Both used to be, or were derived\nfrom, a hardcoded literal that had drifted twenty releases behind the\ninstalled package."
+      },
       "CancelRequest": {
         "properties": {
           "reason": {
@@ -6199,6 +6237,63 @@
         ],
         "title": "ClaudePluginLockResponse",
         "description": "A single lock entry (one ``(source_url, version)`` pair)."
+      },
+      "CodexAuthState": {
+        "type": "string",
+        "enum": [
+          "absent",
+          "ok",
+          "expiring",
+          "expired",
+          "unreadable"
+        ],
+        "title": "CodexAuthState",
+        "description": "Freshness of the configured codex credential."
+      },
+      "CodexAuthStatus": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/CodexAuthState"
+          },
+          "expires_in_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Hours",
+            "description": "Hours until the access token expires. Negative once expired."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "Access token expiry, UTC."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Human-readable summary. Never contains token material."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "detail"
+        ],
+        "title": "CodexAuthStatus",
+        "description": "A non-secret description of the configured codex credential."
       },
       "ConditionRequest": {
         "properties": {
@@ -6942,6 +7037,24 @@
           "status"
         ],
         "title": "CreateWorkflowResponse"
+      },
+      "DegradedReason": {
+        "type": "string",
+        "enum": [
+          "artifact_storage",
+          "claude_plugin_storage",
+          "skill_storage",
+          "conversation_storage",
+          "subscription_coordinator",
+          "projection_catchup",
+          "projection_stalled",
+          "event_poller",
+          "check_run_poller",
+          "anthropic_api_key",
+          "github_app"
+        ],
+        "title": "DegradedReason",
+        "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
       },
       "DeleteWorkflowResponse": {
         "properties": {
@@ -8460,6 +8573,85 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'healthy' while the process is alive and accepting writes."
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "'full', or 'degraded' when some subsystem is impaired."
+          },
+          "build": {
+            "$ref": "#/components/schemas/BuildInfo",
+            "description": "Which build is answering (#1380)."
+          },
+          "degraded_reasons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DegradedReason"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reasons",
+            "description": "Every way this instance is up but not fully serving. Omitted entirely when there are none, which is how a reader tells 'nothing is wrong' from 'something is and it is not listed here'."
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Read-path health. Omitted when no subscription service is wired up at all, e.g. in offline mode."
+          },
+          "codex_auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodexAuthStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Freshness of this instance's codex credential. Omitted when the probe could not run \u2014 a credential hint must never be able to take /health down."
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings",
+            "description": "Human-readable notes that need attention but do not degrade the instance. Omitted when there are none."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "mode",
+          "build"
+        ],
+        "title": "HealthResponse",
+        "description": "Payload of ``GET /health``.\n\nEVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380\ntyped only ``build`` and left ``extra=\"allow\"`` for the probe blocks, which\nput ``additionalProperties: true`` in ``openapi.json`` and an\n``[key: string]: unknown`` index signature in the generated CLI types: the\nfields `syn health` actually reads were invisible to every generated\nconsumer, and a probe could change shape without the drift check noticing.\nThe probes own the shapes \u2014 ``CodexAuthStatus`` and ``ProjectionLag`` are\ndeclared at their source and referenced, not copied \u2014 but the fact that\n/health publishes them is this model's to state.\n\nABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see\n``_OmitsAbsentFields``."
+      },
       "HeatmapDayBucketResponse": {
         "properties": {
           "date": {
@@ -9565,6 +9757,52 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "ProjectionLag": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as it appears in projection_checkpoints."
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position",
+            "description": "Global nonce this projection's checkpoint has reached. 0 when it has no checkpoint at all, which is what a projection looks like immediately after a version bump clears it."
+          },
+          "lag": {
+            "type": "integer",
+            "title": "Lag",
+            "description": "Events between position and the store head. Always > 0 here."
+          },
+          "checkpoint_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Age Seconds",
+            "description": "Seconds since this projection's checkpoint last moved. None when the projection has no checkpoint row yet. This is the evidence behind `stalled`, and the number to sample if the stall threshold needs revisiting."
+          },
+          "stalled": {
+            "type": "boolean",
+            "title": "Stalled",
+            "description": "True when this projection is behind the head and its checkpoint has not moved for longer than the stall threshold (120s by default): it is not working through a backlog, it is stuck.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "position",
+          "lag"
+        ],
+        "title": "ProjectionLag",
+        "description": "One projection's distance from the head of the event store."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -11449,6 +11687,141 @@
         ],
         "title": "StateResponse",
         "description": "Response with execution state."
+      },
+      "SubscriptionHealth": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "degraded",
+              "stalled",
+              "catching_up",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed."
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running",
+            "description": "Whether the subscription coordinator is running. Null when the probe failed and could not ask."
+          },
+          "projection_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Count",
+            "description": "How many projections the coordinator is driving."
+          },
+          "realtime_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Enabled",
+            "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "is_catching_up": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Catching Up",
+            "description": "True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable."
+          },
+          "is_stalled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Stalled",
+            "description": "True when a projection is behind the head and its checkpoint has stopped moving. Does NOT resolve on its own. Null when lag is unmeasurable."
+          },
+          "lag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag",
+            "description": "Distance of the furthest-behind projection from the store head, in lag_unit. 0 means at the head; null means not measurable."
+          },
+          "lag_unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "events"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Unit",
+            "description": "Unit of lag: event-store global-nonce positions, not seconds."
+          },
+          "head_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Position",
+            "description": "Global nonce of the newest event in the store."
+          },
+          "lagging_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProjectionLag"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lagging Projections",
+            "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "SubscriptionHealth",
+        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health``.\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the probe itself\nfails, ``status`` is \"unknown\" and nothing else is known at all.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
       },
       "SystemActionResponse": {
         "properties": {

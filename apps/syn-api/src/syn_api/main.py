@@ -10,6 +10,7 @@ from agentic_logging import get_logger, setup_logging
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from syn_api.build_info import get_build_info
 from syn_api.config import get_api_config
 from syn_api.routes import (
     artifacts_router,
@@ -34,7 +35,7 @@ from syn_api.routes import (
     workflows_router,
 )
 from syn_api.strict_query import reject_unknown_query_params
-from syn_api.types import Err, Ok
+from syn_api.types import Err, HealthResponse, Ok
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -43,8 +44,6 @@ if TYPE_CHECKING:
 # Configure via env vars: LOG_LEVEL, LOG_FORMAT (json/human), LOG_LEVEL_<COMPONENT>
 setup_logging()
 logger = get_logger(__name__)
-
-__version__ = "0.5.1"
 
 
 @asynccontextmanager
@@ -88,7 +87,11 @@ def create_app() -> FastAPI:
             "Provides real-time observability for workflow execution, "
             "agent sessions, and artifacts."
         ),
-        version=__version__,
+        # The INSTALLED release, not a literal. This was hardcoded "0.5.1" and
+        # had drifted twenty releases behind the package it describes, so
+        # openapi.json — and every CLI type and doc page generated from it —
+        # named a build that was not running (#1380).
+        version=get_build_info().version,
         lifespan=lifespan,
         debug=config.debug,
         docs_url="/docs",
@@ -155,20 +158,23 @@ def create_app() -> FastAPI:
         """Root endpoint with API info."""
         return {
             "name": "Syntropic137 API",
-            "version": __version__,
+            "version": get_build_info().version,
             "docs": "/docs",
             "health": "/health",
         }
 
     @app.get("/health")
-    async def health() -> dict:
+    async def health() -> HealthResponse:
         """Health check endpoint with detailed subscription status."""
         import syn_api.services.lifecycle as lifecycle
 
         result = await lifecycle.health_check()
         if isinstance(result, Ok):
             return result.value
-        return {"status": "unhealthy"}
+        # An unhealthy process still has to say which build is unhealthy: that
+        # answer is read from package metadata and needs none of the state that
+        # just failed.
+        return HealthResponse(status="unhealthy", mode="degraded", build=get_build_info())
 
     return app
 
