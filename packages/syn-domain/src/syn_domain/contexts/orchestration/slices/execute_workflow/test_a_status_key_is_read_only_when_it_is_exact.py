@@ -669,3 +669,88 @@ class TestThePromptNamesTheKey:
         assert prompt.count("status") == 1, (
             "the prompt says `status` somewhere other than the sentence forbidding it"
         )
+
+
+#: The second shape seen in production, and the one that failed the run fixing
+#: the first. exec-297778171fa2 finished `implement`, pushed 5e9a1272, and wrote
+#: the right key - ``success`` - wrapped in a markdown code fence. The JSON
+#: inside is exactly what the grammar asks for; only the fence was extra.
+A_FENCED_REPORT = (
+    "TASK_RESULT:\n"
+    "```json\n"
+    '{"success": true, "branch": "fix/1324-status-key-alias", '
+    '"commit": "5e9a1272ae7fc0acf78d2e66d79cd71e020356bb", '
+    '"comments": "Both blocking review findings closed"}\n'
+    "```\n"
+    "TASK_RESULT_END"
+)
+
+
+class TestAFencedBlockIsReadOnlyAsAPair:
+    """A code fence around the one JSON value is unwrapped; nothing else is.
+
+    MUTATION RECORD: deleting the fence handling in `_delimited_reports` fails
+    every positive row here (they read UNREADABLE again); accepting an opening
+    fence without its closing one fails the unclosed row.
+    """
+
+    def test_the_fenced_shape_that_lost_a_phase_is_read(self) -> None:
+        verdict = AgentVerdict.from_agent_text(A_FENCED_REPORT)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.refuses_completion
+        assert verdict.comments == "Both blocking review findings closed"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'TASK_RESULT:\n```\n{"success": false, "comments": "no tag"}\n```\nTASK_RESULT_END',
+            'TASK_RESULT: ```json {"success": false, "comments": "one line"} ``` TASK_RESULT_END',
+        ],
+        ids=["no-language-tag", "all-on-one-line"],
+    )
+    def test_a_fenced_failure_still_refuses_the_phase(self, text: str) -> None:
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.FAILURE
+        assert verdict.refuses_completion
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'TASK_RESULT:\n```json\n{"success": true}\nTASK_RESULT_END',
+            'TASK_RESULT:\n{"success": true}\n```\nTASK_RESULT_END',
+            'TASK_RESULT:\n```json\n{"success": true}\n```\n```\nTASK_RESULT_END',
+        ],
+        ids=[
+            "opening-fence-without-closing",
+            "closing-fence-without-opening",
+            "two-closing-fences",
+        ],
+    )
+    def test_anything_but_one_fence_pair_around_the_value_stays_unreadable(self, text: str) -> None:
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+
+    def test_a_fence_inside_the_comments_changes_nothing(self) -> None:
+        text = (
+            'TASK_RESULT: {"success": true, "comments": "ran ```pytest``` fine"}\nTASK_RESULT_END'
+        )
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert verdict.comments == "ran ```pytest``` fine"
+
+    def test_unwrapping_a_fence_is_logged_so_the_drift_stays_visible(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(
+            logging.WARNING,
+            logger="syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict",
+        ):
+            AgentVerdict.from_agent_text(A_FENCED_REPORT)
+
+        warnings = [record.getMessage() for record in caplog.records]
+        assert any("code fence" in w and "#1324" in w for w in warnings), warnings

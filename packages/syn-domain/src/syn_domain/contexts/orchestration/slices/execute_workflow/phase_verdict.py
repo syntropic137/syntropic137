@@ -211,6 +211,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
 from typing import Final
@@ -241,6 +242,20 @@ TASK_RESULT_MARKER: Final[str] = "TASK_RESULT:"
 #: it there is no answer to "which of these is the report" that some legal
 #: message does not contradict - see the defects in the module docstring.
 TASK_RESULT_TERMINATOR: Final[str] = "TASK_RESULT_END"
+
+#: A markdown code fence an agent wraps the block's JSON in (#1324).
+#:
+#: Agents summarise in markdown, and some write the report as
+#: ``TASK_RESULT:`` + a ```json fence + the object + a closing fence +
+#: ``TASK_RESULT_END``. The JSON inside is exactly the value the grammar asks
+#: for; only the fence is extra, so unwrapping it adds no interpretation. It is
+#: accepted only as a PAIR around the one value - an opening fence with no
+#: closing one is still an unclosed block - and its use is logged so the drift
+#: stays visible rather than silently absorbed. Seen in production on
+#: exec-297778171fa2, which finished its work, pushed it, and was failed on
+#: ```json { "success": true, ... }.
+_CODE_FENCE: Final[str] = "```"
+_OPENING_FENCE: Final[re.Pattern[str]] = re.compile(r"```[A-Za-z0-9_+-]*")
 
 
 class VerdictStatus(Enum):
@@ -699,8 +714,10 @@ def _delimited_reports(text: str) -> list[_Report]:
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
         payload_at = _payload_starts(text, marker_at + len(TASK_RESULT_MARKER))
+        opening = _OPENING_FENCE.match(text, payload_at)
+        value_at = _payload_starts(text, opening.end()) if opening else payload_at
         try:
-            block = _decode_payload(text, payload_at)
+            block = _decode_payload(text, value_at)
         except ValueError:
             # No value here to delimit, so resume just past the marker rather
             # than skipping over text this never read.
@@ -708,13 +725,27 @@ def _delimited_reports(text: str) -> list[_Report]:
             search_from = payload_at
             continue
         terminator_at = _payload_starts(text, block.ends_at)
+        if opening:
+            # A fence is accepted only as a pair around the one value; without
+            # its closing half the block is as unclosed as any other.
+            if not text.startswith(_CODE_FENCE, terminator_at):
+                unclosed_at = payload_at
+                search_from = block.ends_at
+                continue
+            terminator_at = _payload_starts(text, terminator_at + len(_CODE_FENCE))
         if not _terminates_at(text, terminator_at):
             unclosed_at = payload_at
             search_from = block.ends_at
             continue
+        if opening:
+            logger.warning(
+                "TASK_RESULT block was wrapped in a markdown code fence (%r); "
+                "unwrapped it and read the JSON inside (#1324)",
+                opening.group(0),
+            )
         reports.append(
             _Report(
-                payload=text[payload_at : block.ends_at],
+                payload=text[value_at : block.ends_at],
                 decoded=block.value,
                 repeats_status=block.repeats_status,
             )
