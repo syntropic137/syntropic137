@@ -25,6 +25,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    SavedWork,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -63,6 +66,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     WorkflowExecutionResult,  # re-exported for backward compatibility
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    already_saved_by_the_completion_gate,
     refuse_to_complete_unsaved_phase,
 )
 from syn_shared.agents import runner_for_provider
@@ -272,6 +276,7 @@ class WorkflowExecutionProcessor:
                     all_artifact_ids,
                     started_at,
                     cancel_reason=aggregate.cancel_reason,
+                    phase_id=dispatch_ctx.current_phase_id,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -387,13 +392,26 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         started_at: datetime,
         cancel_reason: str | None = None,
+        phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
         The aggregate is already in CANCELLED status - no new command needed.
+
+        ``phase_id`` is the phase that was mid-flight when the cancel landed,
+        from the run's own _DispatchContext for the reason ``failed_phase_id``
+        is: with concurrent runs sharing this processor, anything else could
+        name another execution's phase.
         """
-        cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
+        # BEFORE the teardown below. `abandon_all` destroys the cancelled
+        # phase's container and commits that exist only in it go with it. The
+        # user asked for the run to stop, not for the work to be deleted
+        # (#1231).
+        saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+        cancellation = cancelled_execution(
+            cancel_reason, phase_results, all_artifact_ids, saved=saved
+        )
         await self._runtime.report_cancelled(cancellation.reason)
         await self._runtime.abandon_all("cancel")
         return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
@@ -458,7 +476,28 @@ class WorkflowExecutionProcessor:
         # the same phase ids, so "what did `implement` spend" names two answers.
         # The id is the run's own, so it always names this one's.
         usage = self._runtime.usage_for(execution_id, failed_phase_id)
-        # Before the teardown below, the only window in which it is askable (#1200).
+        # Before the teardown below, the only window in which either is
+        # possible: SAVE what would die with the container (#1231), then read
+        # where that leaves the branches (#1200). Saving first is what lets the
+        # branch report point at a quarantine ref instead of at nothing.
+        #
+        # This does not make the phase succeed and must not be read as doing
+        # so. `error` is untouched, `failed_phase_outcome` appends to its reason
+        # rather than replacing it, and the aggregate is still told the
+        # execution failed: a phase killed at its timeout_seconds is still a
+        # phase that ran out of time. What changes is only that the time is now
+        # the whole of what the timeout costs.
+        #
+        # The one failure that arrives with the workspace already emptied is
+        # the completion gate's own refusal, which quarantined before it raised
+        # (#1184). Saving again would push a second, differently-timestamped
+        # commit to the same ref, be rejected as a non-fast-forward, and report
+        # the work as lost directly under the gate's report that it is not.
+        saved = (
+            SavedWork()
+            if already_saved_by_the_completion_gate(error)
+            else await self._runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
+        )
         observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
             error,
@@ -468,6 +507,7 @@ class WorkflowExecutionProcessor:
             observed=observed,
             kept_artifact_ids=kept,
             usage=usage,
+            saved=saved,
         )
         if failure.result is not None:
             phase_results.append(failure.result)

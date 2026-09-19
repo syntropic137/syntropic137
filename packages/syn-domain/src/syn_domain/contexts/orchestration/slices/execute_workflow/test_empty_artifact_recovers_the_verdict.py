@@ -499,6 +499,7 @@ class TestTheVerdictSurvivesEveryHop:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         aggregate = WorkflowExecutionAggregate()

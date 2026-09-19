@@ -659,6 +659,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
         processor._runtime.record_agent_run(
             "verify",

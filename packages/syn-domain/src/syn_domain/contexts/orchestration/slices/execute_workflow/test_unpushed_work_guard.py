@@ -47,7 +47,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
-    GitWorkspace,
     _read_only_mount,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
@@ -62,6 +61,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
+    )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -215,6 +217,25 @@ class _Clone:
         """
         self.git("config", "protocol.ext.allow", "always")
         self.git("remote", "set-url", "origin", f"ext::sleep {seconds}")
+
+    def hang_the_clean_filter(self, seconds: int) -> None:
+        """Make reading this repository's worktree run a program that never returns.
+
+        THE LOCAL HALF of `hang_the_remote`, and the one that matters more
+        (#1231): a `clean` filter is code the REPOSITORY supplies and git runs
+        while reading files, so it turns a local command into an unbounded
+        wait without any network being involved. `.gitattributes` names the
+        driver and the repository's own config supplies the program - both of
+        them things a phase's checkout carries - and `git add --all`, which
+        the quarantine runs over every path, invokes it for each one.
+
+        A config value rather than a hook script on purpose: it needs no
+        executable file, so this stages the hang identically on a tmpdir
+        mounted `noexec`, where a hook would simply be ignored and the test
+        would pass for the wrong reason.
+        """
+        (self.path / ".gitattributes").write_text("* filter=syn-hang\n")
+        self.git("config", "filter.syn-hang.clean", f"sleep {seconds}")
 
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
@@ -751,11 +772,26 @@ _UNREACHABLE = ExecutionResult(
 )
 
 
+def _unbounded(command: list[str]) -> list[str]:
+    """``command`` without the time bound the gate puts in front of every one.
+
+    `timeout --kill-after=<n> <n>` is three arguments the gate prepends to
+    everything it runs (#1231), so anything reading an argv positionally has
+    to step over them first.
+    """
+    return command[3:] if command[:1] == ["timeout"] else command
+
+
 def _operation(command: list[str]) -> str:
-    """What this argv is doing: the git subcommand, or the bare program."""
-    if "git" in command:
-        return command[command.index("git") + 3]  # git, -C, <repo>, <subcommand>
-    return command[0]
+    """What this argv is doing: the git subcommand, or the bare program.
+
+    Found after `-C <repo>` rather than at a fixed offset from `git`: the
+    `-c` overrides that disable hooks sit between the two and would move it.
+    """
+    argv = _unbounded(command)
+    if "-C" in argv:
+        return argv[argv.index("-C") + 2]
+    return argv[0]
 
 
 class _BreaksOn:
@@ -814,7 +850,7 @@ class _MountedReadOnly:
         return "\n".join(lines) + "\n"
 
     async def execute(self, command: list[str]) -> ExecutionResult:
-        if command[:1] == ["cat"] and command[1:] == ["/proc/self/mountinfo"]:
+        if _unbounded(command) == ["cat", "/proc/self/mountinfo"]:
             return ExecutionResult(
                 exit_code=0, success=True, duration_ms=0.0, stdout=self._table(), stderr=""
             )
