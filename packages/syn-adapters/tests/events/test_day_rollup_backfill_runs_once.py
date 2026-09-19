@@ -61,6 +61,11 @@ _VALID_AGENT_EVENTS_SCHEMA = [
 #: (#1371, found in verification).
 _TGENABLED_ORIGIN = "O"
 _TGENABLED_DISABLED = "D"
+#: ENABLE REPLICA TRIGGER: attached and "enabled", but it fires only under
+#: session_replication_role = replica, so ordinary inserts go uncounted.
+_TGENABLED_REPLICA = "R"
+#: ENABLE ALWAYS TRIGGER: fires in every replication role, including origin.
+_TGENABLED_ALWAYS = "A"
 
 #: One comparison against `tgenabled`: an operator and either a quoted literal
 #: or a bare column reference. The second alternative is what makes a tautology
@@ -68,6 +73,10 @@ _TGENABLED_DISABLED = "D"
 #: the fake has to answer it the way PostgreSQL would, with True, so the test
 #: relying on it goes red.
 _TGENABLED_COMPARISON = re.compile(r"tgenabled\s*(=|<>|!=)\s*('[^']*'|\w+)")
+
+#: A membership test, `tgenabled IN ('O', 'A')`. Parsed into its quoted
+#: literals only; any other element raises below rather than being guessed at.
+_TGENABLED_MEMBERSHIP = re.compile(r"tgenabled\s+IN\s*\(([^)]*)\)", re.IGNORECASE)
 
 
 def _tgenabled_predicate_holds(sql: str, tgenabled: str) -> bool:
@@ -84,7 +93,15 @@ def _tgenabled_predicate_holds(sql: str, tgenabled: str) -> bool:
         # disabled case exists to catch, so it must not be papered over here.
         return True
     comparisons = _TGENABLED_COMPARISON.findall(sql)
-    if not comparisons:
+    memberships = _TGENABLED_MEMBERSHIP.findall(sql)
+    for members in memberships:
+        literals = [m.strip() for m in members.split(",")]
+        if not literals or not all(len(m) >= 2 and m[0] == m[-1] == "'" for m in literals):
+            msg = f"cannot evaluate this fake's tgenabled IN list in: {sql!r}"
+            raise AssertionError(msg)
+        if tgenabled not in {m[1:-1] for m in literals}:
+            return False
+    if not comparisons and not memberships:
         msg = f"cannot evaluate this fake's tgenabled condition in: {sql!r}"
         raise AssertionError(msg)
     for operator, operand in comparisons:
@@ -208,6 +225,20 @@ class CatalogueConnection:
         reason, carrying the `tgenabled` PostgreSQL would leave on it.
         """
         self._triggers[name] = _TGENABLED_DISABLED
+
+    def enable_replica_trigger(self, name: str) -> None:
+        """Leave the trigger attached but replica-only, as ENABLE REPLICA TRIGGER would.
+
+        The subtler sibling of `disable_trigger`: the pg_trigger row is there and
+        `tgenabled` is not 'D', so a check written as "not disabled" calls it
+        healthy - yet it never fires for the origin-mode inserts the application
+        makes, and nothing keeps the rollup current.
+        """
+        self._triggers[name] = _TGENABLED_REPLICA
+
+    def enable_always_trigger(self, name: str) -> None:
+        """Mark the trigger ENABLE ALWAYS: it fires for origin-mode inserts too."""
+        self._triggers[name] = _TGENABLED_ALWAYS
 
 
 def _trigger_statements(conn: CatalogueConnection) -> list[str]:

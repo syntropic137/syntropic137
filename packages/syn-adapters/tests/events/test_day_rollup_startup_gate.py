@@ -97,8 +97,12 @@ class TestATableIsNotProofTheRollupIsComplete:
 
     @pytest.mark.parametrize(
         "stop_it",
-        (CatalogueConnection.drop_trigger, CatalogueConnection.disable_trigger),
-        ids=("dropped", "disabled"),
+        (
+            CatalogueConnection.drop_trigger,
+            CatalogueConnection.disable_trigger,
+            CatalogueConnection.enable_replica_trigger,
+        ),
+        ids=("dropped", "disabled", "replica-only"),
     )
     async def test_a_trigger_that_stopped_maintaining_it_earns_a_backfill(
         self, stop_it: Callable[[CatalogueConnection, str], None]
@@ -145,6 +149,23 @@ class TestATableIsNotProofTheRollupIsComplete:
 
         await _startup(conn, schema)
         await _startup(conn, schema)
+        await _startup(conn, schema)
+
+        assert conn.count_backfills() == 1
+
+    async def test_an_always_enabled_trigger_is_healthy(self) -> None:
+        """'A' fires for origin-mode inserts as well, so it IS maintaining the rollup.
+
+        The other side of the replica-only case: the live-check must accept exactly
+        the states that fire for the application's inserts, 'O' and 'A', and no
+        others. Rejecting 'A' would turn a correctly maintained rollup into a
+        full back-fill at every boot.
+        """
+        conn = _OrderedConnection()
+        schema = EventStoreSchema()
+
+        await _startup(conn, schema)
+        conn.enable_always_trigger(TRIGGER)
         await _startup(conn, schema)
 
         assert conn.count_backfills() == 1

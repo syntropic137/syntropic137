@@ -206,8 +206,9 @@ class TestATriggerThatStoppedMaintainingItEarnsABackfill:
         (
             f"DROP TRIGGER {TRIGGER} ON agent_events",
             f"ALTER TABLE agent_events DISABLE TRIGGER {TRIGGER}",
+            f"ALTER TABLE agent_events ENABLE REPLICA TRIGGER {TRIGGER}",
         ),
-        ids=("dropped", "disabled"),
+        ids=("dropped", "disabled", "replica-only"),
     )
     async def test_the_gap_is_closed_on_the_next_startup(
         self, conn: asyncpg.Connection, how_it_stopped: str

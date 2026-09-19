@@ -181,7 +181,11 @@ SELECT EXISTS (
     FROM pg_trigger
     WHERE tgrelid = to_regclass('agent_events')
       AND tgname = 'agent_events_day_rollup'
-      AND tgenabled <> 'D'
+      -- Only 'O' (origin) and 'A' (always) fire for the ordinary, origin-mode
+      -- inserts the application makes. 'D' is disabled, and 'R' (ENABLE REPLICA
+      -- TRIGGER) fires only under session_replication_role = replica - so both
+      -- leave events uncounted and must earn a reconcile (#1371, review r2).
+      AND tgenabled IN ('O', 'A')
 )
 """
 
