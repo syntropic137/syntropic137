@@ -158,6 +158,15 @@ async def run_phase_agent(
     attempts = retry_policy.begin(
         timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds
     )
+    # NO ATTEMPT IS DISPATCHED ON A TIMEOUT THIS FRAME COMPUTED. Every one runs
+    # on the number inside an `AttemptGrant`, which `busy_upstream` produced
+    # from the same reading of the clock that approved the attempt. This loop
+    # used to read `seconds_left` for itself at the dispatch line, one hop
+    # after the retry was agreed to, and a deadline that expired in that hop
+    # handed the handler a timeout of 0 - which the workspace provider reads
+    # as NO timeout. Holding the granted value is what makes that unreachable:
+    # there is no budget arithmetic here to get wrong.
+    grant = attempts.first_attempt()
     while True:
         result = await handler.handle(
             todo=todo,
@@ -166,26 +175,24 @@ async def run_phase_agent(
             claude_cmd=launch.claude_cmd,
             session_id=session_id,
             agent_model=phase.agent_config.model,
-            # What is LEFT of the phase's budget, not what it started with,
-            # and read on this line rather than when the retry was agreed to:
-            # the backoff before it can overshoot, and a timeout computed
-            # before the overshoot would be one the deadline no longer covers.
-            timeout_seconds=attempts.attempt_timeout_seconds,
+            timeout_seconds=grant.timeout_seconds,
             collector=collector,
             runner=runner,
             on_launch=observer_for(launch.session_manager),
         )
         if _attempt_is_settled(result):
             return result
-        if not await attempts.wait_before_retry(
+        successor = await attempts.wait_before_retry(
             reason=result.stream_result.error_reason,
             work_done=_phase_got_somewhere(result, collector),
-        ):
+        )
+        if successor is None:
             # Final, and `result` is the failed one: the reason it carries is
             # reported by the caller exactly as the agent gave it, whether the
             # budget ran out, the deadline did, the attempt had already got
             # somewhere, or the failure never qualified for a retry.
             return result
+        grant = successor
         logger.warning(
             "Upstream was busy (phase=%s): %s - attempt %d of %d",
             todo.phase_id,

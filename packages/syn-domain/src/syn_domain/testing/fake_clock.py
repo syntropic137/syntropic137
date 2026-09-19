@@ -37,9 +37,24 @@ class FakeClock:
     #: report the phase still affordable and hand the next attempt a timeout of
     #: zero, which the workspace provider reads as no timeout at all (#1344).
     oversleeps_by: float = 0.0
+    #: How far the clock moves between one reading of it and the next.
+    #:
+    #: A real monotonic clock is never read twice at the same instant: work
+    #: happens between the readings, and under a loaded host or a descheduled
+    #: container that work can take far longer than the code doing it expects.
+    #: A fake that answers every reading with the same number cannot express
+    #: that, so it cannot express the defect it hides - a budget CHECKED at one
+    #: reading and DISPATCHED on a later one, where the later reading is past
+    #: the deadline and truncates to a timeout of zero (#1344). Set this and
+    #: every reading costs time, which is what makes "how many times does this
+    #: path read the clock, and which reading does the handler get" an
+    #: assertable property rather than a code-reading exercise.
+    drifts_per_reading: float = 0.0
 
     def monotonic(self) -> float:
-        return self.now
+        reading = self.now
+        self.now += self.drifts_per_reading
+        return reading
 
     async def sleep(self, seconds: float) -> None:
         # Recorded as ASKED and charged as TAKEN, deliberately: `slept` is the

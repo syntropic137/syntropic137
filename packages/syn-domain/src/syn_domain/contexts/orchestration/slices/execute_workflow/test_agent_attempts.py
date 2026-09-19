@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts im
     run_phase_agent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    _MIN_USEFUL_ATTEMPT_SECONDS,
     UpstreamRetryPolicy,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
@@ -77,6 +78,14 @@ NO_WAITING = UpstreamRetryPolicy(base_delay_seconds=0.0)
 #: Long enough that nothing in this file is decided by the deadline unless it
 #: says so. `TestOneDeadlineForTheWholePhase` sets its own.
 ROOMY_SECONDS = 3600
+
+#: The least budget a SUCCESSOR may be launched into, as `busy_upstream`
+#: defines it. Read from the module rather than written as 30 so the boundary
+#: cases below stay boundary cases if the floor is ever retuned.
+MIN_USEFUL = _MIN_USEFUL_ATTEMPT_SECONDS
+
+#: What the first backoff costs, at production's configured schedule.
+FIRST_BACKOFF = UpstreamRetryPolicy().base_delay_seconds
 
 
 @dataclass
@@ -661,4 +670,157 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         assert all(t > 0 for t in granted), (
             f"{granted}: a handler was given a falsey timeout, which the workspace "
             "provider reads as no timeout at all"
+        )
+
+
+class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
+    """What the handler is given when the clock moves AFTER the retry is approved.
+
+    The oversleep cases above close the gap across the backoff. This closes
+    the one after it. The decision to go again and the timeout to go again
+    WITH used to be taken from two different readings of the clock: the policy
+    rechecked affordability when the wait returned, and this module then read
+    `seconds_left` for itself on the dispatch line and truncated it. Every
+    reading of a real monotonic clock is later than the one before, so a
+    budget approved at exactly the 30-second minimum could be dispatched at 0
+    - floored to 1s, which bounds nothing, and past a deadline the recheck had
+    just confirmed. The recheck prevented the attempt it was looking at and
+    not the attempt that actually ran.
+
+    `FakeClock(drifts_per_reading=...)` charges for every reading, which is
+    the only way a test can tell WHICH reading the handler's number came from.
+    """
+
+    async def test_a_successor_is_dispatched_with_the_budget_that_was_approved(self) -> None:
+        """A drift that puts the next reading exactly on the deadline.
+
+        The post-backoff check sees 30s left and approves. Under the old two
+        readings the dispatch line then saw 0 and handed over 1. The handler
+        must receive the 30 that was approved.
+        """
+        clock = FakeClock(drifts_per_reading=MIN_USEFUL)
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=int(MIN_USEFUL * 4)),
+            retry_policy=UpstreamRetryPolicy(
+                base_delay_seconds=0.0, clock=clock.as_attempt_clock()
+            ),
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert len(granted) == 2, f"{granted}: the successor was never dispatched"
+        assert granted[1] == int(MIN_USEFUL), (
+            f"{granted}: the successor was bounded by a reading taken after the one "
+            "that approved it, and by then the deadline had passed"
+        )
+
+    @pytest.mark.parametrize("drift", [0.0, 0.5, 7.0, MIN_USEFUL, 120.0, 250.0])
+    async def test_no_successor_is_ever_dispatched_below_the_minimum(self, drift: float) -> None:
+        """The invariant, across drifts that do and do not outrun the deadline.
+
+        Attempt one is excluded on purpose and has its own case below: it runs
+        on the budget the phase was configured with, whatever that is. Every
+        attempt AFTER it is one this module chose to launch into a partly
+        spent deadline, and the minimum is the whole of what makes that choice
+        defensible.
+        """
+        clock = FakeClock(drifts_per_reading=drift)
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                ]
+            )
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=1000),
+            retry_policy=UpstreamRetryPolicy(
+                base_delay_seconds=0.0, clock=clock.as_attempt_clock()
+            ),
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert len(granted) > 1, f"drift={drift}: nothing was retried - the invariant is vacuous"
+        assert all(t >= MIN_USEFUL for t in granted[1:]), (
+            f"{granted}: a successor was launched into less than the {MIN_USEFUL}s "
+            "a container launch and a harness start need to be worth attempting"
+        )
+
+    async def test_a_budget_just_under_the_minimum_when_the_wait_returns_launches_nothing(
+        self,
+    ) -> None:
+        """Half a thousandth of a second short of affordable.
+
+        The forecast before the backoff said exactly the minimum, so nothing
+        but the recheck-and-grant can stop this one.
+        """
+        clock = FakeClock(oversleeps_by=0.001)
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=int(MIN_USEFUL + FIRST_BACKOFF)),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        assert len(handler.attempts) == 1, (
+            f"a successor was launched with {MIN_USEFUL - 0.001}s of budget, "
+            f"under the {MIN_USEFUL}s minimum"
+        )
+
+    async def test_a_phase_configured_below_the_minimum_still_gets_its_one_attempt(self) -> None:
+        """ATTEMPT ONE IS NOT SUBJECT TO THE MINIMUM, deliberately.
+
+        The minimum asks whether what is LEFT of a partly spent deadline is
+        worth starting another attempt in. Nothing has been spent here: this
+        is the phase running at all, on exactly the budget an operator
+        configured, and `timeout_seconds` carries no floor - a phase may
+        legitimately declare ten seconds. Refusing to dispatch it would fail
+        the phase without ever running it, and there would be no agent result
+        to report that failure with, so the refusal could only surface as a
+        crash where a short run used to be.
+
+        What still holds is that the number means something: never zero.
+        """
+        clock = FakeClock()
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+            )
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=10),
+            # A clock the test owns, so the grant is the configured budget
+            # rather than the configured budget minus however long the real
+            # one took to be read twice - `int()` truncates, so on a real
+            # clock this is 9. That truncation is not what is under test.
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert granted == [10], (
+            f"{granted}: a phase configured for 10s was not run on 10s - either it "
+            "was refused outright or its budget was rewritten"
         )

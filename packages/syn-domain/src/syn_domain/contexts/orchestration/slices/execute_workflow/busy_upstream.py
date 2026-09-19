@@ -99,17 +99,47 @@ _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 #: `if not timeout_seconds: return False` in `providers/base.py` - so a
 #: remaining budget that truncates to `0` would not produce a short attempt,
 #: it would produce an UNBOUNDED one, which is strictly worse than the
-#: overrun it came from. No attempt should ever be dispatched this close to
-#: its deadline (`_MIN_USEFUL_ATTEMPT_SECONDS` is what stops one being), but
-#: the floor is applied where the number is produced regardless: a bound that
+#: overrun it came from. No RETRY is ever dispatched this close to its
+#: deadline (`_MIN_USEFUL_ATTEMPT_SECONDS` is what stops one being), but the
+#: floor is applied where the number is produced regardless: a bound that
 #: matters this much should not depend on every caller having got the
-#: arithmetic right.
+#: arithmetic right, and attempt one is dispatched on whatever budget the
+#: phase was configured with - see `PhaseAttempts.first_attempt`.
 _MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
 
 
 def _upstream_was_busy(reason: str | None) -> bool:
     """Whether ``reason`` is, in full, the upstream reporting its own capacity."""
     return reason in _BUSY_UPSTREAM_REASONS
+
+
+@dataclass(frozen=True)
+class AttemptGrant:
+    """Permission to dispatch ONE attempt, and the timeout it must be given.
+
+    THE TWO TRAVEL TOGETHER BECAUSE THE DEFECT WAS THEM TRAVELLING SEPARATELY.
+    The decision to go again used to be taken against one reading of the clock
+    and the timeout computed from a later one, at the dispatch line. Between
+    the two readings the clock keeps running, so a deadline that expired in
+    between produced an attempt nobody had approved, bounded by a number
+    nobody had checked: `int(seconds_left)` past the deadline is `0`, and the
+    workspace provider reads a falsey timeout as NO timeout at all. The
+    attempt that should not have run became the one attempt with no bound.
+
+    So the budget is read ONCE and both the approval and the number come out
+    of that single reading. A caller holding one of these is holding a
+    timeout that was affordable when it was granted, and cannot re-derive a
+    different one: there is no arithmetic left for it to get wrong.
+    """
+
+    #: Whole seconds to hand the handler. Never zero, never negative, and for
+    #: a successor never below `_MIN_USEFUL_ATTEMPT_SECONDS`.
+    timeout_seconds: int
+
+
+def _meaningful_timeout(remaining: float) -> int:
+    """``remaining`` as whole seconds the handler can be given, never falsey."""
+    return max(int(remaining), _MIN_MEANINGFUL_TIMEOUT_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -129,8 +159,10 @@ class PhaseAttempts:
     """The attempts one phase has left, and the single deadline they share.
 
     Created by `UpstreamRetryPolicy.begin` before attempt one and consulted
-    after each failure. `seconds_left` is what the next attempt may take;
-    `wait_before_retry` answers whether there is a next attempt at all.
+    after each failure. `first_attempt` grants the attempt that always runs;
+    `wait_before_retry` grants or refuses every one after it. Both hand back
+    an `AttemptGrant`, which is the only place a dispatch timeout comes from -
+    `seconds_left` is the budget, not a number to dispatch on.
 
     The deadline is fixed at construction and never extended. Every attempt and
     every backoff is drawn from it, so three attempts cost a phase's configured
@@ -151,19 +183,25 @@ class PhaseAttempts:
         """Time the attempt about to start may take, never below zero."""
         return max(self._deadline - self._clock.monotonic(), 0.0)
 
-    @property
-    def attempt_timeout_seconds(self) -> int:
-        """Whole seconds to hand the handler, read AT the moment of dispatch.
+    def first_attempt(self) -> AttemptGrant:
+        """The grant for attempt one, which is never refused.
 
-        Not at the moment of deciding to dispatch: between the two the clock
-        keeps running, and this is the number that actually bounds the process.
+        DELIBERATELY NOT SUBJECT TO `_MIN_USEFUL_ATTEMPT_SECONDS`. That
+        minimum asks "is there enough LEFT of a budget already partly spent to
+        be worth starting another attempt in", and it can only be asked once
+        something has been spent. Nothing has been, here: this is the phase
+        running at all, on exactly the budget an operator configured for it,
+        and that number is not this module's to veto. A phase declaring
+        `timeout_seconds: 10` gets its ten seconds - refusing it would fail
+        the phase without ever dispatching it, and `run_phase_agent` would
+        have no agent result to report the failure WITH, so the refusal could
+        only surface as a crash where a short run used to be.
 
-        Never zero - see `_MIN_MEANINGFUL_TIMEOUT_SECONDS` for why zero is the
-        one value that must not escape here. Callers get a timeout they can
-        pass on without knowing any of that, which is the point of reading it
-        from here rather than truncating `seconds_left` themselves.
+        What does apply is the floor that keeps the number meaningful: a
+        timeout of zero is not a short attempt downstream, it is an unbounded
+        one.
         """
-        return max(int(self.seconds_left), _MIN_MEANINGFUL_TIMEOUT_SECONDS)
+        return AttemptGrant(timeout_seconds=_meaningful_timeout(self.seconds_left))
 
     @property
     def attempt(self) -> int:
@@ -175,22 +213,28 @@ class PhaseAttempts:
         """The bound this phase was started under. For logging, not for deciding."""
         return self._policy.max_attempts
 
-    async def wait_before_retry(self, *, reason: str | None, work_done: bool) -> bool:
-        """Sleep out the backoff and report whether the failed attempt gets a successor.
+    async def wait_before_retry(
+        self, *, reason: str | None, work_done: bool
+    ) -> AttemptGrant | None:
+        """Sleep out the backoff and grant the failed attempt a successor, or refuse it.
 
         ``reason`` is what the attempt that just failed reported; ``work_done``
         is whether that attempt (or any before it) had already got somewhere -
         see `agent_attempts`.
 
-        False means this failure is final and the caller must report ``reason``
+        `None` means this failure is final and the caller must report ``reason``
         as it stands. It says nothing about WHY it is final - a genuine error, a
         spent budget, an expired deadline and an attempt that had already
         started working all end the run the same way, with the same cause, and a
         caller that branched on the difference would be inventing one.
+
+        An `AttemptGrant` is both the answer and the timeout that answer was
+        computed against. The caller dispatches with the number it is handed
+        and does not read this object's clock again: see `AttemptGrant`.
         """
         delay = self._policy.base_delay_seconds * 2 ** (self._attempt - 1)
         if not self._may_retry(reason=reason, work_done=work_done, delay=delay):
-            return False
+            return None
         await self._clock.sleep(delay)
         # ASKED AGAIN, because the check above was a forecast and this is the
         # outcome. `sleep(delay)` does not promise to return after `delay`: the
@@ -201,10 +245,19 @@ class PhaseAttempts:
         # `seconds_left` had become, which on an overshoot is 0, which the
         # provider reads as NO TIMEOUT. So an oversleep did not merely waste
         # the budget, it removed the bound the budget existed to impose.
-        if not self._affords_an_attempt():
-            return False
+        #
+        # READ ONCE, and used for both halves. Asking `seconds_left` here and
+        # letting the caller ask again at the dispatch line put a second,
+        # unchecked reading between the approval and the attempt: the clock
+        # moves in that gap too, so a budget that passed this check at 30s
+        # could be dispatched at 0s, floored to a meaningless 1s, and the
+        # recheck above would have prevented nothing. The grant closes the gap
+        # by carrying the checked number with the decision.
+        remaining = self.seconds_left
+        if not self._affords_an_attempt(remaining):
+            return None
         self._attempt += 1
-        return True
+        return AttemptGrant(timeout_seconds=_meaningful_timeout(remaining))
 
     def _may_retry(self, *, reason: str | None, work_done: bool, delay: float) -> bool:
         """Whether another attempt is both allowed and affordable."""
@@ -218,17 +271,20 @@ class PhaseAttempts:
             return False
         # The backoff is spent from the same deadline, so an attempt is only
         # affordable if paying for the wait still leaves it room to run.
-        return self._affords_an_attempt(after_waiting=delay)
+        return self._affords_an_attempt(self.seconds_left - delay)
 
-    def _affords_an_attempt(self, *, after_waiting: float = 0.0) -> bool:
-        """Whether the deadline still buys an attempt worth starting.
+    def _affords_an_attempt(self, remaining: float) -> bool:
+        """Whether ``remaining`` seconds still buy an attempt worth starting.
 
-        One rule, read twice: with ``after_waiting`` set it is a forecast of
-        what the budget will be once a backoff is paid for, and with the
-        default it is the fact of what the budget IS. Written once so the two
-        readings cannot drift into disagreeing about what "affordable" means.
+        One rule, applied twice: `_may_retry` passes what the budget WILL be
+        once the backoff is paid for, and `wait_before_retry` passes what it
+        turned out to BE. Written once so the forecast and the outcome cannot
+        drift into disagreeing about what "affordable" means, and taking the
+        budget as an argument rather than reading it so the caller decides
+        which reading is being judged - the reading that is judged is then the
+        one that denominates the grant.
         """
-        return self.seconds_left - after_waiting >= _MIN_USEFUL_ATTEMPT_SECONDS
+        return remaining >= _MIN_USEFUL_ATTEMPT_SECONDS
 
 
 @dataclass(frozen=True)

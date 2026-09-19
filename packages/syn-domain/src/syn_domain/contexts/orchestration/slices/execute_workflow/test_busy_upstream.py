@@ -386,7 +386,75 @@ class TestABackoffThatOverslept:
         clock.advance(500.0)
 
         assert attempts.seconds_left == 0.0
-        assert attempts.attempt_timeout_seconds >= 1, (
+        assert attempts.first_attempt().timeout_seconds >= 1, (
             "an attempt would have been dispatched with a falsey timeout, which the "
             "workspace provider reads as no timeout at all"
+        )
+
+
+class TestTheGrantCarriesTheBudgetThatWasChecked:
+    """The approval and the number are produced by ONE reading of the clock.
+
+    Rechecking the deadline after the backoff closed half the hole. The other
+    half was the hop after it: the decision said "go again", and the caller
+    then read `seconds_left` for ITSELF at the dispatch line and truncated it.
+    Two readings, and the clock moves between any two readings - so a budget
+    that passed the recheck at exactly 30s could be dispatched at 0s, floored
+    to a meaningless 1s, with the recheck having prevented nothing.
+
+    `FakeClock(drifts_per_reading=...)` is what makes that assertable: every
+    reading of the clock costs time, exactly as every reading of a real one
+    does. What is asserted is that the handler's number comes from the reading
+    that was JUDGED, not from whatever the clock said later.
+    """
+
+    async def test_the_granted_timeout_is_the_checked_budget_not_a_later_reading(
+        self,
+    ) -> None:
+        """A drift that would carry the next reading to the deadline exactly.
+
+        The post-backoff check sees 30s and approves. One reading later the
+        budget is 0. The grant must be the 30 that was approved: reading again
+        at dispatch is what produced the falsey timeout this whole class is
+        about.
+        """
+        clock = FakeClock(drifts_per_reading=MIN_USEFUL)
+        policy = UpstreamRetryPolicy(base_delay_seconds=0.0, clock=clock.as_attempt_clock())
+        # Three readings precede the post-backoff one (construction, the first
+        # attempt's grant, the pre-backoff forecast), so 4 * MIN_USEFUL leaves
+        # the check looking at exactly MIN_USEFUL.
+        attempts = policy.begin(timeout_seconds=MIN_USEFUL * 4)
+        assert attempts.first_attempt().timeout_seconds == MIN_USEFUL * 3
+
+        grant = await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+
+        assert grant is not None, "the budget was affordable at the moment it was checked"
+        assert grant.timeout_seconds == int(MIN_USEFUL), (
+            f"{grant.timeout_seconds}s: the grant was denominated by a reading taken "
+            "after the one that approved it, and by then the deadline had passed"
+        )
+        assert attempts.seconds_left == 0.0, "the clock did not drift - the test proves nothing"
+
+    @pytest.mark.parametrize("drift", [0.0, 0.5, 7.0, MIN_USEFUL, 200.0, 400.0])
+    async def test_no_grant_is_ever_below_the_minimum_useful_budget(self, drift: float) -> None:
+        """The invariant, across drifts that do and do not outrun the deadline.
+
+        A grant that exists is a grant that was affordable. There is no
+        drift - none - that produces a successor bounded by less than the
+        minimum, because no second reading of the clock is ever consulted.
+        """
+        clock = FakeClock(drifts_per_reading=drift)
+        policy = UpstreamRetryPolicy(base_delay_seconds=0.0, clock=clock.as_attempt_clock())
+        attempts = policy.begin(timeout_seconds=1000.0)
+        granted: list[int] = []
+
+        while True:
+            grant = await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+            if grant is None:
+                break
+            granted.append(grant.timeout_seconds)
+
+        assert granted, f"drift={drift}: nothing was granted at all - the invariant is vacuous"
+        assert all(t >= MIN_USEFUL for t in granted), (
+            f"{granted}: a successor was granted less than the {MIN_USEFUL}s minimum"
         )
