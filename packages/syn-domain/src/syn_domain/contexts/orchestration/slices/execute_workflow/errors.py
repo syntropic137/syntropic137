@@ -8,9 +8,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+        AgentVerdict,
     )
 
 
@@ -197,11 +204,46 @@ class PhaseReportedFailureError(Exception):
     verdict may be a failure report, and the direction that lets defects
     through is to complete the phase anyway. `AgentVerdict.refusal` says which
     of the two happened, in the words an operator needs.
+
+    TAKES THE VERDICT, NOT A RENDERED MESSAGE (#1357). The two things this
+    exception must carry - what an operator reads, and what the run's failure
+    tally records - are both answers the verdict already has, and a caller
+    handed the job of passing them separately is one edit away from passing a
+    refusal message beside a `PLATFORM` classification. Passing the verdict
+    itself makes that pair unrepresentable: there is one argument, and the
+    exception derives both from it.
     """
 
-    def __init__(self, *, phase_id: str, reason: str) -> None:
-        super().__init__(reason)
+    def __init__(self, *, phase_id: str, verdict: AgentVerdict) -> None:
+        super().__init__(verdict.refusal(phase_id=phase_id))
         self.phase_id = phase_id
+        #: Whether this was the agent's own readable `success=false` report - a
+        #: correct refusal - or a report nobody could read, which is not
+        #: (#1357). Decided by `AgentVerdict.failure_classification`, which
+        #: argues the UNREADABLE case.
+        self.failure_classification = verdict.failure_classification
+
+
+def classify_failure(error: BaseException) -> FailureClassification:
+    """What kind of failure `error` is, for the run's tally (#1357).
+
+    THE ONE PLACE THIS IS DECIDED, beside `describe_exception` and for the
+    identical reason: four sinks describe one failure, and a classification
+    re-derived at any of them is a classification that can disagree with the
+    others. A caller gets an answer and cannot tell how it was reached.
+
+    ONLY ONE KIND OF FAILURE CARRIES ITS OWN CLASSIFICATION, and the isinstance
+    is deliberate rather than a `getattr` for an attribute anything might grow.
+    A correct refusal is a positive claim about what happened, so it is made
+    only where the evidence is - the phase's own readable verdict - and every
+    other exception in the system, present and future, means the platform
+    failed. That is the direction of doubt `FailureClassification` exists to
+    hold: a new failure path that knows nothing about this function is counted
+    as a platform failure, which is exactly what it is counted as today.
+    """
+    if isinstance(error, PhaseReportedFailureError):
+        return error.failure_classification
+    return FailureClassification.PLATFORM
 
 
 class EmptyPhaseArtifactError(Exception):

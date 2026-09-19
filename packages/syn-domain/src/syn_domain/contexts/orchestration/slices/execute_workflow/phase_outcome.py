@@ -30,9 +30,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
+    FailureClassification,
     PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    classify_failure,
     describe_exception,
     describe_observed_branches,
 )
@@ -102,6 +104,18 @@ class PhaseFailure:
     error_type: str
     duration_seconds: float | None
     result: PhaseResult | None
+    classification: FailureClassification = FailureClassification.PLATFORM
+    """Whether the platform failed or the work was correctly judged not
+    deliverable (#1357). A SEVENTH SINK in the making, and here for the reason
+    the six above are: the failure event and the read models an operator reads
+    the failure rate off all have to carry it, and `error_type` - an exception
+    CLASS NAME, which reads `PhaseReportedFailureError` for a correct refusal
+    and for an unreadable report alike - was never going to tell them apart.
+
+    Defaults to `PLATFORM` rather than being required, which is the same
+    direction of doubt the enum documents: a sink that forgets to set it
+    reports what the system already reported, and no omission can invent a
+    correct refusal."""
     observed_branches: tuple[BranchObservation, ...] | None = None
     """Branches read from git at failure time, `()` for "read, and none of them
     differs from how the phase found it", and None for "nothing could tell us".
@@ -164,6 +178,7 @@ class PhaseFailure:
             observed_branches=self.observed_branches,
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
+            classification=self.classification,
         )
 
     def execution_result(
@@ -194,6 +209,11 @@ class PhaseFailure:
             artifact_ids=artifact_ids,
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=self.reason,
+            # The fourth sink gets it too. A caller that dispatched this run
+            # synchronously reads its outcome here and nowhere else, so
+            # stopping at the event would leave the one response that reports
+            # the failure unable to say what kind it was (#1357).
+            failure_classification=self.classification,
         )
 
 
@@ -249,6 +269,11 @@ def failed_phase_outcome(
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
+        # Asked of the exception, once, exactly where `error_type` and `reason`
+        # are (#1357). `error_type` is the class name and cannot answer this:
+        # one class covers both a readable `success=false` report and a report
+        # nobody could read, and those are opposite answers.
+        classification=classify_failure(error),
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
         artifact_ids=kept,
