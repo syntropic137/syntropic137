@@ -205,11 +205,11 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-logger = logging.getLogger(__name__)
-
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TASK_RESULT_MARKER",
