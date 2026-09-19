@@ -714,48 +714,73 @@ def _delimited_reports(text: str) -> list[_Report]:
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
         payload_at = _payload_starts(text, marker_at + len(TASK_RESULT_MARKER))
-        opening = _OPENING_FENCE.match(text, payload_at)
-        value_at = _payload_starts(text, opening.end()) if opening else payload_at
-        try:
-            block = _decode_payload(text, value_at)
-        except ValueError:
-            # No value here to delimit, so resume just past the marker rather
-            # than skipping over text this never read.
+        read = _read_block(text, payload_at)
+        search_from = read.resume_at
+        if read.report is None:
             unclosed_at = payload_at
-            search_from = payload_at
             continue
-        terminator_at = _payload_starts(text, block.ends_at)
-        if opening:
-            # A fence is accepted only as a pair around the one value; without
-            # its closing half the block is as unclosed as any other.
-            if not text.startswith(_CODE_FENCE, terminator_at):
-                unclosed_at = payload_at
-                search_from = block.ends_at
-                continue
-            terminator_at = _payload_starts(text, terminator_at + len(_CODE_FENCE))
-        if not _terminates_at(text, terminator_at):
-            unclosed_at = payload_at
-            search_from = block.ends_at
-            continue
-        if opening:
-            logger.warning(
-                "TASK_RESULT block was wrapped in a markdown code fence (%r); "
-                "unwrapped it and read the JSON inside (#1324)",
-                opening.group(0),
-            )
-        reports.append(
-            _Report(
-                payload=text[value_at : block.ends_at],
-                decoded=block.value,
-                repeats_status=block.repeats_status,
-            )
-        )
-        search_from = block.ends_at + len(TASK_RESULT_TERMINATOR)
+        reports.append(read.report)
     if reports:
         return reports
     if unclosed_at is None:
         return []
     return [_Report(payload=text[unclosed_at:], decoded=None)]
+
+
+@dataclass(frozen=True)
+class _BlockRead:
+    """One marker's attempt at a block: the report, or None, and where to resume.
+
+    ``report`` is None when no complete block stands at the marker - nothing
+    decodes there, or the value is not closed by the terminator (and, for a
+    fenced value, by its closing fence first). The caller treats that position
+    as unclosed. ``resume_at`` is where the search for the next marker starts,
+    exactly as it did when this lived inline in `_delimited_reports`.
+    """
+
+    report: _Report | None
+    resume_at: int
+
+
+def _read_block(text: str, payload_at: int) -> _BlockRead:
+    """Read the block whose payload starts at ``payload_at``, fenced or not."""
+    opening = _OPENING_FENCE.match(text, payload_at)
+    value_at = _payload_starts(text, opening.end()) if opening else payload_at
+    try:
+        block = _decode_payload(text, value_at)
+    except ValueError:
+        # No value here to delimit, so resume just past the marker rather
+        # than skipping over text this never read.
+        return _BlockRead(report=None, resume_at=payload_at)
+    terminator_at = _closing_position(text, block.ends_at, fenced=opening is not None)
+    if terminator_at is None or not _terminates_at(text, terminator_at):
+        return _BlockRead(report=None, resume_at=block.ends_at)
+    if opening:
+        logger.warning(
+            "TASK_RESULT block was wrapped in a markdown code fence (%r); "
+            "unwrapped it and read the JSON inside (#1324)",
+            opening.group(0),
+        )
+    report = _Report(
+        payload=text[value_at : block.ends_at],
+        decoded=block.value,
+        repeats_status=block.repeats_status,
+    )
+    return _BlockRead(report=report, resume_at=block.ends_at + len(TASK_RESULT_TERMINATOR))
+
+
+def _closing_position(text: str, value_ends_at: int, *, fenced: bool) -> int | None:
+    """Where the terminator must start, or None when a fenced value is unclosed.
+
+    A fence is accepted only as a pair around the one value: without its
+    closing half the block is as unclosed as any other.
+    """
+    at = _payload_starts(text, value_ends_at)
+    if not fenced:
+        return at
+    if not text.startswith(_CODE_FENCE, at):
+        return None
+    return _payload_starts(text, at + len(_CODE_FENCE))
 
 
 def _terminates_at(text: str, at: int) -> bool:
