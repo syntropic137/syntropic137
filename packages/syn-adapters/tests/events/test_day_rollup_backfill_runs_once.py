@@ -52,6 +52,55 @@ _VALID_AGENT_EVENTS_SCHEMA = [
 ]
 
 
+#: `pg_trigger.tgenabled`, as PostgreSQL spells it: 'O' for a trigger that
+#: fires on origin, 'D' for one that DISABLE TRIGGER stopped. The fake holds
+#: the catalogue's own character rather than a boolean so that the predicate a
+#: statement writes over that column can be EVALUATED. Recognising the column
+#: is not enough - a fake that only noticed `tgenabled` was mentioned accepted
+#: `tgenabled = tgenabled`, and the disabled case passed over a tautology
+#: (#1371, found in verification).
+_TGENABLED_ORIGIN = "O"
+_TGENABLED_DISABLED = "D"
+
+#: One comparison against `tgenabled`: an operator and either a quoted literal
+#: or a bare column reference. The second alternative is what makes a tautology
+#: evaluable rather than unparseable - `tgenabled = tgenabled` is valid SQL and
+#: the fake has to answer it the way PostgreSQL would, with True, so the test
+#: relying on it goes red.
+_TGENABLED_COMPARISON = re.compile(r"tgenabled\s*(=|<>|!=)\s*('[^']*'|\w+)")
+
+
+def _tgenabled_predicate_holds(sql: str, tgenabled: str) -> bool:
+    """Evaluate the statement's own conditions on `tgenabled` against a row.
+
+    Every comparison the SQL writes is evaluated and the results ANDed, which
+    is the only shape `ROLLUP_TRIGGER_LIVE_SQL` has ever had. A statement that
+    names the column in some form this cannot evaluate raises instead of
+    defaulting to satisfied: an unreadable predicate that reads as True is the
+    same silent pass this evaluator replaced.
+    """
+    if "tgenabled" not in sql:
+        # Existence alone. Answered as existence alone - which is the bug the
+        # disabled case exists to catch, so it must not be papered over here.
+        return True
+    comparisons = _TGENABLED_COMPARISON.findall(sql)
+    if not comparisons:
+        msg = f"cannot evaluate this fake's tgenabled condition in: {sql!r}"
+        raise AssertionError(msg)
+    for operator, operand in comparisons:
+        if operand.startswith("'"):
+            value = operand[1:-1]
+        elif operand == "tgenabled":
+            value = tgenabled
+        else:
+            msg = f"unknown operand {operand!r} compared to tgenabled in: {sql!r}"
+            raise AssertionError(msg)
+        holds = tgenabled == value if operator == "=" else tgenabled != value
+        if not holds:
+            return False
+    return True
+
+
 class _NoOpTransaction:
     """asyncpg's `async with conn.transaction():`, with nothing to roll back."""
 
@@ -85,13 +134,15 @@ class CatalogueConnection:
         #: is a fact about the two interleaved.
         self.calls: list[str] = []
         self._relations: set[str] = set()
-        #: Attached and NOT-disabled are tracked apart, because PostgreSQL
-        #: spells them apart - an absent pg_trigger row versus one with
+        #: The trigger catalogue, keyed the way `pg_trigger` is: a name is
+        #: present because a row is attached, and its value is the `tgenabled`
+        #: character that row carries. Attached and enabled are held apart
+        #: because PostgreSQL spells them apart - an absent row versus one with
         #: `tgenabled = 'D'` - and a live-check that forgets the second half
-        #: passes a disabled trigger as healthy. A fake that merged them would
-        #: answer that question for the code instead of asking it.
-        self._triggers: set[str] = set()
-        self._disabled_triggers: set[str] = set()
+        #: passes a disabled trigger as healthy. Storing the character, and not
+        #: a "disabled" flag, is what lets the SQL's own predicate be run
+        #: against it instead of merely recognised.
+        self._triggers: dict[str, str] = {}
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
@@ -105,12 +156,10 @@ class CatalogueConnection:
         # the trigger still look healthy.
         attached = re.search(r"CREATE TRIGGER (\w+)", sql)
         if attached:
-            self._triggers.add(attached.group(1))
-            self._disabled_triggers.discard(attached.group(1))
+            self._triggers[attached.group(1)] = _TGENABLED_ORIGIN
         detached = re.search(r"DROP TRIGGER IF EXISTS (\w+)", sql)
         if detached:
-            self._triggers.discard(detached.group(1))
-            self._disabled_triggers.discard(detached.group(1))
+            self._triggers.pop(detached.group(1), None)
 
     async def fetchval(self, sql: str, *_args: object) -> bool:
         self.calls.append(sql)
@@ -120,13 +169,15 @@ class CatalogueConnection:
         trigger = re.search(r"FROM pg_trigger\b.*?tgname = '(\w+)'", sql, re.DOTALL)
         if trigger is not None:
             name = trigger.group(1)
-            # Answer the question the SQL actually asks. Existence alone if
-            # that is all it asks for - which is how a disabled trigger got
-            # through - and existence-and-enabled only if it says so.
-            if name not in self._triggers:
+            # Answer the question the SQL actually asks, by running it. No row,
+            # no match; otherwise the statement's own conditions on `tgenabled`
+            # are evaluated against the character this row carries. A check
+            # that merely spotted the column would accept a predicate that
+            # discriminates nothing.
+            tgenabled = self._triggers.get(name)
+            if tgenabled is None:
                 return False
-            asks_about_enabled = "tgenabled" in sql
-            return not asks_about_enabled or name not in self._disabled_triggers
+            return _tgenabled_predicate_holds(sql, tgenabled)
         msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
         raise AssertionError(msg)
 
@@ -145,8 +196,7 @@ class CatalogueConnection:
 
     def drop_trigger(self, name: str) -> None:
         """Make the catalogue report a trigger as gone, as a DROP would."""
-        self._triggers.discard(name)
-        self._disabled_triggers.discard(name)
+        self._triggers.pop(name, None)
 
     def disable_trigger(self, name: str) -> None:
         """Leave the trigger attached but stopped, as DISABLE TRIGGER would.
@@ -154,9 +204,10 @@ class CatalogueConnection:
         Kept apart from `drop_trigger` because it is the case that slips
         through: the pg_trigger row is still there, so anything asking only
         whether a trigger EXISTS says the rollup is being maintained while
-        nothing is maintaining it.
+        nothing is maintaining it. It stays present here for exactly that
+        reason, carrying the `tgenabled` PostgreSQL would leave on it.
         """
-        self._disabled_triggers.add(name)
+        self._triggers[name] = _TGENABLED_DISABLED
 
 
 def _trigger_statements(conn: CatalogueConnection) -> list[str]:
