@@ -109,6 +109,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
     announce_as,
     mint_wrapper_name,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    AttemptClock,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
@@ -169,6 +172,8 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # The clock a phase's retry budget is measured on (#1303)
+    "AttemptClock",
     # Claude plugin types + errors (issue #726)
     "ClaudePluginError",
     "ClaudePluginInvalidName",
