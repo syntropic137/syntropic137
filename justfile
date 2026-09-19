@@ -2396,8 +2396,14 @@ release-local version:
 #   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
 #   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
 #   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
 pit-stop version *flags:
-    ./scripts/pit_stop.sh {{version}} {{flags}}
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
 
 verify-image-capabilities image ref:
     #!/usr/bin/env bash

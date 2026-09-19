@@ -25,12 +25,12 @@ API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
 DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-10800}"
-MODE="all"; DRY=0
+MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --ref) REF="$2"; shift 2 ;;
-        --stage-only) MODE="stage"; shift ;;
-        --swap-only) MODE="swap"; shift ;;
+        --ref) [ $# -ge 2 ] || usage; REF="$2"; shift 2 ;;
+        --stage-only) STAGE_ONLY=1; shift ;;
+        --swap-only) SWAP_ONLY=1; shift ;;
         --dry-run) DRY=1; shift ;;
         *) usage ;;
     esac
@@ -51,10 +51,50 @@ run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; 
 remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
 api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 90 "$API$1" -o "$2"; }
 
+# DELIBERATELY NOT "last flag wins". `--stage-only --swap-only` would resolve
+# to whichever came last, so an invocation that asked only to STAGE could
+# drain and recreate production containers. Refuse the pair instead.
+if [ "$STAGE_ONLY" = 1 ] && [ "$SWAP_ONLY" = 1 ]; then
+    die "--stage-only and --swap-only are mutually exclusive"
+fi
+# `if`, not `[ ... ] && MODE=...`. Bash does not exit on the false test (the
+# test is the left arm of an AND-list, which `set -e` exempts - verified), but
+# the shape only stays safe while the assignment is the LAST thing on the line,
+# and this is a file where a wrong `set -e` reading recreates containers.
+if [ "$STAGE_ONLY" = 1 ]; then MODE="stage"; fi
+if [ "$SWAP_ONLY" = 1 ]; then MODE="swap"; fi
+# Everything below interpolates these into remote command strings and image
+# references, so they are checked here rather than trusted there.
+case "$VERSION" in
+    [0-9]*) : ;;
+    *) die "version must start with a digit (got: $VERSION)" ;;
+esac
+case "$VERSION" in
+    *[!0-9A-Za-z.+-]*) die "version carries characters no image tag may: $VERSION" ;;
+esac
+case "$DRAIN_TIMEOUT" in
+    ""|*[!0-9]*) die "SYN_PIT_DRAIN_TIMEOUT must be whole seconds (got: $DRAIN_TIMEOUT)" ;;
+esac
+
+# Whether the READ PATH is at the head of the event store. Asked before any
+# drain verdict is believed, and again after the swap: `status_counts` is
+# tallied from an asynchronous projection, so a lagging one reports a quiet
+# system while the event store knows about work it has not caught up to.
+projections_healthy() {
+    api "/health" "$TMP/health.json" 2>/dev/null || return 1
+    python3 - "$TMP/health.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1])).get("subscription", {})
+print("   subscription:", {k: s.get(k) for k in ("status", "is_catching_up", "lag")})
+sys.exit(0 if s.get("status") == "healthy" and not s.get("is_catching_up") and not s.get("lag") else 1)
+PY
+}
+
 # A drain is a statement about ONE instant: this returns 0 only when every
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
 drained() {
+    projections_healthy > /dev/null || { echo "   read path is not at the event-store head yet"; return 1; }
     api "/executions?page_size=1" "$TMP/counts.json" || return 1
     python3 - "$TMP/counts.json" <<'PY'
 import json, sys
@@ -114,7 +154,22 @@ if [ "$MODE" != "swap" ]; then
             [ "$old_n" = 0 ] && [ "$new_n" = 2 ] || die "repoint did not change exactly the two pins"
         fi
     fi
-    [ "$MODE" = "stage" ] && { step "staged $TAG; run with --swap-only once drained"; exit 0; }
+    if [ "$MODE" = "stage" ]; then
+        step "staged $TAG; run with --swap-only once drained"
+        exit 0
+    fi
+fi
+
+if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
+    step "precheck: $TAG is staged in the compose file and present on the host"
+    # --swap-only recreates whatever the compose file names. Without this it
+    # would drain the platform and disrupt production containers before
+    # discovering, at verify, that the file pins something else entirely.
+    pins="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
+    [ "$pins" = 2 ] || die "the deployed compose file pins $pins/2 services to $TAG; stage it first"
+    staged="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'" || true)"
+    [ "$staged" = 2 ] || die "$staged/2 images tagged $TAG on $HOST; stage it first"
+    echo "   pins=2 images=2"
 fi
 
 step "drain: waiting for every execution to be terminal (timeout ${DRAIN_TIMEOUT}s)"
@@ -130,16 +185,31 @@ run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway" | t
 
 step "verify: images, docker CLI, projections"
 if [ "$DRY" = 0 ]; then
-    running="$(remote "docker inspect syn137-api syn137-gateway --format '{{.Config.Image}}'")"
-    while IFS= read -r line; do printf '   %s\n' "$line"; done <<< "$running"
-    [ "$(echo "$running" | grep -c ":$TAG\$")" = 2 ] || die "a container is not on $TAG"
+    # BY IMAGE ID, NOT BY TAG. `{{.Config.Image}}` reports the string the
+    # container was created from, and a tag is mutable: a container built from
+    # the PREVIOUS bytes behind this same tag prints exactly what a correct
+    # deploy prints. The id is the thing that actually changed.
+    for svc in api gateway; do
+        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")"
+        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")"
+        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")"
+        printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
+        [ "$up" = true ] || die "syn137-$svc is not running after the swap"
+        [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
+    done
     remote "docker exec syn137-api sh -c 'command -v docker'" >/dev/null || die "no docker CLI in syn-api (#1216): every execution will fail at bootstrap"
+    # A `for` loop reports its LAST command, which here is `sleep`. Written as
+    # `for ...; done || die`, every attempt could fail and the script would
+    # still print DONE. The flag is what makes that failure reachable.
+    healthy=0
     for _ in $(seq 1 30); do
-        api "/health" "$TMP/health.json" 2>/dev/null && python3 -c "
-import json,sys; s=json.load(open('$TMP/health.json')).get('subscription',{})
-print('   subscription:', {k:s.get(k) for k in ('status','is_catching_up','lag')})
-sys.exit(0 if s.get('status')=='healthy' and not s.get('is_catching_up') else 1)" && break
+        if projections_healthy; then healthy=1; break; fi
         sleep 10
-    done || die "projections not healthy after the swap"
+    done
+    [ "$healthy" = 1 ] || die "projections not healthy after the swap"
 fi
-step "PIT STOP DONE: $TAG live in $(( $(date +%s) - T0 ))s. Last check is yours: dispatch one real workflow and watch a PHASE reach running."
+if [ "$DRY" = 1 ]; then
+    step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
+else
+    step "PIT STOP DONE: $TAG live in $(( $(date +%s) - T0 ))s. Last check is yours: dispatch one real workflow and watch a PHASE reach running."
+fi
