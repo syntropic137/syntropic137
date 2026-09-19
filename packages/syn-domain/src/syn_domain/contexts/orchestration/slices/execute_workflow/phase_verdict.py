@@ -130,23 +130,35 @@ it is: NO ``success`` key present, and ``status`` a JSON string that is EXACTLY
 a ``status`` beside an unreadable ``success`` remain UNREADABLE precisely as
 before.
 
-AND A BLOCK THAT NAMES ITS OUTCOME TWICE IS ASKED ABOUT FIRST. The alias makes
-``status`` meaningful, so ``{"success": true, "status": "failed"}`` became a
-block saying two opposite things - and neither model can see that, by design:
-the contract ignores ``status`` as an extra key and the alias is only reached
-once the contract has refused. Whichever ran first would decide, which is a
-verdict settled by ordering. It is settled by rule instead, once, in
-`_read_cross_keys`, before either model:
+AND THE CONTRACT IS ASKED FIRST, SO THE ALIAS ONLY EVER ADDS A READING. A
+``success`` that is a JSON boolean IS the verdict, and a ``status`` beside it is
+an extra key exactly as every other extra key is: ignored, unweighed, and unable
+to move the outcome in either direction. ``{"success": true, "status": "failed"}``
+completes the phase and ``{"success": false, "status": "completed"}`` refuses it,
+both precisely as they did before the alias existed.
 
-  - the two DISAGREE - UNREADABLE. A block containing a plain statement of
-    failure must not complete a phase on the other key, and there is no safe
-    reading of a report that says both. This is the only shape whose treatment
-    the alias changed beyond adding itself, and it changed in the refusing
-    direction.
-  - the two AGREE - read exactly as before, off ``success``, and logged. The
-    agent wrote the contract's key correctly and one redundant key beside it;
-    refusing that is defect (2) below - SUCCESS became UNREADABLE - in a new
-    spelling, and it costs a rerun to punish a report that obeyed.
+That is not indifference to a block that says two things; it is what stops the
+alias becoming a second contract. Weighing the two keys against each other -
+refusing the block whose ``status`` disagrees - reads as caution and is not: it
+would let a key the prompt tells agents NEVER to write refuse a phase that wrote
+the contract's key correctly, which is defect (2) below in a new spelling, and
+it would do it on the strength of a word this module would otherwise never have
+looked at. The alias reads blocks that say nothing under ``success``. Where
+``success`` speaks there is nothing for it to do, and a rule about the two keys
+together is a rule about a question neither of them asked.
+
+WHICH LEAVES ONE WAY A BLOCK CAN STILL NAME ITS OUTCOME TWICE - under the SAME
+key. ``{"status": "failed", "status": "completed"}`` is legal JSON, and a JSON
+decoder keeps the LAST of duplicate members, so the failure the agent wrote is
+deleted by the parser before anything here sees the value. Read off the survivor
+that block COMPLETES a phase that plainly stated failure, and swapping the two
+members swaps the verdict: the outcome is settled by the order of two identical
+keys, which is the TEXT deciding what a report means - defect (1) above,
+arriving through the alias. So the duplication is read off the member list while
+it still exists, in `_decode_payload`, and a repeated ``status`` is UNREADABLE.
+A repeated ``success`` is deliberately left alone: it reads today exactly as it
+reads on the contract path and the alias did not change it, so making it fatal
+is a new strictness on the contract itself rather than a repair to this.
 
 WHY THIS IS NOT THE COERCION THE STRICT MODEL EXISTS TO REFUSE - the first
 objection to raise, and the one that decides whether the alias may exist at all.
@@ -255,18 +267,11 @@ class AgentVerdict:
     quotes what the agent actually wrote - and it exists because an alias that
     leaves no trace in the outcome is indistinguishable from the format having
     quietly changed.
-
-    ``self_contradictory`` says the block named its outcome twice and the two
-    namings disagreed. It is read in the same one place and for the same
-    reason: "could not be read" is true of that block but tells an operator to
-    go looking for malformed JSON or a missing terminator, when what is
-    actually there is a complete, well-formed report that says both things.
     """
 
     status: VerdictStatus
     comments: str = ""
     via_status_alias: bool = False
-    self_contradictory: bool = False
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -300,30 +305,15 @@ class AgentVerdict:
     def _from_report(cls, report: _Report) -> AgentVerdict:
         """What one delimited block claims, judged on its own.
 
-        The cross-key question is asked FIRST, before either model, because it
-        is the one question neither model can answer: the contract ignores
-        ``status`` as an extra key and the alias never sees a block carrying
-        ``success``, so a block that names its outcome twice settles on
-        whichever model happens to run first. That is a decision taken by
-        ordering rather than by rule, and it read a phase that said ``"status":
-        "failed"`` as a completed one.
+        THE CONTRACT ANSWERS ALONE WHENEVER IT CAN, and the order of these two
+        readings is the whole of that rule. A ``success`` the agent wrote as a
+        JSON boolean settles the block here and returns; the alias is reached
+        only where the contract found nothing it could read. So ``status`` can
+        never overrule, soften or contradict what was written under the key the
+        contract actually asks for - it is an extra key beside a readable
+        ``success``, as it was before the alias existed and as it still is on
+        `main`.
         """
-        cross = _read_cross_keys(report.decoded)
-        if cross is _CrossKeyReading.CONTRADICTS:
-            logger.warning(
-                "TASK_RESULT block claimed its outcome twice and disagreed with itself, so "
-                "the phase is refused rather than settled on whichever key was read first "
-                "(#1324): %s",
-                _excerpt(report.payload),
-            )
-            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload), self_contradictory=True)
-        if cross is _CrossKeyReading.AGREES:
-            logger.warning(
-                'TASK_RESULT block wrote both "success" and "status". They agree, so the '
-                'phase is settled on the contract\'s "success" as it always was, but the '
-                "block is not the one key the contract asks for (#1324): %s",
-                _excerpt(report.payload),
-            )
         try:
             reported = _ReportedResult.model_validate(report.decoded)
         except ValidationError:
@@ -339,11 +329,25 @@ class AgentVerdict:
 
         Reached only after the contract above was not met, which is what keeps
         the alias unable to overrule a ``success`` the agent did write. A block
-        whose ``success`` is a readable boolean has already been settled or
-        refused by `_read_cross_keys`; what still arrives here is one whose
-        ``success`` the contract could not read at all, and that is refused
-        here rather than rescued off its ``status``.
+        whose ``success`` is a readable boolean has already been settled there;
+        what arrives here either wrote no ``success`` at all or wrote one the
+        contract could not read, and the second is refused here rather than
+        rescued off its ``status``.
+
+        A ``status`` written TWICE is refused before it is read, because by the
+        time a model could look there is only one of them left - see
+        `_decode_payload` for why the answer travels on the `_Report` rather
+        than being derived from the value here.
         """
+        if report.repeats_status:
+            logger.warning(
+                'TASK_RESULT block wrote "%s" more than once, so which outcome it states '
+                "depends only on which duplicate the JSON decoder kept. The phase is "
+                "refused rather than read off the survivor (#1324): %s",
+                _ALIAS_KEY,
+                _excerpt(report.payload),
+            )
+            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
         try:
             aliased = _StatusAliasResult.model_validate(report.decoded)
         except ValidationError:
@@ -410,14 +414,10 @@ class AgentVerdict:
                 f"on its own report rather than completed on its exit status."
             )
         if self.status is VerdictStatus.UNREADABLE:
-            why = (
-                'it wrote both "success" and "status" and they disagree (#1324)'
-                if self.self_contradictory
-                else f"it is not JSON, or it is not closed by a {TASK_RESULT_TERMINATOR} line"
-            )
             return (
                 f"Phase '{phase_id}' wrote a {TASK_RESULT_MARKER} marker whose block "
-                f'could not be read as a verdict - {why}: "{self.comments}". An '
+                f"could not be read as a verdict - it is not JSON, or it is not "
+                f'closed by a {TASK_RESULT_TERMINATOR} line: "{self.comments}". An '
                 f"unreadable report may be a failure report, so the phase fails "
                 f"rather than completing on a verdict nobody could read."
             )
@@ -486,10 +486,16 @@ class _Report:
     ``decoded`` is None when the message held a marker but no complete block
     under it - the payload is then the text an operator needs to see to work
     out what the agent wrote instead.
+
+    ``repeats_status`` is the one question the decoded value can no longer be
+    asked. A JSON decoder keeps only the last of duplicate members, so it
+    travels from `_decode_payload` rather than being re-derived from `decoded`,
+    where the evidence for it no longer exists.
     """
 
     payload: str
     decoded: object | None
+    repeats_status: bool = False
 
 
 class _ReportedResult(BaseModel):
@@ -575,17 +581,17 @@ class _StatusAliasResult(BaseModel):
 
         Without this, ``extra="ignore"`` would drop a ``success`` the agent DID
         write - a MALFORMED one, by the time a block reaches here, since
-        `_read_cross_keys` has already settled every readable boolean - and
-        read the phase off its ``status`` instead. That undoes the strict
+        `AgentVerdict._from_report` has already settled every readable boolean
+        - and read the phase off its ``status`` instead. That undoes the strict
         refusal one line later and completes a phase on a report the contract
         just called unreadable, so the alias reads only a block that has
         nothing for it to disagree with.
 
-        Kept as a rule of this model and not folded into `_read_cross_keys`
-        because the two guard different things: that one weighs two readable
-        claims against each other, this one refuses to read past an
-        unreadable one. Neither subsumes the other, and the alias must be safe
-        on its own terms whatever reaches it.
+        Kept as a rule of this model and not left to the ordering in
+        `_from_report`, even though that ordering already means no readable
+        ``success`` reaches here. The ordering decides which reading WINS; this
+        decides what the alias is willing to read at all, and the alias has to
+        be safe on its own terms whatever is handed to it.
         """
         if isinstance(block, dict) and "success" in block:
             raise ValueError("a block that wrote 'success' is judged by the contract, not aliased")
@@ -608,74 +614,57 @@ class _StatusAliasResult(BaseModel):
         )
 
 
-class _CrossKeyReading(Enum):
-    """What a block that may have named its outcome twice actually did.
+#: The key the alias reads, and the field `_StatusAliasResult` declares. It is
+#: spelled here as well because a duplicate member is a property of the TEXT:
+#: the model is handed a value that has already lost every duplicate but one, so
+#: it is not something the model can be made to notice.
+_ALIAS_KEY: Final[str] = "status"
 
-    Three states rather than a boolean because the two ways a block CAN carry
-    both keys oblige different things: disagreement is refused, and agreement
-    is read exactly as it always was and merely noted. Collapsing them would
-    force one of those two to be wrong.
+
+@dataclass(frozen=True)
+class _DecodedPayload:
+    """One JSON value read out of a message, and what reading it cost."""
+
+    value: object
+    ends_at: int
+    repeats_status: bool
+
+
+def _decode_payload(text: str, at: int) -> _DecodedPayload:
+    """The JSON value beginning at ``at``, and whether it named ``status`` twice.
+
+    DUPLICATE MEMBERS ARE READ HERE OR NOWHERE. ``{"status": "failed",
+    "status": "completed"}`` is legal JSON and a decoder keeps the last of the
+    two, so what comes out is an ordinary, exact, unambiguous success and the
+    failure the agent wrote has been deleted by the parser. No later check can
+    recover it: the member list is the only place it still exists, and this is
+    the only point at which anything here holds one. That is why the answer is
+    carried out on the `_Report` instead of being asked of the value.
+
+    ONLY THE OUTERMOST OBJECT IS ASKED, because a repeated key under
+    ``comments`` or ``detail`` is not a block naming its own outcome twice. The
+    hook runs on every object in the value and an object can only be finished
+    after its members are, so the top-level one is always the LAST call.
+    Checking the decoded value against it is what makes that a fact about THIS
+    value rather than an assumption about the parser's route through it - and
+    it answers the value that is no object at all, an array or a bare string,
+    which matches nothing and repeats nothing.
+
+    Raises `ValueError` when no complete JSON value begins at ``at``, exactly
+    as `json.JSONDecoder.raw_decode` does.
     """
+    no_object = object()
+    outermost: object = no_object
+    repeated = False
 
-    #: The block did not write both keys, or wrote a ``status`` outside the
-    #: closed alias vocabulary, so there is no second outcome claim to weigh.
-    ABSENT = auto()
-    #: Both keys name the same outcome. The contract settles it, as before.
-    AGREES = auto()
-    #: Both keys name outcomes, and opposite ones.
-    CONTRADICTS = auto()
+    def keep_the_member_list(members: list[tuple[str, object]]) -> object:
+        nonlocal outermost, repeated
+        repeated = sum(1 for key, _ in members if key == _ALIAS_KEY) > 1
+        outermost = dict(members)
+        return outermost
 
-
-def _read_cross_keys(decoded: object) -> _CrossKeyReading:
-    """Whether a block named its outcome twice, and whether the two agreed.
-
-    WHY THIS IS A RULE AND NOT A MODEL. Both models are deliberately blind to
-    it and neither can be fixed to see it without losing what it is for:
-    `_ReportedResult` has ``extra="ignore"`` because an unexpected key is not a
-    reason to discard a well-formed outcome, and `_StatusAliasResult` is only
-    ever reached once the contract has already refused. So the question is
-    asked once, here, over the decoded object, before either of them settles
-    anything - which is also why a repair inside either model would have left
-    the other able to drift away from it.
-
-    WHY DISAGREEMENT REFUSES. ``{"success": true, "status": "failed"}`` is a
-    phase saying it finished and saying it did not, in one block. Read by the
-    contract alone it COMPLETES, which is the direction this module exists to
-    close: the block contains a plain statement of failure and the phase
-    completed anyway. There is no reading of it that is safe to act on, and
-    "we could not tell" is exactly what UNREADABLE means - so it refuses, at
-    the cost of a rerun, and the operator is shown both spellings.
-
-    WHY AGREEMENT DOES NOT. ``{"success": true, "status": "completed"}`` is a
-    phase that wrote the contract's key, correctly, and one redundant key
-    beside it. Refusing that would fail a report that obeyed the contract over
-    a key that contradicts nothing - which is defect (2) in the module
-    docstring, SUCCESS became UNREADABLE, in a new spelling. It is read as it
-    always was and logged, because the drift is worth seeing and is not worth a
-    rerun.
-
-    A ``status`` that is not one of the two `_StatusAlias` spellings is not an
-    outcome claim at all - ``{"success": true, "status": "in_progress"}`` is
-    one claim and a note - so it is `ABSENT` and nothing changes for it. The
-    vocabulary is exact here for the same reason it is exact in the alias: the
-    set is closed in one place, and guessing at a near-miss is the guessing
-    this whole module refuses.
-    """
-    if not isinstance(decoded, dict):
-        return _CrossKeyReading.ABSENT
-    claimed: object = decoded.get("success")
-    named: object = decoded.get("status")
-    # `isinstance(x, bool)` and not a truth test: the contract reads only a
-    # JSON boolean, so anything else under `success` is for the models to
-    # refuse and never for this rule to compare against.
-    if not isinstance(claimed, bool) or not isinstance(named, str):
-        return _CrossKeyReading.ABSENT
-    try:
-        outcome = _StatusAlias(named).verdict
-    except ValueError:
-        return _CrossKeyReading.ABSENT
-    agrees = outcome is (VerdictStatus.SUCCESS if claimed else VerdictStatus.FAILURE)
-    return _CrossKeyReading.AGREES if agrees else _CrossKeyReading.CONTRADICTS
+    value, ends_at = json.JSONDecoder(object_pairs_hook=keep_the_member_list).raw_decode(text, at)
+    return _DecodedPayload(value, ends_at, repeats_status=repeated and value is outermost)
 
 
 def _payload_starts(text: str, after: int) -> int:
@@ -708,27 +697,32 @@ def _delimited_reports(text: str) -> list[_Report]:
     unclosed block alongside a closed one is prose and is dropped - see
     `test_a_truncated_second_block_does_not_unmake_a_closed_first_one`.
     """
-    decoder = json.JSONDecoder()
     reports: list[_Report] = []
     unclosed_at: int | None = None
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
         payload_at = _payload_starts(text, marker_at + len(TASK_RESULT_MARKER))
         try:
-            decoded, payload_ends = decoder.raw_decode(text, payload_at)
+            block = _decode_payload(text, payload_at)
         except ValueError:
             # No value here to delimit, so resume just past the marker rather
             # than skipping over text this never read.
             unclosed_at = payload_at
             search_from = payload_at
             continue
-        terminator_at = _payload_starts(text, payload_ends)
+        terminator_at = _payload_starts(text, block.ends_at)
         if not _terminates_at(text, terminator_at):
             unclosed_at = payload_at
-            search_from = payload_ends
+            search_from = block.ends_at
             continue
-        reports.append(_Report(payload=text[payload_at:payload_ends], decoded=decoded))
-        search_from = payload_ends + len(TASK_RESULT_TERMINATOR)
+        reports.append(
+            _Report(
+                payload=text[payload_at : block.ends_at],
+                decoded=block.value,
+                repeats_status=block.repeats_status,
+            )
+        )
+        search_from = block.ends_at + len(TASK_RESULT_TERMINATOR)
     if reports:
         return reports
     if unclosed_at is None:
