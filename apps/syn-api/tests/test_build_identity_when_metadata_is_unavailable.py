@@ -52,6 +52,8 @@ from syn_api.main import create_app
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from pydantic import JsonValue
+
 #: Captured before anything is patched: the release this test run really has
 #: installed, and therefore the one string that must NOT surface once the
 #: metadata it came from is unreadable.
@@ -120,14 +122,33 @@ def metadata_unavailable(request: pytest.FixtureRequest) -> Iterator[None]:
     importlib.reload(syn_api)
 
 
-async def _health_body() -> dict[str, object]:
-    """The /health payload, parsed from the wire rather than from the model."""
+async def _payload(path: str) -> dict[str, JsonValue]:
+    """A response body, parsed from the wire rather than read off the model.
+
+    Every assertion in this file goes through here on purpose. The interesting
+    way for this to break is not a wrong value but a right one that never
+    reaches a client - dropped at ``BuildInfo``, at the ``info.version``
+    argument, or by a serializer - and a test that inspects the model it just
+    built cannot see any of those.
+    """
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/health")
+        response = await client.get(path)
     assert response.status_code == 200, response.text
-    parsed: dict[str, object] = json.loads(response.text)
+    parsed: dict[str, JsonValue] = json.loads(response.text)
     return parsed
+
+
+def _release_pair(payload: dict[str, JsonValue]) -> tuple[JsonValue, JsonValue]:
+    """The (version, version_status) a response carries, wherever it carries it.
+
+    ``/`` reports the pair flat and ``/health`` reports it inside ``build``.
+    That difference is a fact about those two endpoints and not about what is
+    being asserted, so it is resolved here once instead of in every test.
+    """
+    block = payload.get("build", payload)
+    assert isinstance(block, dict), payload
+    return block.get("version"), block.get("version_status")
 
 
 @pytest.mark.unit
@@ -171,12 +192,10 @@ async def test_health_reports_the_unavailable_state_explicitly(
     this block mean "the image did not stamp itself", a different fact, and
     without a named state a client has to guess which absence it is looking at.
     """
-    body = await _health_body()
-    build = body["build"]
-    assert isinstance(build, dict)
+    version, status = _release_pair(await _payload("/health"))
 
-    assert build["version"] is None
-    assert build["version_status"] == "unavailable"
+    assert version is None
+    assert status == "unavailable"
 
 
 @pytest.mark.unit
@@ -189,14 +208,10 @@ async def test_the_root_endpoint_reports_it_too(metadata_unavailable: None) -> N
     from a release literally called "unknown" — the same "a literal in a version
     slot" #1380 exists to remove, one endpoint over.
     """
-    transport = ASGITransport(app=create_app())
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/")
-    assert response.status_code == 200, response.text
-    body = json.loads(response.text)
+    version, status = _release_pair(await _payload("/"))
 
-    assert body["version"] is None
-    assert body["version_status"] == "unavailable"
+    assert version is None
+    assert status == "unavailable"
 
 
 @pytest.mark.unit
@@ -215,10 +230,9 @@ async def test_no_fabricated_release_reaches_a_client(
     sentinel after the first fix, and a sweep that does not cover every
     response cannot notice the next one.
     """
-    transport = ASGITransport(app=create_app())
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        root = (await client.get("/")).text
-    rendered = json.dumps(await _health_body()) + json.dumps(create_app().openapi()["info"]) + root
+    rendered = json.dumps(
+        [await _payload("/"), await _payload("/health"), create_app().openapi()["info"]]
+    )
 
     assert INSTALLED not in rendered
     assert LOOKS_LIKE_A_RELEASE.search(rendered) is None, rendered
@@ -236,15 +250,11 @@ async def test_an_unavailable_response_always_names_its_state(
     the value it describes. This is the assertion that would have caught the
     root endpoint shipping a sentinel with no status beside it.
     """
-    transport = ASGITransport(app=create_app())
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        root = json.loads((await client.get("/")).text)
-    health_build = (await _health_body())["build"]
-    assert isinstance(health_build, dict)
+    for path in ("/", "/health"):
+        version, status = _release_pair(await _payload(path))
 
-    for surface, payload in (("/", root), ("/health build", health_build)):
-        assert payload["version"] is None, surface
-        assert payload["version_status"] == "unavailable", surface
+        assert version is None, path
+        assert status == "unavailable", path
 
 
 @pytest.mark.unit
@@ -255,15 +265,11 @@ async def test_the_installed_release_is_what_is_reported_when_it_is_readable() -
     Without this, every assertion above is satisfiable by a build accessor that
     reports "unavailable" unconditionally.
     """
-    transport = ASGITransport(app=create_app())
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        root = json.loads((await client.get("/")).text)
-        health = json.loads((await client.get("/health")).text)
+    for path in ("/", "/health"):
+        version, status = _release_pair(await _payload(path))
 
-    assert root["version"] == INSTALLED
-    assert root["version_status"] == "installed"
-    assert health["build"]["version"] == INSTALLED
-    assert health["build"]["version_status"] == "installed"
+        assert version == INSTALLED, path
+        assert status == "installed", path
 
 
 @pytest.mark.unit

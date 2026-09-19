@@ -2,7 +2,9 @@
 
 Three places name the running build — ``openapi.json``'s ``info.version``, the
 root endpoint, and (since #1380) ``/health`` — and before this module each
-answered separately. The two openapi-facing callers shared a literal
+answered separately. Two of the three can now report a null release beside an
+explicit ``version_status``; ``info.version`` cannot, and is the one documented
+home of ``UNKNOWN_VERSION``. The two openapi-facing callers shared a literal
 ``__version__ = "0.5.1"`` in ``main.py`` that had not moved in twenty-odd
 releases, so a VPS running ``syn-api`` ``0.29.1b3`` served ``info.version:
 "0.5.1"``: not missing, WRONG, which is worse, because a client that reads it
@@ -92,13 +94,18 @@ def get_build_info() -> BuildInfo:
 
 
 def version_string() -> str:
-    """The running release for the slots that must hold a non-empty string.
+    """The running release for the ONE slot that must hold a non-empty string.
 
-    ``openapi.json``'s ``info.version`` is required by the spec to be one, and
-    the root endpoint publishes a flat map of strings, so neither can spell
-    "unavailable" as the null ``/health`` uses; both say ``UNKNOWN_VERSION``
-    instead. Prefer ``get_build_info()`` wherever the shape allows it — it can
-    report the difference, and this cannot.
+    That slot is ``openapi.json``'s ``info.version``, which the OpenAPI
+    specification requires to be a string and which therefore cannot spell
+    "unavailable" as the null ``/health`` and ``/`` use; it says
+    ``UNKNOWN_VERSION`` instead. The root endpoint used to be a second caller,
+    because it served a flat map of strings and had nowhere to put a null —
+    that was the defect, not the constraint, and ``RootResponse`` removed it.
+
+    Prefer ``get_build_info()`` everywhere else. This function cannot report
+    the difference between "not installed" and a release, and a new caller for
+    it is almost always a response model that should have been nullable.
     """
     return get_build_info().version or UNKNOWN_VERSION
 
