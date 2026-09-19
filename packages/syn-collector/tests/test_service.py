@@ -1,6 +1,7 @@
 """Tests for the collector service."""
 
 from datetime import UTC, datetime
+from importlib.metadata import version
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,11 +36,16 @@ class TestHealthEndpoint:
     """Tests for health endpoint."""
 
     def test_health_returns_healthy(self, test_client: TestClient) -> None:
-        """Health endpoint should return healthy status."""
+        """Health endpoint should return healthy status.
+
+        The exact payload, so a field added or dropped is caught here. It gained
+        `version` in #1380 - see test_collector_build_identity.py for why that
+        value cannot be a literal.
+        """
         response = test_client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "healthy"}
+        assert response.json() == {"status": "healthy", "version": version("syn-collector")}
 
 
 class TestEventsEndpoint:

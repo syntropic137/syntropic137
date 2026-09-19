@@ -119,6 +119,20 @@ async def test_an_unstamped_build_says_so_rather_than_guessing(
 
 
 @pytest.mark.unit
+def test_the_package_dunder_agrees_with_what_it_serves() -> None:
+    """``syn_api.__version__`` was a THIRD spelling of this package's version.
+
+    It read "0.1.0" while ``main.py`` served "0.5.1" and the distribution was
+    0.29.x, and ``scripts/import_check.py`` prints it - so a diagnostic whose
+    whole job is to confirm what is installed reported a number that had never
+    been true. One source or it drifts again.
+    """
+    import syn_api
+
+    assert syn_api.__version__ == INSTALLED
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_the_response_model_does_not_swallow_the_probe_blocks() -> None:
     """Typing /health must not cost it the fields it already reported.
