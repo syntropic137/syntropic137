@@ -181,6 +181,20 @@ _MAX_FAULT_LINE_LEN = 160
 _MAX_PREVIEW_LEN = 500
 
 
+def codex_fault_reason(message: str) -> str:
+    """The reason text codex's own words about a failed turn are reported under.
+
+    A function rather than an f-string at the one call site because it is not
+    only written here: `busy_upstream` has to RECOGNISE a specific sentence
+    codex says about its own capacity, and it can only do that against the
+    exact spelling this produces. Two copies of that spelling would drift the
+    first time either the prefix or the truncation changed, and the failure
+    would be silent - a phase that stopped being retried, with nothing to read
+    but the reason it was never retried for.
+    """
+    return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+
+
 def _as_int(value: object) -> int:
     """Narrow a JSON-boundary ``object`` value (from ``dict.get``) to ``int``.
 
@@ -276,6 +290,10 @@ class CodexObservabilityRecorder(Protocol):
     duck-typed recorder without an import cycle, mirroring
     ``EventStreamProcessor.ObservabilityRecorder``.
     """
+
+    def note_agent_activity(self) -> None:
+        """See ``ObservabilityCollector.note_agent_activity`` (#1303)."""
+        ...
 
     async def record_tool_started(
         self,
@@ -813,7 +831,7 @@ class CodexStreamProcessor:
             message = error.get("message") if error else None
         if not message:
             return
-        reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+        reason = codex_fault_reason(message)
         logger.error("Codex turn failed: %s", message)
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.
@@ -840,6 +858,15 @@ class CodexStreamProcessor:
         if not isinstance(item, dict):
             return
 
+        # Before the type is read, and regardless of what it turns out to be.
+        # Codex opens an item when it BEGINS the work, so any start at all -
+        # an `agent_message` that never completes, a side-effecting type this
+        # branch has never heard of - is the model having got somewhere. Only
+        # the two below are worth an observation; all of them are worth the
+        # fact, and that fact is what decides whether the whole prompt may be
+        # run a second time over whatever the item did (#1303).
+        self._collector.note_agent_activity()
+
         item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
 
@@ -863,6 +890,12 @@ class CodexStreamProcessor:
         item = event.get("item")
         if not isinstance(item, dict):
             return
+
+        # And on completion too, not only on the start - some codex versions
+        # announce a `file_change` only once it has happened (#1064), so the
+        # completion can be the first and last the stream says about a
+        # workspace mutation. Same rule as the start: any type counts.
+        self._collector.note_agent_activity()
 
         item_type = item.get("type")
         if item_type == CodexItemType.COMMAND_EXECUTION:
