@@ -39,8 +39,10 @@ wrong revision produces a confident false accusation.
 You have one hour, and a phase that hits it is failed with whatever it had.
 Test **at most five** assumptions: the ones the review marked `TEST`, or, if it
 did not mark them, the five the decision depends on most. Every other
-assumption gets a verdict file saying `STILL UNKNOWN - not tested in this run`
-and the command that would settle it. Give each probe about ten minutes and
+assumption gets a short verdict file of its own shape: the claim, the verdict
+`STILL UNKNOWN`, the line `Not tested in this run.`, and the command or
+protocol that would settle it. The full verdict-file contents below apply only
+to the assumptions you test. Give each probe about ten minutes and
 prefer the cheapest test that could falsify the claim; a probe that would take
 longer is cut down or reported `STILL UNKNOWN`. A run that dispatched nine
 probes with no bound spent USD 77, timed out, and left two verdicts unwritten and
@@ -53,7 +55,7 @@ phase stopped at any moment still leaves a complete record of what it knew.
 ## Dispatch one subagent per `TEST` assumption, in parallel
 
 Only the assumptions you are testing (at most five, as above) get a subagent;
-the rest already have their `STILL UNKNOWN - not tested` files. Send them in a
+the rest already have their short `STILL UNKNOWN` files. Send them in a
 single message. Give each exactly one numbered assumption, the
 claim, and the falsifying experiment the review settled on. **Each subagent
 writes a verdict FILE to `artifacts/output/experiments/<n>-<slug>.md` and replies
@@ -79,7 +81,7 @@ repository's crates. The verdict file is the durable record, so put the
 probe's essential source in it as a fenced block, and describe any image or
 binary output by what you measured from it.
 
-## Every verdict file contains
+## Every verdict file for a tested assumption contains
 
 1. **The assumption**, restated as the falsifiable claim.
 2. **The exact command run** - copy-pasteable, not described.
