@@ -17,6 +17,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    computed_field,
     SerializerFunctionWrapHandler,
     model_serializer,
 )
@@ -1496,10 +1497,13 @@ class BuildInfo(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    version: str = Field(
+    version: str | None = Field(
         description="Installed release of the syn-api distribution, as reported by "
         "importlib.metadata. This is the same string pyproject.toml ships, so it "
-        "identifies the build exactly — including beta suffixes (e.g. '0.29.1b3').",
+        "identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). "
+        "Null when the distribution's metadata cannot be read, because there is no "
+        "honest release to report then and a plausible one would mislead; read "
+        "version_status to tell that case apart without inspecting the null.",
     )
     image_tag: str | None = Field(
         default=None,
@@ -1512,6 +1516,25 @@ class BuildInfo(BaseModel):
         description="Git commit the image was built from, stamped at image build time. "
         "Null when the build did not stamp one.",
     )
+
+    @computed_field(
+        description="Whether the running release could be read at all. 'installed' means "
+        "version names the distribution this process was installed from; 'unavailable' "
+        "means importlib.metadata had no such distribution, version is null, and nothing "
+        "has been invented to fill it.",
+    )
+    @property
+    def version_status(self) -> Literal["installed", "unavailable"]:
+        """Derived, never passed in, so it cannot contradict ``version``.
+
+        The pair would otherwise be a second place to get the same fact wrong —
+        ``version: null`` beside ``version_status: "installed"`` is exactly the
+        kind of self-disagreement #1380 is about. It exists as a field anyway
+        because a caller should not have to infer meaning from a null: the two
+        other nulls on this model mean "the image did not stamp itself", which
+        is a different fact, and only a named state says which one it is.
+        """
+        return "unavailable" if self.version is None else "installed"
 
 
 class _OmitsAbsentFields(BaseModel):

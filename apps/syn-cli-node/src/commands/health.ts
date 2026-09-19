@@ -53,10 +53,16 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
 
 /** Which build answered. The release always; the image tag and commit only
  * when the image build stamped them, since an unstamped build reports null and
- * printing "commit: null" tells a reader nothing they can act on. */
+ * printing "commit: null" tells a reader nothing they can act on.
+ *
+ * `version` is null when the API could not read its own package metadata. That
+ * is said in words rather than rendered as "syn-api null", and never filled in
+ * with a plausible number — the whole point of #1380 is that a wrong release
+ * misleads a reader who a missing one would have sent looking. */
 function buildLine(build: components["schemas"]["BuildInfo"]): string {
   const stamps = [build.image_tag, build.commit].filter((s): s is string => Boolean(s));
-  return `syn-api ${build.version}` + (stamps.length > 0 ? ` (${stamps.join(", ")})` : "");
+  const release = build.version ?? "release unknown (package metadata unavailable)";
+  return `syn-api ${release}` + (stamps.length > 0 ? ` (${stamps.join(", ")})` : "");
 }
 
 export const healthCommand: CommandDef = {

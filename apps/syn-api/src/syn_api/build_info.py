@@ -17,10 +17,14 @@ release number, and a second home drifts the first time someone bumps one and
 not the other — which is exactly how "0.5.1" survived into a 0.29.1b3 deploy.
 If the number is wrong now, the package really is that version.
 
-``PackageNotFoundError`` is deliberately not caught. It means ``syn_api`` was
-imported without being installed, and there is no honest version to report in
-that case; degrading to "unknown" would reintroduce a value that says nothing
-while looking like an answer.
+THERE IS NO HONEST VERSION when the distribution is not installed, so none is
+produced: ``PackageNotFoundError`` becomes a null release and an explicit
+``version_status`` of "unavailable", never a plausible number. Inventing one
+would be the original defect in a new costume — a value that says nothing while
+looking like an answer. Letting the error escape is not the alternative either:
+this is read at import time and again while FastAPI is being constructed, so an
+uncaught raise takes the whole process down before it can serve the /health
+that would have explained why.
 
 THE IMAGE TAG AND COMMIT ARE BUILD-TIME FACTS that no installed artifact
 records, so they are stamped into the image as environment variables at build
@@ -39,7 +43,7 @@ is the one question this module exists to answer truthfully.
 from __future__ import annotations
 
 import os
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from syn_api.types import BuildInfo
 
@@ -50,6 +54,12 @@ PACKAGE_NAME = "syn-api"
 ENV_IMAGE_TAG = "SYN_BUILD_IMAGE_TAG"
 ENV_COMMIT = "SYN_BUILD_COMMIT"
 
+#: What to say where a release has to be a non-empty string and there is none.
+#: Not a version number and not shaped like one on purpose: anything downstream
+#: that parses or compares ``info.version`` should fail loudly on this rather
+#: than quietly accept it as a release that was never built.
+UNKNOWN_VERSION = "unknown"
+
 
 def get_build_info() -> BuildInfo:
     """Identify the running build.
@@ -59,10 +69,36 @@ def get_build_info() -> BuildInfo:
     and this is the one value that must never be stale.
     """
     return BuildInfo(
-        version=version(PACKAGE_NAME),
+        version=_installed_release(),
         image_tag=_stamped(ENV_IMAGE_TAG),
         commit=_stamped(ENV_COMMIT),
     )
+
+
+def version_string() -> str:
+    """The running release for the slots that must hold a non-empty string.
+
+    ``openapi.json``'s ``info.version`` is required by the spec to be one, and
+    the root endpoint publishes a flat map of strings, so neither can spell
+    "unavailable" as the null ``/health`` uses; both say ``UNKNOWN_VERSION``
+    instead. Prefer ``get_build_info()`` wherever the shape allows it — it can
+    report the difference, and this cannot.
+    """
+    return get_build_info().version or UNKNOWN_VERSION
+
+
+def _installed_release() -> str | None:
+    """The installed release, or ``None`` when there is no distribution to read.
+
+    ``PackageNotFoundError`` means ``syn_api`` was imported without being
+    installed — an editable tree, a container that copied the source without
+    installing it, a test harness. That is a fact worth reporting accurately
+    and is not a reason to refuse to start.
+    """
+    try:
+        return version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        return None
 
 
 def _stamped(name: str) -> str | None:

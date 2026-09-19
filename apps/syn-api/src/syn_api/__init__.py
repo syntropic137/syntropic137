@@ -21,4 +21,8 @@ __all__ = ["Err", "Ok", "Result"]
 #: this package's version, disagreeing with both pyproject.toml and the "0.5.1"
 #: that main.py served - and `scripts/import_check.py` prints it, so the wrong
 #: number was being reported to a human every time that ran (#1380).
-__version__ = get_build_info().version
+#:
+#: ``None``, never a placeholder string, when the distribution is not installed.
+#: This line runs on `import syn_api`, so it is also the reason `get_build_info`
+#: cannot raise: a package that fails to import reports nothing at all.
+__version__: str | None = get_build_info().version

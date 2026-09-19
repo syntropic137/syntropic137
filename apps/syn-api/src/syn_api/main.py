@@ -10,7 +10,7 @@ from agentic_logging import get_logger, setup_logging
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from syn_api.build_info import get_build_info
+from syn_api.build_info import get_build_info, version_string
 from syn_api.config import get_api_config
 from syn_api.routes import (
     artifacts_router,
@@ -91,7 +91,13 @@ def create_app() -> FastAPI:
         # had drifted twenty releases behind the package it describes, so
         # openapi.json — and every CLI type and doc page generated from it —
         # named a build that was not running (#1380).
-        version=get_build_info().version,
+        #
+        # OpenAPI requires info.version to be a non-empty string, so this one
+        # slot cannot report "no metadata" the way /health's build block does
+        # (null, plus an explicit version_status). It says "unknown" instead —
+        # deliberately not a version number, so it cannot be mistaken for the
+        # release it is standing in for. See syn_api.build_info.UNKNOWN_VERSION.
+        version=version_string(),
         lifespan=lifespan,
         debug=config.debug,
         docs_url="/docs",
@@ -158,7 +164,8 @@ def create_app() -> FastAPI:
         """Root endpoint with API info."""
         return {
             "name": "Syntropic137 API",
-            "version": get_build_info().version,
+            # A flat map of strings, so the same "unknown" as info.version.
+            "version": version_string(),
             "docs": "/docs",
             "health": "/health",
         }
