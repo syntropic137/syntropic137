@@ -510,11 +510,14 @@ def _totals(buckets: list[HeatmapDayBucket]) -> dict[str, float]:
 
 
 async def _compare_queries(
-    seeded: SeededHeatmap, execution_ids: set[str] | None
+    seeded: SeededHeatmap,
+    execution_ids: set[str] | None,
+    start: date = WINDOW_START,
+    end: date = WINDOW_END,
 ) -> list[HeatmapDayBucket]:
     """Run both implementations over one scope and assert they agree, day by day."""
-    new = await seeded.new().query(WINDOW_START, WINDOW_END, execution_ids)
-    old = await seeded.legacy().query(WINDOW_START, WINDOW_END, execution_ids)
+    new = await seeded.new().query(start, end, execution_ids)
+    old = await seeded.legacy().query(start, end, execution_ids)
 
     assert [b.date for b in new] == [b.date for b in old]
     for new_day, old_day in zip(new, old, strict=True):
@@ -699,6 +702,184 @@ class TestScopeFiltersAgreeThroughTheHandler:
             ),
         )
         assert total > 0, f"{metric} totalled zero, so agreeing about it proves nothing"
+
+
+# A window of its own, in a different month from WINDOW_START, so the
+# unfiltered comparison in TestNullAndEmptyExecutionIdsStayApart sees exactly
+# the rows that class seeded and nothing the rest of this module wrote.
+KEY_WINDOW_START = date(2023, 3, 6)
+KEY_WINDOW_END = date(2023, 3, 8)
+
+#: The day whose rows reach the rollup through the BACKFILL, and the day whose
+#: rows reach it through the TRIGGER. Both are re-keyed by #1371, and they are
+#: separate pieces of SQL, so both are seeded and both are asserted on.
+BACKFILL_DAY = KEY_WINDOW_START
+TRIGGER_DAY = KEY_WINDOW_START + timedelta(days=1)
+
+#: A third, ordinary execution on each day. Without it "the count is right"
+#: would be a statement about one value; with it the assertion distinguishes
+#: "'' was counted" from "something was counted".
+EXEC_KEY = f"{EXECUTION_PREFIX}{_RUN}-key"
+
+
+async def _insert_unvalidated_event(
+    conn: asyncpg.pool.PoolConnectionProxy,
+    *,
+    at: datetime,
+    event_type: str,
+    session_id: str,
+    execution_id: str | None,
+) -> None:
+    """Write one agent_events row with the execution_id EXACTLY as given.
+
+    SQL rather than ``AgentEventStore.insert_batch`` for one reason:
+    ``AgentEvent.from_dict`` sets ``execution_id`` only when the incoming value
+    is truthy, so ``""`` becomes ``None`` on the way in and that path cannot
+    produce the pair this test is about. The COLUMN accepts it - nullable TEXT,
+    no CHECK - so the KEY has to be right for what the column accepts, which is
+    what #1371 was: latent, not yet triggered, and one write path away from
+    being a wrong number on the dashboard.
+    """
+    await conn.execute(
+        "INSERT INTO agent_events (time, event_type, session_id, execution_id, data) "
+        "VALUES ($1, $2, $3, $4, '{}'::jsonb)",
+        at,
+        event_type,
+        session_id,
+        execution_id,
+    )
+
+
+async def _seed_one_day(conn: asyncpg.pool.PoolConnectionProxy, day: date, session_id: str) -> None:
+    """One session, one day, three executions - NULL, empty string, and a real id.
+
+    The NULL rows are written FIRST, so that under the COALESCE key the merged
+    row deterministically carries NULL and the per-day execution count is
+    deterministically wrong. Under the correct key the order does not matter.
+    """
+    noon = datetime.combine(day, datetime.min.time(), tzinfo=UTC).replace(hour=12)
+    for minute, execution in enumerate((None, "", EXEC_KEY)):
+        for offset, event_type in enumerate((SESSION_STARTED, GIT_COMMIT)):
+            await _insert_unvalidated_event(
+                conn,
+                at=noon + timedelta(minutes=minute * 10 + offset),
+                event_type=event_type,
+                session_id=session_id,
+                execution_id=execution,
+            )
+
+
+@pytest.fixture
+async def unattributed(
+    test_infrastructure: TestInfrastructure,
+) -> AsyncGenerator[tuple[SeededHeatmap, str], None]:
+    """A session whose events split across a NULL, an empty and a real execution id.
+
+    Seeded twice over, once on each side of the rollup's creation, so the
+    trigger's upsert and the backfill's GROUP BY are each asked the question.
+    """
+    import asyncpg
+
+    from syn_adapters.events import AgentEventStore
+    from syn_adapters.events.schema import EventStoreSchema
+
+    dsn = _utc(test_infrastructure.timescaledb_url)
+
+    store = AgentEventStore(dsn)
+    await store.initialize()  # agent_events must exist before the raw inserts
+    await store.close()
+
+    pool = await asyncpg.create_pool(dsn)
+    assert pool is not None
+    session_id = _sid("unattributed")
+
+    async with pool.acquire() as conn:
+        await _forget_seeded_rows(conn)
+        await conn.execute("DROP TRIGGER IF EXISTS agent_events_day_rollup ON agent_events")
+        await conn.execute("DROP TABLE IF EXISTS agent_event_day_rollup")
+
+        await _seed_one_day(conn, BACKFILL_DAY, session_id)
+        await EventStoreSchema().ensure_schema(conn)  # creates the key, and backfills
+        await _seed_one_day(conn, TRIGGER_DAY, session_id)
+
+    projection_store, repo_projection = await _seed_projections()
+    try:
+        yield (
+            SeededHeatmap(
+                dsn=dsn, pool=pool, store=projection_store, repo_projection=repo_projection
+            ),
+            session_id,
+        )
+    finally:
+        async with pool.acquire() as conn:
+            await _forget_seeded_rows(conn)
+        await pool.close()
+
+
+class TestNullAndEmptyExecutionIdsStayApart:
+    """#1371: two executions that name different things must not become one row.
+
+    The rollup used to be keyed on ``COALESCE(execution_id, '')``, which maps a
+    NULL and an empty string to the same value. Both halves of this class fail
+    on that key, and they fail for different reasons: the first because the
+    rollup holds one row where it should hold two, the second because the
+    number the dashboard prints is then computed from whichever of the two
+    values survived.
+    """
+
+    @pytest.mark.parametrize("day", (BACKFILL_DAY, TRIGGER_DAY), ids=("backfill", "trigger"))
+    async def test_each_execution_id_gets_its_own_rollup_row(
+        self, unattributed: tuple[SeededHeatmap, str], day: date
+    ) -> None:
+        """Three executions on the day, so three rows - however they arrived.
+
+        Order-independent, which the count below is not: under the old key the
+        backfill's two groups raced for the row and either could win, while
+        this assertion is 2 instead of 3 whichever did.
+        """
+        seeded, session_id = unattributed
+        async with seeded.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT execution_id, commits FROM agent_event_day_rollup "
+                "WHERE day = $1 AND session_id = $2 ORDER BY execution_id NULLS FIRST",
+                day,
+                session_id,
+            )
+
+        assert [row["execution_id"] for row in rows] == [None, "", EXEC_KEY], (
+            "the rollup merged rows for different executions. On the "
+            "COALESCE(execution_id, '') key the NULL and the empty string "
+            "share one row, and one of the two executions is gone (#1371)"
+        )
+        assert [row["commits"] for row in rows] == [1, 1, 1]
+
+    async def test_the_heatmap_counts_the_empty_execution_and_not_the_null_one(
+        self, unattributed: tuple[SeededHeatmap, str]
+    ) -> None:
+        """The number the endpoint returns, not the row the trigger wrote.
+
+        ``COUNT(DISTINCT execution_id)`` ignores NULL and counts ``''``, so each
+        day has TWO executions: the empty-string one and ``EXEC_KEY``. The
+        merged key gets this wrong in the direction that is hardest to notice -
+        a number one too small, on a dashboard square, with no error anywhere.
+
+        Asserted against the pre-#1253 implementation as well as against the
+        literal, because "what the old query said" is this file's definition of
+        the right answer and it reads ``agent_events`` directly, where no key
+        has had a chance to merge anything.
+        """
+        seeded, _ = unattributed
+        buckets = await _compare_queries(seeded, None, KEY_WINDOW_START, KEY_WINDOW_END)
+        by_day = {bucket.date: bucket.breakdown for bucket in buckets}
+
+        for day in (BACKFILL_DAY, TRIGGER_DAY):
+            assert by_day[day.isoformat()]["executions"] == 2.0, (
+                f"{day}: the heatmap counted the wrong number of executions. "
+                "Two are countable - the empty-string one and a real id - and "
+                "the NULL one is not, because COUNT(DISTINCT) skips it"
+            )
+            assert by_day[day.isoformat()]["commits"] == 3.0
+        assert by_day[KEY_WINDOW_END.isoformat()]["executions"] == 0.0
 
 
 class TestTheBackfillIsNotPaidAtEveryStartup:

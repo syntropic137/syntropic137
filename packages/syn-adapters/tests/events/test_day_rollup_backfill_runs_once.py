@@ -58,8 +58,13 @@ class _NoOpTransaction:
         return False
 
 
-class _CatalogueConnection:
+class CatalogueConnection:
     """A connection that remembers which tables the DDL it was given created.
+
+    Public, rather than underscored, because test_day_rollup_key.py asks the
+    same connection a different question: not "was the backfill issued twice"
+    but "does the key statement still reach a database that already has the
+    table". Both need the catalogue answered from the DDL actually executed.
 
     The point is that `to_regclass(...) IS NULL` is ANSWERED FROM THE DDL THIS
     CONNECTION ACTUALLY EXECUTED, not from a hardcoded True-then-False. A stub
@@ -99,14 +104,14 @@ class _CatalogueConnection:
         self._relations.discard(name)
 
 
-def _trigger_statements(conn: _CatalogueConnection) -> list[str]:
+def _trigger_statements(conn: CatalogueConnection) -> list[str]:
     return [s for s in conn.executed if "agent_events_day_rollup" in s]
 
 
 class TestDayRollupBackfillRunsOnce:
     async def test_first_startup_backfills(self) -> None:
         """A database that has never seen the rollup gets the full backfill."""
-        conn = _CatalogueConnection()
+        conn = CatalogueConnection()
 
         await EventStoreSchema().ensure_schema(conn)  # type: ignore[arg-type]
 
@@ -118,7 +123,7 @@ class TestDayRollupBackfillRunsOnce:
         This is the assertion the fix exists for. Before it, the count was 2 -
         and 3, and 4, once per restart, forever.
         """
-        conn = _CatalogueConnection()
+        conn = CatalogueConnection()
         schema = EventStoreSchema()
 
         await schema.ensure_schema(conn)  # type: ignore[arg-type]
@@ -139,7 +144,7 @@ class TestDayRollupBackfillRunsOnce:
         _create_day_rollup on later startups would also pass the test above,
         and would silently strand a database on an old trigger definition.
         """
-        conn = _CatalogueConnection()
+        conn = CatalogueConnection()
         schema = EventStoreSchema()
 
         await schema.ensure_schema(conn)  # type: ignore[arg-type]
@@ -157,7 +162,7 @@ class TestDayRollupBackfillRunsOnce:
         together and the table's absence is what tells the next startup the
         rollup was never filled.
         """
-        conn = _CatalogueConnection()
+        conn = CatalogueConnection()
         schema = EventStoreSchema()
 
         await schema.ensure_schema(conn)  # type: ignore[arg-type]
