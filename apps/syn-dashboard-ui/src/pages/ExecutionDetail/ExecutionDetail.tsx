@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import { AlertTriangle, CheckCircle2, DollarSign, FileText, Play, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, DollarSign, FileText, Play, ShieldAlert, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import {
@@ -15,8 +15,9 @@ import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
-import type { ExecutionDetailResponse } from '../../types'
+import type { ExecutionDetailResponse, FailureClassification } from '../../types'
 import { executionTokenTotals } from '../../utils/executionTokens'
+import { isPlatformFailure } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
@@ -106,13 +107,45 @@ function FreshnessIndicator({
   )
 }
 
-function ExecutionErrorCard({ message }: { message: string }) {
+/**
+ * Why this run ended, in the register the run deserves.
+ *
+ * "Execution Failed" in red is a report that the platform broke, and it was
+ * shown for every non-empty `error_message` - including the ones that say a
+ * phase read its own work and judged it not deliverable. That is the gate
+ * doing its job, reported as an outage, directly beneath an amber `refused`
+ * badge saying the opposite (#1367).
+ *
+ * The heading and the colour move together, because they are one claim made
+ * twice: an operator who cannot separate amber from red must still be able to
+ * read which of the two happened.
+ */
+function ExecutionErrorCard({
+  message,
+  status,
+  failureClassification,
+}: {
+  message: string
+  status: string
+  failureClassification?: FailureClassification
+}) {
+  const broke = isPlatformFailure(status, failureClassification)
+  const Icon = broke ? XCircle : ShieldAlert
   return (
     <Card>
-      <div className="flex items-start gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/30">
-        <XCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+      <div
+        className={clsx(
+          'flex items-start gap-3 p-4 rounded-lg border',
+          broke ? 'bg-red-500/10 border-red-500/30' : 'bg-amber-500/10 border-amber-500/30',
+        )}
+      >
+        <Icon
+          className={clsx('h-5 w-5 shrink-0 mt-0.5', broke ? 'text-red-400' : 'text-amber-400')}
+        />
         <div>
-          <p className="text-sm font-medium text-red-400">Execution Failed</p>
+          <p className={clsx('text-sm font-medium', broke ? 'text-red-400' : 'text-amber-400')}>
+            {broke ? 'Execution Failed' : 'Phase Reported Failure'}
+          </p>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{message}</p>
         </div>
       </div>
@@ -261,7 +294,13 @@ export function ExecutionDetail() {
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
-      {execution.error_message && <ExecutionErrorCard message={execution.error_message} />}
+      {execution.error_message && (
+        <ExecutionErrorCard
+          message={execution.error_message}
+          status={execution.status}
+          failureClassification={execution.failure_classification}
+        />
+      )}
       <ReposPanel repos={execution.repos ?? []} />
       <ExecutionMetricsGrid
         execution={execution}

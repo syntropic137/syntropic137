@@ -1,6 +1,7 @@
 import { clsx } from 'clsx'
 
 import type { FailureClassification } from '../types'
+import { REFUSED, outcomeTone } from '../utils/executionOutcome'
 
 interface StatusBadgeProps {
   status: string
@@ -26,28 +27,23 @@ const statusColors: Record<string, { bg: string; text: string; ring: string }> =
   // because both ended without delivering and neither is something broken.
   // Red is reserved for the machinery failing, which is the only kind of
   // failure an operator can act on (#1357).
-  refused: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
+  [REFUSED]: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   cancelled: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   interrupted: { bg: 'bg-orange-500/20', text: 'text-orange-400', ring: 'ring-orange-500/30' },
   skipped: { bg: 'bg-slate-500/20', text: 'text-slate-400', ring: 'ring-slate-500/30' },
 }
 
-/**
- * The word this badge shows, which is also its colour key.
+/*
+ * The word this badge shows is also its colour key, which is why the badge
+ * needs no rule of its own: `outcomeTone` decides, and the label falls out of
+ * the same answer. A correct refusal is therefore drawn apart by its LABEL as
+ * well as its colour - two reds differing by hue alone would be unreadable to
+ * an operator who cannot distinguish them, and the point of #1357 is that
+ * these are different facts, not different shades.
  *
- * A correct refusal is drawn apart from a platform failure by its LABEL and
- * not only by its colour: the two reds differed by hue alone would be
- * unreadable to an operator who cannot distinguish them, and the point of
- * #1357 is that these are different facts, not different shades.
- *
- * Every other status, and every failure the server could not classify, is
- * untouched - `unclassified` is what a run recorded before the field reads,
- * and it has always been a plain failure.
+ * This used to be a local `badgeKey`, and being local is exactly how four
+ * other surfaces stayed red (#1367).
  */
-function badgeKey(status: string, failureClassification?: FailureClassification): string {
-  if (status === 'failed' && failureClassification === 'correct_refusal') return 'refused'
-  return status
-}
 
 const sizeClasses = {
   sm: 'px-1.5 py-0.5 text-xs',
@@ -62,7 +58,7 @@ export function StatusBadge({
   pulse = false,
 }: StatusBadgeProps) {
   // Guard against undefined/null status
-  const safeStatus = badgeKey(status ?? 'unknown', failureClassification)
+  const safeStatus = outcomeTone(status ?? 'unknown', failureClassification)
   const colors = statusColors[safeStatus] ?? statusColors.pending
   const isActive = safeStatus === 'running' || safeStatus === 'in_progress'
 

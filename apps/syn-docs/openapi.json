@@ -7627,6 +7627,10 @@
               }
             ],
             "title": "Error Message"
+          },
+          "failure_classification": {
+            "$ref": "#/components/schemas/FailureClassification",
+            "default": "unclassified"
           }
         },
         "type": "object",

@@ -261,6 +261,18 @@ export interface WorkflowExecutionSummary {
   total_phases: number
   total_tokens: number
   total_cost_usd: number
+  /**
+   * Why a `failed` run failed, as `ExecutionRunSummary` now carries it (#1367).
+   *
+   * Absent until this change, so Workflow Runs had nothing to pass its badge
+   * and every correct refusal on that page read as a plain red failure - the
+   * one surface a prop could not fix, because the server was not sending it.
+   *
+   * Optional, unlike on `ExecutionListItem`: this interface is hand-written
+   * rather than aliased to the generated schema, and a required field here
+   * would be a claim about the wire that only the generated type can make.
+   */
+  failure_classification?: FailureClassification
 }
 
 /**

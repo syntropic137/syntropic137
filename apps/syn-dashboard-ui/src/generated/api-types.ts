@@ -2792,6 +2792,8 @@ export interface components {
             total_cost_usd: string;
             /** Error Message */
             error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
         };
         /**
          * ExecutionStatusResponse

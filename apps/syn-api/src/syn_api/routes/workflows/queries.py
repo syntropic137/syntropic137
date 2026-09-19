@@ -23,6 +23,9 @@ from syn_api.types import (
     WorkflowSummary,
 )
 
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import FailureClassification
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
         InputDeclarationDetail,
@@ -116,6 +119,15 @@ class ExecutionRunSummary(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`, and here for
+    the reason that one is: this is the model behind Workflow Runs, which
+    renders the same rows the executions list does. Without it that page had
+    nothing to pass its badge, so every correct refusal on it read as a plain
+    red failure however classification-aware the badge became (#1367).
+    """
 
 
 class ExecutionRunListResponse(BaseModel):
@@ -795,6 +807,7 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,
+                failure_classification=e.failure_classification,
             )
             for e in exec_result.value
         ],
