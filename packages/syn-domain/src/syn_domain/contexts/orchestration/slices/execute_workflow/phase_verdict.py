@@ -379,7 +379,7 @@ class AgentVerdict:
             )
         if self.status is VerdictStatus.UNREADABLE:
             why = (
-                f'it wrote both "success" and "status" and they disagree (#1324)'
+                'it wrote both "success" and "status" and they disagree (#1324)'
                 if self.self_contradictory
                 else f"it is not JSON, or it is not closed by a {TASK_RESULT_TERMINATOR} line"
             )

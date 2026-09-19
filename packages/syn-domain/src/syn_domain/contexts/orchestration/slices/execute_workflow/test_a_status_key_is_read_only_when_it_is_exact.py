@@ -34,6 +34,10 @@ MUTATION RECORD (each row was shown red before being kept):
     lowercasing the value before the lookup, fails the negative rows;
   - deleting `_StatusAliasResult._refuse_a_block_that_also_wrote_success` fails
     the ``success``-beside-``status`` row above;
+  - returning `_CrossKeyReading.ABSENT` unconditionally - the reading before
+    the cross-key rule existed - fails every disagreement row and the refusal
+    wording; returning `CONTRADICTS` for any block carrying both keys fails
+    every agreement row and both near-miss vocabulary rows;
   - returning ``cls(VerdictStatus.UNREADABLE, ...)`` from `_from_report` as it
     did before fails every positive row;
   - dropping ``via_status_alias=True`` fails the refusal-wording test;
@@ -49,6 +53,7 @@ import logging
 import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    TASK_RESULT_TERMINATOR,
     AgentVerdict,
     VerdictStatus,
 )
@@ -190,38 +195,171 @@ class TestEverythingElseIsUnreadableExactlyAsBefore:
         assert verdict.refuses_completion
         assert not verdict.via_status_alias
 
+
+class TestABlockThatNamesItsOutcomeTwice:
+    """The shape the alias created, and the only one whose reading it changed.
+
+    Before the alias, ``status`` was an extra key and ``extra="ignore"`` was
+    right about it: it said nothing, so the contract settled the block alone.
+    The alias gives it a meaning, so ``{"success": true, "status": "failed"}``
+    is now a block that says two opposite things - and NEITHER model can see
+    that. The contract still ignores ``status``; the alias is only reached once
+    the contract has refused. Whichever ran first would decide, which is a
+    verdict settled by the order of two ``try`` blocks.
+
+    `_read_cross_keys` decides it by rule instead, ahead of both, and the two
+    halves below are why it has three states and not a boolean.
+    """
+
     @pytest.mark.parametrize(
-        ("text", "expected"),
+        "text",
         [
             pytest.param(
                 'TASK_RESULT: {"status": "completed", "success": false, '
                 '"comments": "could not push"}\nTASK_RESULT_END',
-                VerdictStatus.FAILURE,
-                id="a-written-false-outranks-a-completed-status",
+                id="completed-beside-a-written-false",
             ),
             pytest.param(
                 'TASK_RESULT: {"status": "failed", "success": true, '
                 '"comments": "opened PR #1371"}\nTASK_RESULT_END',
-                VerdictStatus.SUCCESS,
-                id="a-written-true-outranks-a-failed-status",
+                id="failed-beside-a-written-true",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "status": "failed"}\nTASK_RESULT_END',
+                id="the-same-disagreement-with-the-keys-the-other-way-round",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": false, "status": "completed"}\nTASK_RESULT_END',
+                id="the-other-disagreement-with-the-keys-the-other-way-round",
             ),
         ],
     )
-    def test_a_block_that_wrote_success_is_judged_by_success_alone(
+    def test_a_disagreement_is_unreadable_whichever_key_was_written_first(self, text: str) -> None:
+        """Presence decides this, never order, because order is a property of
+        the text - which is what every defect in the module docstring came from
+        trusting. All four rows are the same two claims, shuffled.
+
+        ``failed`` beside ``true`` is the row that has to refuse: read by the
+        contract alone it COMPLETES a phase whose own block contains a plain
+        statement of failure, which is the one direction `phase_verdict` exists
+        to close. ``completed`` beside ``false`` refused before and refuses
+        still - what changes is that it now refuses for the reason that is
+        true of it.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.UNREADABLE
+        assert verdict.refuses_completion
+        assert verdict.self_contradictory
+        assert not verdict.via_status_alias
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": true, "status": "completed", '
+                '"comments": "opened PR #1371"}\nTASK_RESULT_END',
+                VerdictStatus.SUCCESS,
+                id="a-redundant-completed-beside-a-written-true",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": false, "status": "failed", '
+                '"comments": "could not push"}\nTASK_RESULT_END',
+                VerdictStatus.FAILURE,
+                id="a-redundant-failed-beside-a-written-false",
+            ),
+        ],
+    )
+    def test_an_agreement_is_read_off_success_exactly_as_it_always_was(
         self, text: str, expected: VerdictStatus
     ) -> None:
-        """Unchanged behaviour, asserted because the alias must not reach it.
+        """The other half, and the reason the rule is not "both keys refuse".
 
-        Both rows read this way before the alias existed - ``success`` is a
-        valid boolean, so the contract model settles them and ``status`` is an
-        extra key that is ignored. The point of the rows is that the alias is
-        never consulted for a block the contract could read, in either
-        direction: it is a fallback, not a second opinion.
+        This agent wrote the contract's key, with the contract's type, and one
+        redundant key beside it that contradicts nothing. Refusing it would
+        fail a report that OBEYED over an extra key - defect (2) in the module
+        docstring, SUCCESS became UNREADABLE, in a new spelling - and cost a
+        rerun of a finished phase to punish compliance. ``extra="ignore"``
+        exists for exactly this and still holds where nothing disagrees.
         """
         verdict = AgentVerdict.from_agent_text(text)
 
         assert verdict.status is expected
+        assert verdict.refuses_completion is (expected is VerdictStatus.FAILURE)
         assert not verdict.via_status_alias
+        assert not verdict.self_contradictory
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                'TASK_RESULT: {"success": true, "status": "in_progress"}\nTASK_RESULT_END',
+                id="a-status-outside-the-closed-vocabulary-is-not-a-second-claim",
+            ),
+            pytest.param(
+                'TASK_RESULT: {"success": true, "status": "Failed"}\nTASK_RESULT_END',
+                id="the-vocabulary-is-exact-here-too-so-a-miscased-status-says-nothing",
+            ),
+        ],
+    )
+    def test_a_status_that_names_no_outcome_leaves_the_contract_alone(self, text: str) -> None:
+        """The vocabulary is `_StatusAlias` and nothing else, on BOTH sides.
+
+        A near-miss is not a claim the rule may weigh - guessing that
+        ``"Failed"`` meant ``failed`` is the guessing the whole module refuses,
+        and here it would turn a contract-shaped success into a refusal. So the
+        closed set decides what counts as a second outcome exactly as it
+        decides what the alias reads, and these blocks are one claim and a note.
+        """
+        verdict = AgentVerdict.from_agent_text(text)
+
+        assert verdict.status is VerdictStatus.SUCCESS
+        assert not verdict.self_contradictory
+
+    def test_the_refusal_says_the_block_disagreed_and_not_that_it_was_malformed(
+        self,
+    ) -> None:
+        """An operator sent to look for broken JSON will not find any.
+
+        `WorkflowExecutionProcessor` raises this string as the phase's failure
+        reason. The block here is well-formed JSON, correctly terminated, and
+        completely readable; the only thing wrong with it is that it says both
+        things. Telling the reader it "is not JSON, or is not closed" is a
+        false lead in the one message they get.
+        """
+        refusal = AgentVerdict.from_agent_text(
+            'TASK_RESULT: {"success": true, "status": "failed"}\nTASK_RESULT_END'
+        ).refusal(phase_id="implement")
+
+        assert "implement" in refusal
+        assert "they disagree" in refusal
+        assert "#1324" in refusal
+        assert TASK_RESULT_TERMINATOR not in refusal, (
+            "the refusal blames a missing terminator on a block that has one"
+        )
+
+    def test_an_agreement_is_logged_so_the_drift_is_still_seen(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Not refusing is not the same as not noticing.
+
+        The block is read as it always was, so nothing downstream can tell that
+        an agent is writing a key the contract does not ask for. The log line
+        is the whole of that signal, and without it a second spelling of the
+        result schema spreads with no evidence anywhere that it exists.
+        """
+        with caplog.at_level(
+            logging.WARNING,
+            logger="syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict",
+        ):
+            AgentVerdict.from_agent_text(
+                'TASK_RESULT: {"success": true, "status": "completed"}\nTASK_RESULT_END'
+            )
+
+        warnings = [record.getMessage() for record in caplog.records]
+        assert len(warnings) == 1, f"expected one warning about both keys, got {warnings}"
+        assert '"success" and "status"' in warnings[0]
+        assert "#1324" in warnings[0]
 
 
 class TestTheDriftIsVisibleRatherThanAbsorbed:
