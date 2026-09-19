@@ -2154,6 +2154,34 @@ export interface components {
             registered_at?: string | null;
         };
         /**
+         * CodexAuthState
+         * @description Freshness of the configured codex credential.
+         * @enum {string}
+         */
+        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable";
+        /**
+         * CodexAuthStatus
+         * @description A non-secret description of the configured codex credential.
+         */
+        CodexAuthStatus: {
+            state: components["schemas"]["CodexAuthState"];
+            /**
+             * Expires In Hours
+             * @description Hours until the access token expires. Negative once expired.
+             */
+            expires_in_hours?: number | null;
+            /**
+             * Expires At
+             * @description Access token expiry, UTC.
+             */
+            expires_at?: string | null;
+            /**
+             * Detail
+             * @description Human-readable summary. Never contains token material.
+             */
+            detail: string;
+        };
+        /**
          * ConditionRequest
          * @description A single trigger condition (field operator value).
          */
@@ -2464,6 +2492,14 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * DegradedReason
+         * @description Reasons the API may enter degraded mode.
+         *
+         *     StrEnum so values serialize directly to JSON in health responses.
+         * @enum {string}
+         */
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -3256,15 +3292,18 @@ export interface components {
          * HealthResponse
          * @description Payload of ``GET /health``.
          *
-         *     EXTRAS ARE ALLOWED, and that is the boundary this model draws rather than an
-         *     omission. The fields below are the ones ``lifecycle.health_check`` sets
-         *     itself; the ``subscription``, ``codex_auth``, ``degraded_reasons`` and
-         *     ``warnings`` blocks are contributed by independent probes that own their own
-         *     shapes and are documented at their own source. Declaring them here would
-         *     duplicate those contracts, and forbidding them would turn adding a probe
-         *     into a 500 on the endpoint liveness checks read — the opposite of what this
-         *     endpoint is for. Typing those blocks is worth doing; it is a bigger change
-         *     than a reporting fix and is not this one.
+         *     EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+         *     typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+         *     put ``additionalProperties: true`` in ``openapi.json`` and an
+         *     ``[key: string]: unknown`` index signature in the generated CLI types: the
+         *     fields `syn health` actually reads were invisible to every generated
+         *     consumer, and a probe could change shape without the drift check noticing.
+         *     The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+         *     declared at their source and referenced, not copied — but the fact that
+         *     /health publishes them is this model's to state.
+         *
+         *     ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+         *     ``_OmitsAbsentFields``.
          */
         HealthResponse: {
             /**
@@ -3279,8 +3318,20 @@ export interface components {
             mode: string;
             /** @description Which build is answering (#1380). */
             build: components["schemas"]["BuildInfo"];
-        } & {
-            [key: string]: unknown;
+            /**
+             * Degraded Reasons
+             * @description Every way this instance is up but not fully serving. Omitted entirely when there are none, which is how a reader tells 'nothing is wrong' from 'something is and it is not listed here'.
+             */
+            degraded_reasons?: components["schemas"]["DegradedReason"][] | null;
+            /** @description Read-path health. Omitted when no subscription service is wired up at all, e.g. in offline mode. */
+            subscription?: components["schemas"]["SubscriptionHealth"] | null;
+            /** @description Freshness of this instance's codex credential. Omitted when the probe could not run — a credential hint must never be able to take /health down. */
+            codex_auth?: components["schemas"]["CodexAuthStatus"] | null;
+            /**
+             * Warnings
+             * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
+             */
+            warnings?: string[] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -3741,6 +3792,38 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * ProjectionLag
+         * @description One projection's distance from the head of the event store.
+         */
+        ProjectionLag: {
+            /**
+             * Projection
+             * @description Projection name, as it appears in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Position
+             * @description Global nonce this projection's checkpoint has reached. 0 when it has no checkpoint at all, which is what a projection looks like immediately after a version bump clears it.
+             */
+            position: number;
+            /**
+             * Lag
+             * @description Events between position and the store head. Always > 0 here.
+             */
+            lag: number;
+            /**
+             * Checkpoint Age Seconds
+             * @description Seconds since this projection's checkpoint last moved. None when the projection has no checkpoint row yet. This is the evidence behind `stalled`, and the number to sample if the stall threshold needs revisiting.
+             */
+            checkpoint_age_seconds?: number | null;
+            /**
+             * Stalled
+             * @description True when this projection is behind the head and its checkpoint has not moved for longer than the stall threshold (120s by default): it is not working through a backlog, it is stuck.
+             * @default false
+             */
+            stalled: boolean;
         };
         /**
          * RegisterClaudePluginRequest
@@ -4845,6 +4928,80 @@ export interface components {
             execution_id: string;
             /** State */
             state: string;
+        };
+        /**
+         * SubscriptionHealth
+         * @description The read-path block of ``GET /health``: is the subscription up, and is it behind.
+         *
+         *     FLAT, not nested, because that is the wire shape `syn health` and the deploy
+         *     runbook already read. The fields from ``running`` down are
+         *     ``CoordinatorSubscriptionService.get_status()``; the ones from
+         *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+         *     ``lifecycle._describe_subscription_health``.
+         *
+         *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+         *     rather than a default: ``lag is None`` means the coordinator is not up yet,
+         *     so there is nothing whose progress could be measured — which is not the same
+         *     as "not behind", and must not serialize as ``lag: 0``. When the probe itself
+         *     fails, ``status`` is "unknown" and nothing else is known at all.
+         *
+         *     ``ReadModelLag``'s fields are restated here because the block is flat on the
+         *     wire and a generated client has to be able to see them. That restatement is
+         *     the one place this model can drift from its producer, so
+         *     ``test_health_contract.py`` asserts the two field sets still match.
+         */
+        SubscriptionHealth: {
+            /**
+             * Status
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed.
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "stalled" | "catching_up" | "unknown";
+            /**
+             * Running
+             * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
+             */
+            running?: boolean | null;
+            /**
+             * Projection Count
+             * @description How many projections the coordinator is driving.
+             */
+            projection_count?: number | null;
+            /**
+             * Realtime Enabled
+             * @description Whether a realtime (SSE) projection is attached.
+             */
+            realtime_enabled?: boolean | null;
+            /**
+             * Is Catching Up
+             * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.
+             */
+            is_catching_up?: boolean | null;
+            /**
+             * Is Stalled
+             * @description True when a projection is behind the head and its checkpoint has stopped moving. Does NOT resolve on its own. Null when lag is unmeasurable.
+             */
+            is_stalled?: boolean | null;
+            /**
+             * Lag
+             * @description Distance of the furthest-behind projection from the store head, in lag_unit. 0 means at the head; null means not measurable.
+             */
+            lag?: number | null;
+            /**
+             * Lag Unit
+             * @description Unit of lag: event-store global-nonce positions, not seconds.
+             */
+            lag_unit?: "events" | null;
+            /**
+             * Head Position
+             * @description Global nonce of the newest event in the store.
+             */
+            head_position?: number | null;
+            /**
+             * Lagging Projections
+             * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
+             */
+            lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
         };
         /**
          * SystemActionResponse

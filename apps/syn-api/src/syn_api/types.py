@@ -12,13 +12,30 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
-# Runtime import: pydantic resolves the annotation below at class-construction
-# time, and the whole point of reusing the DOMAIN enum here is that the API and
-# the CLI cannot grow a second spelling of the same vocabulary (#1357).
-# Imported from the context's public surface, not its internals (ADR-062).
+# Runtime imports, not TYPE_CHECKING ones: pydantic resolves these annotations
+# at class-construction time.
+#
+# FailureClassification: the whole point of reusing the DOMAIN enum here is that
+# the API and the CLI cannot grow a second spelling of the same vocabulary
+# (#1357). Imported from the context's public surface, not its internals
+# (ADR-062).
+#
+# The other three are republished by /health as its own fields, referenced
+# rather than restated - the probe that produces a shape is the only place
+# allowed to define it (#1380).
+from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification
+from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -1497,25 +1514,155 @@ class BuildInfo(BaseModel):
     )
 
 
-class HealthResponse(BaseModel):
-    """Payload of ``GET /health``.
+class _OmitsAbsentFields(BaseModel):
+    """A response model whose ``None`` fields are omitted rather than sent as null.
 
-    EXTRAS ARE ALLOWED, and that is the boundary this model draws rather than an
-    omission. The fields below are the ones ``lifecycle.health_check`` sets
-    itself; the ``subscription``, ``codex_auth``, ``degraded_reasons`` and
-    ``warnings`` blocks are contributed by independent probes that own their own
-    shapes and are documented at their own source. Declaring them here would
-    duplicate those contracts, and forbidding them would turn adding a probe
-    into a 500 on the endpoint liveness checks read — the opposite of what this
-    endpoint is for. Typing those blocks is worth doing; it is a bigger change
-    than a reporting fix and is not this one.
+    /health's optional blocks have always been ABSENT when they could not be
+    filled in, and callers read them that way: `syn health` branches on whether
+    ``subscription`` is there at all, and "no lag measurement" has to stay
+    distinguishable from ``lag: 0``, which is a measurement saying "at the head".
+
+    A model-level serializer rather than ``response_model_exclude_none``,
+    because that flag is recursive and would also delete ``build.image_tag`` and
+    ``build.commit`` — whose ``null`` is a deliberate answer meaning "this image
+    did not stamp itself", not an absence. Omission is correct for the models
+    that inherit this and wrong one level down, so it is spelled where it is
+    correct.
     """
 
-    model_config = ConfigDict(extra="allow")
+    @model_serializer(mode="wrap")
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler):
+        """Deliberately unannotated. Pydantic builds the SERIALIZATION schema from
+        a model serializer's return type, so writing ``-> dict[str, JsonValue]``
+        here replaces every declared property in ``openapi.json`` with
+        ``additionalProperties: {$ref: JsonValue}`` — re-opening the contract
+        this change exists to close, by the same mechanism and less visibly.
+        Left off, pydantic keeps the model's own schema. ``test_health_contract``
+        asserts the schema stays closed and named, which is what would catch an
+        annotation being helpfully added back.
+        """
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+#: Every value ``subscription.status`` can take. The first four are
+#: ``read_path_health._ReadPathStatus``, which owns that vocabulary; "unknown"
+#: is added here because only /health can produce it — it is what the probe
+#: reports when it failed and has no verdict to publish.
+#: ``test_health_contract.py`` fails if those four ever stop being a subset.
+SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+
+
+class SubscriptionHealth(_OmitsAbsentFields):
+    """The read-path block of ``GET /health``: is the subscription up, and is it behind.
+
+    FLAT, not nested, because that is the wire shape `syn health` and the deploy
+    runbook already read. The fields from ``running`` down are
+    ``CoordinatorSubscriptionService.get_status()``; the ones from
+    ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+    ``lifecycle._describe_subscription_health``.
+
+    EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+    rather than a default: ``lag is None`` means the coordinator is not up yet,
+    so there is nothing whose progress could be measured — which is not the same
+    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
+    fails, ``status`` is "unknown" and nothing else is known at all.
+
+    ``ReadModelLag``'s fields are restated here because the block is flat on the
+    wire and a generated client has to be able to see them. That restatement is
+    the one place this model can drift from its producer, so
+    ``test_health_contract.py`` asserts the two field sets still match.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: SubscriptionHealthStatus = Field(
+        description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
+        "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
+        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+    )
+    running: bool | None = Field(
+        default=None,
+        description="Whether the subscription coordinator is running. Null when the probe "
+        "failed and could not ask.",
+    )
+    projection_count: int | None = Field(
+        default=None, description="How many projections the coordinator is driving."
+    )
+    realtime_enabled: bool | None = Field(
+        default=None, description="Whether a realtime (SSE) projection is attached."
+    )
+    is_catching_up: bool | None = Field(
+        default=None,
+        description="True while the coordinator is replaying history and some projection has "
+        "not reached the head. Reads may 404 for recently written aggregates. Ends "
+        "by itself. Null when the subscription is not up yet and lag is unmeasurable.",
+    )
+    is_stalled: bool | None = Field(
+        default=None,
+        description="True when a projection is behind the head and its checkpoint has stopped "
+        "moving. Does NOT resolve on its own. Null when lag is unmeasurable.",
+    )
+    lag: int | None = Field(
+        default=None,
+        description="Distance of the furthest-behind projection from the store head, in "
+        "lag_unit. 0 means at the head; null means not measurable.",
+    )
+    lag_unit: Literal["events"] | None = Field(
+        default=None, description="Unit of lag: event-store global-nonce positions, not seconds."
+    )
+    head_position: int | None = Field(
+        default=None, description="Global nonce of the newest event in the store."
+    )
+    lagging_projections: list[ProjectionLag] | None = Field(
+        default=None,
+        description="Every projection short of the head, furthest behind first. Empty when "
+        "all are at the head; null when lag is unmeasurable.",
+    )
+
+
+class HealthResponse(_OmitsAbsentFields):
+    """Payload of ``GET /health``.
+
+    EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+    typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+    put ``additionalProperties: true`` in ``openapi.json`` and an
+    ``[key: string]: unknown`` index signature in the generated CLI types: the
+    fields `syn health` actually reads were invisible to every generated
+    consumer, and a probe could change shape without the drift check noticing.
+    The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+    declared at their source and referenced, not copied — but the fact that
+    /health publishes them is this model's to state.
+
+    ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+    ``_OmitsAbsentFields``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: str = Field(description="'healthy' while the process is alive and accepting writes.")
     mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
     build: BuildInfo = Field(description="Which build is answering (#1380).")
+    degraded_reasons: list[DegradedReason] | None = Field(
+        default=None,
+        description="Every way this instance is up but not fully serving. Omitted entirely "
+        "when there are none, which is how a reader tells 'nothing is wrong' from "
+        "'something is and it is not listed here'.",
+    )
+    subscription: SubscriptionHealth | None = Field(
+        default=None,
+        description="Read-path health. Omitted when no subscription service is wired up at "
+        "all, e.g. in offline mode.",
+    )
+    codex_auth: CodexAuthStatus | None = Field(
+        default=None,
+        description="Freshness of this instance's codex credential. Omitted when the probe "
+        "could not run — a credential hint must never be able to take /health down.",
+    )
+    warnings: list[str] | None = Field(
+        default=None,
+        description="Human-readable notes that need attention but do not degrade the "
+        "instance. Omitted when there are none.",
+    )
 
 
 # ---------------------------------------------------------------------------

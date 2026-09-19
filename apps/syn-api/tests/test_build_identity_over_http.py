@@ -137,10 +137,12 @@ def test_the_package_dunder_agrees_with_what_it_serves() -> None:
 async def test_the_response_model_does_not_swallow_the_probe_blocks() -> None:
     """Typing /health must not cost it the fields it already reported.
 
-    ``HealthResponse`` declares three fields and allows extras; a model that
-    forbade them, or a serializer that dropped them, would silently delete the
-    codex and subscription blocks that `syn health` and the deploy runbook
-    read. This is the hop the change is most likely to break.
+    ``HealthResponse`` forbids extras, so every block it publishes has to be
+    declared on it; a field left off, or a serializer that dropped one, would
+    silently delete the codex and subscription blocks that `syn health` and the
+    deploy runbook read. This is the hop the change is most likely to break —
+    and the closed model makes it a live risk rather than a theoretical one,
+    which is why the declared set is pinned in ``test_health_contract.py`` too.
     """
     body = await _health_body()
 

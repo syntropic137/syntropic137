@@ -170,7 +170,7 @@ def create_app() -> FastAPI:
 
         result = await lifecycle.health_check()
         if isinstance(result, Ok):
-            return HealthResponse.model_validate(result.value)
+            return result.value
         # An unhealthy process still has to say which build is unhealthy: that
         # answer is read from package metadata and needs none of the state that
         # just failed.
