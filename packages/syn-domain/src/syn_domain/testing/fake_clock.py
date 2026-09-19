@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import AttemptClock
+from syn_domain.contexts.orchestration import AttemptClock
 
 
 @dataclass
