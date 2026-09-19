@@ -116,6 +116,39 @@ false completion. What is no longer bought with it is the old blanket refusal
 whenever the marker appeared after a report - that refused real successes,
 which is defect 2 again in a wider spelling.
 
+THE ONE SHAPE READ THAT THE CONTRACT DOES NOT DESCRIBE (#1324). An agent that
+finished its work and then invented its own result schema - ``{"status":
+"completed", "branch": ..., "commit": ..., "pr": 1371}`` - reported nothing this
+module could read, and exec-cd5e75eaeb63 lost a $10.76 phase whose commit was
+already pushed. Every failing block observed after #1327 made the copyable fence
+literal had that one defect and no other: the key was spelled ``status``, with
+``completed`` or ``failed`` under it.
+
+So that exact shape is read as the verdict it plainly states, and nothing around
+it is: NO ``success`` key present, and ``status`` a JSON string that is EXACTLY
+``completed`` or ``failed``. ``Completed``, ``done``, a non-string ``status``, or
+a ``status`` beside a ``success`` remain UNREADABLE precisely as before.
+
+WHY THIS IS NOT THE COERCION THE STRICT MODEL EXISTS TO REFUSE - the first
+objection to raise, and the one that decides whether the alias may exist at all.
+`_ReportedResult` refuses ``"success": "true"`` because reading a STRING as a
+BOOLEAN is a guess about a value nobody wrote: ``"true"`` is equally the start of
+``"true, but the tests fail"``, and the guess resolves it in the completing
+direction. The alias guesses nothing. It is a closed two-element map from whole
+string literals to the outcomes they name, carrying BOTH directions - ``failed``
+refuses the phase exactly as ``success: false`` does - and it applies only where
+the contract's own key is ABSENT, so it can never overrule, soften or contradict
+anything the agent did write. A permissive mode would widen what a value may
+MEAN; this widens only which key the same two meanings may be written under.
+
+AND IT IS RECORDED RATHER THAN ABSORBED. Reading the alias logs a warning naming
+the spelling and the payload, and the verdict carries ``via_status_alias`` so a
+refusal states how the phase reported itself instead of quoting a
+``success=false`` nobody wrote. An alias nobody can see is how drift becomes the
+format: the contract is still one key called ``success``, and
+`render_workspace_prompt` now says that in as many words rather than leaving it
+to be inferred from an example.
+
 WHAT IS AND IS NOT A VERDICT. Four states, and the distinction between the last
 two is the whole point:
 
@@ -146,11 +179,14 @@ all change without touching a stream processor or the dispatcher.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TASK_RESULT_MARKER",
@@ -189,10 +225,18 @@ class AgentVerdict:
     unparsed text it wrote when the verdict was not readable - in both cases
     the thing an operator needs to see, which is why one field carries both
     rather than the caller having to know which to look at.
+
+    ``via_status_alias`` says the claim was written as ``"status"`` rather than
+    as the ``"success"`` boolean the contract asks for (#1324). It is read in
+    exactly one place - `refusal`, so that the line an operator greps for
+    quotes what the agent actually wrote - and it exists because an alias that
+    leaves no trace in the outcome is indistinguishable from the format having
+    quietly changed.
     """
 
     status: VerdictStatus
     comments: str = ""
+    via_status_alias: bool = False
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -205,9 +249,11 @@ class AgentVerdict:
 
         WHICH parts of the text are reports is `_delimited_reports`'s question;
         this one decides what each of them SAYS and, when they disagree, which
-        stands. A verdict is a JSON object whose ``success`` is a JSON boolean,
-        and anything the agent wrote in its place is unreadable rather than a
-        pass.
+        stands. A verdict is a JSON object whose ``success`` is a JSON boolean -
+        or, for the one shape agents demonstrably write instead, whose ``status``
+        is exactly ``completed`` or ``failed`` with no ``success`` beside it
+        (#1324). Anything else the agent wrote in its place is unreadable rather
+        than a pass.
 
         One message is one reading, not the whole phase: use `VerdictReader`
         when the messages arrive one at a time, so that a report already read
@@ -226,11 +272,34 @@ class AgentVerdict:
         try:
             reported = _ReportedResult.model_validate(report.decoded)
         except ValidationError:
-            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
+            return cls._from_status_alias(report)
         return cls(
             VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
             reported.said,
         )
+
+    @classmethod
+    def _from_status_alias(cls, report: _Report) -> AgentVerdict:
+        """What a block that named its outcome ``status`` claims (#1324).
+
+        Reached only after the contract above was not met, which is what keeps
+        the alias unable to overrule a ``success`` the agent did write: a block
+        carrying both keys never gets here, and one carrying an unreadable
+        ``success`` is refused here too.
+        """
+        try:
+            aliased = _StatusAliasResult.model_validate(report.decoded)
+        except ValidationError:
+            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
+        logger.warning(
+            'TASK_RESULT block named its outcome "status": "%s" instead of writing a '
+            '"success" boolean, and was read as %s under the #1324 alias. The phase '
+            "is not following the reporting contract: %s",
+            aliased.status.value,
+            aliased.status.verdict.name,
+            _excerpt(report.payload),
+        )
+        return cls(aliased.status.verdict, aliased.said, via_status_alias=True)
 
     @property
     def refuses_completion(self) -> bool:
@@ -245,9 +314,14 @@ class AgentVerdict:
         message is never the thing a decision should hinge on.
         """
         if self.status is VerdictStatus.FAILURE:
+            wrote = (
+                f'"status": "{_StatusAlias.FAILED.value}" (read as success=false, #1324)'
+                if self.via_status_alias
+                else "success=false"
+            )
             return (
                 f"Phase '{phase_id}' REPORTED FAILURE. Its agent ended with "
-                f'TASK_RESULT success=false: "{self.comments}". The phase is failed '
+                f'TASK_RESULT {wrote}: "{self.comments}". The phase is failed '
                 f"on its own report rather than completed on its exit status."
             )
         if self.status is VerdictStatus.UNREADABLE:
@@ -359,6 +433,82 @@ class _ReportedResult(BaseModel):
     def said(self) -> str:
         """The comments as an operator will read them, never None."""
         return str(self.comments) if self.comments is not None else ""
+
+
+class _StatusAlias(StrEnum):
+    """The only two ``status`` spellings that name an outcome (#1324).
+
+    The accepted spellings are written here and nowhere else. A closed set in
+    one place is what separates an alias from a habit of adding one more string
+    each time a run is lost, and it is the definition the negative tests are
+    written against: everything not a member of this enum is UNREADABLE.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+    @property
+    def verdict(self) -> VerdictStatus:
+        """The outcome this spelling names. Total over the members by shape."""
+        return VerdictStatus.SUCCESS if self is _StatusAlias.COMPLETED else VerdictStatus.FAILURE
+
+
+class _StatusAliasResult(BaseModel):
+    """A block that named its outcome ``status``, and only in the exact shape.
+
+    `_ReportedResult` is the contract; this is the single documented deviation
+    from it that agents actually write, and the module docstring argues why
+    reading it is not the coercion the strict model refuses. Everything the
+    strict model buys is kept: ``status`` must be a JSON string (a bare `true`
+    or `1` is not one), it must match a `_StatusAlias` value whole and
+    case-sensitively, and both outcomes are carried so the alias refuses a
+    phase as readily as it passes one.
+
+    ``extra="ignore"`` for the same reason as the contract model: the observed
+    blocks carry ``branch``, ``commit`` and ``pr`` beside the outcome, and an
+    unexpected key is not a reason to discard a claim that is otherwise exact.
+    """
+
+    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
+
+    #: Per-field ``strict=False``, and nowhere else in this module. Strict
+    #: validation of an enum demands an instance of it, which no JSON document
+    #: can hold; lax validation of a `StrEnum` is an exact match against its
+    #: values and coerces nothing - ``"Completed"``, ``"done"``, `True` and `1`
+    #: are all refused, each pinned by a test.
+    status: _StatusAlias = Field(strict=False)
+    comments: object | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_a_block_that_also_wrote_success(cls, block: object) -> object:
+        """A block carrying BOTH keys is unreadable, never an alias.
+
+        Without this, ``extra="ignore"`` would drop a ``success`` the agent DID
+        write - including a ``false``, or a malformed one the contract model
+        just refused - and read the phase off its ``status`` instead. That is
+        the completed-failure direction, so the alias reads only a block that
+        has nothing for it to disagree with.
+        """
+        if isinstance(block, dict) and "success" in block:
+            raise ValueError("a block that wrote 'success' is judged by the contract, not aliased")
+        return block
+
+    @property
+    def said(self) -> str:
+        """The agent's comments, or - when it wrote none - the drift itself.
+
+        An aliased block with nothing to quote would otherwise reach an
+        operator as an empty string, which reads as "the agent said nothing"
+        rather than "the agent did not report the way it was asked to".
+        """
+        if self.comments is not None:
+            return str(self.comments)
+        return (
+            f'No comments were written. The phase reported "status": "{self.status.value}" '
+            f'instead of a "success" boolean and was read as '
+            f"{self.status.verdict.name} on that (#1324)."
+        )
 
 
 def _payload_starts(text: str, after: int) -> int:

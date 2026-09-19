@@ -101,6 +101,20 @@ protect. The prompt therefore says outright that a closed block is a report
 wherever it sits and that only one may be written, since reducing how often that
 second block gets closed is the part still available to the emitter.
 
+WHY THE KEY IS NAMED AS A RULE AND NOT ONLY SHOWN (#1324, a third time).
+Literal fences fixed what an agent COPYING them produces and left untouched what
+an agent that never looks at them produces. exec-cd5e75eaeb63 finished its work,
+pushed its commit, then wrote a result schema of its own - ``{"status":
+"completed", "branch": ..., "pr": 1371}`` - and lost a $10.76 phase; every
+failing block observed after the fences went literal had that same shape.
+Nothing here contradicted it. ``success`` appeared only INSIDE two examples, and
+an example is a thing to copy, not a rule to check an invention against. So the
+key and the type of its value are now stated as a rule above the fences, in the
+negative form the failure actually took - never ``status``. `phase_verdict`
+reads that one shape now too, narrowly and visibly; this paragraph is the half
+that stops the drift spreading, and it deliberately does not mention the alias,
+because an alias agents are told about is simply the format.
+
 Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
 copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
 #1324 - and that the rendered prompt, read whole by the production reader, never
@@ -247,6 +261,13 @@ the previous phase failed - report this in your output.
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
 three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
 after it - and it is read as your result only when all three are there.
+
+**The key that carries your outcome is named `success`, never `status`, and its
+value is the JSON boolean `true` or `false`** - not the quoted string `"true"`,
+not a number, and not a word like `completed`. Agents that invented their own
+key here have lost finished, pushed work: `success` is the field the
+orchestrator reads, and a block naming the outcome anything else is not
+guaranteed to be read at all.
 
 A failure reason is specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
