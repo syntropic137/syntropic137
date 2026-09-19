@@ -1,5 +1,6 @@
 """PostgreSQL storage implementation for UI Feedback."""
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -19,6 +20,8 @@ from ui_feedback.models import (
     TypeCount,
 )
 from ui_feedback.storage.protocol import FeedbackStorageProtocol
+
+logger = logging.getLogger(__name__)
 
 # Path to migrations directory
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
@@ -54,19 +57,27 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             self._pool = None
 
     async def _run_migrations(self) -> None:
-        """Run database migrations (idempotent - safe to run multiple times)."""
-        migration_file = MIGRATIONS_DIR / "001_feedback_tables.sql"
-        if not migration_file.exists():
-            print(f"Warning: Migration file not found: {migration_file}")
+        """Apply every migration in order (idempotent - safe to re-run).
+
+        Every statement in every file is IF NOT EXISTS / OR REPLACE, so this
+        converges an empty database and one that already ran an earlier
+        version to the same schema. Applying the whole sorted set, rather
+        than a hard-coded 001, is what makes adding a migration a
+        one-file change instead of a two-file one.
+        """
+        migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+        if not migration_files:
+            logger.warning("No migration files found in %s", MIGRATIONS_DIR)
             return
 
-        sql = migration_file.read_text()
-
         async with self.pool.acquire() as conn:
-            # Execute the migration SQL
-            # All statements use IF NOT EXISTS, so this is idempotent
-            await conn.execute(sql)
-            print("✅ Database migrations applied (feedback_items, feedback_media)")
+            for migration_file in migration_files:
+                await conn.execute(migration_file.read_text())
+
+        logger.info(
+            "ui-feedback schema applied (%s)",
+            ", ".join(f.name for f in migration_files),
+        )
 
     # =========================================================
     # Feedback CRUD
@@ -80,10 +91,11 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
                 click_x, click_y, css_selector, xpath, component_name,
                 feedback_type, comment, priority,
                 app_name, app_version, user_agent,
-                environment, git_commit, git_branch, hostname
+                environment, git_commit, git_branch, hostname,
+                subject_kind, subject_id
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                $16, $17, $18, $19
+                $16, $17, $18, $19, $20, $21
             )
             RETURNING *
         """
@@ -108,6 +120,8 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             data.git_commit,
             data.git_branch,
             data.hostname,
+            data.subject_kind,
+            data.subject_id,
         )
         return self._row_to_feedback_item(row, media_count=0)
 
@@ -152,6 +166,11 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
         feedback_type: str | None = None,
         priority: str | None = None,
         app_name: str | None = None,
+        route: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
         search: str | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -159,35 +178,36 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
         order_desc: bool = True,
     ) -> tuple[list[FeedbackItem], int]:
         """List feedback items with filtering and pagination."""
-        # Build WHERE clause
+        # Build WHERE clause. The placeholder number is derived from how many
+        # params have been bound, so adding a filter is one line and can never
+        # desynchronise an index from its value.
         conditions: list[str] = []
-        params: list[str | int] = []
-        param_idx = 1
+        params: list[object] = []
+
+        def add(column_expr: str, value: object) -> None:
+            params.append(value)
+            conditions.append(column_expr.format(len(params)))
 
         if status:
-            conditions.append(f"status = ${param_idx}")
-            params.append(status)
-            param_idx += 1
-
+            add("status = ${}", status)
         if feedback_type:
-            conditions.append(f"feedback_type = ${param_idx}")
-            params.append(feedback_type)
-            param_idx += 1
-
+            add("feedback_type = ${}", feedback_type)
         if priority:
-            conditions.append(f"priority = ${param_idx}")
-            params.append(priority)
-            param_idx += 1
-
+            add("priority = ${}", priority)
         if app_name:
-            conditions.append(f"app_name = ${param_idx}")
-            params.append(app_name)
-            param_idx += 1
-
+            add("app_name = ${}", app_name)
+        if route:
+            add("route = ${}", route)
+        if subject_kind:
+            add("subject_kind = ${}", subject_kind)
+        if subject_id:
+            add("subject_id = ${}", subject_id)
+        if created_after:
+            add("created_at >= ${}", created_after)
+        if created_before:
+            add("created_at < ${}", created_before)
         if search:
-            conditions.append(f"comment ILIKE ${param_idx}")
-            params.append(f"%{search}%")
-            param_idx += 1
+            add("comment ILIKE ${}", f"%{search}%")
 
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
@@ -204,6 +224,7 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
         total = await self.pool.fetchval(count_query, *params)
 
         # Get items with media count
+        limit_idx = len(params) + 1
         query = f"""
             SELECT f.*,
                    COALESCE(m.media_count, 0) as media_count
@@ -215,7 +236,7 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             ) m ON f.id = m.feedback_id
             WHERE {where_clause}
             ORDER BY {order_by} {order_direction}
-            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            LIMIT ${limit_idx} OFFSET ${limit_idx + 1}
         """
         params.extend([page_size, offset])
 
@@ -436,6 +457,8 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             css_selector=row["css_selector"],
             xpath=row["xpath"],
             component_name=row["component_name"],
+            subject_kind=row["subject_kind"],
+            subject_id=row["subject_id"],
             feedback_type=row["feedback_type"],
             comment=row["comment"],
             status=row["status"],

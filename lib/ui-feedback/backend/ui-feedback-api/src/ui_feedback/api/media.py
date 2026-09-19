@@ -16,12 +16,34 @@ def get_storage() -> FeedbackStorageProtocol:
     raise NotImplementedError("Storage dependency not configured")
 
 
+def get_max_upload_bytes() -> int:
+    """Dependency for the per-file upload ceiling, in bytes.
+
+    Standalone, this is the module's own UI_FEEDBACK_MAX_FILE_SIZE. A host
+    application that mounts this router overrides it (see
+    ``create_feedback_router``) so the limit comes from the host's settings
+    and there is exactly one place it is configured.
+    """
+    return settings.max_file_size
+
+
+def _reject_if_too_large(size: int, max_upload_bytes: int) -> None:
+    """Raise 413 when a file exceeds the ceiling."""
+    if size > max_upload_bytes:
+        max_mb = max_upload_bytes / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {max_mb:.1f}MB",
+        )
+
+
 @router.post("", response_model=MediaItem, status_code=201)
 async def upload_media(
     feedback_id: UUID,
     file: UploadFile = File(...),
     media_type: MediaType = Form(...),
     storage: FeedbackStorageProtocol = Depends(get_storage),
+    max_upload_bytes: int = Depends(get_max_upload_bytes),
 ) -> MediaItem:
     """Upload a media file (screenshot or voice note)."""
     # Check feedback exists
@@ -29,16 +51,15 @@ async def upload_media(
     if not feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
 
-    # Read file
-    data = await file.read()
+    # Refuse on the DECLARED size before reading, so an oversized upload is
+    # not spooled in full just to be rejected. Starlette does not always
+    # populate `size`, so the read below is still checked - this is an early
+    # out, not the authoritative check.
+    if file.size is not None:
+        _reject_if_too_large(file.size, max_upload_bytes)
 
-    # Check file size
-    if len(data) > settings.max_file_size:
-        max_mb = settings.max_file_size / (1024 * 1024)
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {max_mb:.1f}MB",
-        )
+    data = await file.read()
+    _reject_if_too_large(len(data), max_upload_bytes)
 
     # Validate MIME type
     mime_type = file.content_type or "application/octet-stream"

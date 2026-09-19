@@ -72,20 +72,20 @@ export function FeedbackProvider({
   children, apiUrl, appName, appVersion,
   keyboardShortcut = 'Ctrl+Shift+F',
   theme: customTheme, classNames, position = 'bottom-right', disabled = false,
-  environment, gitCommit, gitBranch, hostname,
+  environment, gitCommit, gitBranch, hostname, subject = null,
 }: FeedbackProviderProps) {
   const api = useFeedbackApi({ apiUrl });
   const theme = useMemo(() => mergeTheme(customTheme), [customTheme]);
 
   const config: FeedbackProviderConfig = useMemo(
-    () => ({ apiUrl, appName, appVersion, keyboardShortcut, theme: customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname }),
-    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname],
+    () => ({ apiUrl, appName, appVersion, keyboardShortcut, theme: customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname, subject }),
+    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname, subject],
   );
 
   const {
     state, openFeedbackMode, closeFeedbackMode, openModal, closeModal,
     addMedia, removeMedia, clearMedia, submitFeedback,
-  } = useFeedbackState({ api, appName, appVersion, environment, gitCommit, gitBranch, hostname, disabled });
+  } = useFeedbackState({ api, appName, appVersion, environment, gitCommit, gitBranch, hostname, subject, disabled });
 
   useKeyboardShortcuts({
     disabled, keyboardShortcut,

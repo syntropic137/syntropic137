@@ -24,7 +24,7 @@ Example:
     app.include_router(feedback_router, prefix="/api")
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter
 
@@ -33,14 +33,22 @@ from ui_feedback.api import media as media_api
 from ui_feedback.api import stats as stats_api
 from ui_feedback.storage.protocol import FeedbackStorageProtocol
 
+DependencyOverrides = dict[Callable[[], object], Callable[[], object]]
+
 
 def create_feedback_router(
     storage: FeedbackStorageProtocol,
-) -> tuple[APIRouter, dict[Callable[[], FeedbackStorageProtocol], Callable[[], FeedbackStorageProtocol]]]:
+    *,
+    max_upload_bytes: int | None = None,
+) -> tuple[APIRouter, DependencyOverrides]:
     """Create a FastAPI router with all feedback endpoints.
 
     Args:
         storage: Storage implementation to use for persistence.
+        max_upload_bytes: Per-file upload ceiling for screenshots and voice
+            notes. ``None`` keeps the module's own UI_FEEDBACK_MAX_FILE_SIZE,
+            which is what the standalone app uses; a host application passes
+            its own so the limit is configured in exactly one place.
 
     Returns:
         Tuple of (router, dependency_overrides dict).
@@ -52,16 +60,26 @@ def create_feedback_router(
     def get_storage() -> FeedbackStorageProtocol:
         return storage
 
-    # Include all routers
+    # `/feedback/stats` FIRST. Registration order is match order, and
+    # `/feedback/{feedback_id}` would otherwise swallow it and fail to parse
+    # "stats" as a UUID.
+    router.include_router(stats_api.router)
     router.include_router(feedback_api.router)
     router.include_router(media_api.router)
-    router.include_router(stats_api.router)
 
     # Return overrides to be applied at app level
-    overrides: dict[Callable[[], FeedbackStorageProtocol], Callable[[], FeedbackStorageProtocol]] = {
+    overrides: DependencyOverrides = {
         feedback_api.get_storage: get_storage,
         media_api.get_storage: get_storage,
         stats_api.get_storage: get_storage,
     }
+
+    if max_upload_bytes is not None:
+        limit = max_upload_bytes
+
+        def get_max_upload_bytes() -> int:
+            return limit
+
+        overrides[media_api.get_max_upload_bytes] = get_max_upload_bytes
 
     return router, overrides
