@@ -19,11 +19,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartExecutionCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    observer_for,
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
+    run_phase_agent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
     phase_failure,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    UpstreamRetryPolicy,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
@@ -34,9 +37,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
-    ObservabilityCollector,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
@@ -60,7 +60,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     ExecutionRepository,
     PhaseOutputCache,
     PromptBuilder,
-    Runner,
     SessionRepository,
     TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
@@ -69,7 +68,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     already_saved_by_the_completion_gate,
     refuse_to_complete_unsaved_phase,
 )
-from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -143,8 +141,13 @@ class WorkflowExecutionProcessor:
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
+        retry_policy: UpstreamRetryPolicy | None = None,
     ) -> None:
         self._session_repo = session_repository
+        # How a phase answers a provider that is simply busy (#1303). Injected
+        # only so a test can collapse the backoff to zero; production takes the
+        # policy's own numbers and no caller chooses them.
+        self._retry_policy = retry_policy or UpstreamRetryPolicy()
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -549,32 +552,21 @@ class WorkflowExecutionProcessor:
         session_id = todo.session_id or ""
         launch = self._runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
-        timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
-        # Raises on an unknown or removed provider instead of defaulting to
-        # the claude parser. The execution boundary
-        # (_build_agent_config_from_phase) already rejected it, so reaching
-        # that raise means a new entry point skipped the gate.
-        runner: Runner = runner_for_provider(phase.agent_config.provider, phase_id=phase.phase_id)
 
-        collector = ObservabilityCollector(
-            writer=self._observability_writer,
-            session_id=session_id,
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workspace_id=getattr(launch.workspace, "workspace_id", None),
-            agent_model=phase.agent_config.model,
-        )
-        result = await self._get_agent_handler().handle(
+        # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
+        # line treats the result as final, and for every cause but one it is;
+        # `run_phase_agent` is what makes that true, by not returning until
+        # there is no further attempt to come. How many attempts that took, and
+        # which failures earn one, are settled in `agent_attempts` and are not
+        # facts this function has any use for.
+        result = await run_phase_agent(
+            handler=self._get_agent_handler(),
             todo=todo,
-            workspace=launch.workspace,
-            agent_env=launch.agent_env,
-            claude_cmd=launch.claude_cmd,
+            phase=phase,
+            launch=launch,
             session_id=session_id,
-            agent_model=phase.agent_config.model,
-            timeout_seconds=timeout,
-            collector=collector,
-            runner=runner,
-            on_launch=observer_for(launch.session_manager),
+            observability=self._observability_writer,
+            retry_policy=self._retry_policy,
         )
 
         self._runtime.remember_leader(
