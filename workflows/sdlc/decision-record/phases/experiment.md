@@ -50,9 +50,11 @@ no summary.
 assumption marked `PENDING`, and update its row as each verdict lands. Then a
 phase stopped at any moment still leaves a complete record of what it knew.
 
-## Dispatch one subagent per assumption, in parallel
+## Dispatch one subagent per `TEST` assumption, in parallel
 
-Send them in a single message. Give each exactly one numbered assumption, the
+Only the assumptions you are testing (at most five, as above) get a subagent;
+the rest already have their `STILL UNKNOWN - not tested` files. Send them in a
+single message. Give each exactly one numbered assumption, the
 claim, and the falsifying experiment the review settled on. **Each subagent
 writes a verdict FILE to `artifacts/output/experiments/<n>-<slug>.md` and replies
 with one line: the assumption number and its verdict.** Do not re-ingest its
