@@ -2390,6 +2390,21 @@ release-local version:
 #
 # Callable on its own, including from CI:
 #   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+# Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
+# Codifies docs/deployment/test-deploy.md (direct path). Not a release.
+#   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
+#   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
+#   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
+#   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
+pit-stop version *flags:
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
+
 verify-image-capabilities image ref:
     #!/usr/bin/env bash
     set -euo pipefail
