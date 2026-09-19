@@ -26,6 +26,7 @@ from syn_api._wiring import (
     get_subscription_coordinator,
     get_workflow_dispatcher,
 )
+from syn_api.build_info import get_build_info
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.read_path_health import _judge_read_path
@@ -307,10 +308,15 @@ async def health_check() -> Result[dict, LifecycleError]:
     """Check application health.
 
     Returns:
-        Ok(dict) with health status including mode (full/degraded).
+        Ok(dict) with health status including mode (full/degraded) and the
+        identity of the running build. Serialized through
+        ``syn_api.types.HealthResponse`` by the route.
     """
     mode = "degraded" if _state.degraded_reasons else "full"
-    response: dict = {"status": "healthy", "mode": mode}
+    # Unconditional and never probed: an operator or an agent asking "which
+    # build is this?" must get an answer from a degraded deployment too, since
+    # that is precisely when the question gets asked (#1380).
+    response: dict = {"status": "healthy", "mode": mode, "build": get_build_info().model_dump()}
 
     if _state.degraded_reasons:
         response["degraded_reasons"] = _state.degraded_reasons

@@ -139,6 +139,25 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 EXPOSE 8000
 
+# Build identity (#1380). The release itself comes from the installed package
+# metadata and needs no stamping; these two are facts only the build knows, so
+# they are passed in as build args and read back by syn_api.build_info. Both
+# default to empty and an empty stamp reports as null, so an image built
+# without them is honest about not knowing rather than reporting a placeholder.
+#
+# LAST ON PURPOSE. Every layer after an ARG that changes per commit is rebuilt
+# on every commit, so these sit below everything expensive.
+#
+# Nothing passes them yet: the workflow that builds this image is under
+# .github/, which this change is not permitted to edit. Until the build-args
+# block in release-containers.yaml supplies them, /health reports
+# image_tag: null and commit: null and names the release from package
+# metadata. See the PR body for the one-block change required.
+ARG SYN_BUILD_IMAGE_TAG=""
+ARG SYN_BUILD_COMMIT=""
+ENV SYN_BUILD_IMAGE_TAG=${SYN_BUILD_IMAGE_TAG}
+ENV SYN_BUILD_COMMIT=${SYN_BUILD_COMMIT}
+
 # Start the API server
 # Use shell form to respect environment variables
 CMD ["sh", "-c", "uvicorn syn_api.main:app --host $SYN_API_HOST --port $SYN_API_PORT"]

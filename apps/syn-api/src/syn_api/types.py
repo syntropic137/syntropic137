@@ -1464,6 +1464,61 @@ class RealtimeHealth(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Build identity (#1380)
+# ---------------------------------------------------------------------------
+
+
+class BuildInfo(BaseModel):
+    """Which build is answering. Populated by ``syn_api.build_info``.
+
+    Reported in two places from that one source: this block on ``GET /health``,
+    and ``openapi.json``'s ``info.version``. Both used to be, or were derived
+    from, a hardcoded literal that had drifted twenty releases behind the
+    installed package.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: str = Field(
+        description="Installed release of the syn-api distribution, as reported by "
+        "importlib.metadata. This is the same string pyproject.toml ships, so it "
+        "identifies the build exactly — including beta suffixes (e.g. '0.29.1b3').",
+    )
+    image_tag: str | None = Field(
+        default=None,
+        description="Container image tag this process was built from, stamped at image "
+        "build time. Null when the build did not stamp one — which is a different "
+        "fact from an unknown tag, and is reported as such.",
+    )
+    commit: str | None = Field(
+        default=None,
+        description="Git commit the image was built from, stamped at image build time. "
+        "Null when the build did not stamp one.",
+    )
+
+
+class HealthResponse(BaseModel):
+    """Payload of ``GET /health``.
+
+    EXTRAS ARE ALLOWED, and that is the boundary this model draws rather than an
+    omission. The fields below are the ones ``lifecycle.health_check`` sets
+    itself; the ``subscription``, ``codex_auth``, ``degraded_reasons`` and
+    ``warnings`` blocks are contributed by independent probes that own their own
+    shapes and are documented at their own source. Declaring them here would
+    duplicate those contracts, and forbidding them would turn adding a probe
+    into a 500 on the endpoint liveness checks read — the opposite of what this
+    endpoint is for. Typing those blocks is worth doing; it is a bigger change
+    than a reporting fix and is not this one.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
+    build: BuildInfo = Field(description="Which build is answering (#1380).")
+
+
+# ---------------------------------------------------------------------------
 # Shared base response models
 # ---------------------------------------------------------------------------
 
