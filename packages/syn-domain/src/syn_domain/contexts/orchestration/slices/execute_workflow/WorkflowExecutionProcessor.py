@@ -25,12 +25,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
+    phase_failure,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     UnfinishedPhase,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    PhaseReportedFailureError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
@@ -649,43 +649,22 @@ class WorkflowExecutionProcessor:
         # a raise added later cannot forget it, and it never raises itself, so
         # the reason the phase failed always reaches the caller intact.
         try:
-            # THE PHASE'S OWN REPORT, on the same footing as its exit status and
-            # checked before the aggregate is told the run completed (#1256). A
-            # phase that wrote `TASK_RESULT: {"success": false, ...}` said it did
-            # not do what it was asked; completing it anyway converts a DETECTED
-            # failure into a pass, which is the one direction that lets defects
-            # through every gate downstream. An unreadable report refuses for the
-            # same reason - see `AgentVerdict`.
-            verdict = result.stream_result.verdict
-            if verdict.refuses_completion:
-                # The verdict goes in whole, not a message rendered here: it
-                # carries both what an operator reads and whether this is the
-                # agent's own refusal or a platform failure (#1357), and the
-                # error is the only thing that reaches the tally.
-                refused = PhaseReportedFailureError(phase_id=todo.phase_id, verdict=verdict)
-                logger.error(str(refused))
-                raise refused
-
-            if result.command.exit_code != 0:
-                reason = result.stream_result.error_reason
-                base = (
-                    f"Agent failed: {reason} "
-                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
-                    if reason
-                    else f"Agent execution failed for phase {todo.phase_id} "
-                    f"(exit_code={result.command.exit_code})"
-                )
-                # The token counts used to be appended here as
-                # `(tokens=190+545)`, and that string was the ONLY record of
-                # them anywhere (#1262). They are real fields on the failure
-                # event now, so restating them in prose would be a second
-                # account of the same fact - and a WORSE one: these are the raw
-                # accumulated deltas, which double-count the context re-sent on
-                # every turn, where the fields carry what `FinalUsage.resolve`
-                # settled on. Two numbers for one phase, and nothing to say
-                # which the reader should believe.
-                logger.error(base)
-                raise RuntimeError(base)
+            # THE PHASE'S OWN REPORT, on the same footing as its exit status
+            # and checked before the aggregate is told the run completed
+            # (#1256). A phase that wrote `TASK_RESULT: {"success": false, ...}`
+            # said it did not do what it was asked; completing it anyway
+            # converts a DETECTED failure into a pass, which is the one
+            # direction that lets defects through every gate downstream.
+            #
+            # WHICH of those two channels ended the run, and what the failure
+            # is counted as, are `agent_run_outcome`'s to decide - they were
+            # the ORDER of two `if`s here, and the order was wrong: a refusal
+            # written by a run that a timeout then killed was recorded as the
+            # gate working (#1367).
+            failure = phase_failure(result, phase_id=todo.phase_id)
+            if failure is not None:
+                logger.error(str(failure))
+                raise failure
 
             aggregate.agent_execution_completed(result.command)
             await self._journal.append(aggregate)
