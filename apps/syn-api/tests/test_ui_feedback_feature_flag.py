@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import io
 import os
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,7 +29,7 @@ from syn_adapters.in_memory import InMemoryAdapterError
 from syn_api.types import FeatureDisabledResponse
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -201,6 +201,89 @@ def test_a_durable_database_url_selects_postgres():
 # =====================================================================
 # On - the owner's deployment
 # =====================================================================
+
+
+class _RecordingConnection:
+    """Records the SQL a migration run issues, executing none of it."""
+
+    def __init__(self, statements: list[str]) -> None:
+        self._statements = statements
+
+    async def execute(self, sql: str) -> None:
+        self._statements.append(sql)
+
+
+class _RecordingPool:
+    """Stands in for an asyncpg pool. Only what a migration run touches."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[_RecordingConnection]:
+        yield _RecordingConnection(self.statements)
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_enabling_it_needs_no_migration_command_only_a_restart(monkeypatch):
+    """Setting the flag and booting is the whole of the operator's work.
+
+    The claim being pinned is the operator instruction in the README and the
+    PR body: one .env line plus a restart. So this drives the actual startup
+    path - the same ``connect()`` lifecycle.py calls - rather than reaching
+    into the storage object, and asserts the schema arrived on the way. If
+    the migration ever moves behind an explicit command, or auto_migrate is
+    defaulted off at the point where syn-api constructs the storage, the
+    tables stop appearing here and the operator silently gets a deployment
+    whose feedback routes 500 on a missing table.
+
+    A real database is not needed to see this and would hide it in an
+    integration marker that the unit sweep never runs. The Postgres round
+    trip in tests/integration covers what only a real server can show.
+    """
+    import asyncpg
+
+    from syn_api.services import ui_feedback
+
+    pool = _RecordingPool()
+
+    async def _fake_create_pool(*_args: object, **_kwargs: object) -> _RecordingPool:
+        return pool
+
+    monkeypatch.setattr(asyncpg, "create_pool", _fake_create_pool)
+
+    with configured(
+        enabled=True,
+        environment="production",
+        db_url="postgresql://syn:syn@db:5432/syn",
+    ):
+        await ui_feedback.connect()
+        await ui_feedback.disconnect()
+
+    applied = "\n".join(pool.statements)
+    assert "CREATE TABLE IF NOT EXISTS feedback_items" in applied
+    assert "CREATE TABLE IF NOT EXISTS feedback_media" in applied
+    # 002 must be in there too - applying only 001 is the failure that looks
+    # like success until something reads subject_id.
+    assert "ADD COLUMN IF NOT EXISTS subject_kind" in applied
+
+    # Every restart after the first re-applies all of it, so a statement that
+    # is not idempotent turns the second boot into a crash loop. Split on
+    # statements, not lines: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` puts
+    # the guard on a later line than the verb.
+    without_comments = "\n".join(
+        line for line in applied.splitlines() if not line.lstrip().startswith("--")
+    )
+    creates = [
+        " ".join(statement.split())
+        for statement in without_comments.split(";")
+        if statement.strip().upper().startswith(("CREATE TABLE", "CREATE INDEX", "ALTER TABLE"))
+    ]
+    assert creates
+    for statement in creates:
+        assert "IF NOT EXISTS" in statement.upper(), statement
 
 
 async def test_enabled_round_trip_through_the_api():
