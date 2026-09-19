@@ -42,12 +42,17 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
+# The ONLY two event types canonical usage reads. Exported so a caller can
+# narrow `scoped_events` to them BEFORE the CTE runs, which is the difference
+# between materialising a session's usage rows and materialising its entire
+# telemetry history - every tool call, every stream chunk, and the JSONB `data`
+# blob attached to each (#1253). A caller that hands over unnarrowed rows still
+# gets the right answer; it just pays for rows this CTE then discards.
+CANONICAL_USAGE_EVENT_FILTER = f"event_type IN ('{SESSION_SUMMARY}', '{TOKEN_USAGE}')"
+"""SQL predicate selecting the rows ``CANONICAL_SESSION_USAGE_CTE`` consumes."""
+
+
 CANONICAL_SESSION_USAGE_CTE = f"""
-session_start AS (
-    SELECT session_id, MIN(time) AS started_at
-    FROM scoped_events
-    GROUP BY session_id
-),
 summary_rows AS (
     -- One row per summary observation, NOT aggregated. Aggregating first was
     -- the bug: "the summary supersedes the turn rows" means CHOOSE one, and
@@ -131,10 +136,14 @@ canonical_usage AS (
 """Per-(session, model) canonical usage.
 
 Expects an enclosing CTE named ``scoped_events`` holding the ``agent_events``
-rows already narrowed to the caller's time range and filters. Yields columns:
+rows already narrowed to the caller's time range, filters, and
+``CANONICAL_USAGE_EVENT_FILTER``. It does NOT derive when a session started:
+that is a question about a session's whole life, and answering it from rows
+narrowed to two event types would report the first BILLED observation as the
+start. A caller that needs it must establish it over an unnarrowed scan and
+supply its own ``session_start``. Yields columns:
 ``session_id, model, vendor_cost_usd, input_tokens, output_tokens,
-cache_creation_tokens, cache_read_tokens``, plus a ``session_start`` CTE
-mapping each session to its first observation. ``vendor_cost_usd`` is the
+cache_creation_tokens, cache_read_tokens``. ``vendor_cost_usd`` is the
 harness's OWN reported cost and is NULL whenever it did not report one -
 codex never does, and a claude session that ended abnormally may not either.
 """

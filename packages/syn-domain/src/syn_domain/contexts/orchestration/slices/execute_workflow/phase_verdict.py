@@ -207,6 +207,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 logger = logging.getLogger(__name__)
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
+
 __all__ = [
     "TASK_RESULT_MARKER",
     "TASK_RESULT_TERMINATOR",
@@ -358,6 +362,34 @@ class AgentVerdict:
     def refuses_completion(self) -> bool:
         """True when this phase must not be recorded as completed."""
         return self.status in (VerdictStatus.FAILURE, VerdictStatus.UNREADABLE)
+
+    @property
+    def failure_classification(self) -> FailureClassification:
+        """What a failure ended by this verdict IS, for the run's tally (#1357).
+
+        THE FACT THAT ONLY EXISTS HERE. By the time a failure reaches the
+        aggregate it is an exception and a string, and every one of them reads
+        `failed`; this is the last frame that still knows the phase ended on
+        its OWN readable report rather than on an exit status, a timeout or a
+        crash. A tally that cannot make that distinction counts the quality
+        gate doing its job as the platform breaking.
+
+        UNREADABLE IS NOT A CORRECT REFUSAL, and that is the one line worth
+        arguing. A block nobody could parse might have been a refusal, and it
+        refuses completion for exactly that reason - but "might have been" is
+        not evidence the system worked, and the botched block is itself
+        something that went wrong. So it classifies as `PLATFORM`, in the same
+        fail-closed direction the rest of this module runs in: being wrong
+        this way overstates our own failures, and being wrong the other way
+        credits us with a refusal nobody can read.
+
+        The non-refusing states never reach a failure and answer `PLATFORM`
+        for the same reason `refusal` answers "": a caller that asks anyway
+        gets the conservative answer rather than an exception.
+        """
+        if self.status is VerdictStatus.FAILURE:
+            return FailureClassification.CORRECT_REFUSAL
+        return FailureClassification.PLATFORM
 
     def refusal(self, *, phase_id: str) -> str:
         """Why the phase may not complete, in the words an operator needs.

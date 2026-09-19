@@ -66,6 +66,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    FailureClassification,
     PhaseUsage,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
@@ -192,6 +193,7 @@ __all__ = [
     "ExecutionCostQueryService",
     "ExecutionStatus",
     "FailExecutionCommand",
+    "FailureClassification",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
