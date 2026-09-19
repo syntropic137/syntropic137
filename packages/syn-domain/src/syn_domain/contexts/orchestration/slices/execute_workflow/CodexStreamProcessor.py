@@ -181,6 +181,20 @@ _MAX_FAULT_LINE_LEN = 160
 _MAX_PREVIEW_LEN = 500
 
 
+def codex_fault_reason(message: str) -> str:
+    """The reason text codex's own words about a failed turn are reported under.
+
+    A function rather than an f-string at the one call site because it is not
+    only written here: `busy_upstream` has to RECOGNISE a specific sentence
+    codex says about its own capacity, and it can only do that against the
+    exact spelling this produces. Two copies of that spelling would drift the
+    first time either the prefix or the truncation changed, and the failure
+    would be silent - a phase that stopped being retried, with nothing to read
+    but the reason it was never retried for.
+    """
+    return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+
+
 def _as_int(value: object) -> int:
     """Narrow a JSON-boundary ``object`` value (from ``dict.get``) to ``int``.
 
@@ -813,7 +827,7 @@ class CodexStreamProcessor:
             message = error.get("message") if error else None
         if not message:
             return
-        reason = f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
+        reason = codex_fault_reason(message)
         logger.error("Codex turn failed: %s", message)
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.

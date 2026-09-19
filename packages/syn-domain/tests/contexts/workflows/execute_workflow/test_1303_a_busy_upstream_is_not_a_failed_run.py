@@ -10,6 +10,11 @@ premise check and the implementation had already run and the branch was already
 pushed. The upstream was full for a few seconds and every one of those phases
 was discarded.
 
+AND ONLY A LAUNCH THAT NEVER STARTED IS RETRIED. A rerun re-issues the original
+prompt against the same workspace, which is safe exactly while the attempt it
+replaces did nothing. `test_a_phase_that_had_already_run_a_tool_is_not_retried`
+is that boundary at the outcome level.
+
 THE TWO DIRECTIONS THIS CAN BE WRONG, and they are opposite, so a test for one
 of them alone is satisfied by a change that is badly wrong in the other:
 
@@ -184,6 +189,45 @@ class TestAPermanentFailureStaysPermanent:
         assert result.status == "failed"
         assert result.error_message is not None
         assert "You are not logged in" in result.error_message
+
+    async def test_a_phase_that_had_already_run_a_tool_is_not_retried(self) -> None:
+        """The narrowing, end to end: retry a launch that never started, only.
+
+        Same capacity message, same budget, same everything as
+        `test_a_busy_upstream_gets_another_attempt` above - except this agent
+        ran a tool first. Re-running the prompt would run that tool a second
+        time against a workspace it has already changed, and a commit, a push
+        or a PR does not come back the same way twice. So it fails, with the
+        upstream's own words, exactly as it did before any retry existed.
+
+        The scripted second attempt SUCCEEDS on purpose: if it were ever
+        reached the execution would report `completed`, so `status == "failed"`
+        is evidence the retry did not happen and not merely that it did not
+        help.
+        """
+        fake = FakeAgentExecutionHandler.scripted(
+            FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Bash"]),
+            FakeAgentExecutionHandler.success(says=SUCCEEDED),
+        )
+        processor = _make_processor(fake, retry_policy=NO_WAITING)
+
+        result = await processor.run(
+            workflow_id="wf-1303",
+            workflow_name="Busy after real work",
+            phases=_one_phase_workflow(),
+            inputs={},
+            execution_id="exec-1303-after-work",
+        )
+
+        assert fake.call_count == 1, (
+            f"Asked {fake.call_count} times. The first attempt had already run "
+            "a tool, so the second one re-ran the prompt over its changes."
+        )
+        assert result.status == "failed"
+        assert result.error_message is not None
+        assert "Selected model is at capacity" in result.error_message, (
+            f"The cause was rewritten on the way out: {result.error_message!r}"
+        )
 
     async def test_a_cancelled_phase_is_not_retried(self) -> None:
         """An operator's stop outranks the upstream's excuse.

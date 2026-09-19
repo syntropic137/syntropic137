@@ -78,11 +78,33 @@ class ObservabilityCollector:
         self._phase_id = phase_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
+        self._saw_tool_use = False
 
     @property
     def has_writer(self) -> bool:
         """Whether this collector has an active writer."""
         return self._writer is not None
+
+    @property
+    def saw_tool_use(self) -> bool:
+        """Whether this phase's agent has been seen to invoke a tool yet (#1303).
+
+        The one place that knows. Both stream processors announce every tool op
+        here and nowhere else in common - claude from `tool_use` blocks, codex
+        from `item.started`/`item.completed` - so this is the only answer that
+        does not have to be asked per harness.
+
+        Set BEFORE the writer check below, deliberately: this records what the
+        AGENT did, which is true whether or not anyone is persisting it. Reading
+        it off a stored observation instead would make a run with no
+        observability writer - every unit test, and local dev - look like a run
+        in which no agent ever touched anything.
+
+        Cumulative across the attempts of one phase, because the collector is:
+        once an attempt has got somewhere, that is still true of the phase on
+        the attempt after it.
+        """
+        return self._saw_tool_use
 
     async def record_hook_event(self, enriched: dict[str, Any]) -> None:
         """Record an enriched hook event to observability."""
@@ -145,6 +167,7 @@ class ObservabilityCollector:
         input_preview: str,
     ) -> None:
         """Record tool execution started."""
+        self._saw_tool_use = True
         if self._writer is None:
             return
 
@@ -169,6 +192,11 @@ class ObservabilityCollector:
         output_preview: str | None,
     ) -> None:
         """Record tool execution completed."""
+        # A completion can arrive with no start before it: some codex versions
+        # announce a `file_change` only once it has happened (#1064). That is a
+        # workspace mutation, so it counts, and counting only starts would miss
+        # exactly the tool op that already changed something.
+        self._saw_tool_use = True
         if self._writer is None:
             return
 

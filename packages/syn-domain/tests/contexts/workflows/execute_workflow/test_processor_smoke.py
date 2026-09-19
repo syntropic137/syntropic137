@@ -157,6 +157,12 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
     step with an agent double that produces no files, so declaring an output
     type here would (correctly, since #1167) fail every one of them for a
     reason none of them is about.
+
+    The timeout is a realistic phase budget rather than the 30 seconds it used
+    to be, because a phase's timeout now bounds its retries too (#1303): 30
+    seconds cannot fund a second attempt, so every retry case driven through
+    this workflow would have been decided by the fixture's clock instead of by
+    the rule it is about. Nothing here waits on it - the doubles return at once.
     """
     return [
         ExecutablePhase(
@@ -167,7 +173,7 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
             agent_config=AgentConfiguration(),
             prompt_template="do the thing",
             output_artifact_types=(),
-            timeout_seconds=30,
+            timeout_seconds=1800,
         )
     ]
 

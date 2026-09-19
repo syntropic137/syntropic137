@@ -18,6 +18,14 @@ The caller gets one result and cannot tell how many attempts stand behind it,
 which is the point: "the agent failed" and "the agent failed three times over
 fifteen seconds" are the same fact to everything downstream, and the reason
 reported is the one the agent gave, never a story about retrying.
+
+WHAT IS RETRIED IS A LAUNCH THAT NEVER STARTED, and only that. A retry re-runs
+the original prompt against the SAME workspace, so it is idempotent exactly
+while the attempt it replaces did nothing: an agent that had already edited a
+file, run a command or pushed a branch would do it a second time from a tree
+that is no longer the one the prompt was written against. So an attempt that
+got anywhere fails the way it failed before this module existed, however busy
+the upstream was when it stopped. See `_phase_got_somewhere`.
 """
 
 from __future__ import annotations
@@ -63,10 +71,42 @@ def _attempt_is_settled(result: AgentExecutionResult) -> bool:
 
     A run that exited zero has nothing left to try. An interrupted one is
     checked HERE, ahead of the policy, because a cancelled phase also exits
-    non-zero and can carry a capacity reason: leave it to the signature list
+    non-zero and can carry a capacity reason: leave it to the retry decision
     and the phase restarts work an operator just stopped.
     """
     return result.command.exit_code == 0 or result.stream_result.interrupt_requested
+
+
+def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityCollector) -> bool:
+    """Whether this phase's agent has done anything a rerun would have to redo.
+
+    Two witnesses, and between them they cover the three ways an attempt stops
+    being a launch that never started:
+
+    - ``collector.saw_tool_use`` - a TOOL CALL, and with it any WORKSPACE
+      CHANGE or external side effect. Trustworthy for three reasons: it is
+      recorded from both harnesses' streams at the one point they converge, it
+      is recorded when the tool is ANNOUNCED rather than when it returns, and
+      the announcement precedes the effect. So the record can only run ahead of
+      the side effect, never behind it - and running ahead costs a retry that
+      would have been safe, while running behind would repeat work that was
+      not.
+    - ``last_agent_message is not None`` - an ASSISTANT TURN, for the attempt
+      that spoke without calling anything. ``None`` on this field already means
+      "the agent said nothing at all on this stream", which is a fact the
+      artifact path depends on (#1195), so it is read here rather than
+      re-derived.
+
+    Both are evidence the attempt recorded for other reasons. Neither is a flag
+    set by the retry path for the retry path, which would be a claim about work
+    rather than a trace of it.
+
+    Deliberately NOT token counts: a request that reached the model and was
+    refused for capacity can carry input tokens, and that is a bill, not work
+    to preserve. Treating it as work would stop the retry this module exists
+    for from ever happening.
+    """
+    return collector.saw_tool_use or result.stream_result.last_agent_message is not None
 
 
 async def run_phase_agent(
@@ -102,7 +142,13 @@ async def run_phase_agent(
         agent_model=phase.agent_config.model,
     )
 
-    attempt = 1
+    # ONE deadline for the phase, fixed here, before anything runs. Every
+    # attempt and every backoff is drawn from it, so what a phase is configured
+    # to cost in time is what it can cost - a per-attempt timeout made three
+    # attempts at a 3600-second phase into three hours and three phases' money.
+    attempts = retry_policy.begin(
+        timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds
+    )
     while True:
         result = await handler.handle(
             todo=todo,
@@ -111,25 +157,27 @@ async def run_phase_agent(
             claude_cmd=launch.claude_cmd,
             session_id=session_id,
             agent_model=phase.agent_config.model,
-            timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds,
+            # What is LEFT of the phase's budget, not what it started with.
+            timeout_seconds=int(attempts.seconds_left),
             collector=collector,
             runner=runner,
             on_launch=observer_for(launch.session_manager),
         )
         if _attempt_is_settled(result):
             return result
-        if not await retry_policy.wait_before_retry(
-            reason=result.stream_result.error_reason, attempt=attempt
+        if not await attempts.wait_before_retry(
+            reason=result.stream_result.error_reason,
+            work_done=_phase_got_somewhere(result, collector),
         ):
             # Final, and `result` is the failed one: the reason it carries is
             # reported by the caller exactly as the agent gave it, whether the
-            # budget ran out or the failure never qualified for a retry.
+            # budget ran out, the deadline did, the attempt had already got
+            # somewhere, or the failure never qualified for a retry.
             return result
-        attempt += 1
         logger.warning(
             "Upstream was busy (phase=%s): %s - attempt %d of %d",
             todo.phase_id,
             result.stream_result.error_reason,
-            attempt,
-            retry_policy.max_attempts,
+            attempts.attempt,
+            attempts.max_attempts,
         )

@@ -10,6 +10,14 @@ gets one `AgentExecutionResult` and cannot count the attempts behind it, so a
 retry that quietly started a fresh observability collector - losing the Lane-2
 records of every attempt but the last, which is what the cost ledger reads -
 would leave every assertion about the RESULT still passing.
+
+Two of those "what is built once" facts are budgets rather than objects, and
+they are the ones a retry is most likely to spend twice: the phase's DEADLINE,
+which every attempt and backoff comes out of, and the question of whether the
+attempt that failed had already got somewhere, which is the only thing making
+a rerun of the same prompt in the same workspace idempotent. Both are driven
+here on a clock the test owns, because a 3600-second budget asserted against
+the real clock costs 3600 seconds to assert.
 """
 
 from __future__ import annotations
@@ -31,8 +39,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts im
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
     UpstreamRetryPolicy,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+    codex_fault_reason,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseLaunch
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
+from syn_domain.testing.fake_clock import FakeClock
 from syn_shared.agents import AgentProvider, AgentRunner
 
 if TYPE_CHECKING:
@@ -53,12 +65,18 @@ if TYPE_CHECKING:
 # by no job and can fail on main behind a green check (#825).
 pytestmark = pytest.mark.unit
 
-AT_CAPACITY = "codex reported: Selected model is at capacity. Please try a different model."
+#: Spelled by the function that spells it in production. A literal would pass
+#: this file and miss the real string the day the prefix changed.
+AT_CAPACITY = codex_fault_reason("Selected model is at capacity. Please try a different model.")
 BAD_LOGIN = "Authentication failed"
 
 #: Zero backoff, real bound. The schedule is asserted in `test_busy_upstream.py`;
 #: serving it here would buy nothing and cost 15 seconds per test.
 NO_WAITING = UpstreamRetryPolicy(base_delay_seconds=0.0)
+
+#: Long enough that nothing in this file is decided by the deadline unless it
+#: says so. `TestOneDeadlineForTheWholePhase` sets its own.
+ROOMY_SECONDS = 3600
 
 
 @dataclass
@@ -78,10 +96,17 @@ class _RecordingHandler:
 
     The fake records the todo and the runner; what is interesting here is the
     rest of the arguments, and specifically whether they are the SAME values
-    on attempt three as on attempt one.
+    on attempt three as on attempt one - or, for the timeout, deliberately not.
+
+    An attempt also TAKES time. With `takes_seconds` set it spends that much of
+    `clock`, capped at whatever timeout it was granted, which is what a real
+    attempt does: the harness is killed at its deadline rather than running
+    past it.
     """
 
     scripted: FakeAgentExecutionHandler
+    clock: FakeClock | None = None
+    takes_seconds: float = 0.0
     attempts: list[_RecordedAttempt] = field(default_factory=list)
 
     async def handle(
@@ -106,6 +131,8 @@ class _RecordingHandler:
                 workspace=workspace,
             )
         )
+        if self.clock is not None and self.takes_seconds:
+            self.clock.advance(min(self.takes_seconds, float(timeout_seconds)))
         return await self.scripted.handle(
             todo,
             workspace,
@@ -124,7 +151,9 @@ class _RecordingHandler:
 _: AgentHandlerProtocol = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
 
 
-def _phase(provider: str = AgentProvider.CLAUDE, timeout_seconds: int = 900) -> ExecutablePhase:
+def _phase(
+    provider: str = AgentProvider.CLAUDE, timeout_seconds: int = ROOMY_SECONDS
+) -> ExecutablePhase:
     return ExecutablePhase(
         phase_id="verify",
         name="Verify",
@@ -152,6 +181,7 @@ async def _run(
     *,
     phase: ExecutablePhase | None = None,
     launch: PhaseLaunch | None = None,
+    retry_policy: UpstreamRetryPolicy = NO_WAITING,
 ) -> AgentExecutionResult:
     return await run_phase_agent(
         handler=handler,
@@ -165,7 +195,7 @@ async def _run(
         launch=launch or _launch(),
         session_id="sess-1",
         observability=None,
-        retry_policy=NO_WAITING,
+        retry_policy=retry_policy,
     )
 
 
@@ -293,8 +323,12 @@ class TestWhatIsBuiltOncePerPhaseAndNotOncePerAttempt:
         assert all(attempt.collector is first for attempt in handler.attempts)
 
     async def test_a_retry_runs_the_same_phase_in_the_same_workspace(self) -> None:
-        """Same session, same container, same budget. A retry that re-resolved
-        any of these would be a different run wearing the same phase id."""
+        """Same session, same container. A retry that re-resolved either would
+        be a different run wearing the same phase id.
+
+        The BUDGET is the deliberate exception and has its own class below: it
+        is the one thing a retry must not get a fresh copy of.
+        """
         launch = _launch()
         handler = _RecordingHandler(
             scripted=FakeAgentExecutionHandler(
@@ -309,7 +343,6 @@ class TestWhatIsBuiltOncePerPhaseAndNotOncePerAttempt:
 
         assert len(handler.attempts) == 2
         assert [a.session_id for a in handler.attempts] == ["sess-1", "sess-1"]
-        assert [a.timeout_seconds for a in handler.attempts] == [1234, 1234]
         assert all(a.workspace is launch.workspace for a in handler.attempts)
 
 
@@ -336,3 +369,205 @@ class TestTheProviderChoosesTheParser:
         await _run(handler, phase=_phase(provider=provider))
 
         assert [a.runner for a in handler.attempts] == [expected, expected]
+
+
+class TestOneDeadlineForTheWholePhase:
+    """A phase's configured timeout bounds the WHOLE sequence, not each attempt.
+
+    Every attempt used to be handed `phase.timeout_seconds` again, so the bound
+    a phase was configured with was really three times that plus the backoff: a
+    3600-second phase could occupy a worker for 10,815 seconds and bill three
+    phases' tokens doing it. Nothing in the result said so, because the caller
+    receives one result either way.
+    """
+
+    async def test_an_attempt_is_given_what_is_left_of_the_phase(self) -> None:
+        """Strictly less each time, and by what the last attempt actually spent.
+
+        This is the assertion that fails against a per-attempt timeout, and it
+        fails loudly: identical numbers instead of descending ones.
+        """
+        clock = FakeClock()
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=600.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=3600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert granted == [3600, 2995, 2385], (
+            f"{granted}: each attempt must get the phase's REMAINING seconds - "
+            "its own 600s and the 5s/10s backoff already deducted"
+        )
+
+    async def test_the_whole_sequence_fits_inside_the_configured_timeout(self) -> None:
+        """Attempts plus backoff, against the number an operator configured.
+
+        The handler here wants more time than the phase has, so it is cut off
+        at whatever it was granted - which is what a real harness killed at its
+        deadline does. Under a per-attempt timeout this same run spends 7205
+        seconds on a 3600-second phase.
+        """
+        clock = FakeClock()
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=1_000_000.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=3600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        assert clock.now <= 3600.0, (
+            f"{clock.now}s spent on a 3600s phase across "
+            f"{len(handler.attempts)} attempts and {clock.slept} of backoff"
+        )
+
+    async def test_a_deadline_with_no_room_left_ends_the_retrying(self) -> None:
+        """Attempts remain and the upstream is still busy - and it stops anyway.
+
+        `max_attempts` is 3 and only two are spent. What stopped it is the
+        clock: the first attempt used nearly the whole phase, so a third would
+        have been launched into a budget too small to start a container in.
+        """
+        clock = FakeClock()
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=590.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        assert len(handler.attempts) == 1, (
+            f"{len(handler.attempts)} attempts: a second was launched with "
+            f"{600 - clock.now}s of budget left to run it in"
+        )
+        assert clock.slept == [], "waited out a backoff for an attempt it could not afford"
+
+
+class TestOnlyALaunchThatNeverStartedIsRetried:
+    """A retry re-runs the ORIGINAL prompt against the SAME workspace.
+
+    That is idempotent exactly while the attempt it replaces did nothing. An
+    agent that had already edited a file, run a command or pushed a branch
+    would do it again from a tree that is no longer the one the prompt was
+    written against - and the busy upstream says nothing about whether that
+    happened, so the attempt's own record has to.
+    """
+
+    async def test_a_busy_upstream_before_any_work_is_retried(self) -> None:
+        """The control for the whole class, and the case #1303 is about.
+
+        Without it, every assertion below passes just as well on a change that
+        retries nothing at all.
+        """
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        result = await _run(handler)
+
+        assert len(handler.attempts) == 2
+        assert result.command.exit_code == 0
+
+    async def test_a_busy_upstream_after_a_tool_call_is_not_retried(self) -> None:
+        """The same reason, the same budget, the same everything but one tool
+        call - and it fails, exactly as it did before any of this existed.
+
+        The tool ran against the workspace. Re-running the prompt would run it
+        a second time, from a tree it has already changed, and a `git push` or
+        a `gh pr create` does not come back the same way twice.
+        """
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Bash"]),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        result = await _run(handler)
+
+        assert len(handler.attempts) == 1, (
+            "An attempt that had already run a tool was re-run from the top."
+        )
+        assert result.command.exit_code == 1
+        assert result.stream_result.error_reason == AT_CAPACITY, (
+            "and it fails with the upstream's own reason, unchanged"
+        )
+
+    async def test_a_busy_upstream_after_the_agent_spoke_is_not_retried(self) -> None:
+        """An assistant turn is work too, even when it called nothing.
+
+        The agent got far enough to answer. A rerun pays for that turn twice
+        and throws the first one away, which is the cost this whole module
+        exists to avoid paying.
+        """
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, says="Working on it."),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        result = await _run(handler)
+
+        assert len(handler.attempts) == 1
+        assert result.command.exit_code == 1
+
+    async def test_work_on_an_earlier_attempt_stops_the_later_ones(self) -> None:
+        """The rule is about the PHASE, not the attempt in hand.
+
+        Attempt one starts nothing and is retried. Attempt two runs a tool and
+        fails busy. Attempt three would be a rerun over attempt two's changes,
+        so the bound of 3 is never reached.
+        """
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY, uses_tools=["Edit"]),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        result = await _run(handler)
+
+        assert len(handler.attempts) == 2, (
+            f"{len(handler.attempts)} attempts: attempt 2 changed the workspace "
+            "and attempt 3 re-ran the prompt over it anyway"
+        )
+        assert result.command.exit_code == 1
