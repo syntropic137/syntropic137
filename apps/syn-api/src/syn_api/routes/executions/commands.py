@@ -423,6 +423,7 @@ async def execute(
             # Lane 2: cost is enriched via execution_cost projection at query time (#695)
             total_cost_usd=Decimal("0"),
             error_message=result.error_message,
+            failure_classification=result.failure_classification,
             repos=repo_urls,
         )
     )

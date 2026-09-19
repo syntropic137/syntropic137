@@ -72,11 +72,20 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
+        #: What went wrong with the STREAM, as both real stream processors
+        #: report it: an ``is_error`` result line from claude, a malformed or
+        #: unterminated stream from codex. Independent of ``exit_code``,
+        #: because in production the two come apart in both directions - and
+        #: the combination that has no other way to be expressed is the one
+        #: #1367 is about: a readable refusal whose telemetry is broken is not
+        #: evidence the quality gate worked.
+        self._stream_error = stream_error
         #: The last thing this agent said on its stream, as the real stream
         #: processors would have captured it. Independent of ``produces``
         #: because in production the two come apart: #1300 is agents that
@@ -153,6 +162,7 @@ class FakeAgentExecutionHandler:
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
+            error_reason=self._stream_error,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -208,6 +218,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
@@ -230,6 +241,12 @@ class FakeAgentExecutionHandler:
         ``success: false`` and a non-zero ``spent`` is a phase that did real
         work and then refused itself; it leaves through the same door a timeout
         does and lost its counts the same way (#1262).
+
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, with exit code 0 regardless. That pairing is not a
+        contradiction either: the process ended fine and its telemetry did
+        not, which is what stops a refusal beside it counting as a correct
+        one (#1367).
         """
         return cls(
             interrupt=False,
@@ -237,6 +254,7 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            stream_error=stream_error,
         )
 
     @classmethod
@@ -246,6 +264,7 @@ class FakeAgentExecutionHandler:
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
         spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates an agent failure with the given non-zero exit code.
 
@@ -261,6 +280,9 @@ class FakeAgentExecutionHandler:
         non-zero ``spent`` is the timeout this exists for: those counts are the
         only thing separating a phase killed mid-work from one that stalled
         (#1262).
+
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, as ``StreamResult.error_reason`` carries it.
         """
         return cls(
             interrupt=False,
@@ -268,6 +290,7 @@ class FakeAgentExecutionHandler:
             produces=produces,
             says=says,
             spent=spent,
+            stream_error=stream_error,
         )
 
     @classmethod

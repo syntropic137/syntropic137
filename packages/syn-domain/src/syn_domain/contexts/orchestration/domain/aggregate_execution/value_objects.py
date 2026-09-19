@@ -34,6 +34,94 @@ class ExecutionStatus(StrEnum):
     INTERRUPTED = "interrupted"
 
 
+class FailureClassification(StrEnum):
+    """Why a failed execution ended: the machinery broke, or the work was refused.
+
+    THE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`
+    and nothing else, so a phase that did three phases of real work, found a
+    genuine defect and correctly declined to ship it sat in the same bucket as
+    a segfault. Of 221 recorded failures an unknown fraction were the platform
+    working exactly as designed, which made every failure rate and every
+    lost-spend figure computed from `failed` an upper bound of unknown
+    tightness - and made the product look broken to the operator least able to
+    check.
+
+    THE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a
+    phase that ends on its own agent's `TASK_RESULT success=false` report is a
+    different fact from one that ends on an exit status, a timeout or a parse
+    failure, and `AgentVerdict` already knows which happened at the moment the
+    run is failed. This is where that fact is written down.
+
+    THE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,
+    which is what analysts already sort failures into by hand.
+
+    WHY `task` IS NOT A MEMBER. classify.md's third class - "the request was
+    wrong, too big for a phase, or impossible" - is a judgement about the
+    REQUEST, and nothing in the stored record supports it: the same exit code,
+    the same error text and the same refusal arise from a bad request and from
+    a good one the platform mishandled. Deriving it would be a guess, and
+    classify.md's own instruction for that case is to use the fourth bucket
+    rather than attribute confidently. A member no code path can honestly
+    produce is a branch every reader has to reason about forever, so it is not
+    here. Whoever adds it must bring the evidence with it.
+
+    THE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep
+    when changing anything here: `CORRECT_REFUSAL` is a POSITIVE claim, made
+    only where the agent's own readable `success=false` report is what ended
+    the run. Everything else - including a report nobody could read - is
+    `PLATFORM`. So a path that forgets to classify itself lands on the answer
+    the system already gave, the failure tally stays the upper bound it has
+    always been, and no omission can ever manufacture evidence that the system
+    was working.
+    """
+
+    PLATFORM = "platform"
+    """The machinery failed, or nothing said otherwise: setup, gates,
+    collection, parsing, budget, a non-zero exit with no readable report."""
+
+    CORRECT_REFUSAL = "correct_refusal"
+    """The agent reported failure and the platform recorded it faithfully.
+
+    This is the system WORKING, and it carries that label so nobody optimises
+    it away or counts it as a defect.
+    """
+
+    UNCLASSIFIED = "unclassified"
+    """Nothing recorded a classification for this run, so nobody can say.
+
+    Two runs read this way and `status` tells them apart exactly, which is why
+    neither needs a member of its own: a run that has NOT failed - running,
+    completed, cancelled - has no failure to classify, and a run that failed
+    before this field existed predates the question. What it never means is
+    "we looked and could not tell": no live failure path reaches it, because
+    every one of them ends in `classify_failure`, which always answers.
+
+    Kept distinct from `PLATFORM` because folding it in would assert about
+    history exactly the thing that could not be known about it - and would
+    make every completed run claim a platform failure.
+    """
+
+    @classmethod
+    def from_stored(cls, value: object) -> FailureClassification:
+        """What a stored row or event payload says, `UNCLASSIFIED` when it says nothing.
+
+        THE ONE COERCION POINT, and the reason the replay requirement is met
+        rather than asserted. Events and projection rows written before this
+        field existed carry no key at all, and a row written by a newer
+        version than the reader carries a member this one has never heard of.
+        Both arrive here, neither raises, and both read as `UNCLASSIFIED` -
+        which is the honest answer for each. A `ValueError` escaping a
+        projection replay would take down the read model for every execution
+        in the store, historical ones included, to report one unknown string.
+        """
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.UNCLASSIFIED
+
+
 class PhaseStatus(StrEnum):
     """Status of a single phase execution."""
 

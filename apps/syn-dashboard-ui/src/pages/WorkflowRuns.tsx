@@ -5,19 +5,22 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, EmptyState, PageLoader, StatusBadge } from '../components'
 import { useWorkflowRuns } from '../hooks/useWorkflowRuns'
 import type { WorkflowExecutionSummary } from '../types'
+import { REFUSED, outcomeTone } from '../utils/executionOutcome'
 import { formatDate, formatDurationFromRange } from '../utils/formatters'
 
 function RunProgressBar({ exec }: { exec: WorkflowExecutionSummary }) {
+  const tone = outcomeTone(exec.status, exec.failure_classification)
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-2 bg-[var(--color-surface)] rounded-full overflow-hidden">
         <div
           className={clsx(
             'h-full rounded-full transition-all',
-            exec.status === 'completed' && 'bg-emerald-500',
-            exec.status === 'failed' && 'bg-red-500',
-            exec.status === 'running' && 'bg-blue-500',
-            exec.status === 'pending' && 'bg-slate-500'
+            tone === 'completed' && 'bg-emerald-500',
+            tone === 'failed' && 'bg-red-500',
+            tone === REFUSED && 'bg-amber-500',
+            tone === 'running' && 'bg-blue-500',
+            tone === 'pending' && 'bg-slate-500'
           )}
           style={{ width: `${exec.total_phases > 0 ? (exec.completed_phases / exec.total_phases) * 100 : 0}%` }}
         />
@@ -38,7 +41,9 @@ function RunRow({ exec }: { exec: WorkflowExecutionSummary }) {
       <div className="font-mono text-sm text-[var(--color-text-primary)]">
         {exec.workflow_execution_id.slice(0, 8)}...
       </div>
-      <div><StatusBadge status={exec.status} /></div>
+      <div>
+        <StatusBadge status={exec.status} failureClassification={exec.failure_classification} />
+      </div>
       <RunProgressBar exec={exec} />
       <div className="text-sm text-[var(--color-text-secondary)]">
         {exec.total_tokens.toLocaleString()}

@@ -215,7 +215,7 @@ class _Process:
         provisioned once as far as the record is concerned, and re-announcing
         it would rewind the to-do list to RUN_AGENT and re-run the agent.
         """
-        result = await self.processor._provision_workspace(  # pyright: ignore[reportPrivateUsage]
+        result = await self.processor._workspaces.provision(  # pyright: ignore[reportPrivateUsage]
             todo=todo,
             phase=phase,
             aggregate=aggregate,
