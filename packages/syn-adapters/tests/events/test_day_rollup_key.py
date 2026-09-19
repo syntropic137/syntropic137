@@ -197,7 +197,7 @@ class TestTheReKeyIsSafeWhileTheTriggerIsLive:
         unconstrained, and the trigger's upsert has no arbiter to name - a
         concurrent insert there would either duplicate a row or fail the whole
         ingesting transaction. Inside the transaction that re-attaches the
-        trigger, that insert blocks on ACCESS EXCLUSIVE instead and resumes
+        trigger, that insert blocks on SHARE ROW EXCLUSIVE instead and resumes
         against the finished key.
         """
         conn = _TransactionRecordingConnection()

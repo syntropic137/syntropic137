@@ -930,7 +930,7 @@ class TestTheBackfillIsNotPaidAtEveryStartup:
         assert restored == 0, (
             "the deleted rollup row came back, so ensure_schema() re-ran "
             "ROLLUP_BACKFILL_SQL - a full GROUP BY over agent_events, under "
-            "ACCESS EXCLUSIVE, at every API restart"
+            "SHARE ROW EXCLUSIVE, at every API restart"
         )
 
     async def test_the_trigger_still_fires_after_that_second_call(

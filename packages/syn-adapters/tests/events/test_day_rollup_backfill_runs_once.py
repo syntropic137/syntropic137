@@ -170,7 +170,7 @@ class TestDayRollupBackfillRunsOnce:
         assert after_first == 1
         assert conn.count_backfills() == 1, (
             "ROLLUP_BACKFILL_SQL was issued again on the second ensure_schema(). "
-            "That is a full GROUP BY over agent_events under ACCESS EXCLUSIVE, "
+            "That is a full GROUP BY over agent_events under SHARE ROW EXCLUSIVE, "
             "blocking ingestion, on every API restart."
         )
 
