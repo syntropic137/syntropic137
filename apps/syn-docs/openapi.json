@@ -5420,7 +5420,7 @@
     "/": {
       "get": {
         "summary": "Root",
-        "description": "Root endpoint with API info.",
+        "description": "Root endpoint with API info.\n\nReports a null release and ``version_status: \"unavailable\"`` rather than\nthe ``\"unknown\"`` sentinel it used to serve. It was a flat map of\nstrings, so it had nowhere to put a null and nothing to name the state\nwith \u2014 which made it the last surface still answering \"which build?\"\nwith a literal, the thing #1380 exists to remove (see ``RootResponse``).",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -5428,11 +5428,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Root  Get"
+                  "$ref": "#/components/schemas/RootResponse"
                 }
               }
             }
@@ -5982,7 +5978,7 @@
               "unavailable"
             ],
             "title": "Version Status",
-            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means importlib.metadata had no such distribution, version is null, and nothing has been invented to fill it.",
+            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
             "readOnly": true
           }
         },
@@ -5993,7 +5989,7 @@
           "version_status"
         ],
         "title": "BuildInfo",
-        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in two places from that one source: this block on ``GET /health``,\nand ``openapi.json``'s ``info.version``. Both used to be, or were derived\nfrom, a hardcoded literal that had drifted twenty releases behind the\ninstalled package."
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in three places from that one source: this block on ``GET /health``,\nthe flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All\nthree used to be, or were derived from, a hardcoded literal that had drifted\ntwenty releases behind the installed package.\n\nThe release and its status come from ``_NamesTheRunningRelease``. What this\nmodel adds is the two build-time stamps, which only an image can supply and\nonly ``/health`` reports."
       },
       "CancelRequest": {
         "properties": {
@@ -10633,6 +10629,58 @@
         ],
         "title": "RepoSummaryResponse",
         "description": "Summary of a repo for list views."
+      },
+      "RootResponse": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null."
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable name of this API."
+          },
+          "docs": {
+            "type": "string",
+            "title": "Docs",
+            "description": "Path to the interactive API documentation."
+          },
+          "health": {
+            "type": "string",
+            "title": "Health",
+            "description": "Path to the health endpoint, which reports the full build block plus read-path status."
+          },
+          "version_status": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "unavailable"
+            ],
+            "title": "Version Status",
+            "description": "Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.",
+            "readOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "name",
+          "docs",
+          "health",
+          "version_status"
+        ],
+        "title": "RootResponse",
+        "description": "Payload of ``GET /`` \u2014 what this API is, and which build is serving it.\n\nTHE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was\na flat ``dict[str, str]`` whose version slot held the literal ``\"unknown\"``\nwhen metadata could not be read: a string in a version field, indistinguish-\nable to a client from a release actually called that, and exactly the defect\n#1380 was filed to remove \u2014 just at the endpoint nobody re-read. A typed\nresponse makes the absence a declared state instead of a word.\n\n``openapi.json``'s ``info.version`` remains the one place a sentinel is\nunavoidable; see the comment at that call in ``main.py``."
       },
       "SSEHealthResponse": {
         "properties": {

@@ -1486,13 +1486,19 @@ class RealtimeHealth(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class BuildInfo(BaseModel):
-    """Which build is answering. Populated by ``syn_api.build_info``.
+class _NamesTheRunningRelease(BaseModel):
+    """A response that reports which release of syn-api answered it.
 
-    Reported in two places from that one source: this block on ``GET /health``,
-    and ``openapi.json``'s ``info.version``. Both used to be, or were derived
-    from, a hardcoded literal that had drifted twenty releases behind the
-    installed package.
+    MORE THAN ONE ENDPOINT HAS TO SAY THIS, so the pair that says it lives here
+    once. ``/health`` reports it inside ``build``; ``/`` reports it flat beside
+    the API's name. They are two views of one fact, and #1380 is what happens
+    when a fact about the running release gets a second home: ``main.py``'s
+    ``"0.5.1"`` and the installed package disagreed for twenty releases and
+    nobody noticed, because nothing required them to be derived from one place.
+
+    Subclass this to gain the pair; do not restate it. What a subclass adds is
+    whatever ELSE that endpoint reports — the image stamps, the links — never a
+    second opinion on the release or on whether it is readable.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1505,6 +1511,41 @@ class BuildInfo(BaseModel):
         "honest release to report then and a plausible one would mislead; read "
         "version_status to tell that case apart without inspecting the null.",
     )
+
+    @computed_field(
+        description="Whether the running release could be read at all. 'installed' means "
+        "version names the distribution this process was installed from; 'unavailable' "
+        "means the distribution's metadata could not be read, version is null, and "
+        "nothing has been invented to fill it.",
+    )
+    @property
+    def version_status(self) -> Literal["installed", "unavailable"]:
+        """Derived, never passed in, so it cannot contradict ``version``.
+
+        The pair would otherwise be a second place to get the same fact wrong —
+        ``version: null`` beside ``version_status: "installed"`` is exactly the
+        kind of self-disagreement #1380 is about. It exists as a field anyway
+        because a caller should not have to infer meaning from a null: on
+        ``BuildInfo`` the neighbouring nulls mean "the image did not stamp
+        itself", which is a different fact, and only a named state says which
+        absence a reader is looking at.
+        """
+        return "unavailable" if self.version is None else "installed"
+
+
+class BuildInfo(_NamesTheRunningRelease):
+    """Which build is answering. Populated by ``syn_api.build_info``.
+
+    Reported in three places from that one source: this block on ``GET /health``,
+    the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+    three used to be, or were derived from, a hardcoded literal that had drifted
+    twenty releases behind the installed package.
+
+    The release and its status come from ``_NamesTheRunningRelease``. What this
+    model adds is the two build-time stamps, which only an image can supply and
+    only ``/health`` reports.
+    """
+
     image_tag: str | None = Field(
         default=None,
         description="Container image tag this process was built from, stamped at image "
@@ -1517,24 +1558,27 @@ class BuildInfo(BaseModel):
         "Null when the build did not stamp one.",
     )
 
-    @computed_field(
-        description="Whether the running release could be read at all. 'installed' means "
-        "version names the distribution this process was installed from; 'unavailable' "
-        "means importlib.metadata had no such distribution, version is null, and nothing "
-        "has been invented to fill it.",
-    )
-    @property
-    def version_status(self) -> Literal["installed", "unavailable"]:
-        """Derived, never passed in, so it cannot contradict ``version``.
 
-        The pair would otherwise be a second place to get the same fact wrong —
-        ``version: null`` beside ``version_status: "installed"`` is exactly the
-        kind of self-disagreement #1380 is about. It exists as a field anyway
-        because a caller should not have to infer meaning from a null: the two
-        other nulls on this model mean "the image did not stamp itself", which
-        is a different fact, and only a named state says which one it is.
-        """
-        return "unavailable" if self.version is None else "installed"
+class RootResponse(_NamesTheRunningRelease):
+    """Payload of ``GET /`` — what this API is, and which build is serving it.
+
+    THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+    a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+    when metadata could not be read: a string in a version field, indistinguish-
+    able to a client from a release actually called that, and exactly the defect
+    #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+    response makes the absence a declared state instead of a word.
+
+    ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+    unavoidable; see the comment at that call in ``main.py``.
+    """
+
+    name: str = Field(description="Human-readable name of this API.")
+    docs: str = Field(description="Path to the interactive API documentation.")
+    health: str = Field(
+        description="Path to the health endpoint, which reports the full "
+        "build block plus read-path status."
+    )
 
 
 class _OmitsAbsentFields(BaseModel):

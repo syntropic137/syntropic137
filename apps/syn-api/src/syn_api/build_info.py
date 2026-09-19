@@ -17,14 +17,27 @@ release number, and a second home drifts the first time someone bumps one and
 not the other — which is exactly how "0.5.1" survived into a 0.29.1b3 deploy.
 If the number is wrong now, the package really is that version.
 
-THERE IS NO HONEST VERSION when the distribution is not installed, so none is
-produced: ``PackageNotFoundError`` becomes a null release and an explicit
+THERE IS NO HONEST VERSION when the distribution's metadata cannot be read, so
+none is produced: the read becomes a null release and an explicit
 ``version_status`` of "unavailable", never a plausible number. Inventing one
 would be the original defect in a new costume — a value that says nothing while
 looking like an answer. Letting the error escape is not the alternative either:
 this is read at import time and again while FastAPI is being constructed, so an
 uncaught raise takes the whole process down before it can serve the /health
 that would have explained why.
+
+THE FAILURE IS A CLASS, NOT ONE EXCEPTION. A first cut caught only
+``PackageNotFoundError`` — the cause that was reproduced — and every other way
+a metadata read fails still killed the process: a ``PermissionError`` on the
+dist-info directory, metadata that parses as garbage, anything distribution
+discovery raises walking a broken ``sys.path`` entry. Each of those is the same
+fact to a caller ("which build is this?" cannot be answered) and the same
+outcome if it escapes (the API does not start, because ``main.py`` builds its
+app at import). So ``_installed_release()`` is the single place the read
+happens and it treats any ordinary ``Exception`` as unavailable, logging the
+cause so a null on /health is diagnosable from the process log. ``BaseException``
+is deliberately NOT caught: ``KeyboardInterrupt`` and ``SystemExit`` are the
+process being told to stop, not a metadata read failing.
 
 THE IMAGE TAG AND COMMIT ARE BUILD-TIME FACTS that no installed artifact
 records, so they are stamped into the image as environment variables at build
@@ -42,10 +55,13 @@ is the one question this module exists to answer truthfully.
 
 from __future__ import annotations
 
+import logging
 import os
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 
 from syn_api.types import BuildInfo
+
+logger = logging.getLogger(__name__)
 
 #: The distribution whose installed metadata IS the running release.
 PACKAGE_NAME = "syn-api"
@@ -88,16 +104,35 @@ def version_string() -> str:
 
 
 def _installed_release() -> str | None:
-    """The installed release, or ``None`` when there is no distribution to read.
+    """The installed release, or ``None`` when the metadata cannot be read.
 
-    ``PackageNotFoundError`` means ``syn_api`` was imported without being
-    installed — an editable tree, a container that copied the source without
-    installing it, a test harness. That is a fact worth reporting accurately
-    and is not a reason to refuse to start.
+    THE ONLY PLACE THIS PACKAGE READS ITS OWN METADATA, so it is the only place
+    that has to know the read can fail. Callers get a release or a null and
+    never an exception, which is what lets ``syn_api``'s import and
+    ``create_app()`` both call it unguarded.
+
+    Every failure is the same answer because it is the same fact: nothing here
+    can name the running build. ``PackageNotFoundError`` means ``syn_api`` was
+    imported without being installed — an editable tree, a container that
+    copied the source without installing it, a test harness. A
+    ``PermissionError``, unparseable metadata, or anything else out of
+    distribution discovery means the distribution may well be there and is
+    unreadable anyway. Distinguishing them would give a caller a choice it has
+    no use for; the cause goes to the log, where whoever is diagnosing it can
+    read it.
     """
     try:
         return version(PACKAGE_NAME)
-    except PackageNotFoundError:
+    except Exception:
+        # Never BaseException: KeyboardInterrupt and SystemExit are the process
+        # being asked to stop, and swallowing them here would make an interrupt
+        # look like a missing release.
+        logger.warning(
+            "Could not read installed metadata for %s; reporting the running release as "
+            "unavailable. /health will carry version_status='unavailable'.",
+            PACKAGE_NAME,
+            exc_info=True,
+        )
         return None
 
 

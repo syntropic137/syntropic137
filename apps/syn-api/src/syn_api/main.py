@@ -35,7 +35,7 @@ from syn_api.routes import (
     workflows_router,
 )
 from syn_api.strict_query import reject_unknown_query_params
-from syn_api.types import Err, HealthResponse, Ok
+from syn_api.types import Err, HealthResponse, Ok, RootResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -92,11 +92,17 @@ def create_app() -> FastAPI:
         # openapi.json — and every CLI type and doc page generated from it —
         # named a build that was not running (#1380).
         #
-        # OpenAPI requires info.version to be a non-empty string, so this one
-        # slot cannot report "no metadata" the way /health's build block does
-        # (null, plus an explicit version_status). It says "unknown" instead —
-        # deliberately not a version number, so it cannot be mistaken for the
-        # release it is standing in for. See syn_api.build_info.UNKNOWN_VERSION.
+        # THE ONE PLACE A SENTINEL IS UNAVOIDABLE, and the only remaining
+        # caller of version_string(). The OpenAPI specification requires
+        # info.version to be a non-empty string: the field has no null and no
+        # neighbouring field to name a state with, so unlike /health's build
+        # block and the root response — both of which report a null release
+        # plus an explicit version_status — this slot has to put SOMETHING
+        # here. It says "unknown", deliberately a word and not a version
+        # number, so nothing downstream can parse or compare it as a release
+        # the way it could a fabricated "0.0.0". See
+        # syn_api.build_info.UNKNOWN_VERSION. Do not copy this pattern to a
+        # field that could have been nullable.
         version=version_string(),
         lifespan=lifespan,
         debug=config.debug,
@@ -160,15 +166,21 @@ def create_app() -> FastAPI:
     app.include_router(insights_router)
 
     @app.get("/")
-    async def root() -> dict[str, str]:
-        """Root endpoint with API info."""
-        return {
-            "name": "Syntropic137 API",
-            # A flat map of strings, so the same "unknown" as info.version.
-            "version": version_string(),
-            "docs": "/docs",
-            "health": "/health",
-        }
+    async def root() -> RootResponse:
+        """Root endpoint with API info.
+
+        Reports a null release and ``version_status: "unavailable"`` rather than
+        the ``"unknown"`` sentinel it used to serve. It was a flat map of
+        strings, so it had nowhere to put a null and nothing to name the state
+        with — which made it the last surface still answering "which build?"
+        with a literal, the thing #1380 exists to remove (see ``RootResponse``).
+        """
+        return RootResponse(
+            name="Syntropic137 API",
+            version=get_build_info().version,
+            docs="/docs",
+            health="/health",
+        )
 
     @app.get("/health")
     async def health() -> HealthResponse:

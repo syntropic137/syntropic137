@@ -55,11 +55,26 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
  * when the image build stamped them, since an unstamped build reports null and
  * printing "commit: null" tells a reader nothing they can act on.
  *
- * `version` is null when the API could not read its own package metadata. That
- * is said in words rather than rendered as "syn-api null", and never filled in
- * with a plausible number — the whole point of #1380 is that a wrong release
- * misleads a reader who a missing one would have sent looking. */
-function buildLine(build: components["schemas"]["BuildInfo"]): string {
+ * THREE STATES, NOT TWO, and the third is the one that used to crash. `build`
+ * is required by the CURRENT schema, but this CLI ships to npm and the server
+ * is deployed separately, so a new CLI meets an old server routinely — and an
+ * old server's /health has no `build` key at all. `openapi-fetch` does no
+ * runtime validation, so the schema's guarantee is a compile-time one only:
+ * reading `build.image_tag` on that payload threw a TypeError before anything
+ * was printed, turning "is the new build live yet?" into a crash whose message
+ * named neither the server nor its version.
+ *
+ * So the absent block is a state with its own sentence. A server too old to
+ * report its build identity is not the same fact as a server that reported it
+ * as unreadable (`version: null`), and both are different again from a release
+ * we know — a reader chasing a rollout needs to tell all three apart. None of
+ * them is ever filled in with a plausible number: the whole point of #1380 is
+ * that a wrong release misleads a reader who a missing one would have sent
+ * looking. */
+function buildLine(build: components["schemas"]["BuildInfo"] | undefined): string {
+  if (!build) {
+    return "syn-api build identity not reported — this server predates /health carrying it (#1380)";
+  }
   const stamps = [build.image_tag, build.commit].filter((s): s is string => Boolean(s));
   const release = build.version ?? "release unknown (package metadata unavailable)";
   return `syn-api ${release}` + (stamps.length > 0 ? ` (${stamps.join(", ")})` : "");
@@ -80,7 +95,10 @@ export const healthCommand: CommandDef = {
     // /health said nothing, leaving `docker inspect` over SSH as the only
     // read. Printing it below a "Degraded" line would bury the answer in the
     // case it is most needed.
-    print(style(buildLine(data.build), DIM));
+    // `data.build` is typed as always present and is not, against an older
+    // server; see buildLine. The cast is where that gap is acknowledged rather
+    // than somewhere it can be forgotten.
+    print(style(buildLine(data.build as components["schemas"]["BuildInfo"] | undefined), DIM));
 
     if (status === "healthy" && mode === "full") {
       print(style("Healthy", BOLD, GREEN) + " — all systems operational");

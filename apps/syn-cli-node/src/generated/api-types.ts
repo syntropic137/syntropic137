@@ -1767,6 +1767,12 @@ export interface paths {
         /**
          * Root
          * @description Root endpoint with API info.
+         *
+         *     Reports a null release and ``version_status: "unavailable"`` rather than
+         *     the ``"unknown"`` sentinel it used to serve. It was a flat map of
+         *     strings, so it had nowhere to put a null and nothing to name the state
+         *     with — which made it the last surface still answering "which build?"
+         *     with a literal, the thing #1380 exists to remove (see ``RootResponse``).
          */
         get: operations["root__get"];
         put?: never;
@@ -2012,10 +2018,14 @@ export interface components {
          * BuildInfo
          * @description Which build is answering. Populated by ``syn_api.build_info``.
          *
-         *     Reported in two places from that one source: this block on ``GET /health``,
-         *     and ``openapi.json``'s ``info.version``. Both used to be, or were derived
-         *     from, a hardcoded literal that had drifted twenty releases behind the
-         *     installed package.
+         *     Reported in three places from that one source: this block on ``GET /health``,
+         *     the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+         *     three used to be, or were derived from, a hardcoded literal that had drifted
+         *     twenty releases behind the installed package.
+         *
+         *     The release and its status come from ``_NamesTheRunningRelease``. What this
+         *     model adds is the two build-time stamps, which only an image can supply and
+         *     only ``/health`` reports.
          */
         BuildInfo: {
             /**
@@ -2035,7 +2045,7 @@ export interface components {
             commit?: string | null;
             /**
              * Version Status
-             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means importlib.metadata had no such distribution, version is null, and nothing has been invented to fill it.
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
@@ -4366,6 +4376,48 @@ export interface components {
             created_by: string;
             /** Created At */
             created_at?: string | null;
+        };
+        /**
+         * RootResponse
+         * @description Payload of ``GET /`` — what this API is, and which build is serving it.
+         *
+         *     THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+         *     a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+         *     when metadata could not be read: a string in a version field, indistinguish-
+         *     able to a client from a release actually called that, and exactly the defect
+         *     #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+         *     response makes the absence a declared state instead of a word.
+         *
+         *     ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+         *     unavoidable; see the comment at that call in ``main.py``.
+         */
+        RootResponse: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
+             */
+            version: string | null;
+            /**
+             * Name
+             * @description Human-readable name of this API.
+             */
+            name: string;
+            /**
+             * Docs
+             * @description Path to the interactive API documentation.
+             */
+            docs: string;
+            /**
+             * Health
+             * @description Path to the health endpoint, which reports the full build block plus read-path status.
+             */
+            health: string;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
         };
         /**
          * SSEHealthResponse
@@ -9151,9 +9203,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["RootResponse"];
                 };
             };
         };
