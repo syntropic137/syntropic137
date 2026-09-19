@@ -116,6 +116,70 @@ false completion. What is no longer bought with it is the old blanket refusal
 whenever the marker appeared after a report - that refused real successes,
 which is defect 2 again in a wider spelling.
 
+THE ONE SHAPE READ THAT THE CONTRACT DOES NOT DESCRIBE (#1324). An agent that
+finished its work and then invented its own result schema - ``{"status":
+"completed", "branch": ..., "commit": ..., "pr": 1371}`` - reported nothing this
+module could read, and exec-cd5e75eaeb63 lost a $10.76 phase whose commit was
+already pushed. Every failing block observed after #1327 made the copyable fence
+literal had that one defect and no other: the key was spelled ``status``, with
+``completed`` or ``failed`` under it.
+
+So that exact shape is read as the verdict it plainly states, and nothing around
+it is: NO ``success`` key present, and ``status`` a JSON string that is EXACTLY
+``completed`` or ``failed``. ``Completed``, ``done``, a non-string ``status``, or
+a ``status`` beside an unreadable ``success`` remain UNREADABLE precisely as
+before.
+
+AND THE CONTRACT IS ASKED FIRST, SO THE ALIAS ONLY EVER ADDS A READING. A
+``success`` that is a JSON boolean IS the verdict, and a ``status`` beside it is
+an extra key exactly as every other extra key is: ignored, unweighed, and unable
+to move the outcome in either direction. ``{"success": true, "status": "failed"}``
+completes the phase and ``{"success": false, "status": "completed"}`` refuses it,
+both precisely as they did before the alias existed.
+
+That is not indifference to a block that says two things; it is what stops the
+alias becoming a second contract. Weighing the two keys against each other -
+refusing the block whose ``status`` disagrees - reads as caution and is not: it
+would let a key the prompt tells agents NEVER to write refuse a phase that wrote
+the contract's key correctly, which is defect (2) below in a new spelling, and
+it would do it on the strength of a word this module would otherwise never have
+looked at. The alias reads blocks that say nothing under ``success``. Where
+``success`` speaks there is nothing for it to do, and a rule about the two keys
+together is a rule about a question neither of them asked.
+
+WHICH LEAVES ONE WAY A BLOCK CAN STILL NAME ITS OUTCOME TWICE - under the SAME
+key. ``{"status": "failed", "status": "completed"}`` is legal JSON, and a JSON
+decoder keeps the LAST of duplicate members, so the failure the agent wrote is
+deleted by the parser before anything here sees the value. Read off the survivor
+that block COMPLETES a phase that plainly stated failure, and swapping the two
+members swaps the verdict: the outcome is settled by the order of two identical
+keys, which is the TEXT deciding what a report means - defect (1) above,
+arriving through the alias. So the duplication is read off the member list while
+it still exists, in `_decode_payload`, and a repeated ``status`` is UNREADABLE.
+A repeated ``success`` is deliberately left alone: it reads today exactly as it
+reads on the contract path and the alias did not change it, so making it fatal
+is a new strictness on the contract itself rather than a repair to this.
+
+WHY THIS IS NOT THE COERCION THE STRICT MODEL EXISTS TO REFUSE - the first
+objection to raise, and the one that decides whether the alias may exist at all.
+`_ReportedResult` refuses ``"success": "true"`` because reading a STRING as a
+BOOLEAN is a guess about a value nobody wrote: ``"true"`` is equally the start of
+``"true, but the tests fail"``, and the guess resolves it in the completing
+direction. The alias guesses nothing. It is a closed two-element map from whole
+string literals to the outcomes they name, carrying BOTH directions - ``failed``
+refuses the phase exactly as ``success: false`` does - and it applies only where
+the contract's own key is ABSENT, so it can never overrule, soften or contradict
+anything the agent did write. A permissive mode would widen what a value may
+MEAN; this widens only which key the same two meanings may be written under.
+
+AND IT IS RECORDED RATHER THAN ABSORBED. Reading the alias logs a warning naming
+the spelling and the payload, and the verdict carries ``via_status_alias`` so a
+refusal states how the phase reported itself instead of quoting a
+``success=false`` nobody wrote. An alias nobody can see is how drift becomes the
+format: the contract is still one key called ``success``, and
+`render_workspace_prompt` now says that in as many words rather than leaving it
+to be inferred from an example.
+
 WHAT IS AND IS NOT A VERDICT. Four states, and the distinction between the last
 two is the whole point:
 
@@ -146,15 +210,19 @@ all change without touching a stream processor or the dispatcher.
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "TASK_RESULT_MARKER",
@@ -175,6 +243,20 @@ TASK_RESULT_MARKER: Final[str] = "TASK_RESULT:"
 #: message does not contradict - see the defects in the module docstring.
 TASK_RESULT_TERMINATOR: Final[str] = "TASK_RESULT_END"
 
+#: A markdown code fence an agent wraps the block's JSON in (#1324).
+#:
+#: Agents summarise in markdown, and some write the report as
+#: ``TASK_RESULT:`` + a ```json fence + the object + a closing fence +
+#: ``TASK_RESULT_END``. The JSON inside is exactly the value the grammar asks
+#: for; only the fence is extra, so unwrapping it adds no interpretation. It is
+#: accepted only as a PAIR around the one value - an opening fence with no
+#: closing one is still an unclosed block - and its use is logged so the drift
+#: stays visible rather than silently absorbed. Seen in production on
+#: exec-297778171fa2, which finished its work, pushed it, and was failed on
+#: ```json { "success": true, ... }.
+_CODE_FENCE: Final[str] = "```"
+_OPENING_FENCE: Final[re.Pattern[str]] = re.compile(r"```[A-Za-z0-9_+-]*")
+
 
 class VerdictStatus(Enum):
     """Whether the phase claimed an outcome, and whether the claim was readable."""
@@ -193,10 +275,18 @@ class AgentVerdict:
     unparsed text it wrote when the verdict was not readable - in both cases
     the thing an operator needs to see, which is why one field carries both
     rather than the caller having to know which to look at.
+
+    ``via_status_alias`` says the claim was written as ``"status"`` rather than
+    as the ``"success"`` boolean the contract asks for (#1324). It is read in
+    exactly one place - `refusal`, so that the line an operator greps for
+    quotes what the agent actually wrote - and it exists because an alias that
+    leaves no trace in the outcome is indistinguishable from the format having
+    quietly changed.
     """
 
     status: VerdictStatus
     comments: str = ""
+    via_status_alias: bool = False
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -209,9 +299,11 @@ class AgentVerdict:
 
         WHICH parts of the text are reports is `_delimited_reports`'s question;
         this one decides what each of them SAYS and, when they disagree, which
-        stands. A verdict is a JSON object whose ``success`` is a JSON boolean,
-        and anything the agent wrote in its place is unreadable rather than a
-        pass.
+        stands. A verdict is a JSON object whose ``success`` is a JSON boolean -
+        or, for the one shape agents demonstrably write instead, whose ``status``
+        is exactly ``completed`` or ``failed`` with no ``success`` beside it
+        (#1324). Anything else the agent wrote in its place is unreadable rather
+        than a pass.
 
         One message is one reading, not the whole phase: use `VerdictReader`
         when the messages arrive one at a time, so that a report already read
@@ -226,15 +318,64 @@ class AgentVerdict:
 
     @classmethod
     def _from_report(cls, report: _Report) -> AgentVerdict:
-        """What one delimited block claims, judged on its own."""
+        """What one delimited block claims, judged on its own.
+
+        THE CONTRACT ANSWERS ALONE WHENEVER IT CAN, and the order of these two
+        readings is the whole of that rule. A ``success`` the agent wrote as a
+        JSON boolean settles the block here and returns; the alias is reached
+        only where the contract found nothing it could read. So ``status`` can
+        never overrule, soften or contradict what was written under the key the
+        contract actually asks for - it is an extra key beside a readable
+        ``success``, as it was before the alias existed and as it still is on
+        `main`.
+        """
         try:
             reported = _ReportedResult.model_validate(report.decoded)
         except ValidationError:
-            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
+            return cls._from_status_alias(report)
         return cls(
             VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
             reported.said,
         )
+
+    @classmethod
+    def _from_status_alias(cls, report: _Report) -> AgentVerdict:
+        """What a block that named its outcome ``status`` claims (#1324).
+
+        Reached only after the contract above was not met, which is what keeps
+        the alias unable to overrule a ``success`` the agent did write. A block
+        whose ``success`` is a readable boolean has already been settled there;
+        what arrives here either wrote no ``success`` at all or wrote one the
+        contract could not read, and the second is refused here rather than
+        rescued off its ``status``.
+
+        A ``status`` written TWICE is refused before it is read, because by the
+        time a model could look there is only one of them left - see
+        `_decode_payload` for why the answer travels on the `_Report` rather
+        than being derived from the value here.
+        """
+        if report.repeats_status:
+            logger.warning(
+                'TASK_RESULT block wrote "%s" more than once, so which outcome it states '
+                "depends only on which duplicate the JSON decoder kept. The phase is "
+                "refused rather than read off the survivor (#1324): %s",
+                _ALIAS_KEY,
+                _excerpt(report.payload),
+            )
+            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
+        try:
+            aliased = _StatusAliasResult.model_validate(report.decoded)
+        except ValidationError:
+            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload))
+        logger.warning(
+            'TASK_RESULT block named its outcome "status": "%s" instead of writing a '
+            '"success" boolean, and was read as %s under the #1324 alias. The phase '
+            "is not following the reporting contract: %s",
+            aliased.status.value,
+            aliased.status.verdict.name,
+            _excerpt(report.payload),
+        )
+        return cls(aliased.status.verdict, aliased.said, via_status_alias=True)
 
     @property
     def refuses_completion(self) -> bool:
@@ -277,9 +418,14 @@ class AgentVerdict:
         message is never the thing a decision should hinge on.
         """
         if self.status is VerdictStatus.FAILURE:
+            wrote = (
+                f'"status": "{_StatusAlias.FAILED.value}" (read as success=false, #1324)'
+                if self.via_status_alias
+                else "success=false"
+            )
             return (
                 f"Phase '{phase_id}' REPORTED FAILURE. Its agent ended with "
-                f'TASK_RESULT success=false: "{self.comments}". The phase is failed '
+                f'TASK_RESULT {wrote}: "{self.comments}". The phase is failed '
                 f"on its own report rather than completed on its exit status."
             )
         if self.status is VerdictStatus.UNREADABLE:
@@ -355,10 +501,16 @@ class _Report:
     ``decoded`` is None when the message held a marker but no complete block
     under it - the payload is then the text an operator needs to see to work
     out what the agent wrote instead.
+
+    ``repeats_status`` is the one question the decoded value can no longer be
+    asked. A JSON decoder keeps only the last of duplicate members, so it
+    travels from `_decode_payload` rather than being re-derived from `decoded`,
+    where the evidence for it no longer exists.
     """
 
     payload: str
     decoded: object | None
+    repeats_status: bool = False
 
 
 class _ReportedResult(BaseModel):
@@ -393,6 +545,140 @@ class _ReportedResult(BaseModel):
         return str(self.comments) if self.comments is not None else ""
 
 
+class _StatusAlias(StrEnum):
+    """The only two ``status`` spellings that name an outcome (#1324).
+
+    The accepted spellings are written here and nowhere else. A closed set in
+    one place is what separates an alias from a habit of adding one more string
+    each time a run is lost, and it is the definition the negative tests are
+    written against: everything not a member of this enum is UNREADABLE.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+    @property
+    def verdict(self) -> VerdictStatus:
+        """The outcome this spelling names. Total over the members by shape."""
+        return VerdictStatus.SUCCESS if self is _StatusAlias.COMPLETED else VerdictStatus.FAILURE
+
+
+class _StatusAliasResult(BaseModel):
+    """A block that named its outcome ``status``, and only in the exact shape.
+
+    `_ReportedResult` is the contract; this is the single documented deviation
+    from it that agents actually write, and the module docstring argues why
+    reading it is not the coercion the strict model refuses. Everything the
+    strict model buys is kept: ``status`` must be a JSON string (a bare `true`
+    or `1` is not one), it must match a `_StatusAlias` value whole and
+    case-sensitively, and both outcomes are carried so the alias refuses a
+    phase as readily as it passes one.
+
+    ``extra="ignore"`` for the same reason as the contract model: the observed
+    blocks carry ``branch``, ``commit`` and ``pr`` beside the outcome, and an
+    unexpected key is not a reason to discard a claim that is otherwise exact.
+    """
+
+    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
+
+    #: Per-field ``strict=False``, and nowhere else in this module. Strict
+    #: validation of an enum demands an instance of it, which no JSON document
+    #: can hold; lax validation of a `StrEnum` is an exact match against its
+    #: values and coerces nothing - ``"Completed"``, ``"done"``, `True` and `1`
+    #: are all refused, each pinned by a test.
+    status: _StatusAlias = Field(strict=False)
+    comments: object | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_a_block_that_also_wrote_success(cls, block: object) -> object:
+        """A block carrying BOTH keys is unreadable, never an alias.
+
+        Without this, ``extra="ignore"`` would drop a ``success`` the agent DID
+        write - a MALFORMED one, by the time a block reaches here, since
+        `AgentVerdict._from_report` has already settled every readable boolean
+        - and read the phase off its ``status`` instead. That undoes the strict
+        refusal one line later and completes a phase on a report the contract
+        just called unreadable, so the alias reads only a block that has
+        nothing for it to disagree with.
+
+        Kept as a rule of this model and not left to the ordering in
+        `_from_report`, even though that ordering already means no readable
+        ``success`` reaches here. The ordering decides which reading WINS; this
+        decides what the alias is willing to read at all, and the alias has to
+        be safe on its own terms whatever is handed to it.
+        """
+        if isinstance(block, dict) and "success" in block:
+            raise ValueError("a block that wrote 'success' is judged by the contract, not aliased")
+        return block
+
+    @property
+    def said(self) -> str:
+        """The agent's comments, or - when it wrote none - the drift itself.
+
+        An aliased block with nothing to quote would otherwise reach an
+        operator as an empty string, which reads as "the agent said nothing"
+        rather than "the agent did not report the way it was asked to".
+        """
+        if self.comments is not None:
+            return str(self.comments)
+        return (
+            f'No comments were written. The phase reported "status": "{self.status.value}" '
+            f'instead of a "success" boolean and was read as '
+            f"{self.status.verdict.name} on that (#1324)."
+        )
+
+
+#: The key the alias reads, and the field `_StatusAliasResult` declares. It is
+#: spelled here as well because a duplicate member is a property of the TEXT:
+#: the model is handed a value that has already lost every duplicate but one, so
+#: it is not something the model can be made to notice.
+_ALIAS_KEY: Final[str] = "status"
+
+
+@dataclass(frozen=True)
+class _DecodedPayload:
+    """One JSON value read out of a message, and what reading it cost."""
+
+    value: object
+    ends_at: int
+    repeats_status: bool
+
+
+def _decode_payload(text: str, at: int) -> _DecodedPayload:
+    """The JSON value beginning at ``at``, and whether it named ``status`` twice.
+
+    DUPLICATE MEMBERS ARE READ HERE OR NOWHERE. ``{"status": "failed",
+    "status": "completed"}`` is legal JSON and a decoder keeps the last of the
+    two, so what comes out is an ordinary, exact, unambiguous success and the
+    failure the agent wrote has been deleted by the parser. No later check can
+    recover it: the member list is the only place it still exists, and this is
+    the only point at which anything here holds one. That is why the answer is
+    carried out on the `_Report` instead of being asked of the value.
+
+    ONLY THE OUTERMOST OBJECT IS ASKED, because a repeated key under
+    ``comments`` or ``detail`` is a malformed note and not a block naming its
+    own outcome twice. That falls out of the hook rather than being tested
+    for: it runs on every object in the value, and an object cannot be
+    finished before its members are, so the outermost one is always the LAST
+    call and the answer left standing is its own. Accumulating across the
+    calls - ``repeated = repeated or ...`` - is the way to get this wrong, and
+    it would refuse a block whose top-level outcome is perfectly exact.
+
+    Raises `ValueError` when no complete JSON value begins at ``at``, exactly
+    as `json.JSONDecoder.raw_decode` does.
+    """
+    repeated = False
+
+    def keep_the_member_list(members: list[tuple[str, object]]) -> object:
+        nonlocal repeated
+        repeated = sum(1 for key, _ in members if key == _ALIAS_KEY) > 1
+        return dict(members)
+
+    value, ends_at = json.JSONDecoder(object_pairs_hook=keep_the_member_list).raw_decode(text, at)
+    return _DecodedPayload(value, ends_at, repeats_status=repeated)
+
+
 def _payload_starts(text: str, after: int) -> int:
     """Where the value begins, skipping the whitespace a writer put in."""
     while after < len(text) and text[after].isspace():
@@ -423,32 +709,78 @@ def _delimited_reports(text: str) -> list[_Report]:
     unclosed block alongside a closed one is prose and is dropped - see
     `test_a_truncated_second_block_does_not_unmake_a_closed_first_one`.
     """
-    decoder = json.JSONDecoder()
     reports: list[_Report] = []
     unclosed_at: int | None = None
     search_from = 0
     while (marker_at := text.find(TASK_RESULT_MARKER, search_from)) != -1:
         payload_at = _payload_starts(text, marker_at + len(TASK_RESULT_MARKER))
-        try:
-            decoded, payload_ends = decoder.raw_decode(text, payload_at)
-        except ValueError:
-            # No value here to delimit, so resume just past the marker rather
-            # than skipping over text this never read.
+        read = _read_block(text, payload_at)
+        search_from = read.resume_at
+        if read.report is None:
             unclosed_at = payload_at
-            search_from = payload_at
             continue
-        terminator_at = _payload_starts(text, payload_ends)
-        if not _terminates_at(text, terminator_at):
-            unclosed_at = payload_at
-            search_from = payload_ends
-            continue
-        reports.append(_Report(payload=text[payload_at:payload_ends], decoded=decoded))
-        search_from = payload_ends + len(TASK_RESULT_TERMINATOR)
+        reports.append(read.report)
     if reports:
         return reports
     if unclosed_at is None:
         return []
     return [_Report(payload=text[unclosed_at:], decoded=None)]
+
+
+@dataclass(frozen=True)
+class _BlockRead:
+    """One marker's attempt at a block: the report, or None, and where to resume.
+
+    ``report`` is None when no complete block stands at the marker - nothing
+    decodes there, or the value is not closed by the terminator (and, for a
+    fenced value, by its closing fence first). The caller treats that position
+    as unclosed. ``resume_at`` is where the search for the next marker starts,
+    exactly as it did when this lived inline in `_delimited_reports`.
+    """
+
+    report: _Report | None
+    resume_at: int
+
+
+def _read_block(text: str, payload_at: int) -> _BlockRead:
+    """Read the block whose payload starts at ``payload_at``, fenced or not."""
+    opening = _OPENING_FENCE.match(text, payload_at)
+    value_at = _payload_starts(text, opening.end()) if opening else payload_at
+    try:
+        block = _decode_payload(text, value_at)
+    except ValueError:
+        # No value here to delimit, so resume just past the marker rather
+        # than skipping over text this never read.
+        return _BlockRead(report=None, resume_at=payload_at)
+    terminator_at = _closing_position(text, block.ends_at, fenced=opening is not None)
+    if terminator_at is None or not _terminates_at(text, terminator_at):
+        return _BlockRead(report=None, resume_at=block.ends_at)
+    if opening:
+        logger.warning(
+            "TASK_RESULT block was wrapped in a markdown code fence (%r); "
+            "unwrapped it and read the JSON inside (#1324)",
+            opening.group(0),
+        )
+    report = _Report(
+        payload=text[value_at : block.ends_at],
+        decoded=block.value,
+        repeats_status=block.repeats_status,
+    )
+    return _BlockRead(report=report, resume_at=block.ends_at + len(TASK_RESULT_TERMINATOR))
+
+
+def _closing_position(text: str, value_ends_at: int, *, fenced: bool) -> int | None:
+    """Where the terminator must start, or None when a fenced value is unclosed.
+
+    A fence is accepted only as a pair around the one value: without its
+    closing half the block is as unclosed as any other.
+    """
+    at = _payload_starts(text, value_ends_at)
+    if not fenced:
+        return at
+    if not text.startswith(_CODE_FENCE, at):
+        return None
+    return _payload_starts(text, at + len(_CODE_FENCE))
 
 
 def _terminates_at(text: str, at: int) -> bool:
