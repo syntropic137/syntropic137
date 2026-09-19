@@ -666,7 +666,7 @@ class TestStaleCollectArtifactsGuard:
 
         assert processor._runtime.workspace_for("p-1") is None
 
-        await processor._handle_collect_artifacts(
+        await processor._workspaces.collect(
             todo,
             phase,
             aggregate,
@@ -764,10 +764,10 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
 
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=handler,
         ):
-            await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
+            await processor._workspaces.collect(todo, phase, MagicMock(), [], cache)
 
         assert cache.files == {"p-1": files}
         assert cache.primary == {"p-1": "r"}

@@ -54,6 +54,12 @@ pick a winner.
 
 ## Write to `artifacts/output/options.md`
 
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
+
 Sections: Problem, Is it real / already solved, Success criteria, Constraints,
 Non-goals, Paths (one subsection each), Comparison.
 
@@ -68,3 +74,22 @@ is an unusable one: a reader cannot follow it and a checker cannot verify it.
 - Do NOT recommend, rank or choose. Describe.
 - Every factual claim carries a `file:line`, or is marked ASSUMED.
 - Do not modify any file outside `artifacts/output/`.
+
+## End with exactly this, and nothing after it
+
+Your document is the deliverable; the status block only says whether you
+produced it. End your final message with these two lines, verbatim in shape:
+`"success"` and `"comments"` are the only keys, the comment is one short
+sentence on one line with no double quotes inside it, and `TASK_RESULT_END` is
+on its own line. Every detail belongs in the file you wrote, not here. Three
+runs of this workflow completed their document and were still failed because
+the block had no `"success"` key (they wrote `"status": "complete"`), which the
+platform reads as an unreadable verdict.
+
+```text
+TASK_RESULT: {"success": true, "comments": "Wrote artifacts/output/<file> with <n> sections."}
+TASK_RESULT_END
+```
+
+If you could not produce the document, use `"success": false` and say why in
+the comment.

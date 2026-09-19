@@ -36,6 +36,10 @@ of them.
   mark it STILL UNKNOWN.
 - If an assumption is **STILL UNKNOWN**, every step resting on it is marked as
   such, with what would settle it.
+- An assumption whose summary row still says **PENDING**, or that has no verdict
+  file at all, was never settled: the experiment phase stopped before it. Treat
+  it as STILL UNKNOWN, and say in the record that it was not tested, not that
+  it was tested and came back unknown.
 
 ## Dispose of every review finding
 
@@ -43,6 +47,12 @@ of them.
 file). Where a finding and a measurement disagree, the measurement wins.
 
 ## Write `artifacts/output/decision-record.md` - the final artifact
+
+**Write it in sections, not in one call.** Create the file with its first
+section, then add each further section with a separate edit. A single write of
+a long document can exceed the model's output limit, and a cut-off tool call
+is discarded whole: a run ended here with 15 minutes of drafting and nothing
+written.
 
 A standalone document. Whoever reads it should not need the others, though
 every risky claim still points at the evidence behind it. It contains:
@@ -74,6 +84,10 @@ honest work.
 
 One line: ready to implement; ready once the operator ratifies the decision; or
 blocked on a named, specific unknown. Saying it is blocked is a correct outcome.
+**"Ready" is allowed only if no load-bearing assumption is still unknown,
+untested or pending** - or if you have amended the decision and plan so that
+they no longer depend on it, and said how. Otherwise the line is "blocked on",
+naming each one and what would settle it.
 This workflow exists to make a decision that holds up, not to manufacture the
 appearance of one.
 
@@ -88,3 +102,22 @@ is an unusable one: a reader cannot follow it and a checker cannot verify it.
 - Plan only. No production code, no commits.
 - A verification step that would pass with the change reverted is worse than
   none, because it will be believed.
+
+## End with exactly this, and nothing after it
+
+Your document is the deliverable; the status block only says whether you
+produced it. End your final message with these two lines, verbatim in shape:
+`"success"` and `"comments"` are the only keys, the comment is one short
+sentence on one line with no double quotes inside it, and `TASK_RESULT_END` is
+on its own line. Every detail belongs in the file you wrote, not here. Three
+runs of this workflow completed their document and were still failed because
+the block had no `"success"` key (they wrote `"status": "complete"`), which the
+platform reads as an unreadable verdict.
+
+```text
+TASK_RESULT: {"success": true, "comments": "Wrote artifacts/output/<file> with <n> sections."}
+TASK_RESULT_END
+```
+
+If you could not produce the document, use `"success": false` and say why in
+the comment.
