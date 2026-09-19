@@ -127,7 +127,26 @@ literal had that one defect and no other: the key was spelled ``status``, with
 So that exact shape is read as the verdict it plainly states, and nothing around
 it is: NO ``success`` key present, and ``status`` a JSON string that is EXACTLY
 ``completed`` or ``failed``. ``Completed``, ``done``, a non-string ``status``, or
-a ``status`` beside a ``success`` remain UNREADABLE precisely as before.
+a ``status`` beside an unreadable ``success`` remain UNREADABLE precisely as
+before.
+
+AND A BLOCK THAT NAMES ITS OUTCOME TWICE IS ASKED ABOUT FIRST. The alias makes
+``status`` meaningful, so ``{"success": true, "status": "failed"}`` became a
+block saying two opposite things - and neither model can see that, by design:
+the contract ignores ``status`` as an extra key and the alias is only reached
+once the contract has refused. Whichever ran first would decide, which is a
+verdict settled by ordering. It is settled by rule instead, once, in
+`_read_cross_keys`, before either model:
+
+  - the two DISAGREE - UNREADABLE. A block containing a plain statement of
+    failure must not complete a phase on the other key, and there is no safe
+    reading of a report that says both. This is the only shape whose treatment
+    the alias changed beyond adding itself, and it changed in the refusing
+    direction.
+  - the two AGREE - read exactly as before, off ``success``, and logged. The
+    agent wrote the contract's key correctly and one redundant key beside it;
+    refusing that is defect (2) below - SUCCESS became UNREADABLE - in a new
+    spelling, and it costs a rerun to punish a report that obeyed.
 
 WHY THIS IS NOT THE COERCION THE STRICT MODEL EXISTS TO REFUSE - the first
 objection to raise, and the one that decides whether the alias may exist at all.
@@ -232,11 +251,18 @@ class AgentVerdict:
     quotes what the agent actually wrote - and it exists because an alias that
     leaves no trace in the outcome is indistinguishable from the format having
     quietly changed.
+
+    ``self_contradictory`` says the block named its outcome twice and the two
+    namings disagreed. It is read in the same one place and for the same
+    reason: "could not be read" is true of that block but tells an operator to
+    go looking for malformed JSON or a missing terminator, when what is
+    actually there is a complete, well-formed report that says both things.
     """
 
     status: VerdictStatus
     comments: str = ""
     via_status_alias: bool = False
+    self_contradictory: bool = False
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -268,7 +294,32 @@ class AgentVerdict:
 
     @classmethod
     def _from_report(cls, report: _Report) -> AgentVerdict:
-        """What one delimited block claims, judged on its own."""
+        """What one delimited block claims, judged on its own.
+
+        The cross-key question is asked FIRST, before either model, because it
+        is the one question neither model can answer: the contract ignores
+        ``status`` as an extra key and the alias never sees a block carrying
+        ``success``, so a block that names its outcome twice settles on
+        whichever model happens to run first. That is a decision taken by
+        ordering rather than by rule, and it read a phase that said ``"status":
+        "failed"`` as a completed one.
+        """
+        cross = _read_cross_keys(report.decoded)
+        if cross is _CrossKeyReading.CONTRADICTS:
+            logger.warning(
+                "TASK_RESULT block claimed its outcome twice and disagreed with itself, so "
+                "the phase is refused rather than settled on whichever key was read first "
+                "(#1324): %s",
+                _excerpt(report.payload),
+            )
+            return cls(VerdictStatus.UNREADABLE, _excerpt(report.payload), self_contradictory=True)
+        if cross is _CrossKeyReading.AGREES:
+            logger.warning(
+                'TASK_RESULT block wrote both "success" and "status". They agree, so the '
+                'phase is settled on the contract\'s "success" as it always was, but the '
+                "block is not the one key the contract asks for (#1324): %s",
+                _excerpt(report.payload),
+            )
         try:
             reported = _ReportedResult.model_validate(report.decoded)
         except ValidationError:
@@ -283,9 +334,11 @@ class AgentVerdict:
         """What a block that named its outcome ``status`` claims (#1324).
 
         Reached only after the contract above was not met, which is what keeps
-        the alias unable to overrule a ``success`` the agent did write: a block
-        carrying both keys never gets here, and one carrying an unreadable
-        ``success`` is refused here too.
+        the alias unable to overrule a ``success`` the agent did write. A block
+        whose ``success`` is a readable boolean has already been settled or
+        refused by `_read_cross_keys`; what still arrives here is one whose
+        ``success`` the contract could not read at all, and that is refused
+        here rather than rescued off its ``status``.
         """
         try:
             aliased = _StatusAliasResult.model_validate(report.decoded)
@@ -325,10 +378,14 @@ class AgentVerdict:
                 f"on its own report rather than completed on its exit status."
             )
         if self.status is VerdictStatus.UNREADABLE:
+            why = (
+                f'it wrote both "success" and "status" and they disagree (#1324)'
+                if self.self_contradictory
+                else f"it is not JSON, or it is not closed by a {TASK_RESULT_TERMINATOR} line"
+            )
             return (
                 f"Phase '{phase_id}' wrote a {TASK_RESULT_MARKER} marker whose block "
-                f"could not be read as a verdict - it is not JSON, or it is not "
-                f'closed by a {TASK_RESULT_TERMINATOR} line: "{self.comments}". An '
+                f'could not be read as a verdict - {why}: "{self.comments}". An '
                 f"unreadable report may be a failure report, so the phase fails "
                 f"rather than completing on a verdict nobody could read."
             )
@@ -485,10 +542,18 @@ class _StatusAliasResult(BaseModel):
         """A block carrying BOTH keys is unreadable, never an alias.
 
         Without this, ``extra="ignore"`` would drop a ``success`` the agent DID
-        write - including a ``false``, or a malformed one the contract model
-        just refused - and read the phase off its ``status`` instead. That is
-        the completed-failure direction, so the alias reads only a block that
-        has nothing for it to disagree with.
+        write - a MALFORMED one, by the time a block reaches here, since
+        `_read_cross_keys` has already settled every readable boolean - and
+        read the phase off its ``status`` instead. That undoes the strict
+        refusal one line later and completes a phase on a report the contract
+        just called unreadable, so the alias reads only a block that has
+        nothing for it to disagree with.
+
+        Kept as a rule of this model and not folded into `_read_cross_keys`
+        because the two guard different things: that one weighs two readable
+        claims against each other, this one refuses to read past an
+        unreadable one. Neither subsumes the other, and the alias must be safe
+        on its own terms whatever reaches it.
         """
         if isinstance(block, dict) and "success" in block:
             raise ValueError("a block that wrote 'success' is judged by the contract, not aliased")
@@ -509,6 +574,76 @@ class _StatusAliasResult(BaseModel):
             f'instead of a "success" boolean and was read as '
             f"{self.status.verdict.name} on that (#1324)."
         )
+
+
+class _CrossKeyReading(Enum):
+    """What a block that may have named its outcome twice actually did.
+
+    Three states rather than a boolean because the two ways a block CAN carry
+    both keys oblige different things: disagreement is refused, and agreement
+    is read exactly as it always was and merely noted. Collapsing them would
+    force one of those two to be wrong.
+    """
+
+    #: The block did not write both keys, or wrote a ``status`` outside the
+    #: closed alias vocabulary, so there is no second outcome claim to weigh.
+    ABSENT = auto()
+    #: Both keys name the same outcome. The contract settles it, as before.
+    AGREES = auto()
+    #: Both keys name outcomes, and opposite ones.
+    CONTRADICTS = auto()
+
+
+def _read_cross_keys(decoded: object) -> _CrossKeyReading:
+    """Whether a block named its outcome twice, and whether the two agreed.
+
+    WHY THIS IS A RULE AND NOT A MODEL. Both models are deliberately blind to
+    it and neither can be fixed to see it without losing what it is for:
+    `_ReportedResult` has ``extra="ignore"`` because an unexpected key is not a
+    reason to discard a well-formed outcome, and `_StatusAliasResult` is only
+    ever reached once the contract has already refused. So the question is
+    asked once, here, over the decoded object, before either of them settles
+    anything - which is also why a repair inside either model would have left
+    the other able to drift away from it.
+
+    WHY DISAGREEMENT REFUSES. ``{"success": true, "status": "failed"}`` is a
+    phase saying it finished and saying it did not, in one block. Read by the
+    contract alone it COMPLETES, which is the direction this module exists to
+    close: the block contains a plain statement of failure and the phase
+    completed anyway. There is no reading of it that is safe to act on, and
+    "we could not tell" is exactly what UNREADABLE means - so it refuses, at
+    the cost of a rerun, and the operator is shown both spellings.
+
+    WHY AGREEMENT DOES NOT. ``{"success": true, "status": "completed"}`` is a
+    phase that wrote the contract's key, correctly, and one redundant key
+    beside it. Refusing that would fail a report that obeyed the contract over
+    a key that contradicts nothing - which is defect (2) in the module
+    docstring, SUCCESS became UNREADABLE, in a new spelling. It is read as it
+    always was and logged, because the drift is worth seeing and is not worth a
+    rerun.
+
+    A ``status`` that is not one of the two `_StatusAlias` spellings is not an
+    outcome claim at all - ``{"success": true, "status": "in_progress"}`` is
+    one claim and a note - so it is `ABSENT` and nothing changes for it. The
+    vocabulary is exact here for the same reason it is exact in the alias: the
+    set is closed in one place, and guessing at a near-miss is the guessing
+    this whole module refuses.
+    """
+    if not isinstance(decoded, dict):
+        return _CrossKeyReading.ABSENT
+    claimed: object = decoded.get("success")
+    named: object = decoded.get("status")
+    # `isinstance(x, bool)` and not a truth test: the contract reads only a
+    # JSON boolean, so anything else under `success` is for the models to
+    # refuse and never for this rule to compare against.
+    if not isinstance(claimed, bool) or not isinstance(named, str):
+        return _CrossKeyReading.ABSENT
+    try:
+        outcome = _StatusAlias(named).verdict
+    except ValueError:
+        return _CrossKeyReading.ABSENT
+    agrees = outcome is (VerdictStatus.SUCCESS if claimed else VerdictStatus.FAILURE)
+    return _CrossKeyReading.AGREES if agrees else _CrossKeyReading.CONTRADICTS
 
 
 def _payload_starts(text: str, after: int) -> int:
