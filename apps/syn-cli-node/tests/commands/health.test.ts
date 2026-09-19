@@ -23,11 +23,17 @@ describe("health command", () => {
     });
   }
 
+  /** The build block /health now always carries (#1380). Spelled out in a
+   * helper rather than in each fixture so no test can accidentally assert
+   * against a payload the API cannot produce - the mistake the
+   * `degraded_reasons` comment below records. */
+  const BUILD = { version: "0.29.0", image_tag: null, commit: null };
+
   const emptyArgs = { positionals: [] as string[], values: {} };
 
   it("prints healthy status", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ status: "healthy", mode: "full" }),
+      jsonResponse({ build: BUILD, status: "healthy", mode: "full" }),
     );
 
     await healthCommand.handler(emptyArgs);
@@ -46,6 +52,7 @@ describe("health command", () => {
   it("prints degraded status with reasons", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "degraded",
         degraded_reasons: ["subscription_coordinator", "projection_catchup"],
@@ -67,6 +74,7 @@ describe("health command", () => {
   it("names the lagging projection while the read models rebuild", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "degraded",
         degraded_reasons: ["projection_catchup"],
@@ -99,6 +107,7 @@ describe("health command", () => {
   it("says nothing about rebuilding when the read models are current", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "full",
         subscription: {
@@ -128,6 +137,7 @@ describe("health command", () => {
   it("names the stalled projection and says waiting will not help", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "degraded",
         degraded_reasons: ["projection_stalled"],
@@ -170,6 +180,7 @@ describe("health command", () => {
   it("reports a wedged rebuild as both rebuilding and stalled", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "degraded",
         degraded_reasons: ["projection_catchup", "projection_stalled"],
@@ -214,15 +225,77 @@ describe("health command", () => {
 
   it("throws CLIError on unhealthy status", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({ status: "unhealthy", mode: "full" }),
+      jsonResponse({ build: BUILD, status: "unhealthy", mode: "full" }),
     );
 
     await expect(healthCommand.handler(emptyArgs)).rejects.toThrow(CLIError);
   });
 
+  // `syn health` is the interface an operator or an agent uses to answer "is
+  // the new build live yet?". Until #1380 it could not: /health carried no
+  // version and openapi.json claimed 0.5.1 against a 0.29.1b3 deployment.
+  it("names the running build", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        build: { version: "0.29.1b3", image_tag: null, commit: null },
+        status: "healthy",
+        mode: "full",
+      }),
+    );
+
+    await healthCommand.handler(emptyArgs);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    // The exact beta from the deploy in the issue: a value no default produces.
+    expect(output).toContain("syn-api 0.29.1b3");
+  });
+
+  it("names the image tag and commit when the build stamped them", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        build: {
+          version: "0.29.1b3",
+          image_tag: "v0.29.1-beta.3",
+          commit: "9f3c1ab",
+        },
+        status: "healthy",
+        mode: "full",
+      }),
+    );
+
+    await healthCommand.handler(emptyArgs);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    expect(output).toContain("syn-api 0.29.1b3 (v0.29.1-beta.3, 9f3c1ab)");
+  });
+
+  // The build is the answer a DEGRADED deployment is most often asked for -
+  // "is this the bad build?" - so it must not be gated behind a healthy verdict.
+  it("names the running build even when the deployment is unhealthy", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        build: { version: "0.29.1b3", image_tag: null, commit: null },
+        status: "unhealthy",
+        mode: "degraded",
+      }),
+    );
+
+    await expect(healthCommand.handler(emptyArgs)).rejects.toThrow(CLIError);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    expect(output).toContain("syn-api 0.29.1b3");
+  });
+
   it("prints subscription info when present", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({
+        build: BUILD,
         status: "healthy",
         mode: "full",
         subscription: { status: "healthy", running: true },

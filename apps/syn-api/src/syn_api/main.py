@@ -10,6 +10,7 @@ from agentic_logging import get_logger, setup_logging
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from syn_api.build_info import get_build_info
 from syn_api.config import get_api_config
 from syn_api.routes import (
     artifacts_router,
@@ -33,7 +34,6 @@ from syn_api.routes import (
     webhooks_router,
     workflows_router,
 )
-from syn_api.build_info import get_build_info
 from syn_api.strict_query import reject_unknown_query_params
 from syn_api.types import Err, HealthResponse, Ok
 

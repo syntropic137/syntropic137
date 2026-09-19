@@ -2009,6 +2009,32 @@ export interface components {
             unpushed_commits: number;
         };
         /**
+         * BuildInfo
+         * @description Which build is answering. Populated by ``syn_api.build_info``.
+         *
+         *     Reported in two places from that one source: this block on ``GET /health``,
+         *     and ``openapi.json``'s ``info.version``. Both used to be, or were derived
+         *     from, a hardcoded literal that had drifted twenty releases behind the
+         *     installed package.
+         */
+        BuildInfo: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3').
+             */
+            version: string;
+            /**
+             * Image Tag
+             * @description Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one — which is a different fact from an unknown tag, and is reported as such.
+             */
+            image_tag?: string | null;
+            /**
+             * Commit
+             * @description Git commit the image was built from, stamped at image build time. Null when the build did not stamp one.
+             */
+            commit?: string | null;
+        };
+        /**
          * CancelRequest
          * @description Request to cancel an execution.
          */
@@ -3225,6 +3251,36 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthResponse
+         * @description Payload of ``GET /health``.
+         *
+         *     EXTRAS ARE ALLOWED, and that is the boundary this model draws rather than an
+         *     omission. The fields below are the ones ``lifecycle.health_check`` sets
+         *     itself; the ``subscription``, ``codex_auth``, ``degraded_reasons`` and
+         *     ``warnings`` blocks are contributed by independent probes that own their own
+         *     shapes and are documented at their own source. Declaring them here would
+         *     duplicate those contracts, and forbidding them would turn adding a probe
+         *     into a 500 on the endpoint liveness checks read — the opposite of what this
+         *     endpoint is for. Typing those blocks is worth doing; it is a bigger change
+         *     than a reporting fix and is not this one.
+         */
+        HealthResponse: {
+            /**
+             * Status
+             * @description 'healthy' while the process is alive and accepting writes.
+             */
+            status: string;
+            /**
+             * Mode
+             * @description 'full', or 'degraded' when some subsystem is impaired.
+             */
+            mode: string;
+            /** @description Which build is answering (#1380). */
+            build: components["schemas"]["BuildInfo"];
+        } & {
+            [key: string]: unknown;
         };
         /**
          * HeatmapDayBucketResponse
@@ -8954,9 +9010,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };

@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.5.1"
+    "version": "0.29.0"
   },
   "paths": {
     "/workflows": {
@@ -5451,9 +5451,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Health Get"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             }
@@ -5938,6 +5936,46 @@
         ],
         "title": "BranchObservationInfo",
         "description": "One branch of a failed phase's workspace, as git had it (#1200).\n\nTHE ANSWER TO \"WHERE DO I LOOK\", made machine-readable. A phase can push\ncomplete work and still fail - most often because it wrote no deliverable,\nwhich #1167 correctly refuses to pass - and the failure then named no\nbranch, so nothing pointed at commits that were merged by hand twice in one\nday once a human found them.\n\nEVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the\nREMOTE ITSELF answered, asked while the workspace was still alive, and\n`remote_commit_at_phase_start` is where this clone's tracking ref pointed\nwhen the phase was handed that workspace. The two differing means the ref\nmoved. It does NOT mean this phase moved it, and no field here says so: a\npush carries no author, so the same evidence is produced by a concurrent\nprocess or a person. Two earlier versions of this claimed otherwise.\n\nA RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the\nrepository - the ref moved, or commits are sitting on no remote. The FIELD\nis three-valued and the two empty answers must not be merged: absent/null\nmeans nothing could look, `[]` means the workspace was read and every\nbranch is exactly where the phase found it. Only a moved ref can be\nrecovered by fetching."
+      },
+      "BuildInfo": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly \u2014 including beta suffixes (e.g. '0.29.1b3')."
+          },
+          "image_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Tag",
+            "description": "Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one \u2014 which is a different fact from an unknown tag, and is reported as such."
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit",
+            "description": "Git commit the image was built from, stamped at image build time. Null when the build did not stamp one."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "BuildInfo",
+        "description": "Which build is answering. Populated by ``syn_api.build_info``.\n\nReported in two places from that one source: this block on ``GET /health``,\nand ``openapi.json``'s ``info.version``. Both used to be, or were derived\nfrom, a hardcoded literal that had drifted twenty releases behind the\ninstalled package."
       },
       "CancelRequest": {
         "properties": {
@@ -8459,6 +8497,33 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'healthy' while the process is alive and accepting writes."
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "'full', or 'degraded' when some subsystem is impaired."
+          },
+          "build": {
+            "$ref": "#/components/schemas/BuildInfo",
+            "description": "Which build is answering (#1380)."
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "mode",
+          "build"
+        ],
+        "title": "HealthResponse",
+        "description": "Payload of ``GET /health``.\n\nEXTRAS ARE ALLOWED, and that is the boundary this model draws rather than an\nomission. The fields below are the ones ``lifecycle.health_check`` sets\nitself; the ``subscription``, ``codex_auth``, ``degraded_reasons`` and\n``warnings`` blocks are contributed by independent probes that own their own\nshapes and are documented at their own source. Declaring them here would\nduplicate those contracts, and forbidding them would turn adding a probe\ninto a 500 on the endpoint liveness checks read \u2014 the opposite of what this\nendpoint is for. Typing those blocks is worth doing; it is a bigger change\nthan a reporting fix and is not this one."
       },
       "HeatmapDayBucketResponse": {
         "properties": {
