@@ -2285,3 +2285,54 @@ class SkillStorageStatsResponse(BaseModel):
         default=False,
         description="True if the backend returned a partial listing, so the counts are floors.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Runtime feature flags (#105, ADR-016)
+# ---------------------------------------------------------------------------
+
+
+class FeaturesResponse(BaseModel):
+    """Which optional features this deployment has switched on.
+
+    Read by the dashboard at RUNTIME, so a flag is one .env line plus a
+    restart rather than a rebuild: the operator runs the same image as
+    everybody else. Fields are additive and always present, so a client
+    never has to branch on their absence.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ui_feedback: bool = Field(
+        default=False,
+        description=(
+            "In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). "
+            "When false the routes answer 404 and the dashboard never loads the widget."
+        ),
+    )
+
+
+class FeatureDisabledDetail(BaseModel):
+    """Why a route that exists is refusing to do anything."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    feature: str = Field(description="The feature flag that governs this route.")
+    reason: str = Field(description="Human-readable explanation.")
+    enable_with: str | None = Field(
+        default=None,
+        description="The environment setting that switches the feature on, when there is one.",
+    )
+
+
+class FeatureDisabledResponse(BaseModel):
+    """Body of the 404 a flag-gated route returns while its flag is off.
+
+    The routes are mounted unconditionally so the OpenAPI spec, the CLI
+    types and the drift check are byte-identical with the flag on or off;
+    only this body distinguishes "the feature is off" from "no such item".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: FeatureDisabledDetail

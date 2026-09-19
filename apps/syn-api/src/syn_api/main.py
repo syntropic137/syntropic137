@@ -19,6 +19,7 @@ from syn_api.routes import (
     costs_router,
     events_router,
     executions_router,
+    features_router,
     github_router,
     insights_router,
     metrics_router,
@@ -34,7 +35,7 @@ from syn_api.routes import (
     workflows_router,
 )
 from syn_api.strict_query import reject_unknown_query_params
-from syn_api.types import Err, Ok
+from syn_api.types import Err, FeatureDisabledResponse, Ok
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -149,6 +150,28 @@ def create_app() -> FastAPI:
     app.include_router(systems_router)
     app.include_router(repos_router)
     app.include_router(insights_router)
+    app.include_router(features_router)
+
+    # ── UI feedback (ADR-016, #105) ────────────────────────────────────
+    # Mounted unconditionally, on purpose. SYN_UI_FEEDBACK_ENABLED decides
+    # what these routes DO, never whether they exist: if the flag moved the
+    # mount, the OpenAPI spec, the generated CLI types and check:api-drift
+    # would all differ between two deployments of the same image. With the
+    # flag off, syn_api.services.ui_feedback.get_feedback_storage answers
+    # every one of them with the typed 404 declared below.
+    from ui_feedback.router import create_feedback_router
+
+    from syn_api.services import ui_feedback as ui_feedback_service
+
+    feedback_router, feedback_overrides = create_feedback_router(
+        ui_feedback_service.get_feedback_storage,
+        max_upload_bytes=ui_feedback_service.MAX_UPLOAD_BYTES,
+    )
+    app.dependency_overrides.update(feedback_overrides)
+    app.include_router(
+        feedback_router,
+        responses={404: {"model": FeatureDisabledResponse}},
+    )
 
     @app.get("/")
     async def root() -> dict[str, str]:

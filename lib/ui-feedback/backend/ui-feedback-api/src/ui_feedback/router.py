@@ -37,14 +37,17 @@ DependencyOverrides = dict[Callable[[], object], Callable[[], object]]
 
 
 def create_feedback_router(
-    storage: FeedbackStorageProtocol,
+    storage: FeedbackStorageProtocol | Callable[[], FeedbackStorageProtocol],
     *,
     max_upload_bytes: int | None = None,
 ) -> tuple[APIRouter, DependencyOverrides]:
     """Create a FastAPI router with all feedback endpoints.
 
     Args:
-        storage: Storage implementation to use for persistence.
+        storage: Either a storage implementation, or a callable returning one
+            per request. The callable form exists because a host application
+            may decide per request whether the feature is available at all -
+            it can raise there instead of having every route repeat the check.
         max_upload_bytes: Per-file upload ceiling for screenshots and voice
             notes. ``None`` keeps the module's own UI_FEEDBACK_MAX_FILE_SIZE,
             which is what the standalone app uses; a host application passes
@@ -56,9 +59,15 @@ def create_feedback_router(
     """
     router = APIRouter()
 
-    # Create storage dependency
-    def get_storage() -> FeedbackStorageProtocol:
-        return storage
+    # Storage implementations are objects, never callables, so this is an
+    # unambiguous discrimination between the two accepted forms.
+    if callable(storage):
+        get_storage = storage
+    else:
+        instance = storage
+
+        def get_storage() -> FeedbackStorageProtocol:
+            return instance
 
     # `/feedback/stats` FIRST. Registration order is match order, and
     # `/feedback/{feedback_id}` would otherwise swallow it and fail to parse
