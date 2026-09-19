@@ -192,6 +192,11 @@ class PhaseWorkspace:
             workspace_cm=result.workspace_cm,
             agent_env=result.agent_env,
             claude_cmd=result.claude_cmd,
+            # The phase's own declaration, handed over here because this is the
+            # only frame that holds both it and the workspace it describes. The
+            # terminal paths that need it are given an exception and a phase id
+            # and have no definition to ask (#1231).
+            delivers_repo_changes=phase.delivers_repo_changes,
         )
         await self._runtime.record_starting_point(todo.phase_id)
         aggregate.provision_workspace_completed(result.command)
