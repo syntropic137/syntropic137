@@ -31,8 +31,11 @@ from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 # One thing makes these better than their execution_cost equivalents and it is
 # worth not losing: they are BATCHED. A repo's executions are priced in two
 # round-trips over an id array rather than two per execution, so the scan is
-# paid once per page instead of once per row. The per-page cost is the same
-# shape; the per-row multiplier that made /executions 21.8s is absent.
+# paid once over the whole execution-id set rather than once per row - and
+# over the WHOLE set, not once per page: `calculate_all` binds every
+# correlated execution id it was given, with no pagination of its own. The
+# per-row multiplier that made /executions 21.8s is absent; the per-call cost
+# still grows with how many executions the caller hands over.
 #
 # They are covered by `idx_events_execution_type (execution_id, event_type,
 # time)` on the uncompressed chunks, and by nothing on the compressed ones.

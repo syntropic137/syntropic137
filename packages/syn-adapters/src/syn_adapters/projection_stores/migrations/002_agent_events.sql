@@ -63,7 +63,11 @@ CREATE INDEX IF NOT EXISTS idx_events_session_type ON agent_events (session_id, 
 CREATE INDEX IF NOT EXISTS idx_events_execution_type ON agent_events (execution_id, event_type, time DESC);
 
 -- GIN index on data for JSONB queries
-CREATE INDEX IF NOT EXISTS idx_events_data ON agent_events USING GIN (data);
+-- idx_events_data (GIN over `data`) was declared here and never created by
+-- any install. It is removed rather than honoured: nothing queries `data` by
+-- containment, and EventStoreSchema._create_indexes runs at API startup, where
+-- a non-concurrent GIN build would hold writes off agent_events for the length
+-- of the build. See the matching note in events/schema.py.
 
 -- Configure compression (for scale - compress after 1 day)
 ALTER TABLE agent_events SET (

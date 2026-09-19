@@ -330,18 +330,24 @@ class EventStoreSchema:
             ON agent_events (execution_id, event_type, time DESC)
         """)
 
-        # Declared canonical in 002_agent_events.sql since that migration was
-        # written, and created here for the first time in #1338: it was the
-        # pre-existing drift the index test found on its first run, so until now
-        # no install had it. Listed last because it is the one index here that
-        # serves no query in this repository today - it is kept because the
-        # canonical schema declares it, and dropping a GIN index over every
-        # `data` payload is a write-throughput decision to take deliberately in
-        # both files rather than by leaving Python silently behind.
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_events_data
-            ON agent_events USING GIN (data)
-        """)
+        # `idx_events_data`, a GIN index over every event's whole `data`
+        # payload, is DELIBERATELY NOT CREATED HERE, and is not declared in
+        # 002_agent_events.sql either, so the two stay in agreement.
+        #
+        # It was declared in that migration and never created, which the index
+        # test found as drift on its first run. Resolving that drift by
+        # creating it would have been the wrong direction: nothing in this
+        # repository queries `data` by containment, so the index earns nothing
+        # - and it is not free. `_create_indexes` runs inside API STARTUP, and
+        # a plain `CREATE INDEX` (not CONCURRENTLY, which cannot run in this
+        # transaction) takes a lock that holds writes off `agent_events` for
+        # as long as the build takes. On an install with real history that is
+        # the observability write path stalled at boot, once, with no warning
+        # and nothing gained.
+        #
+        # So the drift is resolved by removing the declaration rather than by
+        # honouring it. If a query that needs it ever arrives, it comes back
+        # with that query, built CONCURRENTLY outside startup.
 
     async def _create_day_rollup(self, conn: asyncpg.Connection) -> None:
         """Create the per-day rollup that bounds the contribution heatmap (#1253).
