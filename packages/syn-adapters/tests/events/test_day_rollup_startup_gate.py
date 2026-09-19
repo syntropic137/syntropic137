@@ -34,12 +34,14 @@ telling the fake what it wants to hear.
 What they cannot reach is whether PostgreSQL agrees: that ``tgenabled <> 'D'``
 really is how a disabled trigger reads, that the recomputing upsert really does
 repair a short row, that two real connections really do serialise on the lock.
-Those are ``test_heatmap_rollup_reconciliation.py``, marked ``integration``,
+Those are ``test_day_rollup_reconciliation.py``, marked ``integration``,
 which does not run on a PR into ``main`` (ci.yml). ``pytest -m unit`` is what
 gates the PR, so the decision itself is pinned here.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -49,6 +51,9 @@ from syn_adapters.events.schema import (
 )
 
 from .test_day_rollup_backfill_runs_once import CatalogueConnection
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -90,18 +95,31 @@ async def _startup(conn: CatalogueConnection, schema: EventStoreSchema) -> None:
 class TestATableIsNotProofTheRollupIsComplete:
     """The finding: existence answered a question nobody had asked."""
 
-    async def test_a_trigger_that_stopped_maintaining_it_earns_a_backfill(self) -> None:
+    @pytest.mark.parametrize(
+        "stop_it",
+        (CatalogueConnection.drop_trigger, CatalogueConnection.disable_trigger),
+        ids=("dropped", "disabled"),
+    )
+    async def test_a_trigger_that_stopped_maintaining_it_earns_a_backfill(
+        self, stop_it: Callable[[CatalogueConnection, str], None]
+    ) -> None:
         """The gap-closing case, and the one the old gate got wrong.
 
         The table survives - nothing dropped it - so the old gate saw it, said
         "filled", and skipped. Every event that arrived while the trigger was
         detached stayed missing.
+
+        Both ways of stopping a trigger, because PostgreSQL leaves the
+        catalogue in different states for them: DROP removes the pg_trigger
+        row, DISABLE leaves it with ``tgenabled = 'D'``. A live-check written
+        as "does a trigger row exist" passes the disabled case and leaves the
+        gap open forever, so that case has to be asked separately.
         """
         conn = _OrderedConnection()
         schema = EventStoreSchema()
 
         await _startup(conn, schema)
-        conn.forget_trigger(TRIGGER)
+        stop_it(conn, TRIGGER)
         await _startup(conn, schema)
 
         assert conn.count_backfills() == 2, (

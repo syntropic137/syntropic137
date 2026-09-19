@@ -14,8 +14,8 @@ difference is whether the statement was issued. So this test watches the
 statements.
 
 The OTHER half of the gate - that a rollup whose trigger went missing is NOT
-treated as complete - is in test_day_rollup_reconciles_a_dead_trigger.py, which
-uses the same fake.
+treated as complete - is in test_day_rollup_startup_gate.py, which uses the
+same fake.
 
 It is a unit test on purpose. The integration job that would exercise the real
 trigger does not run on pull requests into `main` (see .github/workflows/ci.yml:
@@ -85,7 +85,13 @@ class CatalogueConnection:
         #: is a fact about the two interleaved.
         self.calls: list[str] = []
         self._relations: set[str] = set()
-        self._enabled_triggers: set[str] = set()
+        #: Attached and NOT-disabled are tracked apart, because PostgreSQL
+        #: spells them apart - an absent pg_trigger row versus one with
+        #: `tgenabled = 'D'` - and a live-check that forgets the second half
+        #: passes a disabled trigger as healthy. A fake that merged them would
+        #: answer that question for the code instead of asking it.
+        self._triggers: set[str] = set()
+        self._disabled_triggers: set[str] = set()
 
     async def execute(self, sql: str, *_args: object) -> None:
         self.executed.append(sql)
@@ -99,10 +105,12 @@ class CatalogueConnection:
         # the trigger still look healthy.
         attached = re.search(r"CREATE TRIGGER (\w+)", sql)
         if attached:
-            self._enabled_triggers.add(attached.group(1))
+            self._triggers.add(attached.group(1))
+            self._disabled_triggers.discard(attached.group(1))
         detached = re.search(r"DROP TRIGGER IF EXISTS (\w+)", sql)
         if detached:
-            self._enabled_triggers.discard(detached.group(1))
+            self._triggers.discard(detached.group(1))
+            self._disabled_triggers.discard(detached.group(1))
 
     async def fetchval(self, sql: str, *_args: object) -> bool:
         self.calls.append(sql)
@@ -111,7 +119,14 @@ class CatalogueConnection:
             return relation.group(1) in self._relations
         trigger = re.search(r"FROM pg_trigger\b.*?tgname = '(\w+)'", sql, re.DOTALL)
         if trigger is not None:
-            return trigger.group(1) in self._enabled_triggers
+            name = trigger.group(1)
+            # Answer the question the SQL actually asks. Existence alone if
+            # that is all it asks for - which is how a disabled trigger got
+            # through - and existence-and-enabled only if it says so.
+            if name not in self._triggers:
+                return False
+            asks_about_enabled = "tgenabled" in sql
+            return not asks_about_enabled or name not in self._disabled_triggers
         msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
         raise AssertionError(msg)
 
@@ -128,17 +143,20 @@ class CatalogueConnection:
         """Make the catalogue report a table as gone, as a rollback would."""
         self._relations.discard(name)
 
-    def forget_trigger(self, name: str) -> None:
-        """Make the catalogue report a trigger as dropped or disabled.
+    def drop_trigger(self, name: str) -> None:
+        """Make the catalogue report a trigger as gone, as a DROP would."""
+        self._triggers.discard(name)
+        self._disabled_triggers.discard(name)
 
-        One method for both, because `_rollup_is_complete()` asks one question -
-        "is something still maintaining this table" - and a dropped trigger and
-        a disabled one are the same answer to it. Whether PostgreSQL spells the
-        difference as an absent pg_trigger row or as `tgenabled = 'D'` is the
-        real database's business, and the real database is what
-        test_heatmap_rollup_reconciliation.py asks.
+    def disable_trigger(self, name: str) -> None:
+        """Leave the trigger attached but stopped, as DISABLE TRIGGER would.
+
+        Kept apart from `drop_trigger` because it is the case that slips
+        through: the pg_trigger row is still there, so anything asking only
+        whether a trigger EXISTS says the rollup is being maintained while
+        nothing is maintaining it.
         """
-        self._enabled_triggers.discard(name)
+        self._disabled_triggers.add(name)
 
 
 def _trigger_statements(conn: CatalogueConnection) -> list[str]:
