@@ -235,8 +235,13 @@ class EventStoreSchema:
         4. Update EXPECTED_COLUMNS in models.py to match
         5. Update docker/init-db if needed for fresh containers
 
-        Auto-creation is disabled when skip_auto_create=True, which leaves the
-        caller responsible for having created the schema some other way.
+        The drift tests in tests/events/ exist to stop the two separating, and
+        since #1338 they cover indexes as well as columns.
+
+        Auto-creation is disabled when skip_auto_create=True, which turns
+        agent_events DDL off entirely with no replacement. That is correct for
+        a database whose schema is managed out of band, and a guarantee of an
+        empty schema for one that is not.
     """
 
     def __init__(self, *, skip_auto_create: bool = False) -> None:
@@ -287,7 +292,16 @@ class EventStoreSchema:
         """)
 
     async def _create_indexes(self, conn: asyncpg.Connection) -> None:
-        """Create indexes for common queries."""
+        """Create indexes for common queries.
+
+        Index set MUST match: projection_stores/migrations/002_agent_events.sql,
+        which carries the reasoning for each one. Nothing applies that migration
+        (see the class docstring), so this method is the only path by which any
+        of these indexes reaches a database - a new index added only to the .sql
+        file is a no-op everywhere.
+
+        Pinned by test_agent_events_index_set_reaches_a_fresh_install.py.
+        """
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_events_session
             ON agent_events (session_id, time DESC)
@@ -302,6 +316,38 @@ class EventStoreSchema:
             CREATE INDEX IF NOT EXISTS idx_events_type
             ON agent_events (event_type, time DESC)
         """)
+
+        # The cost read paths pair an id with an event_type; the three indexes
+        # above all lead on one column and then on `time`, so none of them
+        # serves that pair (#1338). Uncompressed chunks only - see the migration.
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_session_type
+            ON agent_events (session_id, event_type, time DESC)
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_events_execution_type
+            ON agent_events (execution_id, event_type, time DESC)
+        """)
+
+        # `idx_events_data`, a GIN index over every event's whole `data`
+        # payload, is DELIBERATELY NOT CREATED HERE, and is not declared in
+        # 002_agent_events.sql either, so the two stay in agreement.
+        #
+        # It was declared in that migration and never created, which the index
+        # test found as drift on its first run. Resolving that drift by
+        # creating it would have been the wrong direction: nothing in this
+        # repository queries `data` by containment, so the index earns nothing
+        # - and it is not free. `_create_indexes` runs inside API STARTUP, and
+        # a plain `CREATE INDEX` (not CONCURRENTLY, which cannot run in this
+        # transaction) takes a lock that holds writes off `agent_events` for
+        # as long as the build takes. On an install with real history that is
+        # the observability write path stalled at boot, once, with no warning
+        # and nothing gained.
+        #
+        # So the drift is resolved by removing the declaration rather than by
+        # honouring it. If a query that needs it ever arrives, it comes back
+        # with that query, built CONCURRENTLY outside startup.
 
     async def _create_day_rollup(self, conn: asyncpg.Connection) -> None:
         """Create the per-day rollup that bounds the contribution heatmap (#1253).
