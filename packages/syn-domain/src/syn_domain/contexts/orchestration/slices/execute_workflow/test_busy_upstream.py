@@ -19,6 +19,8 @@ executions against a condition no wait can clear.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
@@ -249,7 +251,10 @@ class TestTheOneDeadline:
 
         while True:
             granted.append(attempts.seconds_left)
-            clock.advance(min(300.0, attempts.seconds_left))
+            # Each attempt spends 400s of what it was granted, or all of it if
+            # that is less. Spending a FIXED amount would let a budget that
+            # silently reset still land inside 1000, which is the whole defect.
+            clock.advance(min(400.0, attempts.seconds_left))
             if not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False):
                 break
 
@@ -257,8 +262,8 @@ class TestTheOneDeadline:
         assert clock.now <= 1000.0, (
             f"{clock.now}s spent against a 1000s phase timeout: the deadline moved"
         )
-        assert granted == sorted(granted, reverse=True), (
-            f"an attempt got more time than the one before it: {granted}"
+        assert all(later < earlier for earlier, later in itertools.pairwise(granted)), (
+            f"an attempt got at least as much time as the one before it: {granted}"
         )
 
 

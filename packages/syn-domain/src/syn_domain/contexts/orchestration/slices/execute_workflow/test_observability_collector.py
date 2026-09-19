@@ -250,3 +250,54 @@ class TestObservabilityCollectorNullWriter:
         """has_writer reflects writer presence."""
         assert not _make_collector(writer=None).has_writer
         assert _make_collector(writer=AsyncMock()).has_writer
+
+
+@pytest.mark.unit
+class TestSawToolUse:
+    """The one witness that a phase's agent actually did something (#1303).
+
+    Retrying a busy upstream is only safe for a launch that never started, and
+    this flag is how that is known: both stream processors announce every tool
+    op here and nowhere else in common. Whether it is set decides whether a
+    failed phase is re-run, so each way of announcing a tool op needs its own
+    test - a path that stops setting it would otherwise cost a duplicated
+    phase, silently.
+    """
+
+    def test_a_fresh_collector_has_seen_nothing(self) -> None:
+        assert not _make_collector(writer=AsyncMock()).saw_tool_use
+
+    @pytest.mark.anyio
+    async def test_a_started_tool_is_work(self) -> None:
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_tool_started("Bash", "t-1", "rm -rf build")
+
+        assert collector.saw_tool_use
+
+    @pytest.mark.anyio
+    async def test_a_completed_tool_is_work_even_with_no_start_behind_it(self) -> None:
+        """Codex can announce a `file_change` only on completion (#1064).
+
+        Counting starts alone would miss the tool op that already edited the
+        workspace, and the phase would be re-run over its own edits.
+        """
+        collector = _make_collector(writer=AsyncMock())
+
+        await collector.record_tool_completed("file_change", "t-1", success=True, output_preview="")
+
+        assert collector.saw_tool_use
+
+    @pytest.mark.anyio
+    async def test_work_is_witnessed_with_no_writer_to_record_it(self) -> None:
+        """The flag is about what the AGENT did, not about who stored it.
+
+        A collector with no writer still runs a real agent against a real
+        workspace. Reading "no work" off a missing writer would make every such
+        phase retriable.
+        """
+        collector = _make_collector(writer=None)
+
+        await collector.record_tool_started("Bash", "t-1", "")
+
+        assert collector.saw_tool_use
