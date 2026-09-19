@@ -672,7 +672,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
                 ),
             ),
         )
-        await processor._handle_collect_artifacts(
+        await processor._workspaces.collect(
             TodoItem(
                 execution_id="exec-1",
                 action=TodoAction.COLLECT_ARTIFACTS,
