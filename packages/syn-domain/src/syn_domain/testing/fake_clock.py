@@ -27,13 +27,26 @@ class FakeClock:
     #: Every backoff served, in order - the schedule, as observed rather than
     #: as configured.
     slept: list[float] = field(default_factory=list)
+    #: Extra time every sleep takes beyond what it was asked for.
+    #:
+    #: `sleep(delay)` does not promise to return after `delay`, and the gap is
+    #: not a rounding error: a suspended host, a busy loop or a descheduled
+    #: container can come back arbitrarily late. That is a fact about real
+    #: clocks that only a fake one can be made to assert, and it is the fact
+    #: behind the defect this exists for - an overslept backoff that used to
+    #: report the phase still affordable and hand the next attempt a timeout of
+    #: zero, which the workspace provider reads as no timeout at all (#1344).
+    oversleeps_by: float = 0.0
 
     def monotonic(self) -> float:
         return self.now
 
     async def sleep(self, seconds: float) -> None:
+        # Recorded as ASKED and charged as TAKEN, deliberately: `slept` is the
+        # schedule under test and must not silently absorb the overshoot, while
+        # `now` is the clock everything else reads and must.
         self.slept.append(seconds)
-        self.now += seconds
+        self.now += seconds + self.oversleeps_by
 
     def advance(self, seconds: float) -> None:
         """Spend ``seconds`` on something other than waiting - an attempt running."""

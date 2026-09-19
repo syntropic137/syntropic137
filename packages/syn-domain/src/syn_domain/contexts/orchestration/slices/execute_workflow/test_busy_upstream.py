@@ -24,6 +24,7 @@ import itertools
 import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    _MIN_USEFUL_ATTEMPT_SECONDS,
     PhaseAttempts,
     UpstreamRetryPolicy,
 )
@@ -51,11 +52,27 @@ RATE_LIMITED = api_error_label(ApiErrorType.RATE_LIMIT, "429")
 ROOMY = 3600.0
 
 
-def _begin(*, timeout_seconds: float = ROOMY) -> tuple[PhaseAttempts, FakeClock]:
-    """A phase's attempts, on a clock the test owns, at production's bound."""
-    clock = FakeClock()
+def _begin(
+    *, timeout_seconds: float = ROOMY, oversleeps_by: float = 0.0
+) -> tuple[PhaseAttempts, FakeClock]:
+    """A phase's attempts, on a clock the test owns, at production's bound.
+
+    ``oversleeps_by`` is how much longer than asked each backoff really takes -
+    see `FakeClock`. Zero is a clock that keeps its word, which no real one
+    promises to.
+    """
+    clock = FakeClock(oversleeps_by=oversleeps_by)
     policy = UpstreamRetryPolicy(clock=clock.as_attempt_clock())
     return policy.begin(timeout_seconds=timeout_seconds), clock
+
+
+#: The least time an attempt may be given and still be worth starting, as
+#: `busy_upstream` defines it. Read from the module rather than written as 30
+#: so these boundary cases stay boundary cases if the floor is ever retuned.
+MIN_USEFUL = _MIN_USEFUL_ATTEMPT_SECONDS
+
+#: What the first backoff costs, which is what a pre-sleep check has to forecast.
+FIRST_BACKOFF = UpstreamRetryPolicy().base_delay_seconds
 
 
 class TestTheBackoff:
@@ -285,3 +302,91 @@ class TestAnAttemptThatGotSomewhere:
         attempts, _ = _begin()
 
         assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+
+
+class TestABackoffThatOverslept:
+    """The deadline is rechecked AFTER the wait, not only forecast before it.
+
+    `wait_before_retry` used to check affordability, sleep, and then return
+    True unconditionally. The check was a forecast of where the clock would be;
+    the sleep is what actually moved it, and `sleep(delay)` does not promise to
+    return after `delay` - a suspended host, a busy loop or a descheduled
+    container can come back arbitrarily late.
+
+    When that happened the caller had already been told to go again, and was
+    handed `int(seconds_left)` for the attempt. Past the deadline that is 0,
+    and the workspace provider reads a falsey timeout as NO TIMEOUT
+    (`if not timeout_seconds: return False` in `providers/base.py`). So an
+    overslept backoff did not merely waste the rest of the budget - it removed
+    the bound the budget existed to impose, and the hard phase timeout an
+    operator configured stopped applying at all.
+    """
+
+    async def test_a_sleep_that_overshoots_the_deadline_dispatches_no_successor(self) -> None:
+        """The reproduction from the review, in its own terms: a budget that
+        can afford the wait, a wait that takes far longer than it asked for."""
+        attempts, clock = _begin(timeout_seconds=40.0, oversleeps_by=45.0)
+
+        assert not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False), (
+            "the backoff came back past the deadline and another attempt was launched anyway"
+        )
+        assert clock.slept == [FIRST_BACKOFF], "it did not get as far as sleeping"
+        assert attempts.seconds_left == 0.0
+
+    async def test_a_backoff_leaving_exactly_the_minimum_still_retries(self) -> None:
+        """The boundary from the affordable side, and the control for the two
+        below: they must fail on the shortfall, not on the recheck existing."""
+        attempts, clock = _begin(timeout_seconds=MIN_USEFUL + FIRST_BACKOFF)
+
+        assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+        assert attempts.seconds_left == MIN_USEFUL
+        assert clock.now == FIRST_BACKOFF
+
+    async def test_a_backoff_leaving_just_under_the_minimum_does_not(self) -> None:
+        """Half a second short. Before the recheck this was indistinguishable
+        from the case above, because only the forecast was ever consulted and
+        the forecast said 30."""
+        attempts, _ = _begin(timeout_seconds=MIN_USEFUL + FIRST_BACKOFF, oversleeps_by=0.5)
+
+        assert not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+
+    async def test_a_backoff_leaving_exactly_zero_does_not(self) -> None:
+        """The value that matters most, because it is not a short attempt.
+
+        Zero is what `int(seconds_left)` truncates to at the deadline and what
+        the provider reads as unbounded.
+        """
+        attempts, _ = _begin(timeout_seconds=MIN_USEFUL + FIRST_BACKOFF, oversleeps_by=MIN_USEFUL)
+
+        assert not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+        assert attempts.seconds_left == 0.0
+
+    async def test_an_overshoot_past_an_hour_long_deadline_does_not(self) -> None:
+        """At the largest phase timeout the platform configures.
+
+        The arithmetic is otherwise correct at this size - that is pinned in
+        `TestTheOneDeadline` - so what fails here is only the oversleep, and it
+        fails by more than an hour.
+        """
+        attempts, clock = _begin(timeout_seconds=3600.0, oversleeps_by=3600.0)
+        clock.advance(3600.0 - MIN_USEFUL - FIRST_BACKOFF)
+
+        assert not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+        assert clock.now > 3600.0, "the clock did not actually overshoot - test proves nothing"
+
+    async def test_the_timeout_handed_to_an_attempt_is_never_zero(self) -> None:
+        """Whatever the clock has done, and however far past the deadline.
+
+        `seconds_left` may legitimately be 0.0 - it is a remaining budget. The
+        number the handler is given may not be, because downstream 0 does not
+        mean "no time" but "no limit". This is the floor that makes that
+        impossible rather than merely unlikely.
+        """
+        attempts, clock = _begin(timeout_seconds=100.0)
+        clock.advance(500.0)
+
+        assert attempts.seconds_left == 0.0
+        assert attempts.attempt_timeout_seconds >= 1, (
+            "an attempt would have been dispatched with a falsey timeout, which the "
+            "workspace provider reads as no timeout at all"
+        )

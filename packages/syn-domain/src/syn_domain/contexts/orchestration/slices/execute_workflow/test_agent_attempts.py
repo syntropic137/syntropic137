@@ -571,3 +571,94 @@ class TestOnlyALaunchThatNeverStartedIsRetried:
             "and attempt 3 re-ran the prompt over it anyway"
         )
         assert result.command.exit_code == 1
+
+
+class TestNothingIsDispatchedOnAnExpiredDeadline:
+    """What the handler is actually CALLED with, once the backoff overslept.
+
+    `test_busy_upstream.py` pins the decision; this pins the dispatch, and they
+    are not the same hop. The decision said "go again" and the caller then read
+    `seconds_left` for itself and truncated it, so a deadline that expired
+    during the wait produced `timeout_seconds=0` - which the workspace provider
+    reads as NO timeout (`if not timeout_seconds: return False`), making the
+    attempt that should not have run at all the one attempt with no bound.
+    """
+
+    async def test_a_backoff_that_overshoots_the_deadline_launches_nothing(self) -> None:
+        clock = FakeClock(oversleeps_by=45.0)
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=40),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        assert len(handler.attempts) == 1, (
+            f"the wait came back {clock.now - 40:.0f}s past a 40s deadline and a "
+            "successor was dispatched anyway"
+        )
+
+    async def test_an_overshoot_past_an_hour_long_phase_launches_nothing(self) -> None:
+        """The same, at the largest timeout the platform configures, and with
+        an attempt that really spent the budget rather than a deadline set
+        short enough to expire on its own."""
+        clock = FakeClock(oversleeps_by=3600.0)
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=3565.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(reason=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=3600),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        assert len(handler.attempts) == 1
+        assert clock.now > 3600.0, "the clock never overshot - the test proves nothing"
+
+    @pytest.mark.parametrize("oversleeps_by", [0.0, 0.5, 30.0, 45.0, 3600.0])
+    async def test_no_attempt_is_ever_given_a_timeout_of_zero(self, oversleeps_by: float) -> None:
+        """Across every overshoot the cases above single out, and the honest
+        clock alongside them.
+
+        Zero is not a short timeout downstream, it is an unbounded one, so this
+        is the invariant rather than an assertion about any one path: whatever
+        the clock did, every number this module hands a handler still MEANS a
+        limit.
+        """
+        clock = FakeClock(oversleeps_by=oversleeps_by)
+        handler = _RecordingHandler(
+            clock=clock,
+            takes_seconds=25.0,
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(reason=AT_CAPACITY)]
+            ),
+        )
+
+        await _run(
+            handler,
+            phase=_phase(timeout_seconds=70),
+            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert granted, "nothing was dispatched at all - the invariant is vacuous"
+        assert all(t > 0 for t in granted), (
+            f"{granted}: a handler was given a falsey timeout, which the workspace "
+            "provider reads as no timeout at all"
+        )
