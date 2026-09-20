@@ -679,6 +679,18 @@ async def _renew_credential(workspace: GitWorkspace, *, doing: str) -> None:
     The token already in the container may have minutes left, and spending it
     is the only way to find out. So the failure is logged and the push goes
     ahead, where its own result is reported honestly either way.
+
+    NEVER RAISES MEANS ANY EXCEPTION, not just the documented one. The
+    protocol says implementations raise `CredentialRenewalFailedError`, and
+    catching only that would make this promise conditional on every present
+    and future workspace keeping its half of it - while the cost of one that
+    does not is precisely #1393's cost: the rescue push is never attempted,
+    the commit dies with the container, and the honest `NOT RECOVERABLE`
+    report that the push would have produced is never written either. An
+    optional improvement to the credential must not be able to take the thing
+    it was improving with it, so the second handler is deliberate and not
+    defensive clutter: at this point in a phase there is no exception worth
+    more than the attempt.
     """
     try:
         await workspace.renew_git_credential()
@@ -689,6 +701,13 @@ async def _renew_credential(workspace: GitWorkspace, *, doing: str) -> None:
             "a phase that ran its full budget has probably expired.",
             doing,
             unrenewable,
+        )
+    except Exception:
+        logger.exception(
+            "Renewing this workspace's git credential before %s raised something other "
+            "than CredentialRenewalFailedError, which its protocol says it will not. "
+            "The push will be attempted with the credential already in the container.",
+            doing,
         )
 
 

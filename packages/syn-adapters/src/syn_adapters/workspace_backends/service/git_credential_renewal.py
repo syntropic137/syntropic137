@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +78,15 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
 
     Raises:
         CredentialRenewalFailedError: the credential in this container is not
-            known to be usable. Minting failed, or the script that installs it
-            did not run. Deliberately NOT swallowed here: the two callers want
-            opposite things from a failure - the startup check fails the phase
-            on it, the quarantine path logs it and pushes anyway on the chance
-            the old token has life left - and only they can decide that.
+            known to be usable, and THE ONLY THING this can raise. Minting
+            failed, the script could not be put in the container, running it
+            failed, or it exited non-zero - four causes, one outcome, because
+            the callers can do nothing different about them and a fifth kind
+            of failure escaping as itself is one neither of them catches.
+            Deliberately NOT swallowed here: the two want opposite things from
+            a failure - the startup check fails the phase on it, the
+            quarantine path logs it and pushes anyway on the chance the old
+            token has life left - and only they can decide that.
     """
     from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
@@ -106,18 +113,13 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
         logger.debug("No git credential to renew for workspace %s", workspace.workspace_id)
         return
 
-    await workspace.inject_files(
-        [(_SCRIPT_PATH, secrets.build_credential_script().encode())], base_path="/workspace"
-    )
     try:
-        result = await workspace.execute(
-            ["bash", f"/workspace/{_SCRIPT_PATH}"], timeout_seconds=_TIMEOUT_SECONDS
-        )
+        result = await _install(workspace, secrets.build_credential_script())
     finally:
         # The script holds the token in plain text, so removing it is not
         # tidiness. In a `finally` because a script that failed part-way is
         # exactly as readable as one that succeeded.
-        await workspace.execute(["rm", "-f", f"/workspace/{_SCRIPT_PATH}"])
+        await _remove_script(workspace)
 
     if result.exit_code != 0:
         raise CredentialRenewalFailedError(
@@ -125,3 +127,56 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
             f"{result.stderr.strip() or '(no stderr output)'}"
         )
     logger.info("Renewed the git credential in workspace %s", workspace.workspace_id)
+
+
+async def _install(workspace: ManagedWorkspace, script: str) -> ExecutionResult:
+    """Put the script in the container and run it, or raise the promised error.
+
+    EVERY WAY THIS CAN FAIL IS THE SAME FAILURE to the callers: the credential
+    in the container is not known to be usable. Both of these calls reach a
+    container through an isolation provider, so both can raise whatever that
+    provider raises - a docker API error, a timeout, a handle for a container
+    that has already gone. Letting one of those through as itself would have
+    been a third outcome nobody catches, and at teardown that is the whole
+    bug this module exists to fix arriving by another door: `_quarantine`
+    catches `CredentialRenewalFailedError` and would abort on anything else,
+    skipping the rescue push entirely rather than spending the old token on it.
+    A workspace that will not take a file is a workspace that did not get a
+    new credential, which is exactly what the error says.
+    """
+    try:
+        await workspace.inject_files([(_SCRIPT_PATH, script.encode())], base_path="/workspace")
+        return await workspace.execute(
+            ["bash", f"/workspace/{_SCRIPT_PATH}"], timeout_seconds=_TIMEOUT_SECONDS
+        )
+    except Exception as uninstallable:
+        raise CredentialRenewalFailedError(
+            f"the credential script could not be installed and run ({uninstallable})"
+        ) from uninstallable
+
+
+async def _remove_script(workspace: ManagedWorkspace) -> None:
+    """Delete the staged script, and never let that deletion be the verdict.
+
+    LOGGED, NOT RAISED, for two different reasons that happen to agree. A
+    cleanup that fails AFTER a successful renewal would otherwise report a
+    usable credential as unusable - and at startup that refuses a phase that
+    could have saved its work. A cleanup that fails after a FAILED renewal
+    would replace the real reason with itself, which is the masking a bare
+    `finally` around a raising call always does.
+
+    The token left behind is a real cost and is why this is ERROR rather than
+    a shrug: it sits 0600 in a `.setup` directory that `clear_secrets` also
+    empties, inside a container that is about to be destroyed on the teardown
+    path. That is worth an operator's attention and is not worth losing a
+    phase's work over.
+    """
+    try:
+        await workspace.execute(["rm", "-f", f"/workspace/{_SCRIPT_PATH}"])
+    except Exception:
+        logger.exception(
+            "Could not remove %s from workspace %s. It holds an installation token in "
+            "plain text until the workspace is destroyed.",
+            _SCRIPT_PATH,
+            workspace.workspace_id,
+        )
