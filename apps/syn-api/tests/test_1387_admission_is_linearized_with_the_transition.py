@@ -41,7 +41,7 @@ from syn_api._wiring import BackgroundWorkflowDispatcher
 from syn_api.routes.executions import commands
 from syn_api.routes.maintenance import set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest
-from syn_domain.contexts._shared import AdmissionGate, MaintenanceMode
+from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket, MaintenanceMode
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
@@ -93,17 +93,24 @@ class _SuspendablePort:
 
 
 class _RecordingHandler:
-    """Stands in for ExecuteWorkflowHandler. Records what was admitted."""
+    """Stands in for ExecuteWorkflowHandler. Records what was admitted.
+
+    Keeps the tickets as well as the commands, so a test can ask whether the
+    record the projection wrote and the execution that actually ran came from
+    the SAME admission - which is the whole of what "one awaited operation
+    whose result reaches the projection" buys.
+    """
 
     def __init__(self) -> None:
         self.admitted: list[object] = []
+        self.tickets: list[AdmissionTicket | None] = []
 
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: object = None) -> None:
-        del admitted
+    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
         self.admitted.append(command)
+        self.tickets.append(admitted)
 
 
 class _Fixture:
@@ -294,6 +301,14 @@ class TestATransitionThatStartsMidAdmission:
         record = await fixture.record("exec-midway2")
         assert record["status"] == "dispatched"
         assert len(fixture.handler.admitted) == 1
+
+        # The record and the run came from one admission, not from two guesses
+        # that happened to agree. `dispatched_at` is the gate's own answer -
+        # the moment it granted the ticket the handler then ran under - so a
+        # record cannot exist without an admission that produced it.
+        ticket = fixture.handler.tickets[0]
+        assert ticket is not None
+        assert record["dispatched_at"] == ticket.granted_at.isoformat()
 
     async def test_the_next_trigger_after_the_set_returns_is_refused(
         self, fixture: _Fixture
