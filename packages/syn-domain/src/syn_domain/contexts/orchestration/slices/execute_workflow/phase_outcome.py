@@ -34,10 +34,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    classify_failure,
     describe_exception,
     describe_observed_branches,
     describe_saved_work,
+    failure_account,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -55,11 +55,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
         PhaseResult,
+        ReportedFailureReason,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         ObservedBranches,
         SavedWork,
     )
+
 
 
 def failed_phase_elapsed_seconds(
@@ -120,6 +122,15 @@ class PhaseFailure:
     direction of doubt the enum documents: a sink that forgets to set it
     reports what the system already reported, and no omission can invent a
     correct refusal."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What the phase itself SAID caused the failure (#1372), `None` when it
+    said nothing this reader knows.
+
+    Beside the field above rather than folded into it, which is the whole of
+    #1392: that one is a measurement and this is a claim, they answer to
+    different evidence, and a record that fuses them lets a run choose the
+    number it lands in. Both travel to every sink, so the operator reads the
+    agent's own word and the tally never counts it."""
     observed_branches: tuple[BranchObservation, ...] | None = None
     """Branches read from git at failure time, `()` for "read, and none of them
     differs from how the phase found it", and None for "nothing could tell us".
@@ -183,6 +194,7 @@ class PhaseFailure:
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
             classification=self.classification,
+            reported_failure_reason=self.reported_failure_reason,
         )
 
     def execution_result(
@@ -216,8 +228,10 @@ class PhaseFailure:
             # The fourth sink gets it too. A caller that dispatched this run
             # synchronously reads its outcome here and nowhere else, so
             # stopping at the event would leave the one response that reports
-            # the failure unable to say what kind it was (#1357).
+            # the failure unable to say what kind it was (#1357) - or what its
+            # phase said about it (#1372).
             failure_classification=self.classification,
+            reported_failure_reason=self.reported_failure_reason,
         )
 
 
@@ -282,14 +296,17 @@ def failed_phase_outcome(
         reason = f"{reason}\n\n{describe_observed_branches(observed)}"
     kept = tuple(kept_artifact_ids)
     spent = usage or PhaseUsage()
+    account = failure_account(error)
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
         # Asked of the exception, once, exactly where `error_type` and `reason`
         # are (#1357). `error_type` is the class name and cannot answer this:
         # one class covers both a readable `success=false` report and a report
-        # nobody could read, and those are opposite answers.
-        classification=classify_failure(error),
+        # nobody could read, and those are opposite answers. The pair arrives
+        # together so no sink can hold one without the other (#1392).
+        classification=account.classification,
+        reported_failure_reason=account.reported_reason,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
         artifact_ids=kept,

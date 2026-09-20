@@ -36,6 +36,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FailureClassification,
     FinishedAgentRun,
     PhaseDefinition,
+    ReportedFailureReason,
     StrandedDeliverable,
 )
 
@@ -140,6 +141,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: otherwise, which is also what every such event written before the
         #: field existed replays as.
         self._failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+        self._reported_failure_reason: ReportedFailureReason | None = None
         self._cancel_reason: str | None = None
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
@@ -248,6 +250,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         does it exactly.
         """
         return self._failure_classification
+
+    @property
+    def reported_failure_reason(self) -> ReportedFailureReason | None:
+        """What the failing phase SAID caused it (#1372), None when it did not.
+
+        Apart from `failure_classification` deliberately and permanently: that
+        one is what the platform measured and is what failure numbers are
+        computed from, this one is a claim the run made about itself (#1392).
+        """
+        return self._reported_failure_reason
 
     @property
     def cancel_reason(self) -> str | None:
@@ -367,6 +379,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             # aggregate looking at `error_type` or at the message text would be
             # guessing, and guessing is what put the distinction in prose.
             failure_classification=command.classification,
+            # Beside it, never instead of it (#1392). The classification is
+            # what the platform measured; this is what the phase SAID, and the
+            # event is where the two stop being one frame's local variables and
+            # start being the record every read model is built from.
+            reported_failure_reason=command.reported_failure_reason,
         )
         self._apply(event)
 
@@ -640,6 +657,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # (#1357).
         self._failure_classification = FailureClassification.from_stored(
             _evt(event, "failure_classification")
+        )
+        # Same coercion, same reason, one field over: a reason written by a
+        # newer version is a word this reader does not know, and reads as "no
+        # reason given" rather than stopping the stream (#1372).
+        self._reported_failure_reason = ReportedFailureReason.from_stored(
+            _evt(event, "reported_failure_reason")
         )
 
     @event_sourcing_handler("PhaseStarted")

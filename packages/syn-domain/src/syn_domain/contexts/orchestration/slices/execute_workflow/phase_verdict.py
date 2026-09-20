@@ -220,6 +220,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
+    ReportedFailureReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,97 +260,6 @@ _CODE_FENCE: Final[str] = "```"
 _OPENING_FENCE: Final[re.Pattern[str]] = re.compile(r"```[A-Za-z0-9_+-]*")
 
 
-class ReportedFailureReason(StrEnum):
-    """What a phase says CAUSED the failure it is reporting (#1372).
-
-    THE QUESTION THIS ANSWERS, and why it had to be asked rather than worked
-    out. A readable ``success=false`` says THAT a phase failed and nothing
-    more, so every reported failure was recorded as a correct refusal - the
-    system working - including the one whose agent had just written "GH_TOKEN
-    is not set", which is the system not working, and the one that said the
-    task was impossible, which is neither. Those three take opposite responses:
-    retry, fix the platform, rewrite the brief. An operator re-dispatching off
-    a record that cannot tell them apart spends a whole run to find out.
-
-    THE SPELLINGS ARE classify.md's, which is the vocabulary analysts already
-    sort failures into by hand and the one `FailureClassification` was built
-    from. Three words, closed, written here and nowhere else - a closed set in
-    one place is what separates a contract from the habit of adding one more
-    string every time a run is lost, and it is the definition the negative
-    tests are written against.
-
-    IT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,
-    an exception message or an exit status to reach a member of this; the only
-    way into one is a phase that wrote it. That is the condition
-    `FailureClassification` set for `TASK` existing at all.
-
-    AND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when
-    editing anything here. This decides a LABEL on a failure already decided by
-    ``success``. A word nobody recognises, a sentence, a number, or no key at
-    all all read as "no reason given" and leave the verdict exactly as it was.
-    Making a misspelling fatal would let a tally field refuse a finished run,
-    which is #1324's defect bought back in exchange for nothing.
-    """
-
-    TASK = "task"
-    """The request was the problem: wrong, impossible, or too big for a phase."""
-
-    PLATFORM = "platform"
-    """The machinery was the problem: a missing credential, a tool that
-    crashed, a workspace that was not what it claimed."""
-
-    REFUSED = "refused"
-    """Neither: the phase could have done the work and judged it should not."""
-
-    @classmethod
-    def from_reported(cls, value: object) -> ReportedFailureReason | None:
-        """The reason a block named, or None when it named none this knows.
-
-        Total over every JSON value an agent can write, and it never raises -
-        `FailureClassification.from_stored`'s rule applied one boundary
-        earlier, and for the same reason: the value crosses a trust boundary,
-        so the reader has to survive whatever is on the other side of it.
-
-        Anything unreadable is LOGGED rather than absorbed, because a reason
-        nobody can see being dropped is how a key quietly stops working.
-        """
-        if value is None:
-            return None
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, str):
-            try:
-                return cls(value)
-            except ValueError:
-                pass
-        logger.warning(
-            "TASK_RESULT block named a failure_reason this reader does not know (%r). "
-            "It must be exactly one of %s, and not a sentence - that is what comments "
-            "is for. The failure is classified as though no reason were given (#1372).",
-            value,
-            [member.value for member in cls],
-        )
-        return None
-
-    @property
-    def classification(self) -> FailureClassification:
-        """What a failure named this way IS, for the run's tally.
-
-        The whole of the mapping, in one total table, so that the three words
-        an agent writes and the members a tally counts can be read against each
-        other without following a call. ``REFUSED`` is spelled differently on
-        the two sides deliberately: an agent is asked what it DID, and is never
-        asked to grade its own refusal as the correct one.
-        """
-        match self:
-            case ReportedFailureReason.TASK:
-                return FailureClassification.TASK
-            case ReportedFailureReason.PLATFORM:
-                return FailureClassification.PLATFORM
-            case ReportedFailureReason.REFUSED:
-                return FailureClassification.CORRECT_REFUSAL
-
-
 class VerdictStatus(Enum):
     """Whether the phase claimed an outcome, and whether the claim was readable."""
 
@@ -375,19 +285,27 @@ class AgentVerdict:
     leaves no trace in the outcome is indistinguishable from the format having
     quietly changed.
 
-    ``failure_reason`` is the word the phase wrote for what CAUSED the failure
-    (#1372), already matched against the closed set and `None` when it wrote
-    nothing this reader knows. It is carried on every verdict rather than only
-    on the failing ones because a phase that reports success and a reason has
-    written both of those things; `failure_classification` is the one place
+    ``reported_failure_reason`` is the word the phase wrote for what CAUSED the
+    failure (#1372), already matched against the closed set and `None` when it
+    wrote nothing this reader knows. It is carried on every verdict rather than
+    only on the failing ones because a phase that reports success and a reason
+    has written both of those things; `failure_classification` is the one place
     that decides the reason is meaningless beside anything but a FAILURE, and
     dropping it here would be that decision made twice.
+
+    IT IS SPELLED ``reported_`` SO THAT NO CALL SITE CAN LOSE THE DISTINCTION
+    (#1392). Beside `failure_classification` - which is authoritative, is what
+    every failure number is computed from, and is derived from what the
+    PLATFORM observed - this field is what the AGENT SAID, and the two are one
+    attribute access apart. A reader who has to remember which is which will
+    eventually not; a name that says so at every hop it travels does not
+    depend on remembering.
     """
 
     status: VerdictStatus
     comments: str = ""
     via_status_alias: bool = False
-    failure_reason: ReportedFailureReason | None = None
+    reported_failure_reason: ReportedFailureReason | None = None
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -437,7 +355,7 @@ class AgentVerdict:
         return cls(
             VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
             reported.said,
-            failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
+            reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
         )
 
     @classmethod
@@ -481,7 +399,7 @@ class AgentVerdict:
             aliased.status.verdict,
             aliased.said,
             via_status_alias=True,
-            failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
+            reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
         )
 
     @property
@@ -513,23 +431,16 @@ class AgentVerdict:
         for the same reason `refusal` answers "": a caller that asks anyway
         gets the conservative answer rather than an exception.
 
-        WHAT THE REPORTED REASON MOVES, AND WHAT IT CANNOT (#1372). A phase
-        that named one gets the class it named - `TASK` for a request that was
-        wrong or impossible, `PLATFORM` for machinery it watched break. That is
-        the only door to `TASK` in the system, and it opens on the agent's own
-        structured word rather than on anything read out of prose.
-
-        A phase that named NO reason is classified exactly as it was before the
-        field existed. Silence is not a third signal: the reported failure is
-        still a correct refusal, which is the answer the system already gave,
-        so nothing an agent omits can move a number. That is the same direction
-        of doubt as the paragraph above, one field further in.
+        WHAT THE REPORTED REASON MOVES, AND WHAT IT CANNOT (#1372, #1392). The
+        word the agent wrote is a REPORT - see `ReportedFailureReason` - and
+        the answer here is a MEASUREMENT, so almost nothing the agent can write
+        moves it. `_corroborated_classification` holds the whole of that rule
+        and is where it is argued; the report itself travels beside this,
+        unaltered, on `reported_failure_reason`.
         """
         if self.status is not VerdictStatus.FAILURE:
             return FailureClassification.PLATFORM
-        if self.failure_reason is None:
-            return FailureClassification.CORRECT_REFUSAL
-        return self.failure_reason.classification
+        return _corroborated_classification(self.reported_failure_reason)
 
     def refusal(self, *, phase_id: str) -> str:
         """Why the phase may not complete, in the words an operator needs.
@@ -558,6 +469,55 @@ class AgentVerdict:
                 f"rather than completing on a verdict nobody could read."
             )
         return ""
+
+
+def _corroborated_classification(
+    reported: ReportedFailureReason | None,
+) -> FailureClassification:
+    """What a failure the PLATFORM corroborated is recorded as, having heard this word.
+
+    Reached only for a run that got this far: a readable ``success=false`` from
+    a process the platform delivered intact (`agent_run_outcome._ran_cleanly`).
+    That much is corroborated - the harness watched it happen - and it is the
+    whole of what is corroborated.
+
+    THE RULE, WHICH IS THE POINT OF THIS FUNCTION EXISTING (#1392). A word the
+    AGENT CHOOSES may never ADD a claim to the record; it may only WITHDRAW
+    one. So:
+
+      - ``task`` and ``platform`` leave the measurement exactly where the
+        corroborated evidence put it. They are claims about the REQUEST and
+        about the MACHINERY, and the only thing standing behind either is the
+        run's own say-so. A phase that has given up exits cleanly and can write
+        ``task``; a phase that would rather not be counted as the gate working
+        can write ``platform``. Believing either would let a run decide what
+        number it lands in, which is the defect this function was extracted to
+        close - stated as a class, so the next self-reported word inherits the
+        answer rather than the bug.
+      - ``refused`` agrees with that measurement, and always did.
+      - ``unknown`` takes the measurement AWAY, to `UNCLASSIFIED`. That is the
+        withdrawal, and it is safe in the direction every rule here runs in: it
+        costs the platform a "the system worked" data point and cannot earn the
+        run one.
+      - NOTHING AT ALL - no key, a misspelling, a null, a number - is the
+        answer the system gave before any of this existed, and keeps it. Every
+        report already in the store was written that way, and a new reading of
+        those bytes would be a new claim about history rather than a fix.
+
+    Total over the members deliberately: adding one is a decision made here,
+    against the rule above, rather than a value that quietly acquires whichever
+    branch it falls through to.
+    """
+    match reported:
+        case ReportedFailureReason.UNKNOWN:
+            return FailureClassification.UNCLASSIFIED
+        case (
+            ReportedFailureReason.TASK
+            | ReportedFailureReason.PLATFORM
+            | ReportedFailureReason.REFUSED
+            | None
+        ):
+            return FailureClassification.CORRECT_REFUSAL
 
 
 class VerdictReader:

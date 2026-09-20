@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         BranchObservation,
         FailureClassification,
         PhaseDefinition,
+        ReportedFailureReason,
     )
 
 
@@ -89,6 +90,7 @@ class FailExecutionCommand:
         observed_branches: tuple[BranchObservation, ...] | None = None,
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
+        reported_failure_reason: ReportedFailureReason | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -135,6 +137,13 @@ class FailExecutionCommand:
         #: run, a stale-execution sweep - and saying so at those call sites is
         #: documentation a default would delete.
         self.classification = classification
+        #: What the failing PHASE said caused it (#1372), `None` when it said
+        #: nothing this reader knows - which is every one of the three call
+        #: sites above except the one that read an agent's own report, and is
+        #: why this defaults where the field above does not. Carried beside
+        #: the classification and never folded into it (#1392): an operator
+        #: reads the agent's word, and no number is computed from it.
+        self.reported_failure_reason = reported_failure_reason
 
 
 class StartPhaseCommand:

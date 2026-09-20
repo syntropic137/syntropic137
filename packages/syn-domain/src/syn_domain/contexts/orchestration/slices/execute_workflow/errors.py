@@ -6,7 +6,7 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        ReportedFailureReason,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
@@ -217,40 +218,68 @@ class PhaseReportedFailureError(Exception):
     def __init__(self, *, phase_id: str, verdict: AgentVerdict) -> None:
         super().__init__(verdict.refusal(phase_id=phase_id))
         self.phase_id = phase_id
-        #: What the phase's own report makes this failure: a correct refusal,
-        #: an impossible task, a platform fault it reported itself (#1372), or
-        #: a report nobody could read, which is none of the three (#1357).
-        #: Decided by `AgentVerdict.failure_classification`, which argues the
-        #: UNREADABLE case and which of the three a silent report gets.
+        #: What the PLATFORM makes this failure: a correct refusal, a report
+        #: nobody could read - which is none of the classes and is `PLATFORM`
+        #: (#1357) - or a failure nobody could classify (#1392). Decided by
+        #: `AgentVerdict.failure_classification`, never by the word below.
         self.failure_classification = verdict.failure_classification
+        #: What the AGENT SAID caused it, carried verbatim and carried apart
+        #: (#1372, #1392). Every sink that records the classification records
+        #: this beside it, because an operator asking "why did this fail"
+        #: wants the phase's own word and a failure number must not be
+        #: computed from it. `None` when the phase named no reason this reader
+        #: knows, which is every failure written before #1372.
+        self.reported_failure_reason = verdict.reported_failure_reason
 
 
-def classify_failure(error: BaseException) -> FailureClassification:
-    """What kind of failure `error` is, for the run's tally (#1357).
+class FailureAccount(NamedTuple):
+    """Everything the record says about WHY a run failed: the measurement, and the claim.
+
+    TWO FIELDS RATHER THAN TWO FUNCTIONS, for the reason
+    `PhaseReportedFailureError` takes a verdict rather than a rendered message
+    (#1392). These two are read together at every sink that records a failure,
+    and they are the pair that must never be mismatched: a call site free to
+    fetch one without the other is one edit away from storing a `task` the
+    agent never claimed, or a classification computed from a claim. Asked once,
+    answered once, carried together.
+    """
+
+    classification: FailureClassification
+    """What the PLATFORM says this failure was, and the only field a failure
+    number may be computed from."""
+
+    reported_reason: ReportedFailureReason | None
+    """What the AGENT SAID caused it, `None` when it said nothing this reader
+    knows. An operator reads it; nothing counts it."""
+
+
+def failure_account(error: BaseException) -> FailureAccount:
+    """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
 
     THE ONE PLACE THIS IS DECIDED, beside `describe_exception` and for the
     identical reason: four sinks describe one failure, and a classification
     re-derived at any of them is a classification that can disagree with the
     others. A caller gets an answer and cannot tell how it was reached.
 
-    ONLY ONE KIND OF FAILURE CARRIES ITS OWN CLASSIFICATION, and the isinstance
-    is deliberate rather than a `getattr` for an attribute anything might grow.
+    ONLY ONE KIND OF FAILURE CARRIES ITS OWN ACCOUNT, and the isinstance is
+    deliberate rather than a `getattr` for an attribute anything might grow.
     Every member but `PLATFORM` is a positive claim about what happened, so
-    each is made only where the evidence is - the phase's own readable verdict,
-    which since #1372 also carries WHY it failed - and every other exception in
-    the system, present and future, means the platform failed. That is the
-    direction of doubt `FailureClassification` exists to hold: a new failure
-    path that knows nothing about this function is counted as a platform
-    failure, which is exactly what it is counted as today.
+    each is made only where the evidence is - the phase's own readable verdict
+    - and every other exception in the system, present and future, means the
+    platform failed and reported nothing. That is the direction of doubt
+    `FailureClassification` exists to hold: a new failure path that knows
+    nothing about this function is counted as a platform failure, which is
+    exactly what it is counted as today.
 
     Widening the verdict's vocabulary did not widen this function's. An
     exception is still either the one that carries a phase's own report or it
-    is a platform failure; #1372 added members that only that report can
-    produce, which is the same rule with more to say.
+    is a platform failure; what #1372 added is a second field to carry, and
+    #1392 is why it is a field of its own rather than a wider answer under the
+    first.
     """
     if isinstance(error, PhaseReportedFailureError):
-        return error.failure_classification
-    return FailureClassification.PLATFORM
+        return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    return FailureAccount(FailureClassification.PLATFORM, None)
 
 
 class EmptyPhaseArtifactError(Exception):
