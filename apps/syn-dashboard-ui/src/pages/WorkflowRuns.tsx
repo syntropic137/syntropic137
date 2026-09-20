@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, EmptyState, PageLoader, StatusBadge } from '../components'
 import { useWorkflowRuns } from '../hooks/useWorkflowRuns'
 import type { WorkflowExecutionSummary } from '../types'
-import { REFUSED, outcomeTone } from '../utils/executionOutcome'
+import { REFUSED, TASK_FAILED, outcomeTone } from '../utils/executionOutcome'
 import { formatDate, formatDurationFromRange } from '../utils/formatters'
 
 function RunProgressBar({ exec }: { exec: WorkflowExecutionSummary }) {
@@ -18,7 +18,7 @@ function RunProgressBar({ exec }: { exec: WorkflowExecutionSummary }) {
             'h-full rounded-full transition-all',
             tone === 'completed' && 'bg-emerald-500',
             tone === 'failed' && 'bg-red-500',
-            tone === REFUSED && 'bg-amber-500',
+            (tone === REFUSED || tone === TASK_FAILED) && 'bg-amber-500',
             tone === 'running' && 'bg-blue-500',
             tone === 'pending' && 'bg-slate-500'
           )}

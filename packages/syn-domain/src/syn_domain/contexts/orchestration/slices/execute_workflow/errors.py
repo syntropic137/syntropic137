@@ -217,10 +217,11 @@ class PhaseReportedFailureError(Exception):
     def __init__(self, *, phase_id: str, verdict: AgentVerdict) -> None:
         super().__init__(verdict.refusal(phase_id=phase_id))
         self.phase_id = phase_id
-        #: Whether this was the agent's own readable `success=false` report - a
-        #: correct refusal - or a report nobody could read, which is not
-        #: (#1357). Decided by `AgentVerdict.failure_classification`, which
-        #: argues the UNREADABLE case.
+        #: What the phase's own report makes this failure: a correct refusal,
+        #: an impossible task, a platform fault it reported itself (#1372), or
+        #: a report nobody could read, which is none of the three (#1357).
+        #: Decided by `AgentVerdict.failure_classification`, which argues the
+        #: UNREADABLE case and which of the three a silent report gets.
         self.failure_classification = verdict.failure_classification
 
 
@@ -234,12 +235,18 @@ def classify_failure(error: BaseException) -> FailureClassification:
 
     ONLY ONE KIND OF FAILURE CARRIES ITS OWN CLASSIFICATION, and the isinstance
     is deliberate rather than a `getattr` for an attribute anything might grow.
-    A correct refusal is a positive claim about what happened, so it is made
-    only where the evidence is - the phase's own readable verdict - and every
-    other exception in the system, present and future, means the platform
-    failed. That is the direction of doubt `FailureClassification` exists to
-    hold: a new failure path that knows nothing about this function is counted
-    as a platform failure, which is exactly what it is counted as today.
+    Every member but `PLATFORM` is a positive claim about what happened, so
+    each is made only where the evidence is - the phase's own readable verdict,
+    which since #1372 also carries WHY it failed - and every other exception in
+    the system, present and future, means the platform failed. That is the
+    direction of doubt `FailureClassification` exists to hold: a new failure
+    path that knows nothing about this function is counted as a platform
+    failure, which is exactly what it is counted as today.
+
+    Widening the verdict's vocabulary did not widen this function's. An
+    exception is still either the one that carries a phase's own report or it
+    is a platform failure; #1372 added members that only that report can
+    produce, which is the same rule with more to say.
     """
     if isinstance(error, PhaseReportedFailureError):
         return error.failure_classification

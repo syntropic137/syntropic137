@@ -475,12 +475,17 @@ class ExecutionSummary(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); the request could not be done as
+    written (`task`, rewrite the brief before spending another run on it); or
+    a phase judged the work not deliverable and was recorded faithfully
+    (`correct_refusal`, read it and close it) - the system working.
+    `unclassified` is a run that ended before anything recorded the
+    difference, and is what every failure predating the field reads as.
+
+    The phase names the cause itself, in its `TASK_RESULT` block (#1372). A
+    reported failure that names no cause reads as `correct_refusal`, which is
+    every run recorded before that field existed.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
@@ -526,12 +531,17 @@ class ExecutionDetail(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); the request could not be done as
+    written (`task`, rewrite the brief before spending another run on it); or
+    a phase judged the work not deliverable and was recorded faithfully
+    (`correct_refusal`, read it and close it) - the system working.
+    `unclassified` is a run that ended before anything recorded the
+    difference, and is what every failure predating the field reads as.
+
+    The phase names the cause itself, in its `TASK_RESULT` block (#1372). A
+    reported failure that names no cause reads as `correct_refusal`, which is
+    every run recorded before that field existed.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
@@ -1119,12 +1129,17 @@ class ExecutionDetailFull(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); the request could not be done as
+    written (`task`, rewrite the brief before spending another run on it); or
+    a phase judged the work not deliverable and was recorded faithfully
+    (`correct_refusal`, read it and close it) - the system working.
+    `unclassified` is a run that ended before anything recorded the
+    difference, and is what every failure predating the field reads as.
+
+    The phase names the cause itself, in its `TASK_RESULT` block (#1372). A
+    reported failure that names no cause reads as `correct_refusal`, which is
+    every run recorded before that field existed.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
