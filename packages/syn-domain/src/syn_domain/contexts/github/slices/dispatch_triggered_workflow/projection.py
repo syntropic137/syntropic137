@@ -32,6 +32,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
@@ -80,9 +81,19 @@ class _BudgetChecker(Protocol):
 
 logger = logging.getLogger(__name__)
 
+#: The announcement that admission is open again (#1387). Read from the event
+#: class so the string cannot drift from the thing that writes it.
+_ADMISSION_OPEN = AdmissionOpenEvent.event_type
+
 # Event types this projection subscribes to
 _SUBSCRIBED_EVENTS = {
     "github.TriggerFired",
+    # Not a trigger and it writes no record. It is here for its SIDE EFFECT on
+    # the coordinator: `process_pending()` runs only after a subscribed event
+    # is handled live, so subscribing is the only way a paused record is ever
+    # re-offered. Without it a trigger held back by a deploy waits for the next
+    # unrelated GitHub event - which on a quiet repository may never come.
+    _ADMISSION_OPEN,
 }
 
 #: Dispatch held back because execution admission is closed (#1387). Reversible:
@@ -155,6 +166,12 @@ class WorkflowDispatchProjection(ProcessManager):
 
         Writes a pending dispatch record for each TriggerFired event.
         The record is processed later by process_pending() (live-only).
+
+        `maintenance.AdmissionOpen` writes nothing: the to-do list already
+        holds the paused records and the announcement adds no work, it only
+        says the work may be retried. Checkpointing and returning SUCCESS is
+        the whole of its handling - that is what makes the coordinator run the
+        processor side, which re-offers them (#1387).
         """
         event_type = envelope.metadata.event_type or "Unknown"
         event_data: dict[str, _EventValue] = envelope.event.model_dump()  # type: ignore[assignment]  # model_dump() -> dict[str, Any]

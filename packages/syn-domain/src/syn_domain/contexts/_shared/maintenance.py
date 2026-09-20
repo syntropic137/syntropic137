@@ -28,6 +28,7 @@ declaration, so the two cannot drift apart on what "paused" means.
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager, contextmanager
 
 # NOT in a TYPE_CHECKING block: `MaintenanceMode` is a Pydantic model and
@@ -40,6 +41,9 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
+
+
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceMode(BaseModel):
@@ -101,6 +105,25 @@ class MaintenancePort(Protocol):
 
     async def set_mode(self, *, active: bool, reason: str, actor: str) -> MaintenanceMode:
         """Persist the state and return what was stored. Durable before return."""
+        ...
+
+
+@runtime_checkable
+class AdmissionAnnouncer(Protocol):
+    """Publishes "admission is open" somewhere a consumer can be woken by.
+
+    Separate from :class:`MaintenancePort` on purpose. The port stores the
+    answer to "may I admit?"; this tells work that was parked while the answer
+    was no that it may try again. A store cannot do the second - nothing reads
+    a flag it is not already reading - and a gate must not know that the answer
+    is an event store append.
+
+    Implementations MUST be durable before returning: the whole value of the
+    announcement is that it survives the process that made it (#1387).
+    """
+
+    async def announce_open(self, mode: MaintenanceMode, *, after_restart: bool) -> None:
+        """Announce that new executions are being admitted."""
         ...
 
 
@@ -265,8 +288,9 @@ class AdmissionGate:
     is out of scope for #1387.
     """
 
-    def __init__(self, port: MaintenancePort) -> None:
+    def __init__(self, port: MaintenancePort, announcer: AdmissionAnnouncer | None = None) -> None:
         self._port = port
+        self._announcer = announcer
         self._transition = asyncio.Lock()
         self._outstanding = 0
         self._idle = asyncio.Event()
@@ -343,8 +367,49 @@ class AdmissionGate:
         something the deploy must not overtake. Re-opening overtakes nothing,
         and blocking it behind executions that are merely queued would hold a
         deploy's final step for as long as the work it just released.
+
+        Re-opening announces (#1387). Work refused during the deploy is parked,
+        not discarded, and nothing re-offers it on its own: a flag that stops
+        being true is not an event and wakes no consumer. The announcement is
+        what turns "admission is open again" into something that arrives.
         """
         async with self._transition:
             if active:
                 await self._idle.wait()
-            return await self._port.set_mode(active=active, reason=reason, actor=actor)
+            mode = await self._port.set_mode(active=active, reason=reason, actor=actor)
+
+        if not active:
+            # After the flag is durable, never before: a consumer woken while
+            # the gate still refused would re-park everything it retried, and
+            # the wake would have been spent on nothing.
+            #
+            # Outside the transition lock, because this is a round trip to the
+            # event store and admission must not queue behind it.
+            await self.announce_open(mode)
+        return mode
+
+    async def announce_open(self, mode: MaintenanceMode, *, after_restart: bool = False) -> None:
+        """Tell parked work it may try again. Safe to repeat.
+
+        Called on every re-open, and once at startup when admission is already
+        open - that second call is what carries the wake across a restart, so
+        a crash between clearing the flag and draining the parked work does not
+        strand it.
+
+        A failure here is reported and swallowed. The flag is already durably
+        open, so raising would tell the operator their deploy's last step
+        failed when the system is in fact admitting; and the announcement has
+        further chances - any later subscribed event, and the next startup.
+        What it must not do is fail silently, because the visible symptom is a
+        trigger that never runs.
+        """
+        if self._announcer is None:
+            return
+        try:
+            await self._announcer.announce_open(mode, after_restart=after_restart)
+        except Exception:
+            logger.exception(
+                "Execution admission re-opened but the announcement failed; "
+                "triggers paused during maintenance stay paused until the next "
+                "subscribed event or the next restart (#1387)"
+            )

@@ -1,6 +1,8 @@
 """Cross-context shared kernel: value objects and integration events."""
 
+from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import (
+    AdmissionAnnouncer,
     AdmissionGate,
     AdmissionTicket,
     MaintenanceMode,
@@ -12,7 +14,9 @@ from syn_domain.contexts._shared.maintenance import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 
 __all__ = [
+    "AdmissionAnnouncer",
     "AdmissionGate",
+    "AdmissionOpenEvent",
     "AdmissionTicket",
     "MaintenanceMode",
     "MaintenancePausedError",

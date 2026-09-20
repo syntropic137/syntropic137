@@ -7,11 +7,13 @@ a maintenance flag lost on restart re-opens admission in the middle of the
 deploy it was set for, and nothing reports that it happened.
 """
 
+from syn_adapters.maintenance.event_store_announcer import EventStoreAdmissionAnnouncer
 from syn_adapters.maintenance.memory_maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.maintenance.postgres_maintenance import PostgresMaintenanceAdapter
 from syn_adapters.maintenance.redis_maintenance import RedisMaintenanceAdapter
 
 __all__ = [
+    "EventStoreAdmissionAnnouncer",
     "InMemoryMaintenanceAdapter",
     "PostgresMaintenanceAdapter",
     "RedisMaintenanceAdapter",

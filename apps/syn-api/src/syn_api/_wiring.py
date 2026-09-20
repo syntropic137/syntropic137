@@ -755,14 +755,23 @@ def get_admission_gate() -> AdmissionGate:
 
     The port under it stays the durable one (Postgres > Redis > fail-fast); the
     gate adds ordering, not storage, and caches no state of its own.
+
+    The announcer is the other half of #1387: clearing the flag is not an event
+    and wakes nobody, so re-opening writes `maintenance.AdmissionOpen` to the
+    event store and the trigger-dispatch ProcessManager - which subscribes to
+    it - re-offers the dispatches a deploy held back.
     """
     global _admission_gate_singleton
     if _admission_gate_singleton is not None:
         return _admission_gate_singleton
 
+    from syn_adapters.maintenance import EventStoreAdmissionAnnouncer
     from syn_domain.contexts._shared import AdmissionGate as _AdmissionGate
 
-    _admission_gate_singleton = _AdmissionGate(get_maintenance_port())
+    _admission_gate_singleton = _AdmissionGate(
+        get_maintenance_port(),
+        EventStoreAdmissionAnnouncer(get_event_store_client()),
+    )
     return _admission_gate_singleton
 
 
