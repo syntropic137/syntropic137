@@ -35,7 +35,7 @@ class ExecutionStatus(StrEnum):
 
 
 class FailureClassification(StrEnum):
-    """Why a failed execution ended: the machinery broke, or the work was refused.
+    """Why a failed execution ended: the machinery, the request, or the work.
 
     THE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`
     and nothing else, so a phase that did three phases of real work, found a
@@ -55,29 +55,50 @@ class FailureClassification(StrEnum):
     THE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,
     which is what analysts already sort failures into by hand.
 
-    WHY `task` IS NOT A MEMBER. classify.md's third class - "the request was
-    wrong, too big for a phase, or impossible" - is a judgement about the
-    REQUEST, and nothing in the stored record supports it: the same exit code,
-    the same error text and the same refusal arise from a bad request and from
-    a good one the platform mishandled. Deriving it would be a guess, and
-    classify.md's own instruction for that case is to use the fourth bucket
-    rather than attribute confidently. A member no code path can honestly
-    produce is a branch every reader has to reason about forever, so it is not
-    here. Whoever adds it must bring the evidence with it.
+    WHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).
+    classify.md's third class - "the request was wrong, too big for a phase, or
+    impossible" - is a judgement about the REQUEST, and the stored record did
+    not support it: the same exit code, the same error text and the same refusal
+    arise from a bad request and from a good one the platform mishandled.
+    Deriving it from any of those would be a guess, so the member was left out
+    with the note that whoever added it had to bring the evidence with them.
+
+    The evidence is ASKED FOR rather than inferred. `TASK_RESULT` now carries a
+    typed `failure_reason` beside `success` - `ReportedFailureReason`, three
+    closed words, the same three classify.md sorts by hand - and the prompt
+    every phase is sent says which to write. `AgentVerdict.failure_classification`
+    reads that field and nothing else, so no comment text and no exception
+    message can reach this member. Nothing was derived; the agent was asked.
 
     THE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep
-    when changing anything here: `CORRECT_REFUSAL` is a POSITIVE claim, made
-    only where the agent's own readable `success=false` report is what ended
-    the run. Everything else - including a report nobody could read - is
-    `PLATFORM`. So a path that forgets to classify itself lands on the answer
-    the system already gave, the failure tally stays the upper bound it has
-    always been, and no omission can ever manufacture evidence that the system
-    was working.
+    when changing anything here: every member but `PLATFORM` is a POSITIVE
+    claim, made only where the agent's own readable report is what ended the
+    run and only from the field that states it. Everything else - including a
+    report nobody could read - is `PLATFORM`. So a path that forgets to
+    classify itself lands on the answer the system already gave, the failure
+    tally stays the upper bound it has always been, and no omission can ever
+    manufacture evidence that the system was working.
+
+    OMISSION IS NOT A THIRD SIGNAL, which is what keeps `TASK` from widening
+    the claim the record makes. A phase that reports failure and names no
+    reason classifies exactly as it did before the field existed -
+    `CORRECT_REFUSAL` - because that is the answer the system already gave and
+    a silent agent has said nothing new to move it.
     """
 
     PLATFORM = "platform"
     """The machinery failed, or nothing said otherwise: setup, gates,
     collection, parsing, budget, a non-zero exit with no readable report."""
+
+    TASK = "task"
+    """The request was wrong, too big for one phase, or impossible.
+
+    The phase's own agent said so in the one field that can say it, and the
+    platform delivered the run intact while it did. An operator reading this
+    rewrites the brief; re-dispatching an unchanged one spends a second whole
+    run to arrive back here, which is why this may never be confused with the
+    two members either side of it.
+    """
 
     CORRECT_REFUSAL = "correct_refusal"
     """The agent reported failure and the platform recorded it faithfully.

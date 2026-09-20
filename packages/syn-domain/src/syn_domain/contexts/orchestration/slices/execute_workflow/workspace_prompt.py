@@ -119,6 +119,36 @@ Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
 copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
 #1324 - and that the rendered prompt, read whole by the production reader, never
 yields SUCCESS.
+
+WHY THERE ARE THREE FAILURE FENCES AND NOT ONE WITH A SLOT IN IT (#1372). The
+block now carries `failure_reason`, which is what tells a task that could not be
+done apart from a platform that broke apart from a judgement not to ship - the
+three answers `FailureClassification` records and the three different people who
+act on them. A key stated only in prose is the shape that has already failed
+twice here: #1324 was an agent that never looked at the fences, and the fix was
+to state the rule AND hand out something copyable. One failure fence with the
+word left out would state the rule and hand out a block that reports no reason,
+so the common path - copy the fence, replace the comments - would write nothing
+into the field and the classification would stay exactly as blind as before.
+
+And it cannot be one fence with a `"task|platform|refused"` slot, which is the
+obvious third option: that is the `<...>` placeholder of two paragraphs above,
+spelled without the angle brackets. An agent that copies it verbatim writes a
+word no reader knows.
+
+So the rule above the fences is a table of the three words, and there is one
+complete literal fence per OUTCOME - four now rather than two. Nothing about
+#1324's property changes: every fence is still copyable with no substitution but
+the `comments` sentence, every one still carries its own terminator, and a
+quotation of the section still settles as FAILURE. What the count buys is that
+the label an operator reads is written by an agent that only had to copy.
+
+THE FIELD IS FAIL-SOFT BY CONSTRUCTION, which is what makes handing out four
+blocks safe. A misspelled, invented or omitted reason costs the LABEL and never
+the run - `ReportedFailureReason.from_reported` resolves it to "no reason given"
+and the verdict stands exactly as it did. That is the opposite of the terminator,
+where the cost of getting it wrong is the whole phase, and it is why the two are
+allowed to be stated with different force.
 """
 
 from __future__ import annotations
@@ -269,15 +299,30 @@ key here have lost finished, pushed work: `success` is the field the
 orchestrator reads, and a block naming the outcome anything else is not
 guaranteed to be read at all.
 
-A failure reason is specific. What a useful one looks like:
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of three words - never a sentence, which is
+what `comments` is for:
+
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+
+Those three go to three different people, so the wrong word fetches the wrong
+one and the right one never hears. If none of them is honestly true, leave the
+key out: an omitted reason is read as "could not tell", which is a worse answer
+than the truth and a better one than a guess.
+
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
 Write ONE complete block, for your outcome only. A complete block is read as
-your report wherever it sits, so do not copy out the other one to explain the
-format - once it is closed it is a report and not a quotation, whatever the
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
 words around it say. Discussing the format in prose is free; closing a second
 block is not.
 
@@ -293,11 +338,26 @@ TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplis
 TASK_RESULT_END
 ```
 
-You could NOT complete the task, because you were blocked, lacked access, or hit
-an error - copy both lines:
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
 
 ```
-TASK_RESULT: {{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT: {{"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}}
 TASK_RESULT_END
 ```
 
