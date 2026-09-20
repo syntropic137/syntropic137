@@ -436,9 +436,7 @@ class WorkflowExecutionProcessor:
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
 
-    async def _preserve_interrupted_work(
-        self, execution_id: str, *, phase_id: str | None
-    ) -> None:
+    async def _preserve_interrupted_work(self, execution_id: str, *, phase_id: str | None) -> None:
         """Empty this execution's workspaces before the process holding them dies (#1381).
 
         THE TERMINAL PATH FOR A CANCELLATION NOBODY ASKED FOR. The other two

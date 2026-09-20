@@ -41,8 +41,8 @@ import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
     _BRANCH,
-    _Clone,
     _REPO,
+    _Clone,
 )
 
 pytestmark = [pytest.mark.unit]
@@ -171,7 +171,7 @@ def _start_child(tmp_path: Path) -> tuple[subprocess.Popen[str], Path, str]:
     root.mkdir()
     ready = tmp_path / "ready.json"
 
-    child = subprocess.Popen(  # noqa: S603
+    child = subprocess.Popen(
         [sys.executable, str(script), str(root), str(ready), str(_DOMAIN_TESTS)],
         env={**os.environ, "APP_ENVIRONMENT": "test", "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,

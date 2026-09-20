@@ -154,7 +154,7 @@ class WatchedWorkspaces:
         async def __aenter__(self) -> object:
             workspace = await self._inner.__aenter__()  # type: ignore[attr-defined]
             self._owner.open_contexts += 1
-            return GitBackedWorkspace(workspace, self._owner._clone)  # noqa: SLF001
+            return GitBackedWorkspace(workspace, self._owner._clone)
 
         async def __aexit__(self, *exc_info: object) -> bool | None:
             self._owner.closed_contexts += 1

@@ -213,6 +213,7 @@ services:
         max-size: 5m
         max-file: "3"
   api:
+    stop_grace_period: 150s
     environment:
       SYN_API_PORT: "8000"
       SYN_API_HOST: 0.0.0.0
