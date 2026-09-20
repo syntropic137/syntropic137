@@ -29,7 +29,11 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
-    from syn_domain.contexts._shared.maintenance import MaintenancePort
+    from syn_domain.contexts._shared.maintenance import (
+        AdmissionGate,
+        AdmissionTicket,
+        MaintenancePort,
+    )
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
@@ -735,6 +739,32 @@ def get_maintenance_port() -> MaintenancePort:
         ) from exc
 
 
+_admission_gate_singleton: AdmissionGate | None = None
+
+
+def get_admission_gate() -> AdmissionGate:
+    """Return the process-wide admission gate (#1387).
+
+    One instance per process, and that is load-bearing rather than tidiness:
+    the gate's guarantee is mutual exclusion between admitting an execution and
+    changing the flag, and two instances over the same store exclude nothing.
+    So the ``PUT /maintenance`` route, the HTTP execute route and the trigger
+    dispatcher all have to reach admission through this, never through
+    :func:`get_maintenance_port` directly.
+
+    The port under it stays the durable one (Postgres > Redis > fail-fast); the
+    gate adds ordering, not storage, and caches no state of its own.
+    """
+    global _admission_gate_singleton
+    if _admission_gate_singleton is not None:
+        return _admission_gate_singleton
+
+    from syn_domain.contexts._shared import AdmissionGate as _AdmissionGate
+
+    _admission_gate_singleton = _AdmissionGate(get_maintenance_port())
+    return _admission_gate_singleton
+
+
 _import_ledger_singleton: ImportLedgerPort | None = None
 
 
@@ -938,13 +968,17 @@ class BackgroundWorkflowDispatcher:
         self,
         handler: ExecuteWorkflowHandler,
         max_concurrent: int = 1,
-        maintenance: MaintenancePort | None = None,
+        maintenance: AdmissionGate | None = None,
     ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
         A caller that omits it used to get 5, which quietly reintroduced the
         unsafe value the setting exists to avoid (#865). The safe value has to
         be the one you get by saying nothing.
+
+        `maintenance` is the :class:`AdmissionGate` (#1387), not the bare port:
+        this class is where the decision to admit and the task that carries it
+        out come apart, so it needs the thing that can hold them together.
         """
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
@@ -958,7 +992,7 @@ class BackgroundWorkflowDispatcher:
         execution_id: str = "",
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
-    ) -> None:
+    ) -> AdmissionTicket | None:
         # SYNCHRONOUS refusal, before the task exists (#1039). Everything after
         # this line is fire-and-forget: `WorkflowDispatchProjection` awaits
         # this method and then writes `status="dispatched"`, so anything that
@@ -967,19 +1001,47 @@ class BackgroundWorkflowDispatcher:
         # projection's `dispatch_exception` path, which marks the record
         # `failed` - the state that is actually true.
         #
-        # #1387 rides the same slot for the same reason, and goes first because
-        # a paused gate should not cost a template read. The projection tells
+        # #1387 rides the same slot for the same reason. The projection tells
         # the two apart by exception type and records this one as `paused`, not
         # `failed`: the trigger was refused, not broken.
-        if self._maintenance is not None:
-            from syn_domain.contexts._shared import refuse_if_paused
+        if self._maintenance is None:
+            await self._handler.validate_stored_declarations(workflow_id)
+            self._spawn(workflow_id, inputs, execution_id, task, repos, None)
+            return None
 
-            await refuse_if_paused(self._maintenance)
+        # Two reads, and they are not the same check twice. This first one is
+        # cheap and unlocked, so a paused gate costs no template read and a
+        # deploy is never delayed behind one. It decides nothing: its answer
+        # can be stale by the time it arrives.
+        await self._maintenance.refuse_early()
 
         await self._handler.validate_stored_declarations(workflow_id)
 
+        # The decisive one. Inside `admitting()` no maintenance transition can
+        # complete, and the task is created before the ticket is spent - so
+        # once `PUT /maintenance` returns, no task can still be on its way in.
+        # A refusal here is raised, synchronously, out of this method and into
+        # the projection, which is the only place it can still change what the
+        # trigger record says.
+        async with self._maintenance.admitting() as ticket:
+            self._spawn(workflow_id, inputs, execution_id, task, repos, ticket)
+            return ticket
+
+    def _spawn(
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None,
+        repos: list[RepositoryRef] | None,
+        ticket: AdmissionTicket | None,
+    ) -> None:
+        """Create the fire-and-forget task. Synchronous, so nothing interleaves
+        between the gate's answer and the work existing."""
         asyncio_task = asyncio.create_task(
-            self._run_with_semaphore(workflow_id, inputs, execution_id, task=task, repos=repos),
+            self._run_with_semaphore(
+                workflow_id, inputs, execution_id, task=task, repos=repos, admitted=ticket
+            ),
             name=f"workflow-exec-{execution_id or workflow_id}",
         )
         self._tasks.add(asyncio_task)
@@ -992,9 +1054,12 @@ class BackgroundWorkflowDispatcher:
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
+        admitted: AdmissionTicket | None = None,
     ) -> None:
         async with self._semaphore:
-            await self._run(workflow_id, inputs, execution_id, task=task, repos=repos)
+            await self._run(
+                workflow_id, inputs, execution_id, task=task, repos=repos, admitted=admitted
+            )
 
     async def _run(
         self,
@@ -1003,6 +1068,7 @@ class BackgroundWorkflowDispatcher:
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
+        admitted: AdmissionTicket | None = None,
     ) -> None:
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
@@ -1017,7 +1083,10 @@ class BackgroundWorkflowDispatcher:
                 execution_id=execution_id or None,
                 task=task,
             )
-            await self._handler.handle(cmd)
+            # #1387: carry the gate's answer in rather than asking again. This
+            # runs after the caller was told the work started, so a second
+            # refusal here could only lose the execution, never prevent it.
+            await self._handler.handle(cmd, admitted=admitted)
         except DuplicateExecutionError:
             logger.info(
                 "Duplicate dispatch for execution %s, already running",
@@ -1079,7 +1148,7 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     return BackgroundWorkflowDispatcher(
         handler,
         max_concurrent=max_concurrent,
-        maintenance=get_maintenance_port(),
+        maintenance=get_admission_gate(),
     )
 
 

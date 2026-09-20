@@ -32,6 +32,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api._wiring import BackgroundWorkflowDispatcher
+from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
@@ -51,7 +52,8 @@ class _RecordingHandler:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object) -> None:
+    async def handle(self, command: object, *, admitted: object = None) -> None:
+        del admitted
         self.admitted.append(command)
 
 
@@ -60,7 +62,11 @@ class _Fixture:
         self.store = MemoryProjectionStore()
         self.checkpoints = MemoryCheckpointStore()
         self.handler = _RecordingHandler()
-        self.maintenance = InMemoryMaintenanceAdapter()
+        # The real gate over the real port, because #1387's verification found
+        # the defect in the gap between them: the dispatcher holding only a
+        # port could read it, have the operator's set complete, and admit
+        # anyway. A double for either half would hide that.
+        self.maintenance = AdmissionGate(InMemoryMaintenanceAdapter())
         self.dispatcher = BackgroundWorkflowDispatcher(
             self.handler,  # type: ignore[arg-type]
             maintenance=self.maintenance,

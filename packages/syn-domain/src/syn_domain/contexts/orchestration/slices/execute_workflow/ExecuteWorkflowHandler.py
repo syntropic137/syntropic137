@@ -32,7 +32,7 @@ from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
-    from syn_domain.contexts._shared.maintenance import MaintenancePort
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
@@ -334,26 +334,41 @@ class ExecuteWorkflowHandler:
     async def handle(
         self,
         command: ExecuteWorkflowCommand,
+        *,
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
         """Handle ExecuteWorkflow command.
 
         Args:
             command: ExecuteWorkflowCommand with workflow ID and inputs
+            admitted: The ticket the gate issued for this execution (#1387).
+                Present means admission was already decided, under the lock,
+                before the caller was told the work had started. Absent means
+                nobody asked the gate, and the backstop below does.
 
         Returns:
             WorkflowExecutionResult with execution details and metrics
 
         Raises:
             WorkflowNotFoundError: If workflow doesn't exist
-            MaintenancePausedError: If execution admission is paused (#1387)
+            MaintenancePausedError: If admission is paused and no ticket was
+                presented (#1387)
         """
         # #1387, FIRST, before anything is loaded or created: this is the one
-        # place both admission paths converge, so a path that forgets its own
-        # refusal is still refused here rather than quietly admitted. Entry
-        # points that want a nicer answer than an exception - a 409, a paused
-        # trigger record - refuse earlier; this is what catches the ones that
-        # do not exist yet.
-        if self._maintenance is not None:
+        # place every admission path converges, so a path that forgets its own
+        # refusal is still refused here rather than quietly admitted.
+        #
+        # Skipped for a ticketed execution, and that is the point rather than a
+        # concession. This runs inside a fire-and-forget task, after the caller
+        # has already been told `dispatched` or 200, and an exception here
+        # cannot reach them - it is logged and swallowed. Re-deciding an
+        # admission the gate already granted therefore does not refuse the
+        # work, it loses it, leaving a trigger record claiming a run that no
+        # longer exists. The ticket was issued under the transition lock, so
+        # "the flag changed since" means the operator paused AFTER this was
+        # admitted, and admitted work runs to completion (#1387: this gates
+        # admission, not execution).
+        if admitted is None and self._maintenance is not None:
             await refuse_if_paused(self._maintenance)
 
         workflow = await self._workflow_repo.get_by_id(command.aggregate_id)

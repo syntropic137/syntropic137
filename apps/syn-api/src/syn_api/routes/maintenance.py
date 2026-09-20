@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from syn_api._wiring import get_maintenance_port
+from syn_api._wiring import get_admission_gate
 from syn_api.types import MaintenanceModeResponse, SetMaintenanceModeRequest
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -26,7 +26,7 @@ async def get_maintenance_mode() -> MaintenanceModeResponse:
     Read through to the durable store, never from process memory, so this
     answers for the system rather than for this container.
     """
-    mode = await get_maintenance_port().current()
+    mode = await get_admission_gate().current()
     return MaintenanceModeResponse(
         active=mode.active,
         reason=mode.reason,
@@ -39,11 +39,16 @@ async def get_maintenance_mode() -> MaintenanceModeResponse:
 async def set_maintenance_mode(request: SetMaintenanceModeRequest) -> MaintenanceModeResponse:
     """Pause or resume execution admission.
 
-    Returns only once the state is durably stored. That ordering is the point:
-    a caller that has its response knows that every admission path is already
-    refusing, so there is no window on the setting side either.
+    Returns only once the state is durably stored AND every admission already
+    part-way through deciding has finished deciding. That ordering is the whole
+    point: a caller holding this response knows not only that the flag is set
+    but that nothing is still on its way through the old answer, so there is no
+    window on the setting side either.
+
+    Set through the gate rather than the port, because the port can only store
+    the flag - it cannot hold the door while it does so.
     """
-    mode = await get_maintenance_port().set_mode(
+    mode = await get_admission_gate().set_mode(
         active=request.active,
         reason=request.reason,
         actor=request.actor,

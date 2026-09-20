@@ -32,7 +32,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
-from syn_domain.contexts._shared.maintenance import MaintenancePausedError
+from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
@@ -44,6 +44,11 @@ class _ExecutionService(Protocol):
     Orchestration contexts (ADR-063). Repository identity is passed
     as typed ``RepositoryRef`` values, not smuggled through the
     ``inputs`` dict.
+
+    ``run_workflow`` returns the admission ticket rather than ``None`` (#1387)
+    so this context depends on the admission DECISION and not on the absence of
+    an exception. A trigger record is written from the ticket, which is the
+    only thing that can honestly say the work was admitted.
     """
 
     async def run_workflow(
@@ -53,7 +58,7 @@ class _ExecutionService(Protocol):
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
-    ) -> None: ...
+    ) -> AdmissionTicket | None: ...
 
 
 class _BudgetChecker(Protocol):
@@ -301,7 +306,15 @@ class WorkflowDispatchProjection(ProcessManager):
                     repo_slug,
                 )
 
-        await self._execution_service.run_workflow(
+        # #1387: `run_workflow` either raises MaintenancePausedError - which
+        # _dispatch_record records as `paused` - or hands back the admission
+        # ticket the gate issued under its transition lock. The record below is
+        # written FROM that ticket, so "dispatched" cannot be a guess: there is
+        # no way to reach the next line without the gate having said yes.
+        #
+        # `None` means this dispatcher was built without a gate, which only
+        # happens in fixtures; the timestamp falls back to now.
+        ticket = await self._execution_service.run_workflow(
             workflow_id=workflow_id,
             inputs=str_inputs,
             execution_id=execution_id,
@@ -309,7 +322,9 @@ class WorkflowDispatchProjection(ProcessManager):
         )
 
         record["status"] = "dispatched"
-        record["dispatched_at"] = datetime.now(UTC).isoformat()
+        record["dispatched_at"] = (
+            ticket.granted_at if ticket is not None else datetime.now(UTC)
+        ).isoformat()
         if execution_id:
             await self._store.save(self.PROJECTION_NAME, execution_id, record)
 

@@ -53,14 +53,25 @@ class _FakeRedis:
         self.data[key] = value
 
 
+def _rebuild_the_gate_over(port: object) -> None:
+    """Point the process at a new durable store, as a restart would.
+
+    Both singletons, because the gate holds the port it was built with - and a
+    stale gate over a discarded store is exactly the "comes back permissive"
+    failure these tests are here to catch.
+    """
+    import syn_api._wiring as wiring
+
+    wiring._maintenance_singleton = port  # type: ignore[assignment]
+    wiring._admission_gate_singleton = None
+
+
 @pytest.fixture(autouse=True)
 def _fresh_maintenance_port() -> object:
     """Each test gets its own gate; none of them inherit another's state."""
-    import syn_api._wiring as wiring
-
-    wiring._maintenance_singleton = None
+    _rebuild_the_gate_over(None)
     yield
-    wiring._maintenance_singleton = None
+    _rebuild_the_gate_over(None)
 
 
 async def _admit(workflow_id: str = "wf-does-not-exist") -> BackgroundTasks:
@@ -139,17 +150,16 @@ class TestARestartedApiComesBackStillRefusing:
     """
 
     async def test_a_fresh_adapter_over_the_same_store_still_refuses(self) -> None:
-        import syn_api._wiring as wiring
         from syn_adapters.maintenance import RedisMaintenanceAdapter
 
         backend = _FakeRedis()
-        wiring._maintenance_singleton = RedisMaintenanceAdapter(backend)  # type: ignore[arg-type]
+        _rebuild_the_gate_over(RedisMaintenanceAdapter(backend))  # type: ignore[arg-type]
         await set_maintenance_mode(
             SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
         )
 
         # The swap: this process's adapter is gone, a new one reads the store.
-        wiring._maintenance_singleton = RedisMaintenanceAdapter(backend)  # type: ignore[arg-type]
+        _rebuild_the_gate_over(RedisMaintenanceAdapter(backend))  # type: ignore[arg-type]
 
         with pytest.raises(HTTPException) as exc:
             await _admit()
@@ -163,11 +173,10 @@ class TestARestartedApiComesBackStillRefusing:
         cannot be reading anything it cached - already sees the new state by
         the time the PUT's response exists.
         """
-        import syn_api._wiring as wiring
         from syn_adapters.maintenance import RedisMaintenanceAdapter
 
         backend = _FakeRedis()
-        wiring._maintenance_singleton = RedisMaintenanceAdapter(backend)  # type: ignore[arg-type]
+        _rebuild_the_gate_over(RedisMaintenanceAdapter(backend))  # type: ignore[arg-type]
 
         await set_maintenance_mode(
             SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
