@@ -463,16 +463,18 @@ class CredentialRenewalFailedError(Exception):
     """This workspace's git credential is not known to be usable (#1393).
 
     Raised by the adapter that mints and installs the credential, and caught
-    by both of its callers - who want OPPOSITE things from it, which is the
-    reason it is an exception rather than a logged warning. The startup check
-    fails the phase on it, before an agent has been given anything to lose.
-    The quarantine path logs it and pushes anyway, because the token already
-    in the container may still have minutes left and a push that might work
-    beats one that was never attempted.
+    by both of its callers - neither of whom lets it end a phase on its own
+    (#1396). The startup rehearsal retries it a bounded number of times and
+    then keeps the credential the setup phase installed, because a mint that
+    failed is a statement about GitHub's availability, not about the token
+    minutes old in this container. The quarantine path logs it and pushes
+    anyway, because that token may still have minutes left and a push that
+    might work beats one that was never attempted.
 
     It says nothing about whether the OLD credential still works. Nothing can:
     the only way to find out is to spend it on a push, which is what both
-    callers go on to do.
+    callers go on to do - and at phase start, that push's own refusal is the
+    only thing that refuses the phase.
     """
 
 

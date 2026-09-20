@@ -154,6 +154,20 @@ _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
 #: test can lower it and make the backstop fire in a second.
 _CANCELLED_PUSH_SECONDS: Final[float] = 30.0
 
+#: How many times the phase-start rehearsal tries something that talks to
+#: GitHub before it reads a failure as this phase's verdict (#1396). Minting a
+#: token and a dry-run push are both one request to a third party, and a
+#: timeout, a 5xx or a secondary rate limit are momentary - refusing an
+#: execution for one throws away a phase that would have run perfectly.
+_RENEWAL_ATTEMPTS: Final[int] = 3
+
+#: The wait between those attempts. Long enough to outlive a blip, short
+#: enough that the whole rehearsal stays a few seconds of phase start.
+#:
+#: Module globals, read at call time like the bounds in `workspace_git`, so a
+#: test can make the retries instant.
+_RENEWAL_RETRY_SECONDS: Final[float] = 2.0
+
 
 async def rehearse_quarantine_credential(
     workspace: GitWorkspace, *, execution_id: str, phase_id: str
@@ -202,9 +216,21 @@ async def rehearse_quarantine_credential(
     the source of a push, and a phase that later commits into it is covered by
     every other repository's rehearsal.
 
+    A MINT THAT FAILED IS NOT A VERDICT ABOUT THIS PHASE (#1396). Failing here
+    on the renewal alone refused phases whose workspace was holding a
+    credential that worked: the setup phase installed one minutes ago, it has
+    most of its hour left, and a rate limit or a five-second network fault
+    between here and GitHub says nothing about it. So the renewal is retried a
+    bounded number of times, and if it still cannot happen the credential
+    already in the container is KEPT and the rehearsal below is run with it.
+    The rehearsal is the only thing that can produce a verdict, because it is
+    the only thing that spends the credential on the actual remote - and its
+    refusal, after the same bounded retries, is what fails the phase.
+
     Raises:
         QuarantinePathUnusableError: origin could not be reached with a
-            credential, or the credential it depends on could not be renewed.
+            credential, after bounded retries. A renewal that failed does not
+            reach here on its own.
         WorkspaceInspectionFailedError: the workspace would not answer, so
             nothing was rehearsed and no verdict exists. Propagated rather
             than downgraded, for the reason every command in this module is
@@ -214,31 +240,14 @@ async def rehearse_quarantine_credential(
     repos = await repositories(workspace)
     if not repos:
         return
-    try:
-        await workspace.renew_git_credential()
-    except Exception as unrenewable:
-        # ANY exception, for the same reason the teardown caller swallows any:
-        # the protocol names one type, and a policy that only applied to that
-        # one would be a policy conditional on every workspace keeping its
-        # half of it. Here the conclusion is identical whatever was raised -
-        # this workspace cannot be given a credential, so an hour from now it
-        # will not be able to hand back the work it was given. What differs is
-        # only that the phase now fails by NAME rather than by whatever the
-        # isolation provider happened to call the problem.
-        raise QuarantinePathUnusableError(
-            phase_id=phase_id,
-            detail=(
-                f"The credential every quarantine push depends on could not be "
-                f"renewed: {unrenewable}"
-            ),
-        ) from unrenewable
+    await _renew_for_the_rehearsal(workspace, phase_id=phase_id)
 
     ref = _quarantine_ref(execution_id, phase_id)
     for repo in repos:
         head = (await git(workspace, repo, "rev-parse", "--revs-only", "HEAD")).strip()
         if not head:
             continue
-        rehearsed = await push(workspace, repo, commit=head, ref=ref, dry_run=True)
+        rehearsed = await _rehearsal_push(workspace, repo, commit=head, ref=ref)
         if rehearsed.exit_code != 0:
             raise QuarantinePathUnusableError(
                 phase_id=phase_id,
@@ -255,6 +264,96 @@ async def rehearse_quarantine_credential(
         phase_id,
         ref,
     )
+
+
+async def _renew_for_the_rehearsal(workspace: GitWorkspace, *, phase_id: str) -> None:
+    """Mint a fresh credential if it can be minted, and never fail the phase for it.
+
+    RETRIED, because the failures this call has are mostly not about this
+    phase: minting a GitHub installation token is one HTTPS request to a
+    third party, and a timeout, a 5xx or a secondary rate limit are all
+    momentary and all arrive here indistinguishable from a permanent refusal.
+    `_RENEWAL_ATTEMPTS` of them, `_RENEWAL_RETRY_SECONDS` apart, costs seconds
+    at phase start and converts the most common transient failure into no
+    failure at all.
+
+    AND THEN NOT FATAL EITHER. What the workspace holds after all the attempts
+    have failed is the credential the setup phase installed, which is minutes
+    old and good for an hour - the same credential this phase would have
+    spent anyway had the renewal never been attempted. Refusing the phase at
+    that point throws away an execution that could have run, to protect work
+    it has not been given yet, on the strength of evidence about GitHub's
+    availability rather than about this workspace. The rehearsal that follows
+    asks the question that actually matters, with the credential that is
+    actually there.
+
+    `asyncio.CancelledError` is re-raised rather than retried: nothing has
+    been given to this phase yet, so there is nothing here to salvage, and
+    the teardown path's argument for pushing anyway does not apply.
+    """
+    for attempt in range(1, _RENEWAL_ATTEMPTS + 1):
+        try:
+            await workspace.renew_git_credential()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as unrenewable:
+            # ANY exception, for the same reason the teardown caller swallows
+            # any: the protocol names one type, and a policy that only applied
+            # to that one would be conditional on every workspace keeping its
+            # half of it.
+            if attempt < _RENEWAL_ATTEMPTS:
+                logger.info(
+                    "Could not mint a fresh git credential for phase %s (attempt %d of "
+                    "%d): %s. Retrying in %.0fs.",
+                    phase_id,
+                    attempt,
+                    _RENEWAL_ATTEMPTS,
+                    unrenewable,
+                    _RENEWAL_RETRY_SECONDS,
+                )
+                await asyncio.sleep(_RENEWAL_RETRY_SECONDS)
+                continue
+            logger.warning(
+                "Could not mint a fresh git credential for phase %s after %d attempts: "
+                "%s. KEEPING the credential this workspace was provisioned with, which "
+                "is minutes old, and rehearsing the quarantine push with it: whether "
+                "THAT works is the only thing that decides this phase (#1396).",
+                phase_id,
+                _RENEWAL_ATTEMPTS,
+                unrenewable,
+            )
+    return
+
+
+async def _rehearsal_push(
+    workspace: GitWorkspace, repo: str, *, commit: str, ref: str
+) -> ExecutionResult:
+    """The rehearsal's dry run, retried so a blip cannot refuse a viable phase.
+
+    The same bound and the same reasoning as the renewal above, one layer
+    further out: this push IS the verdict, so a network fault that made it
+    fail once would take a whole execution off the board. What survives
+    `_RENEWAL_ATTEMPTS` is no longer plausibly transient, and is read as the
+    answer - an authorization refusal and a remote that is simply not there
+    both look exactly like this and both are reasons not to run the phase.
+    """
+    for attempt in range(1, _RENEWAL_ATTEMPTS + 1):
+        rehearsed = await push(workspace, repo, commit=commit, ref=ref, dry_run=True)
+        if rehearsed.exit_code == 0 or attempt == _RENEWAL_ATTEMPTS:
+            return rehearsed
+        logger.info(
+            "A rehearsal push of %s to %s failed (attempt %d of %d): %s. Retrying in "
+            "%.0fs, because a transport fault is not a verdict about this phase.",
+            repo,
+            ref,
+            attempt,
+            _RENEWAL_ATTEMPTS,
+            (rehearsed.stderr or rehearsed.stdout).strip() or "no output",
+            _RENEWAL_RETRY_SECONDS,
+        )
+        await asyncio.sleep(_RENEWAL_RETRY_SECONDS)
+    raise AssertionError("unreachable: the loop returns on its last attempt")
 
 
 async def refuse_to_complete_unsaved_phase(

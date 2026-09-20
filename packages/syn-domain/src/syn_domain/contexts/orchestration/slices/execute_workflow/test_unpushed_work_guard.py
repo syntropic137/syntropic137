@@ -290,6 +290,16 @@ class _Clone:
         """
         self.git("remote", "set-url", "origin", str(self.root / "no-such-origin.git"))
 
+    def restore_the_remote(self) -> None:
+        """Put origin back, so a break can be made to last exactly one command.
+
+        A transport fault is a MOMENT, not a state, and the difference is the
+        whole of #1396's fourth finding: code that retries and code that does
+        not are indistinguishable against a remote that stays broken, and
+        differ completely against one that does not.
+        """
+        self.git("remote", "set-url", "origin", str(self.origin))
+
     def advance_origin_main(self, name: str, content: str) -> None:
         """Move origin/main on, the way another PR merging does, and fetch it."""
         seed = self.seed
@@ -365,6 +375,19 @@ def _clone_repository(root: Path, name: str = _REPO) -> _Clone:
 def clone(tmp_path: Path) -> _Clone:
     """A pushed-up-to-date clone on a feature branch - a phase's starting point."""
     return _clone_repository(tmp_path)
+
+
+@pytest.fixture
+def instant_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take the wait out of the rehearsal's bounded retries (#1396).
+
+    The COUNT is the behaviour and the DELAY is the production tuning, so the
+    tests below keep the first and drop the second - otherwise every retry
+    test would spend `_RENEWAL_RETRY_SECONDS` per attempt proving nothing. A
+    module global read at call time is what makes that possible, which is why
+    `_RENEWAL_RETRY_SECONDS` is one.
+    """
+    monkeypatch.setattr(unpushed_work_guard, "_RENEWAL_RETRY_SECONDS", 0.0)
 
 
 async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clone) -> None:
@@ -2083,22 +2106,146 @@ async def test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept
     assert not clone.reachable_in_origin(committed, "refs/heads/main")
 
 
-async def test_the_rehearsal_refuses_the_phase_when_the_credential_cannot_be_minted(
-    clone: _Clone,
-) -> None:
-    """The other way the path is unusable, and the one a push cannot report.
+# --------------------------------------------------------------------------
+# A MINT THAT FAILED IS NOT A VERDICT ABOUT THIS PHASE (#1396)
+#
+# The rehearsal used to refuse a phase whose renewal raised, before making any
+# push at all. That reads one failure as another: minting an installation
+# token is an HTTPS request to GitHub, and it failing says GitHub was briefly
+# unavailable - not that the credential the setup phase installed minutes ago,
+# with most of its hour left, has stopped working. The workspace is already
+# built and the repositories are already cloned by the time this runs, so the
+# cost of being wrong is a whole execution thrown away to protect work that
+# has not been produced yet.
+#
+# So: retry the transient thing, keep what the workspace already holds, and
+# let the push be the one that answers. A rehearsal push that fails after its
+# own retries is a refusal or an origin that is not there, and both of those
+# are reasons not to start.
+# --------------------------------------------------------------------------
 
-    A workspace that cannot be given a credential at all will not be able to
-    quarantine anything an hour from now, whatever the token in it does in the
-    meantime. Unlike the teardown caller, this one has nothing to lose by
-    refusing, so it refuses.
+
+class _FailsToMintTwice:
+    """The real workspace, except the first two renewals fail and the third works.
+
+    The failure GitHub actually produces: a 5xx or a reset connection on one
+    request, gone by the next. `attempts` is counted because "it was retried"
+    is the behaviour, and a double that merely succeeded eventually would stay
+    green with the loop deleted.
     """
-    with pytest.raises(QuarantinePathUnusableError) as raised:
-        await rehearse_quarantine_credential(
-            _CannotRenew(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
-        )
 
-    assert "could not be renewed" in str(raised.value)
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.attempts = 0
+
+    async def renew_git_credential(self) -> None:
+        self.attempts += 1
+        if self.attempts < 3:
+            raise CredentialRenewalFailedError("502 from the installation token endpoint")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _UnreachableForTheFirstPush(_RenewsCredential):
+    """The real workspace, with origin genuinely gone for the first push only.
+
+    A REAL failed push from real git rather than a fabricated result, for the
+    reason #1396 gave about the old `_RemoteRejects`: a canned non-zero
+    `ExecutionResult` asserts that the caller reads `exit_code` and assumes
+    the thing that needs establishing. The remote is broken around exactly one
+    command and put back, so the retry has something to succeed at.
+    """
+
+    def __init__(self, clone: _Clone) -> None:
+        self._clone = clone
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != "push":
+            return await self._clone.workspace.execute(command)
+        self.pushes += 1
+        if self.pushes > 1:
+            return await self._clone.workspace.execute(command)
+        self._clone.break_the_remote()
+        try:
+            return await self._clone.workspace.execute(command)
+        finally:
+            self._clone.restore_the_remote()
+
+
+async def test_a_mint_that_failed_does_not_refuse_a_phase_whose_credential_still_works(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The finding itself: the old policy refused this phase, and it was viable.
+
+    The workspace is holding the credential its setup phase installed minutes
+    ago. A mint that cannot happen right now says something about GitHub's
+    availability; the rehearsal push that follows says something about this
+    phase, and it passes - the token in the container reaches the origin and
+    the quarantine path it will need in an hour is open.
+    """
+    await rehearse_quarantine_credential(
+        _CannotRenew(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
+
+
+async def test_a_mint_that_fails_transiently_is_retried_before_it_is_given_up_on(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """One request to a third party, so one failure is not an answer.
+
+    COUNTED, because "it was retried" and "it happened to work" are different
+    programs and only the first is the fix. Keeping the fresh token when it
+    can be had is still worth a second and a third try: the phase then runs on
+    a credential with a full hour on it rather than on whatever is left of the
+    one it was provisioned with.
+    """
+    workspace = _FailsToMintTwice(clone.workspace)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.attempts == 3
+
+
+async def test_a_rehearsal_push_that_fails_transiently_is_retried_before_it_is_fatal(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The same argument one layer out, where being wrong costs a whole phase.
+
+    This push IS the verdict, so a momentary transport fault during it would
+    take an execution off the board for a reason that was over before the
+    agent would have started. Origin is really gone for the first push and
+    really back for the second, and the phase is not refused.
+    """
+    workspace = _UnreachableForTheFirstPush(clone)
+
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.pushes == 2, "the rehearsal never retried, so nothing was tested"
+
+
+async def test_a_phase_whose_mint_failed_is_still_launched(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """The wiring for the same decision: the viable phase reaches its agent.
+
+    THE HOP, not the function. `start_phase` rehearses between provisioning
+    and telling the aggregate that provisioning completed, and that second
+    call is what lets the agent run - so asserting on the absence of a raise
+    would leave a refusal that happened one line later undetected. Asserted on
+    `provision_workspace_completed`, which is the thing the old policy did not
+    reach.
+    """
+    run = _PhaseRun(_CannotRenew(clone.workspace))
+
+    await run.start()
+
+    run.aggregate.provision_workspace_completed.assert_called_once()
 
 
 async def test_a_workspace_with_no_repositories_has_no_quarantine_path_to_rehearse() -> None:
@@ -2126,7 +2273,8 @@ async def test_a_phase_whose_quarantine_path_is_unusable_is_never_launched(
     on `provision_workspace_completed` rather than on the raise, because the
     raise alone would also be satisfied by a check that ran too late.
     """
-    run = _PhaseRun(_CannotRenew(clone.workspace))
+    clone.break_the_remote()
+    run = _PhaseRun(clone.workspace)
 
     with pytest.raises(QuarantinePathUnusableError):
         await run.start()
@@ -2234,25 +2382,21 @@ async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
 
-async def test_the_rehearsal_refuses_the_phase_when_the_renewal_breaks_its_contract(
+async def test_a_renewal_that_broke_its_own_contract_is_no_more_a_verdict_than_any_other(
     clone: _Clone,
+    instant_retries: None,
 ) -> None:
-    """The same input as the teardown test above, and the opposite verdict.
+    """The same input as the teardown test above, and now the same conclusion.
 
-    One contract, two policies, and neither of them conditional on the type
-    raised. A workspace that cannot be given a credential now will not be able
-    to give one back an hour from now either - so it is refused, by name, while
-    the only thing at stake is the provisioning already spent.
+    One contract, one policy, and neither half of it conditional on the type
+    raised. At both ends a renewal that could not happen is a reason the push
+    MIGHT fail, and at both ends the push is what answers. What still differs
+    is what the answer costs: here a refusal ends the phase before its agent
+    runs, and there it is reported as work that is not recoverable.
     """
-    with pytest.raises(QuarantinePathUnusableError) as raised:
-        await rehearse_quarantine_credential(
-            _BreaksItsContract(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
-        )
-
-    message = str(raised.value)
-    assert _PHASE_ID in message
-    assert "could not be renewed" in message
-    assert "no such container" in message
+    await rehearse_quarantine_credential(
+        _BreaksItsContract(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
 
 
 # --------------------------------------------------------------------------
