@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
+    from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
@@ -668,6 +669,74 @@ def _create_dedup_adapter() -> DedupPort:
         ) from exc
 
 
+_maintenance_singleton: MaintenancePort | None = None
+
+
+def get_maintenance_port() -> MaintenancePort:
+    """Return the process-wide maintenance mode store (#1387).
+
+    The single durable answer to "may a new execution be admitted". Every
+    admission path reads it; the deploy script sets it before draining and
+    clears it after the swap.
+
+    Priority (ADR-060): Postgres (durable) > Redis (durable) > in-memory
+    (tests only) > fail-fast. There is deliberately no permissive fallback: an
+    API that cannot read the flag cannot know admission is open, and guessing
+    "open" is exactly the silent re-opening this gate exists to prevent.
+
+    A singleton for the connection, not for the state - both durable adapters
+    read through to their store on every call, so a container that starts in
+    the middle of a deploy comes up still refusing.
+    """
+    global _maintenance_singleton
+    if _maintenance_singleton is not None:
+        return _maintenance_singleton
+
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if settings.uses_in_memory_stores:
+        from syn_adapters.maintenance import InMemoryMaintenanceAdapter
+
+        _maintenance_singleton = InMemoryMaintenanceAdapter()
+        return _maintenance_singleton
+
+    if settings.syn_observability_db_url:
+        try:
+            from syn_api._wiring_db import get_shared_db_pool
+
+            pool = get_shared_db_pool()
+            if pool is not None:
+                from syn_adapters.maintenance import PostgresMaintenanceAdapter
+
+                logger.info("Maintenance mode using Postgres (ADR-060)")
+                _maintenance_singleton = PostgresMaintenanceAdapter(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
+                return _maintenance_singleton
+        except Exception:
+            logger.warning(
+                "Postgres maintenance store unavailable; falling back to Redis",
+                exc_info=True,
+            )
+
+    try:
+        from syn_adapters.maintenance import RedisMaintenanceAdapter
+        from syn_adapters.redis_client import resilient_redis_client
+
+        logger.info("Maintenance mode using Redis")
+        _maintenance_singleton = RedisMaintenanceAdapter(
+            resilient_redis_client(settings.redis_url)
+        )
+        return _maintenance_singleton
+    except Exception as exc:
+        raise RuntimeError(
+            "No durable maintenance-mode backend available (Postgres and Redis both "
+            "failed). Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production. "
+            "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md) "
+            "and issue #1387."
+        ) from exc
+
+
 _import_ledger_singleton: ImportLedgerPort | None = None
 
 
@@ -867,7 +936,12 @@ class BackgroundWorkflowDispatcher:
     - Semaphore-bounded concurrency (Phase A2)
     """
 
-    def __init__(self, handler: ExecuteWorkflowHandler, max_concurrent: int = 1) -> None:
+    def __init__(
+        self,
+        handler: ExecuteWorkflowHandler,
+        max_concurrent: int = 1,
+        maintenance: MaintenancePort | None = None,
+    ) -> None:
         """`max_concurrent` defaults to 1 for the same reason the setting does.
 
         A caller that omits it used to get 5, which quietly reintroduced the
@@ -877,6 +951,7 @@ class BackgroundWorkflowDispatcher:
         self._handler = handler
         self._tasks: set[asyncio.Task[None]] = set()
         self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._maintenance = maintenance
 
     async def run_workflow(
         self,
@@ -893,6 +968,16 @@ class BackgroundWorkflowDispatcher:
         # no execution stream and never will. Raising HERE reaches the
         # projection's `dispatch_exception` path, which marks the record
         # `failed` - the state that is actually true.
+        #
+        # #1387 rides the same slot for the same reason, and goes first because
+        # a paused gate should not cost a template read. The projection tells
+        # the two apart by exception type and records this one as `paused`, not
+        # `failed`: the trigger was refused, not broken.
+        if self._maintenance is not None:
+            from syn_domain.contexts._shared import refuse_if_paused
+
+            await refuse_if_paused(self._maintenance)
+
         await self._handler.validate_stored_declarations(workflow_id)
 
         asyncio_task = asyncio.create_task(
@@ -980,6 +1065,10 @@ async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:
         workflow_repository=get_workflow_repository(),
         phase_plugin_resolver=resolution_service.resolve_for_phase,
         phase_skill_resolver=skill_resolution_service.resolve_for_phase,
+        # #1387: the backstop. Both admission paths refuse earlier and more
+        # informatively than this, but a path added later that only knows about
+        # the handler is still refused rather than silently admitted.
+        maintenance=get_maintenance_port(),
     )
 
 
@@ -989,7 +1078,11 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     from syn_shared.settings import get_settings
 
     max_concurrent = get_settings().polling.max_concurrent_dispatches
-    return BackgroundWorkflowDispatcher(handler, max_concurrent=max_concurrent)
+    return BackgroundWorkflowDispatcher(
+        handler,
+        max_concurrent=max_concurrent,
+        maintenance=get_maintenance_port(),
+    )
 
 
 class _NullSignalQueueAdapter:

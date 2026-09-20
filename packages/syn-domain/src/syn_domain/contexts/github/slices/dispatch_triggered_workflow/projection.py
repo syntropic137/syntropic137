@@ -32,6 +32,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts._shared.maintenance import MaintenancePausedError
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
@@ -78,6 +79,10 @@ logger = logging.getLogger(__name__)
 _SUBSCRIBED_EVENTS = {
     "github.TriggerFired",
 }
+
+#: Dispatch held back because execution admission is closed (#1387). Reversible:
+#: unlike "failed", a record in this state is re-offered on every later tick.
+_PAUSED = "paused"
 
 
 _Scalar = str | int | float | bool | None
@@ -199,14 +204,28 @@ class WorkflowDispatchProjection(ProcessManager):
             )
             return 0
 
-        pending = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
         processed = 0
-
-        for record in pending:
+        for record in await self._pending_records():
             if await self._dispatch_record(record):
                 processed += 1
 
         return processed
+
+    async def _pending_records(self) -> list[dict[str, str | int | float | bool | None]]:
+        """Records still owed a dispatch: never attempted, or parked by #1387.
+
+        ``paused`` is a reversible state, not a terminal one. A trigger that
+        arrived during a deploy is picked up again on the next tick after
+        maintenance mode clears, which is what stops "recorded as paused" from
+        being a dropped trigger wearing a nicer label. The existing hourly
+        dispatch rate limit bounds the catch-up burst.
+        """
+        assert self._store is not None
+        records = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
+        records.extend(
+            await self._store.query(self.PROJECTION_NAME, filters={"status": _PAUSED})
+        )
+        return records
 
     async def _dispatch_record(self, record: dict[str, str | int | float | bool | None]) -> bool:
         """Dispatch a single pending record. Returns True if dispatched."""
@@ -230,6 +249,21 @@ class WorkflowDispatchProjection(ProcessManager):
         try:
             await self._execute_and_record(record, execution_id, workflow_id, trigger_id)
             return True
+        except MaintenancePausedError as exc:
+            # #1387: refused, not broken. The execution service raises this
+            # SYNCHRONOUSLY, before any task exists, so nothing was started and
+            # this record is the whole truth about the trigger. Recording it as
+            # `failed` would say the dispatch was attempted and went wrong;
+            # `paused` says it was held back, and _pending_records() picks it up
+            # again once the gate clears.
+            logger.info(
+                "Dispatch of workflow %s for trigger %s held: %s",
+                workflow_id,
+                trigger_id,
+                exc.mode.refusal_detail,
+            )
+            await self._save_record_status(execution_id, record, _PAUSED, "maintenance_mode")
+            return False
         except Exception:
             logger.exception(
                 "Failed to dispatch workflow %s for trigger %s", workflow_id, trigger_id
@@ -331,10 +365,12 @@ class WorkflowDispatchProjection(ProcessManager):
         status: str,
         reason: str,
     ) -> None:
-        """Update a record's status and persist it."""
+        """Update a record's status and the reason for it, and persist."""
         assert self._store is not None
         record["status"] = status
-        record["failure_reason"] = reason
+        # Named for the status, not for failure: #1387 writes a `paused` status
+        # here and "failure_reason" would have described a refusal as a fault.
+        record["status_reason"] = reason
         if execution_id:
             await self._store.save(self.PROJECTION_NAME, execution_id, record)
 

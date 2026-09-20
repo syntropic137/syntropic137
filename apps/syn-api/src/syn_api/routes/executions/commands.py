@@ -606,6 +606,23 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
         ) from None
 
 
+async def _refuse_while_paused() -> None:
+    """Translate a paused admission gate into 409 (#1387).
+
+    409 rather than 503: the request is well-formed and the service is up, the
+    system state simply forbids it right now. A caller can tell that apart from
+    a failure and retry after the deploy, which is the whole point of the gate
+    having an answer at all.
+    """
+    from syn_api._wiring import get_maintenance_port
+    from syn_domain.contexts._shared import MaintenancePausedError, refuse_if_paused
+
+    try:
+        await refuse_if_paused(get_maintenance_port())
+    except MaintenancePausedError as exc:
+        raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -685,7 +702,14 @@ async def execute_workflow_endpoint(
     request: ExecuteWorkflowRequest,
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
-    """Start workflow execution in background."""
+    """Start workflow execution in background.
+
+    Refuses with 409 while maintenance mode is active (#1387). The check is
+    SYNCHRONOUS and first: everything below the ``add_task`` line runs after
+    the response has been sent, so a refusal discovered there would arrive as
+    a 200 followed by an execution that never happened.
+    """
+    await _refuse_while_paused()
     _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
