@@ -31,16 +31,16 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-# NOT in a TYPE_CHECKING block, despite TC003: `MaintenanceMode` is a
-# Pydantic model and Pydantic resolves `since: datetime | None` against
-# this module's real namespace at class-build time.
-from datetime import UTC, datetime  # noqa: TC003
+# NOT in a TYPE_CHECKING block: `MaintenanceMode` is a Pydantic model and
+# Pydantic resolves `since: datetime | None` against this module's real
+# namespace at class-build time.
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-from pydantic import BaseModel, ConfigDict
 
 
 class MaintenanceMode(BaseModel):

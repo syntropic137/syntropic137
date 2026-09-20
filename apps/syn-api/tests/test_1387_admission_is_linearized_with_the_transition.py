@@ -31,23 +31,22 @@ from datetime import UTC, datetime
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
-from fastapi import BackgroundTasks, HTTPException
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from event_sourcing.stores.memory_projection import MemoryProjectionStore
+from fastapi import BackgroundTasks, HTTPException
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+from syn_api._wiring import BackgroundWorkflowDispatcher
 from syn_api.routes.executions import commands
 from syn_api.routes.maintenance import set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest
-
-from syn_api._wiring import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared import AdmissionGate, MaintenanceMode
-from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
 )
+from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
 pytestmark = pytest.mark.unit
 
@@ -168,9 +167,9 @@ class _Fixture:
         """
         async with asyncio.timeout(_PATIENCE):
             for _ in range(100):
-                if not self.dispatcher._tasks:  # noqa: SLF001 - no public view of them
+                if not self.dispatcher._tasks:
                     return
-                await asyncio.gather(*self.dispatcher._tasks, return_exceptions=True)  # noqa: SLF001
+                await asyncio.gather(*self.dispatcher._tasks, return_exceptions=True)
                 await asyncio.sleep(0)
 
 
@@ -273,9 +272,7 @@ class TestATransitionThatStartsMidAdmission:
             await closing
         await fixture.drain_the_dispatcher()
 
-    async def test_the_admission_that_held_the_ticket_is_honoured(
-        self, fixture: _Fixture
-    ) -> None:
+    async def test_the_admission_that_held_the_ticket_is_honoured(self, fixture: _Fixture) -> None:
         """It was admitted before the set returned, so it runs - and the record
         says so truthfully. This gates admission, not execution."""
         await fixture.a_trigger_fires("exec-midway2")
@@ -340,7 +337,9 @@ class _Request:
     """Enough of ExecuteWorkflowRequest for the endpoint's signature."""
 
     inputs: dict[str, str] = field(default_factory=dict)
-    repos: list[str] = field(default_factory=lambda: ["https://github.com/syntropic137/syntropic137"])
+    repos: list[str] = field(
+        default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
+    )
     task: str | None = None
     provider: str = "claude"
 
@@ -389,9 +388,7 @@ class TestTheHttpRouteHoldingAStaleRead:
     resumes saying "open". A 200 from here is an execution the drain never
     counted and the swap kills."""
 
-    async def test_answers_409_and_queues_nothing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_answers_409_and_queues_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fixture = _HttpFixture(suspend_read=1)
         fixture.install(monkeypatch)
 

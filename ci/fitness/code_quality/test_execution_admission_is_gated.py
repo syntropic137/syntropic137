@@ -13,13 +13,25 @@ AST, by the two things an admission does and cannot avoid doing:
     * constructing an ``ExecuteWorkflowCommand`` - admitting work directly
     * calling ``run_workflow(...)`` - admitting work through the dispatcher
 
-Every production module that does either must also name the gate. A new
-admission path fails this test on the day it is written, which is the only
-day fixing it is cheap.
+**The granularity is the call site, not the module.** That distinction is the
+whole value of this check and it was missing until now: the first version
+asked whether the module containing an admission mentioned the gate anywhere,
+which meant every module that already had a gated path was a free pass for
+every path added to it afterwards. Verification demonstrated it - a second,
+entirely ungated admission function appended to ``routes/executions/commands.py``
+and all seven tests stayed green. The module a new admission is most likely to
+be written in is precisely a module that already admits something.
+
+So each site is asked about on its own: the function it is written in - or a
+function lexically enclosing that one, since a closure can be handed a ticket -
+must name the gate. "Name the gate" is matched against the AST, never the
+text, so a comment about maintenance mode buys nothing.
 
 The failure mode a discovery check has of its own is going vacuous: an anchor
 that matches nothing passes everywhere. So each anchor must find at least one
-site, and the composition root must be seen passing the port.
+site, the composition root must be seen passing the port, and
+``TestTheCheckerItself`` drives the checker over synthetic modules - including
+the exact false negative above - so this file cannot quietly stop checking.
 
 Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
@@ -27,6 +39,7 @@ Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -38,6 +51,8 @@ _COMMAND = "ExecuteWorkflowCommand"
 #: Calling this hands work to the background dispatcher.
 _DISPATCH_METHOD = "run_workflow"
 
+_ANCHORS = (_COMMAND, _DISPATCH_METHOD)
+
 #: The single composition root for the handler, which must be given the port.
 _HANDLER = "ExecuteWorkflowHandler"
 
@@ -46,90 +61,175 @@ _HANDLER = "ExecuteWorkflowHandler"
 _GATE_MODULE = Path("packages/syn-domain/src/syn_domain/contexts/_shared/maintenance.py")
 _GATE_FUNCTION = "refuse_if_paused"
 
-#: Any of these identifiers means the module has the gate in hand. A comment
-#: mentioning maintenance does not count - these are matched against the AST.
+#: Any of these identifiers, written in the function that admits, means that
+#: function has the gate in hand. Three ways a function can legitimately have
+#: it, and all three must count or the check would force a shape on code rather
+#: than a property:
+#:
+#:   * it consults the gate itself (`refuse_if_paused`, `admitting`, ...)
+#:   * it receives the decision (`admitted`, `ticket`) - which is how an
+#:     admission that was granted upstream, under the transition lock, avoids
+#:     being re-decided inside a fire-and-forget task where a refusal could
+#:     only lose the work
+#:   * it handles the refusal (`MaintenancePausedError`) to answer in its own
+#:     protocol - a 409, a `paused` trigger record
 _GATE_NAMES = frozenset(
     {
         _GATE_FUNCTION,
+        "AdmissionGate",
+        "AdmissionTicket",
         "MaintenancePausedError",
         "MaintenancePort",
+        "admitted",
+        "admitting",
+        "get_admission_gate",
         "get_maintenance_port",
         "maintenance",
         "_maintenance",
+        "refuse_early",
         "_refuse_while_paused",
+        "_admit_or_409",
+        "ticket",
     }
 )
 
 
-def _identifiers(tree: ast.AST) -> set[str]:
-    """Every name, attribute and keyword argument written in the module."""
+#: What an ungated site is reported as. A location, because the reader has to
+#: go and look at exactly one place.
+@dataclass(frozen=True)
+class _Site:
+    anchor: str
+    line: int
+    scope: str
+
+
+def _names_written_directly_in(node: ast.AST) -> set[str]:
+    """Identifiers written in this scope, NOT counting nested scopes.
+
+    Excluding nested functions and classes is what keeps the check per-site: a
+    gated helper defined beside an ungated one must not vouch for it.
+    """
     found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name):
-            found.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            found.add(node.attr)
-        elif isinstance(node, ast.keyword) and node.arg is not None:
-            found.add(node.arg)
-        elif isinstance(node, ast.alias):
-            found.add(node.asname or node.name.rsplit(".", 1)[-1])
+
+    def visit(current: ast.AST, *, top: bool) -> None:
+        if not top and isinstance(
+            current, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+        ):
+            return
+        if isinstance(current, ast.Name):
+            found.add(current.id)
+        elif isinstance(current, ast.Attribute):
+            found.add(current.attr)
+        elif isinstance(current, ast.keyword) and current.arg is not None:
+            found.add(current.arg)
+        elif isinstance(current, ast.alias):
+            found.add(current.asname or current.name.rsplit(".", 1)[-1])
+        elif isinstance(current, ast.arg):
+            found.add(current.arg)
+        for child in ast.iter_child_nodes(current):
+            visit(child, top=False)
+
+    visit(node, top=True)
     return found
 
 
-def _called_names(tree: ast.AST) -> set[str]:
-    """The names actually CALLED, so a class definition is not a construction."""
-    called: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Name):
-            called.add(node.func.id)
-        elif isinstance(node.func, ast.Attribute):
-            called.add(node.func.attr)
-    return called
+def _anchor_of(call: ast.Call) -> str | None:
+    """The admission anchor this call is, if it is one."""
+    name = (
+        call.func.id
+        if isinstance(call.func, ast.Name)
+        else call.func.attr
+        if isinstance(call.func, ast.Attribute)
+        else None
+    )
+    return name if name in _ANCHORS else None
 
 
-def _discover() -> tuple[list[tuple[str, str]], dict[str, int]]:
-    """Return (admission sites, per-anchor counts) across production code."""
+def ungated_admission_sites(source: str) -> list[_Site]:
+    """Every admission in ``source`` whose scope chain never names the gate.
+
+    A pure function over text so the checker can be driven over cases that do
+    not exist in the tree - including the ones it used to miss.
+    """
+    ungated: list[_Site] = []
+
+    def walk(node: ast.AST, scope: tuple[str, ...], gated: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                walk(
+                    child,
+                    (*scope, child.name),
+                    # Lexical, not just innermost: a nested function can be
+                    # handed the ticket its enclosing function took out.
+                    gated or bool(_GATE_NAMES & _names_written_directly_in(child)),
+                )
+                continue
+            if isinstance(child, ast.ClassDef):
+                walk(child, (*scope, child.name), gated)
+                continue
+            if isinstance(child, ast.Call) and (anchor := _anchor_of(child)) and not gated:
+                ungated.append(
+                    _Site(anchor=anchor, line=child.lineno, scope=".".join(scope) or "<module>")
+                )
+            walk(child, scope, gated)
+
+    walk(ast.parse(source), (), gated=False)
+    return ungated
+
+
+def _count_anchors(source: str) -> dict[str, int]:
+    counts = dict.fromkeys(_ANCHORS, 0)
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and (anchor := _anchor_of(node)):
+            counts[anchor] += 1
+    return counts
+
+
+def _discover() -> tuple[list[str], dict[str, int]]:
+    """Return (production files that admit, per-anchor counts)."""
     root = repo_root()
-    sites: list[tuple[str, str]] = []
-    counts = {_COMMAND: 0, _DISPATCH_METHOD: 0}
+    admitting: list[str] = []
+    counts = dict.fromkeys(_ANCHORS, 0)
 
     for py_file in production_files(root):
         try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            source = py_file.read_text(encoding="utf-8")
+            found = _count_anchors(source)
         except SyntaxError:
             continue
-        called = _called_names(tree)
-        for anchor in (_COMMAND, _DISPATCH_METHOD):
-            if anchor in called:
-                counts[anchor] += 1
-                sites.append((rel_path(py_file, root), anchor))
+        if any(found.values()):
+            admitting.append(rel_path(py_file, root))
+        for anchor, n in found.items():
+            counts[anchor] += n
 
-    return sites, counts
+    return admitting, counts
 
 
-_SITES, _COUNTS = _discover()
+_ADMITTING_FILES, _COUNTS = _discover()
 
 
 @pytest.mark.architecture
 @pytest.mark.parametrize(
-    "file_path,anchor",
-    _SITES,
-    ids=[f"{p.split('/')[-1]}::{a}" for p, a in _SITES] if _SITES else [],
+    "file_path",
+    _ADMITTING_FILES,
+    ids=[p.split("/")[-1] for p in _ADMITTING_FILES] if _ADMITTING_FILES else [],
 )
-def test_every_admission_path_names_the_gate(file_path: str, anchor: str) -> None:
-    tree = ast.parse((repo_root() / file_path).read_text(encoding="utf-8"))
-    assert _GATE_NAMES & _identifiers(tree), (
-        f"{file_path} admits executions (it calls {anchor}) but never consults "
-        f"the maintenance gate. Every admission path must refuse while "
-        f"maintenance mode is set (#1387) - see {_GATE_MODULE}. "
-        f"A new entrance is a new hole in the deploy drain."
+def test_every_admission_site_is_gated(file_path: str) -> None:
+    source = (repo_root() / file_path).read_text(encoding="utf-8")
+    ungated = ungated_admission_sites(source)
+    assert not ungated, (
+        f"{file_path} admits executions without consulting the maintenance "
+        f"gate at: "
+        + ", ".join(f"{s.scope}() line {s.line} ({s.anchor})" for s in ungated)
+        + f". Every admission path must refuse while maintenance mode is set "
+        f"(#1387) - see {_GATE_MODULE}. It is not enough that some OTHER "
+        f"function in this module consults the gate: a new entrance is a new "
+        f"hole in the deploy drain wherever it is written."
     )
 
 
 @pytest.mark.architecture
-@pytest.mark.parametrize("anchor", [_COMMAND, _DISPATCH_METHOD])
+@pytest.mark.parametrize("anchor", _ANCHORS)
 def test_the_anchor_still_matches_something(anchor: str) -> None:
     """A discovery check that discovers nothing passes over everything."""
     assert _COUNTS[anchor] > 0, (
@@ -150,10 +250,11 @@ def test_the_gate_is_where_this_test_says_it_is() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
     }
-    assert _GATE_FUNCTION in defined, (
-        f"{_GATE_MODULE} no longer defines {_GATE_FUNCTION!r}. Update _GATE_NAMES "
-        f"to the new name, or every check above is matching a token that no "
-        f"longer gates anything."
+    missing = {_GATE_FUNCTION, "AdmissionGate", "AdmissionTicket"} - defined
+    assert not missing, (
+        f"{_GATE_MODULE} no longer defines {sorted(missing)}. Update _GATE_NAMES "
+        f"to the new names, or every check above is matching tokens that no "
+        f"longer gate anything."
     )
 
 
@@ -188,3 +289,83 @@ def test_the_handler_is_constructed_with_the_port() -> None:
         f"The handler's gate is the backstop for admission paths that forget "
         f"their own refusal (#1387); unwired, it refuses nothing."
     )
+
+
+class TestTheCheckerItself:
+    """The check above is only as good as what it can see, and what it could
+    not see was found by mutation rather than by reading it. These are that
+    mutation, kept."""
+
+    @pytest.mark.architecture
+    def test_an_ungated_admission_in_an_already_gated_module_is_caught(self) -> None:
+        """The regression. This module gates one path and not the other; the
+        module-wide version of this check passed it."""
+        source = """
+async def gated(workflow_id: str, gate) -> None:
+    await refuse_if_paused(gate)
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
+
+async def a_new_path_someone_forgot(workflow_id: str) -> None:
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
+"""
+        ungated = ungated_admission_sites(source)
+
+        assert [s.scope for s in ungated] == ["a_new_path_someone_forgot"]
+
+    @pytest.mark.architecture
+    def test_a_gated_sibling_does_not_vouch_for_a_nested_one(self) -> None:
+        """A helper defined beside an ungated function is a different scope,
+        however close together they are written."""
+        source = """
+class Dispatcher:
+    async def gated(self, wf, gate):
+        async with gate.admitting() as ticket:
+            await self.run_workflow(workflow_id=wf)
+
+    async def ungated(self, wf):
+        await self.run_workflow(workflow_id=wf)
+"""
+        ungated = ungated_admission_sites(source)
+
+        assert [s.scope for s in ungated] == ["Dispatcher.ungated"]
+
+    @pytest.mark.architecture
+    def test_a_ticket_handed_to_a_closure_counts(self) -> None:
+        """Lexical, so the real HTTP route's shape passes: the ticket is taken
+        out in the endpoint and spent in the task it queues."""
+        source = """
+async def endpoint(wf, gate):
+    async with gate.admitting() as ticket:
+        async def _run():
+            await handler.handle(ExecuteWorkflowCommand(aggregate_id=wf))
+        queue(_run)
+"""
+        assert ungated_admission_sites(source) == []
+
+    @pytest.mark.architecture
+    def test_an_admission_at_module_level_is_caught(self) -> None:
+        """Nowhere to put a gate check is not the same as not needing one."""
+        source = "task = run_workflow(workflow_id='wf-x')\n"
+
+        assert [s.scope for s in ungated_admission_sites(source)] == ["<module>"]
+
+    @pytest.mark.architecture
+    def test_a_module_that_does_not_admit_reports_nothing(self) -> None:
+        """The negative control: a checker that flagged everything would pass
+        every assertion above."""
+        source = """
+async def unrelated(x):
+    return await something_else(x)
+"""
+        assert ungated_admission_sites(source) == []
+
+    @pytest.mark.architecture
+    def test_a_comment_naming_the_gate_does_not_count(self) -> None:
+        """Matched against the AST, so prose cannot satisfy it."""
+        source = '''
+async def looks_gated(wf):
+    # maintenance mode: refuse_if_paused, AdmissionTicket, admitting
+    """See AdmissionGate - admitted, ticket, MaintenancePausedError."""
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=wf))
+'''
+        assert [s.scope for s in ungated_admission_sites(source)] == ["looks_gated"]

@@ -750,7 +750,13 @@ async def execute_workflow_endpoint(
     _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
-    async def _run(admitted: AdmissionTicket) -> None:
+    # Bound by the `async with` below, and closed over like every other value
+    # this task carries. Passing it through `add_task` instead would say the
+    # ticket arrived from somewhere else; it did not - it is granted eight
+    # lines down, in this function, and the task is queued under it.
+    admitted: AdmissionTicket
+
+    async def _run() -> None:
         try:
             result = await execute(
                 workflow_id=workflow_id,
@@ -783,8 +789,8 @@ async def execute_workflow_endpoint(
     # no maintenance transition can complete around it. A refusal here is the
     # second and final 409, and it is still reachable by the caller because
     # nothing has been queued yet.
-    async with _admit_or_409() as ticket:
-        background_tasks.add_task(_run, ticket)
+    async with _admit_or_409() as admitted:
+        background_tasks.add_task(_run)
     logger.info(
         "Started workflow execution",
         extra={

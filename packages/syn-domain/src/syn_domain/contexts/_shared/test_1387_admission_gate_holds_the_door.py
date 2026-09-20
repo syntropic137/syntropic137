@@ -85,9 +85,7 @@ class TestASetThatArrivesWhileATicketIsUnspent:
         async with asyncio.timeout(_PATIENCE):
             await in_the_body.wait()
 
-        closing = asyncio.create_task(
-            gate.set_mode(active=True, reason="pit stop", actor="deploy")
-        )
+        closing = asyncio.create_task(gate.set_mode(active=True, reason="pit stop", actor="deploy"))
         await _let_the_loop_run()
 
         assert not closing.done(), (
@@ -117,9 +115,7 @@ class TestASetThatArrivesWhileATicketIsUnspent:
         admission = asyncio.create_task(_admit())
         async with asyncio.timeout(_PATIENCE):
             await in_the_body.wait()
-        closing = asyncio.create_task(
-            gate.set_mode(active=True, reason="pit stop", actor="deploy")
-        )
+        closing = asyncio.create_task(gate.set_mode(active=True, reason="pit stop", actor="deploy"))
         await _let_the_loop_run()
         may_finish.set()
         async with asyncio.timeout(_PATIENCE):
