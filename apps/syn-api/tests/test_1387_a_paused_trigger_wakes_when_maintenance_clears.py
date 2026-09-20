@@ -34,7 +34,10 @@ from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import EventStoreAdmissionAnnouncer, InMemoryMaintenanceAdapter
-from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+from syn_adapters.subscriptions.coordinator_service import (
+    CoordinatorSubscriptionService,
+    SubscriptionNotLiveError,
+)
 from syn_api._wiring import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared import (
     AdmissionAnnouncementFailedError,
@@ -679,3 +682,139 @@ class TestTheRestartWakeRacesTheCoordinator:
             )
         finally:
             await api.service.stop()
+
+
+class _NeverLiveEventStore:
+    """A store whose head read never comes back, as an unreachable one does.
+
+    The coordinator snapshots the head and only then subscribes, so a read
+    that never returns IS a subscription that never opens - the one state the
+    start deadline exists for. Nothing here is timing: the read blocks on an
+    event nobody sets, so the deadline is the only way out and the test cannot
+    pass by being lucky about ordering.
+    """
+
+    def __init__(self) -> None:
+        self.appended: list[EventEnvelope[DomainEvent]] = []
+        self.subscribed = False
+        self._never = asyncio.Event()
+
+    async def append_events(
+        self,
+        stream_name: str,
+        events: list[EventEnvelope[DomainEvent]],
+        expected_version: int | None = None,
+    ) -> None:
+        del stream_name, expected_version
+        self.appended.extend(events)
+
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        del from_global_nonce, max_count, forward
+        await self._never.wait()
+        raise AssertionError("the head read was released; nothing should set that event")
+
+    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        del from_global_nonce
+        self.subscribed = True
+        return self._nothing()
+
+    async def _nothing(self) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        empty: list[EventEnvelope[DomainEvent]] = []
+        for envelope in empty:  # pragma: no cover - there is never one
+            yield envelope
+        await self._never.wait()
+
+
+class TestTheEventStoreThatNeverGoesLive:
+    """A start that cannot reach the boundary must FAIL, not announce anyway.
+
+    `TestTheRestartWakeRacesTheCoordinator` pins the normal path: `start()`
+    waits, so the announcement lands above the live boundary. This is the
+    other exit from that wait. A deadline that logged and returned would leave
+    `start()` meaning "live" on one path and "a task exists" on the other,
+    with nothing at the call site able to tell which it got - and
+    `_init_subscriptions` announces the moment it returns. That is the same
+    stranded trigger as finding B, arriving thirty seconds later.
+
+    Duration is not the property being tested and the timeout is shortened
+    here so it is not being timed: what these assert is the STATE on return -
+    no announcement, no orphaned coordinator, and a raise the lifecycle
+    registry can turn into a degraded `/health` and a retry that announces
+    when the store is back.
+    """
+
+    async def _boot_against_a_store_that_never_subscribes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[_NeverLiveEventStore, CoordinatorSubscriptionService]:
+        from syn_adapters.subscriptions import coordinator_service
+        from syn_api.services import lifecycle
+
+        monkeypatch.setattr(coordinator_service, "_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS", 0.0)
+        store = _NeverLiveEventStore()
+        gate = AdmissionGate(
+            InMemoryMaintenanceAdapter(),
+            EventStoreAdmissionAnnouncer(store),  # type: ignore[arg-type]
+        )
+        service = CoordinatorSubscriptionService(
+            event_store=store,  # type: ignore[arg-type]
+            projections=[],
+            checkpoint_store=MemoryCheckpointStore(),
+        )
+        monkeypatch.setattr(lifecycle, "get_admission_gate", lambda: gate)
+        monkeypatch.setattr(lifecycle, "get_realtime", lambda: None)
+        monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kwargs: service)
+        return store, service
+
+    async def test_the_startup_fails_instead_of_announcing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_api.services import lifecycle
+
+        store, _service = await self._boot_against_a_store_that_never_subscribes(monkeypatch)
+        state = lifecycle.LifecycleState()
+        state.workflow_dispatcher = object()  # type: ignore[assignment]
+
+        with pytest.raises(SubscriptionNotLiveError):
+            await lifecycle._init_subscriptions(state)
+
+        assert store.subscribed is False, "wrong bug: the coordinator did subscribe"
+        assert store.appended == [], (
+            "startup announced that admission was open while the coordinator "
+            "was not subscribed, so the announcement is backlog to it and the "
+            "trigger a deploy paused stays parked (#1387, finding B)"
+        )
+        assert state.subscription_service is None, (
+            "a service whose start() raised was registered as the running one"
+        )
+
+    async def test_the_failed_start_leaves_no_coordinator_behind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failing is only half of it; the attempt has to clean up after itself.
+
+        Nothing upstream can: `start()` raised, so the caller never got the
+        service back, and the recovery loop builds a NEW one on every retry. A
+        task left running here would stack another coordinator - and another
+        checkpoint pool - against the same store on each pass.
+        """
+        from syn_api.services import lifecycle
+
+        _store, service = await self._boot_against_a_store_that_never_subscribes(monkeypatch)
+        state = lifecycle.LifecycleState()
+        state.workflow_dispatcher = object()  # type: ignore[assignment]
+
+        with pytest.raises(SubscriptionNotLiveError):
+            await lifecycle._init_subscriptions(state)
+
+        assert service.is_running is False
+        task = service._subscription_task
+        assert task is not None
+        assert task.done(), (
+            "the coordinator task outlived the start() that created it, so "
+            "each recovery retry adds another one against the same store"
+        )

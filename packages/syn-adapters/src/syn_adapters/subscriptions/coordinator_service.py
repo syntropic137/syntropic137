@@ -52,12 +52,36 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 #: How long :meth:`CoordinatorSubscriptionService.start` waits for the
-#: coordinator to open its subscription before returning anyway. Only reached
-#: when the event store is unreachable, and then the coordinator's own backoff
-#: is already retrying and whatever the caller meant to do next would have
-#: failed too. The cap is here so a store outage cannot hold up process start,
-#: not because the wait is optional.
+#: coordinator to open its subscription before giving up and FAILING. Only
+#: reached when the event store is unreachable or very slow, and then the
+#: coordinator's own backoff is already retrying.
+#:
+#: The cap is here so a store outage cannot hold up process start
+#: indefinitely - not so that ``start()`` can return without having done what
+#: it says. Returning normally here is what made "started" mean two different
+#: things, one of which silently reopens the race this wait exists to close;
+#: see :class:`SubscriptionNotLiveError`.
 _SUBSCRIPTION_OPEN_TIMEOUT_SECONDS: Final[float] = 30.0
+
+
+class SubscriptionNotLiveError(RuntimeError):
+    """``start()`` could not reach the point after which an append arrives live.
+
+    Raised rather than logged, because the two outcomes need different things
+    from the caller and only the caller knows which it can do. For the API's
+    startup path the difference is the whole of #1387: a coordinator that is
+    live may be announced to, and a coordinator that is not must not be - an
+    announcement appended below the live boundary is read as backlog, and the
+    coordinator deliberately does not run a ProcessManager's processor side
+    for backlog. The event is stored, delivered, and then ignored forever.
+
+    Failing is not the same as losing the wake. ``SUBSCRIPTION_COORDINATOR`` is
+    a recoverable degradation, so the lifecycle reports it on ``/health`` and
+    its recovery loop retries ``_init_subscriptions`` - which announces on the
+    attempt that does reach the boundary. The alternative, warning and
+    continuing, reports a healthy API and announces into a gap where nothing
+    will act on it.
+    """
 
 
 class _SignalsWhenSubscribed:
@@ -278,12 +302,35 @@ class CoordinatorSubscriptionService:
             self._run_coordinator(),
             name="coordinator-subscription",
         )
-        await self._wait_until_subscribed()
+        try:
+            await self._wait_until_subscribed()
+        except BaseException:
+            await self._abandon_failed_start()
+            raise
 
         logger.info(
             "Coordinator subscription service started",
             extra={"projection_count": len(all_projections)},
         )
+
+    async def _abandon_failed_start(self) -> None:
+        """Undo a ``start()`` that never reached its live boundary.
+
+        ``stop()`` is the only thing that cancels the coordinator task and
+        closes the checkpoint pool, and the caller cannot do it for us: a
+        ``start()`` that raises has not handed the service back, so nothing
+        upstream holds a reference to stop. The API's recovery loop builds a
+        brand new service on every retry, so a failed attempt that left its
+        task running would stack another coordinator - and another pool -
+        against the same store on each pass.
+
+        Best effort by design: a second failure while tearing down must not
+        replace the reason the start failed, which is what the caller acts on.
+        """
+        try:
+            await self.stop()
+        except Exception:
+            logger.exception("Could not stop the coordinator after a failed start")
 
     async def _wait_until_subscribed(self) -> None:
         """Do not return from ``start()`` until an append would arrive live.
@@ -300,17 +347,23 @@ class CoordinatorSubscriptionService:
         (#1387), so a trigger a deploy paused could still be stranded by the
         restart that was supposed to release it. Rather than have every caller
         learn what a live boundary is, ``start()`` means started.
+
+        Which is why the deadline raises. A timeout that logged and returned
+        would leave ``start()`` meaning "live" on one path and "a task exists"
+        on the other, with nothing at the call site able to tell them apart -
+        the original race, arriving thirty seconds later. Duration is not the
+        property; the state on return is.
         """
         try:
             async with asyncio.timeout(_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS):
                 await self._subscribed.wait()
         except TimeoutError:
-            logger.warning(
-                "Coordinator did not open its subscription within %.0fs; continuing, "
-                "but an event appended now may be read as historical and a "
-                "ProcessManager woken by it will not run until the next live event",
-                _SUBSCRIPTION_OPEN_TIMEOUT_SECONDS,
-            )
+            raise SubscriptionNotLiveError(
+                f"Coordinator did not open its subscription within "
+                f"{_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS:.0f}s, so an event appended now "
+                f"would be read as historical and a ProcessManager woken by it would "
+                f"not run until the next live event"
+            ) from None
 
     async def _run_coordinator(self) -> None:
         """Run the coordinator with exponential-backoff reconnect on error."""

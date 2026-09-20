@@ -168,9 +168,9 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     for any recoverable failures.
     """
     # BEFORE the registry loop, deliberately (#1120). The registry starts the
-    # subscription coordinator and the GitHub pollers, and `coordinator.start()`
-    # returns as soon as it spawns its background task - so from that moment
-    # this process can dispatch NEW executions into `running`. Reconciling after
+    # subscription coordinator and the GitHub pollers, and once
+    # `coordinator.start()` returns the subscription is live - so from that
+    # moment this process can dispatch NEW executions into `running`. Reconciling after
     # that point means the reconcile query cannot tell work orphaned by the
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
@@ -694,6 +694,13 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     # subscribed, so the announcement below cannot land underneath it and be
     # read as backlog (#1387). The wait lives in the service because "started"
     # is its word to keep, not something each caller should have to arrange.
+    #
+    # It RAISES if it cannot get there, and that raise is deliberately not
+    # caught here. SUBSCRIPTION_COORDINATOR is recoverable, so the registry
+    # marks the API degraded, says so on /health, and the recovery loop calls
+    # this function again - announcing on the attempt that does reach the
+    # boundary. Continuing past a failed start would announce into a store
+    # nothing is listening to live and report the API healthy while doing it.
     await coordinator.start()
     # Only assign to state after coordinator starts successfully,
     # so a partial failure doesn't orphan the dispatcher.
