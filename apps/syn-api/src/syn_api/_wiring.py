@@ -111,6 +111,7 @@ from syn_adapters.storage.repositories import (
     get_workflow_execution_repository,
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
+from syn_domain.contexts._shared.maintenance import carrying
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.agents import (
@@ -1020,6 +1021,9 @@ class BackgroundWorkflowDispatcher:
         # The decisive one. Inside `admitting()` no maintenance transition can
         # complete, and the task is created before the ticket is spent - so
         # once `PUT /maintenance` returns, no task can still be on its way in.
+        # The ticket outlives this block: it is spent where the execution
+        # becomes durable, so `PUT /maintenance` also cannot return over a task
+        # that is still queued behind the semaphore.
         # A refusal here is raised, synchronously, out of this method and into
         # the projection, which is the only place it can still change what the
         # trigger record says.
@@ -1037,7 +1041,13 @@ class BackgroundWorkflowDispatcher:
         ticket: AdmissionTicket | None,
     ) -> None:
         """Create the fire-and-forget task. Synchronous, so nothing interleaves
-        between the gate's answer and the work existing."""
+        between the gate's answer and the work existing.
+
+        Creating it does not spend the ticket (#1387). The task may sit behind
+        the semaphore for as long as the execution ahead of it runs, and until
+        it opens its stream the drain cannot see it - so the lease it carries
+        is ended by the task itself, not by this line.
+        """
         asyncio_task = asyncio.create_task(
             self._run_with_semaphore(
                 workflow_id, inputs, execution_id, task=task, repos=repos, admitted=ticket
@@ -1056,10 +1066,17 @@ class BackgroundWorkflowDispatcher:
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
     ) -> None:
-        async with self._semaphore:
-            await self._run(
-                workflow_id, inputs, execution_id, task=task, repos=repos, admitted=admitted
-            )
+        # #1387: the lease spans the semaphore wait. This is the case that
+        # rebuilt the execution-loss window - a ticket spent at `create_task`
+        # while the execution sat queued behind another one, invisible to the
+        # drain. `carrying` ends the lease however this task leaves: the
+        # execution became durable and ended it already, `_run` swallowed a
+        # failure, or shutdown cancelled us while still queued.
+        with carrying(admitted):
+            async with self._semaphore:
+                await self._run(
+                    workflow_id, inputs, execution_id, task=task, repos=repos, admitted=admitted
+                )
 
     async def _run(
         self,

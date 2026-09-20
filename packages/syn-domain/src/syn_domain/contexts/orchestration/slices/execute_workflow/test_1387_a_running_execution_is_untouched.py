@@ -99,8 +99,9 @@ class _SuspendedProcessor:
         inputs: dict[str, str],
         execution_id: str,
         repos: list[RepositoryRef],
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        del workflow_name, phases, inputs, repos
+        del workflow_name, phases, inputs, repos, admitted
         self.running.set()
         await self.may_finish.wait()
         return WorkflowExecutionResult(
@@ -126,8 +127,9 @@ class _ImmediateProcessor:
         inputs: dict[str, str],
         execution_id: str,
         repos: list[RepositoryRef],
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        del workflow_name, phases, inputs, repos
+        del workflow_name, phases, inputs, repos, admitted
         self.runs += 1
         return WorkflowExecutionResult(
             workflow_id=workflow_id,

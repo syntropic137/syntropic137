@@ -32,7 +32,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api._wiring import BackgroundWorkflowDispatcher
-from syn_domain.contexts._shared import AdmissionGate
+from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
@@ -52,9 +52,12 @@ class _RecordingHandler:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: object = None) -> None:
-        del admitted
+    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
         self.admitted.append(command)
+        # The real handler reaches `journal.open()` through the processor and
+        # the lease ends there (#1387); this double stands in for that.
+        if admitted is not None:
+            admitted.mark_visible()
 
 
 class _Fixture:

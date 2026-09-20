@@ -30,6 +30,7 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
+from syn_domain.contexts._shared.maintenance import carrying
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
@@ -757,38 +758,47 @@ async def execute_workflow_endpoint(
     admitted: AdmissionTicket
 
     async def _run() -> None:
-        try:
-            result = await execute(
-                workflow_id=workflow_id,
-                inputs=effective_inputs,
-                execution_id=execution_id,
-                task=request.task,
-                repos=typed_repos,
-                admitted=admitted,
-            )
-            if isinstance(result, Err):
-                logger.error(
-                    "Workflow execution failed",
+        # #1387: the lease, carried across the hop that used to spend it.
+        # `add_task` below only queues this coroutine - Starlette runs it after
+        # the response - so the ticket cannot be released there. It ends inside
+        # `execute()` when the execution's start event is durable, or here if
+        # this task produced no execution at all.
+        with carrying(admitted):
+            try:
+                result = await execute(
+                    workflow_id=workflow_id,
+                    inputs=effective_inputs,
+                    execution_id=execution_id,
+                    task=request.task,
+                    repos=typed_repos,
+                    admitted=admitted,
+                )
+                if isinstance(result, Err):
+                    logger.error(
+                        "Workflow execution failed",
+                        extra={
+                            "execution_id": execution_id,
+                            "workflow_id": workflow_id,
+                            "error": result.message,
+                        },
+                    )
+            except Exception:
+                logger.exception(
+                    "Workflow execution raised exception",
                     extra={
                         "execution_id": execution_id,
                         "workflow_id": workflow_id,
-                        "error": result.message,
                     },
                 )
-        except Exception:
-            logger.exception(
-                "Workflow execution raised exception",
-                extra={
-                    "execution_id": execution_id,
-                    "workflow_id": workflow_id,
-                },
-            )
 
     # #1387: the decisive step. Queueing the task IS admitting the work - the
     # response below says 200 either way - so it happens inside the gate, where
     # no maintenance transition can complete around it. A refusal here is the
     # second and final 409, and it is still reachable by the caller because
     # nothing has been queued yet.
+    #
+    # Leaving this block does NOT release the ticket. It is queued work, not
+    # started work, and `_run` above owns the lease from here.
     async with _admit_or_409() as admitted:
         background_tasks.add_task(_run)
     logger.info(

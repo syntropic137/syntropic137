@@ -111,6 +111,12 @@ class _RecordingHandler:
     async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
         self.admitted.append(command)
         self.tickets.append(admitted)
+        # What the real handler reaches through the processor: the start event
+        # is durable, so the admission lease ends here (#1387). A double that
+        # skipped it would leave every lease outstanding and turn the next
+        # `set_mode(active=True)` into a hang rather than an assertion.
+        if admitted is not None:
+            admitted.mark_visible()
 
 
 class _Fixture:
@@ -380,6 +386,7 @@ class _HttpFixture:
     def __init__(self, *, suspend_read: int) -> None:
         self.port = _SuspendablePort(suspend_read=suspend_read)
         self.gate = AdmissionGate(self.port)
+        self.started: list[str] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import syn_api._wiring as wiring
@@ -387,6 +394,28 @@ class _HttpFixture:
         monkeypatch.setattr(wiring, "_admission_gate_singleton", self.gate, raising=False)
         monkeypatch.setattr(commands, "ensure_connected", _nothing_to_connect)
         monkeypatch.setattr(commands, "get_workflow_repo", _WorkflowRepo)
+        monkeypatch.setattr(commands, "execute", self._execute)
+
+    async def _execute(
+        self,
+        *,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None,
+        repos: list[object],
+        admitted: AdmissionTicket | None = None,
+    ) -> None:
+        """Stand in for the background task's run of the execution.
+
+        It ends the admission lease, because that is what the real path does
+        at ``journal.open()`` (#1387). Nothing before this point may end it:
+        the route only QUEUED this coroutine.
+        """
+        del workflow_id, inputs, task, repos
+        self.started.append(execution_id)
+        if admitted is not None:
+            admitted.mark_visible()
 
     async def admit(self) -> BackgroundTasks:
         tasks = BackgroundTasks()
@@ -461,10 +490,20 @@ class TestAnHttpTransitionThatStartsMidAdmission:
         fixture.port.release.set()
         async with asyncio.timeout(_PATIENCE):
             response = await call
-            await closing
 
         assert response.status == "started"
         assert len(tasks.tasks) == 1
+        assert not closing.done(), (
+            "PUT /maintenance returned as soon as the route had QUEUED the "
+            "execution. Starlette has not run the background task yet, so no "
+            "stream exists for the drain to count (#1387, finding A)"
+        )
+
+        async with asyncio.timeout(_PATIENCE):
+            await tasks()  # Starlette runs the queued task after the response
+            await closing
+
+        assert fixture.started == [response.execution_id]
 
     async def test_the_next_request_after_the_set_returns_is_refused(
         self, monkeypatch: pytest.MonkeyPatch
@@ -487,6 +526,7 @@ class TestAnHttpTransitionThatStartsMidAdmission:
         fixture.port.release.set()
         async with asyncio.timeout(_PATIENCE):
             await call
+            await tasks()  # the lease ends when the execution becomes durable
             await closing
 
         later = BackgroundTasks()

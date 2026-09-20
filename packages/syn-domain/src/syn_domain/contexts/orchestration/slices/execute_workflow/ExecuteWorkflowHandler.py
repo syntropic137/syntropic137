@@ -388,6 +388,11 @@ class ExecuteWorkflowHandler:
         )
 
         try:
+            # #1387: the ticket travels all the way to the write. The lease it
+            # represents ends when this execution's start event is durable -
+            # the processor is the only place that knows when that is - and
+            # until then `set_mode(active=True)` waits, so a deploy cannot
+            # drain past work that is admitted but not yet visible.
             return await self._processor.run(
                 workflow_id=command.aggregate_id,
                 workflow_name=workflow.name or "",
@@ -395,6 +400,7 @@ class ExecuteWorkflowHandler:
                 inputs=merged_inputs,
                 execution_id=execution_id,
                 repos=repos,
+                admitted=admitted,
             )
         except StreamAlreadyExistsError:
             logger.warning(

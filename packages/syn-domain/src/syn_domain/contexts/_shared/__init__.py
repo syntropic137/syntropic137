@@ -6,6 +6,7 @@ from syn_domain.contexts._shared.maintenance import (
     MaintenanceMode,
     MaintenancePausedError,
     MaintenancePort,
+    carrying,
     refuse_if_paused,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -17,5 +18,6 @@ __all__ = [
     "MaintenancePausedError",
     "MaintenancePort",
     "RepositoryRef",
+    "carrying",
     "refuse_if_paused",
 ]

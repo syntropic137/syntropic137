@@ -28,8 +28,7 @@ declaration, so the two cannot drift apart on what "paused" means.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import asynccontextmanager, contextmanager
 
 # NOT in a TYPE_CHECKING block: `MaintenanceMode` is a Pydantic model and
 # Pydantic resolves `since: datetime | None` against this module's real
@@ -40,7 +39,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterator
 
 
 class MaintenanceMode(BaseModel):
@@ -116,9 +115,8 @@ async def refuse_if_paused(port: MaintenancePort) -> None:
         raise MaintenancePausedError(mode)
 
 
-@dataclass(frozen=True)
 class AdmissionTicket:
-    """Proof that one execution was admitted while the gate was provably open.
+    """A LEASE on one admission, held until the execution exists or is abandoned.
 
     Issued by :meth:`AdmissionGate.admitting` and carried forward to whatever
     finally starts the work. It exists because the admission decision and the
@@ -132,13 +130,97 @@ class AdmissionTicket:
     refused: the record was written from the first answer and the work stopped
     on the second.
 
+    A lease and not a receipt, because queueing work is not doing it. Both
+    entrances hand the execution to something asynchronous - a Starlette
+    background task, an ``asyncio`` task that then waits behind the dispatcher
+    semaphore - and until that work writes its start event the drain cannot see
+    it. A ticket released at the hand-off therefore lets ``PUT /maintenance``
+    return over an execution that exists nowhere yet, and the swap that follows
+    kills it. That is the loss this whole module exists to prevent, one layer
+    down, so the lease outlives the hand-off:
+
+    * :meth:`mark_visible` - the start event is durably written. The drain can
+      see this execution now and will wait for it.
+    * :meth:`abort` - it definitively will not start. There is nothing for the
+      drain to see and nothing to wait for.
+
+    Exactly one of those two is the end of the lease, whichever arrives first;
+    both are idempotent, so the worker can call :meth:`abort` unconditionally
+    in a ``finally`` and it is a no-op once the stream is open. Nothing else
+    releases it - in particular, leaving the ``admitting()`` block does not.
+
     The absence of a ticket is the safe state. Anything reaching the handler
     with ``None`` was never admitted by the gate and is checked against it
     there, so a path written later is refused rather than waved through.
     """
 
-    granted_at: datetime
-    mode: MaintenanceMode
+    def __init__(
+        self,
+        *,
+        granted_at: datetime,
+        mode: MaintenanceMode,
+        on_settled: Callable[[], None] | None = None,
+    ) -> None:
+        """``on_settled`` is how the gate learns the lease ended.
+
+        Optional so a test can build a ticket to stand for "this was admitted"
+        without a gate behind it. A ticket built that way leases nothing and
+        blocks nothing, which is the right meaning for one that no gate issued.
+        """
+        self.granted_at = granted_at
+        self.mode = mode
+        self._on_settled = on_settled
+        self._settled = False
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether the lease has ended, either way."""
+        return self._settled
+
+    def mark_visible(self) -> None:
+        """The start event is durably written; the drain can see this work.
+
+        Called at the write itself, not by the caller that queued the work, so
+        the lease ends where the guarantee actually becomes true.
+        """
+        self._settle()
+
+    def abort(self) -> None:
+        """This admission produced no execution and never will.
+
+        The other honest end of a lease: refused downstream, failed before the
+        stream was opened, or cancelled at shutdown. Safe to call after
+        :meth:`mark_visible` - the first settlement wins - so a worker can put
+        it in a ``finally`` and not reason about which path it took.
+        """
+        self._settle()
+
+    def _settle(self) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        if self._on_settled is not None:
+            self._on_settled()
+
+
+@contextmanager
+def carrying(ticket: AdmissionTicket | None) -> Iterator[None]:
+    """Run admitted work under its lease, and end the lease whatever happens.
+
+    The one rule every background worker owes the gate, written once: a lease
+    that is never settled stalls the next ``set_mode(active=True)`` for as long
+    as the process lives, and settling it correctly on each of return, raise and
+    cancellation is not something two entrances should be re-deriving. Wrapping
+    is a no-op once the work has called :meth:`AdmissionTicket.mark_visible`.
+
+    ``None`` is accepted and does nothing, for the fixtures that build a
+    dispatcher with no gate at all.
+    """
+    try:
+        yield
+    finally:
+        if ticket is not None:
+            ticket.abort()
 
 
 class AdmissionGate:
@@ -155,14 +237,25 @@ class AdmissionGate:
 
     * an admission holds :attr:`_transition` only long enough to read the flag
       and take out a ticket, so admissions never queue behind one another;
-    * ``set_mode`` holds it for the write AND first waits for every ticket
-      already taken out to be spent.
+    * closing the gate holds it for the write AND first waits for every ticket
+      already taken out to reach its execution or abandon it.
 
-    After ``set_mode`` returns, therefore: the flag is durable, no admission is
-    part-way through deciding, and every later admission must take the same
-    lock and will read the new state. That is the property the deploy needs -
-    "nothing more can be admitted from here" - rather than "nothing had been
-    admitted a moment ago", which is all the drain could ever observe.
+    After ``set_mode(active=True)`` returns, therefore: the flag is durable, no
+    admission is part-way through deciding, every admission granted before it
+    has a durably-written start event the drain can see or has definitively
+    produced nothing, and every later admission must take the same lock and
+    will read the new state. That is the property the deploy needs - "nothing
+    more can be admitted from here, and everything already admitted is
+    countable" - rather than "nothing had been admitted a moment ago", which is
+    all the drain could ever observe.
+
+    The wait is on the work becoming VISIBLE, not on it finishing: a lease ends
+    at ``journal.open()``, so the execution the deploy must not lose is one the
+    drain then counts and waits out. It is unbounded by design. An execution
+    queued behind the dispatcher semaphore holds its lease until the one ahead
+    of it finishes, and that is the honest answer - the alternative is
+    returning from ``PUT /maintenance`` over work that exists nowhere, which is
+    the bug. The drain that follows would have waited for it anyway.
 
     In-process only, deliberately. It linearises the API container that owns
     both the HTTP route and the trigger-dispatch projection, which is the
@@ -175,9 +268,16 @@ class AdmissionGate:
     def __init__(self, port: MaintenancePort) -> None:
         self._port = port
         self._transition = asyncio.Lock()
-        self._unspent = 0
+        self._outstanding = 0
         self._idle = asyncio.Event()
         self._idle.set()
+
+    def _lease_ended(self) -> None:
+        """One ticket reached its execution, or abandoned it. Never public:
+        the ticket is what decides a lease has ended, and it decides once."""
+        self._outstanding -= 1
+        if self._outstanding == 0:
+            self._idle.set()
 
     async def current(self) -> MaintenanceMode:
         """The durable state, read through. No lock: this only reports."""
@@ -204,29 +304,47 @@ class AdmissionGate:
 
         Raises :class:`MaintenancePausedError` instead of yielding when the
         gate is shut. The body must be the DECISIVE step and nothing else -
-        creating the task, queueing the background work - because ``set_mode``
-        waits for it. Validation, template reads and preflight belong outside;
-        holding the gate across them would let a slow request stall a deploy.
+        creating the task, queueing the background work. Validation, template
+        reads and preflight belong outside; holding the gate across them would
+        let a slow request stall a deploy.
+
+        Leaving the body does NOT end the lease, and that asymmetry is the
+        point: the body only queues the work, so releasing there would let a
+        deploy declare the system quiet over an execution that has not started.
+        The ticket is handed to whoever runs the work, and the lease ends when
+        that work calls :meth:`AdmissionTicket.mark_visible` or
+        :meth:`AdmissionTicket.abort` - see :func:`carrying`, which is how both
+        entrances guarantee one of the two. A body that RAISES has queued
+        nothing, so the lease is ended here.
         """
         async with self._transition:
             mode = await self._port.current()
             if mode.active:
                 raise MaintenancePausedError(mode)
-            self._unspent += 1
+            self._outstanding += 1
             self._idle.clear()
+        ticket = AdmissionTicket(
+            granted_at=datetime.now(UTC), mode=mode, on_settled=self._lease_ended
+        )
         try:
-            yield AdmissionTicket(granted_at=datetime.now(UTC), mode=mode)
-        finally:
-            self._unspent -= 1
-            if self._unspent == 0:
-                self._idle.set()
+            yield ticket
+        except BaseException:
+            ticket.abort()
+            raise
 
     async def set_mode(self, *, active: bool, reason: str, actor: str) -> MaintenanceMode:
         """Persist the state, durable before return and with the door held.
 
         Every admission path must set the flag through here rather than through
         the port, or the exclusion above is decoration.
+
+        Closing waits for the outstanding leases; re-opening does not. Waiting
+        is what makes closing a gate rather than an observation - there is
+        something the deploy must not overtake. Re-opening overtakes nothing,
+        and blocking it behind executions that are merely queued would hold a
+        deploy's final step for as long as the work it just released.
         """
         async with self._transition:
-            await self._idle.wait()
+            if active:
+                await self._idle.wait()
             return await self._port.set_mode(active=active, reason=reason, actor=actor)
