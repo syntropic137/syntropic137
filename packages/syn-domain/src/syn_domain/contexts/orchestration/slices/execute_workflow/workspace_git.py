@@ -157,6 +157,38 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 BOUND_FIRED_EXIT_CODE: Final[int] = 124
 
 
+def answered(result: ExecutionResult) -> bool:
+    """Whether a command produced a result at all, or was cut off before one arrived.
+
+    THE ONE PLACE that decides what "it did not finish" looks like, so that a
+    caller asking it gets the whole rule rather than the half it remembered.
+    Two ways to be cut off and one word for it: the BACKEND says so when it
+    enforced its own limit, and `timeout` says so with `BOUND_FIRED_EXIT_CODE`
+    when the bound `run_bounded` put in the argv fired. Every command on this
+    path goes through `run_bounded`, so both readings are available for any of
+    them.
+
+    FALSE IS NOT "IT FAILED" - it is the stronger and narrower statement that
+    NO ANSWER EXISTS. A command that ran and exited non-zero answered: the
+    remote said no, the path was not a repository, git refused the argv. That
+    distinction is what `unpushed_work_guard` spends when it decides whether a
+    failed rehearsal is a verdict about the phase or merely silence (#1396),
+    and it is why this is a predicate about the result rather than a flag the
+    caller sets from what it was expecting.
+
+    WHAT IT DOES NOT SEPARATE, stated here because the limit is load-bearing
+    and invisible otherwise: among commands that DID answer, git does not
+    distinguish an authorization refusal from a transport fault. Measured on
+    the workspace image's git 2.39.5 - a DNS failure, a refused connection, an
+    HTTP 401, 403, 500 and 502 all exit 128, and `GIT_TRACE2_EVENT` reports
+    the same ``"code":128`` and the same error ``fmt`` for every one of them.
+    The only datum that differs is the prose in the message. So a caller can
+    learn from this whether an answer arrived, and must not believe it can
+    learn from anything here WHY the answer was no.
+    """
+    return not (result.timed_out or result.exit_code == BOUND_FIRED_EXIT_CODE)
+
+
 class GitWorkspace(Protocol):
     """A workspace this slice can run git in, and whose credential it can renew.
 
@@ -252,13 +284,11 @@ async def checked(
             command=tuple(command),
             exit_code=result.exit_code,
             stderr=result.stderr,
-            # Two ways to be cut off and one word for it: the BACKEND says so
-            # when it enforced its own limit, and `timeout` says so with an
-            # exit code when the bound `run_bounded` put in the argv fired. A
-            # reader needs "it did not finish" either way, not a number. Every
-            # command goes through `run_bounded`, so 124 can be read this way
-            # whatever the command was.
-            timed_out=result.timed_out or result.exit_code == BOUND_FIRED_EXIT_CODE,
+            # A reader needs "it did not finish", not a number, and there is
+            # more than one way for a command not to finish. `answered` is
+            # where that rule is stated; holding a second copy of it here is
+            # how the two drift.
+            timed_out=not answered(result),
         ),
     )
 
