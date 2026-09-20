@@ -127,6 +127,23 @@ _MOUNT_FIELDS: Final[int] = 6
 #: the name.
 _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 
+
+def quarantine_ref(*, execution_id: str, phase_id: str) -> str:
+    """The ref a phase's unsaved work is pushed to, spelled in ONE place.
+
+    A function rather than a format string repeated at each site, because the
+    second definition of a name is the one that goes stale. Two callers need
+    it and they run in different processes: the gate that WRITES the ref, and
+    the startup reconciliation that has to tell an operator where a restart
+    left the work of an execution it is about to fail (#1381). A restart is
+    the whole point of the second caller, so the two can never be read side by
+    side - only the shared definition keeps them agreeing.
+
+    Derived entirely from ids the event store already holds, which is why the
+    restart needs to remember nothing of its own to name it (ADR-060).
+    """
+    return f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+
 #: The quarantine commit is written through a scratch index so the doomed
 #: worktree's own index is never touched. Starting from an empty file also
 #: means the tree is the WORKTREE as it stands rather than whatever happened to
@@ -219,7 +236,7 @@ async def quarantine_unpushed_work(
             its push landed: work saved before the failure is not unsaved by
             it, and work whose push failed is not saved by being listed.
     """
-    ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+    ref = quarantine_ref(execution_id=execution_id, phase_id=phase_id)
     quarantined: list[QuarantinedWork] = []
     try:
         repos = await repositories(workspace)

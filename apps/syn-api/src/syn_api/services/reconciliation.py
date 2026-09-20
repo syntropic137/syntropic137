@@ -61,6 +61,73 @@ _ORPHAN_REASON_AFTER_SALVAGE: Final[str] = (
     "did"
 )
 
+#: Where the interrupted phase's repository work went, said on the record that
+#: outlives the restart (#1381).
+#:
+#: THE HALF THAT WAS MISSING. The shutdown quarantines a dying workspace's
+#: unpushed commits and edits to ``refs/syn/lost/<execution>/<phase>``, and it
+#: says so - at ERROR, in the log of the process that is going away. That log
+#: line is the only statement of the ref that has ever existed, and by the time
+#: anybody looks at the execution the process which wrote it is gone and the
+#: execution reads as a bare "orphaned". The bytes survived and the pointer to
+#: them did not, which for a recovery that has to be performed by hand is most
+#: of the way to not having saved them at all.
+#:
+#: So the pointer is written where it survives: onto the ``WorkflowFailedEvent``
+#: that this reconciliation is already emitting, in the event store, read back
+#: by the API and the CLI like every other failure reason.
+#:
+#: CONDITIONAL, BECAUSE THE FACT IS. A ref exists only where a graceful
+#: shutdown got to run - ``docker stop`` and so ``docker compose up -d`` send
+#: SIGTERM and wait, but a SIGKILL, an OOM-kill or a host loss runs no Python
+#: and quarantines nothing. Nothing reachable from here can tell those apart:
+#: this process has no clone of the execution's repositories and no record of
+#: the one that died. Stating the condition alongside the ref is therefore the
+#: strongest TRUE thing available, and it is strictly better than the silence
+#: it replaces - an operator who finds no such ref has learnt the shutdown was
+#: not graceful, which is itself worth knowing.
+_ORPHAN_WORK_MAY_BE_QUARANTINED: Final[str] = (
+    ". If this API was stopped gracefully rather than killed, the work phase "
+    "'{phase_id}' was holding that no remote had was pushed to '{ref}' in each "
+    "of the execution's repositories before its container went away: fetch "
+    "that ref to get it back. No such ref means the shutdown was not graceful "
+    "and the work was not saved"
+)
+
+
+def _orphan_reason(*, execution_id: str, phase_id: str | None, salvaged_phase: str | None) -> str:
+    """The failure reason an operator reads, including where to find the work.
+
+    Two independent facts about the same dead execution, and both belong on the
+    record: what was recovered FROM THE TRANSCRIPT (#1300, an artifact) and what
+    was quarantined FROM THE WORKSPACE (#1381, a git ref). They are recovered by
+    different means and neither implies the other, so the sentence about the ref
+    is appended to whichever of the two reasons applies rather than being a
+    third alternative to them.
+
+    The ref is named through ``quarantine_ref``, the same function the gate that
+    writes it uses, so the name an operator is told cannot drift from the name
+    the push used - the two run in different processes, either side of the
+    restart, and could never be compared by reading them.
+    """
+    reason = (
+        _ORPHAN_REASON
+        if salvaged_phase is None
+        else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
+    )
+    if phase_id is None:
+        # No phase was mid-flight, so no workspace was holding anything and
+        # there is no ref to point at. Saying nothing is the honest answer.
+        return reason
+    from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+        quarantine_ref,
+    )
+
+    return reason + _ORPHAN_WORK_MAY_BE_QUARANTINED.format(
+        phase_id=phase_id,
+        ref=quarantine_ref(execution_id=execution_id, phase_id=phase_id),
+    )
+
 
 def _started_before(summary: object, cutoff: datetime) -> bool:
     """Whether this execution demonstrably started before `cutoff`.
@@ -298,10 +365,10 @@ async def _reconcile_one(
         aggregate.fail_execution(
             FailExecutionCommand(
                 execution_id=execution_id,
-                error=(
-                    _ORPHAN_REASON
-                    if salvaged_phase is None
-                    else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
+                error=_orphan_reason(
+                    execution_id=execution_id,
+                    phase_id=aggregate.running_phase_id,
+                    salvaged_phase=salvaged_phase,
                 ),
                 error_type="OrphanedByRestart",
                 # The phase that was mid-flight, so both phase read models
