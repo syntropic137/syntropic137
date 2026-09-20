@@ -76,6 +76,7 @@ if TYPE_CHECKING:
         SessionCapturePort,
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -218,8 +219,16 @@ class WorkflowExecutionProcessor:
         execution_id: str,
         repos: list[RepositoryRef] | None = None,
         expected_completion_at: datetime | None = None,
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        """Execute a workflow using the Processor To-Do List pattern."""
+        """Execute a workflow using the Processor To-Do List pattern.
+
+        ``admitted`` is the admission lease this execution was started under
+        (#1387), and it ends a few lines below, at the moment the start event
+        is durable. Nowhere earlier would be true: everything between the
+        admission decision and that write is queueing, and a deploy that
+        drained over it would count a quiet system and then kill this run.
+        """
         started_at = datetime.now(UTC)
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
@@ -252,6 +261,15 @@ class WorkflowExecutionProcessor:
         )
         aggregate.start_execution(start_cmd)
         await self._journal.open(aggregate)
+
+        # #1387: durable, therefore visible. From here the drain counts this
+        # execution and a maintenance transition may proceed over it; before
+        # here it existed only as a queued task, and `set_mode(active=True)`
+        # was waiting on this line. If `open()` raised - a duplicate stream,
+        # a store that is down - the lease is ended by the worker instead,
+        # which is the other honest answer: nothing started.
+        if admitted is not None:
+            admitted.mark_visible()
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
