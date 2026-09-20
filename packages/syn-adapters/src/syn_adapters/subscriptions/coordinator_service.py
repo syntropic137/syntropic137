@@ -251,7 +251,13 @@ class CoordinatorSubscriptionService:
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:
+            # Still waits. This is the method's other way out, and "started"
+            # has to mean the same thing on both of them: a second caller that
+            # returned here while the first was still in flight would be told
+            # the subscription was live before it was, which is the whole of
+            # #1387 finding B reached by a different door.
             logger.warning("Coordinator subscription service already running")
+            await self._wait_until_subscribed()
             return
 
         logger.info("Starting coordinator subscription service...")

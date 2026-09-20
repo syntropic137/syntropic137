@@ -818,3 +818,22 @@ class TestTheEventStoreThatNeverGoesLive:
             "the coordinator task outlived the start() that created it, so "
             "each recovery retry adds another one against the same store"
         )
+
+    async def test_a_second_start_does_not_report_live_either(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`start()` has two ways out and both owe the caller the same thing.
+
+        The early return for an already-running service is the other door into
+        finding B: a caller told "started" while the first start is still in
+        flight would announce into exactly the gap the wait exists to close.
+        """
+        _store, service = await self._boot_against_a_store_that_never_subscribes(monkeypatch)
+
+        with pytest.raises(SubscriptionNotLiveError):
+            await service.start()
+
+        service._running = True  # the first start, still in flight
+
+        with pytest.raises(SubscriptionNotLiveError):
+            await service.start()
