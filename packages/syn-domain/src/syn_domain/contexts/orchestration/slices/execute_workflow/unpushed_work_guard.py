@@ -101,9 +101,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
     BOUND_FIRED_EXIT_CODE,
     GitWorkspace,
-    answered,
+    ObservedPush,
+    PushVerdict,
     checked,
     git,
+    observed_push,
     push,
     repositories,
     run_bounded,
@@ -233,30 +235,28 @@ async def rehearse_quarantine_credential(
     phase identically, so an origin that had said NOTHING was read as an
     origin that had said no. A rehearsal whose whole promise is "credential
     and connectivity" cannot spend the absence of connectivity as evidence
-    about the credential. So the outcome is CLASSIFIED rather than counted -
-    `workspace_git.answered` - and only a push that came back refuses the
-    phase. One that never came back logs a warning and lets the phase run; the
-    exposure that leaves is the one this rehearsal never covered anyway, and
-    it still lands where every uncovered case lands, on a teardown push that
-    fails and reports NOT RECOVERABLE.
+    about the credential. So the outcome is CLASSIFIED rather than counted,
+    and the bound stops being a verdict and goes back to being a bound.
 
-    THE CLASSIFICATION IS COARSER THAN THE RULE, and the gap is stated rather
-    than hidden. "Refuse only on an authorization or policy rejection" would
-    need an answered failure to be separable into "origin refused you" and
-    "the network broke after origin answered". git does not expose that: on
-    the image's git 2.39.5 a DNS failure, a refused connection and an HTTP
-    401, 403, 500 or 502 all exit 128 with byte-identical trace2 structure,
-    differing only in the prose of the message, and classifying on prose is a
-    rule that git's next release may silently rewrite. So an answered failure
-    refuses, which is the conservative half: the failure class this guard was
-    built for - the expired credential of #1393 - stays caught, and the class
-    it cannot yet separate stays with it rather than being waved through on a
-    guess.
+    AND AN ANSWERED FAILURE IS NOT A VERDICT EITHER, unless it is a verdict
+    ABOUT THE CREDENTIAL, which is the rest of the same argument. Exit status
+    alone cannot supply that: on the image's git 2.39.5 a DNS failure, a
+    refused connection and an HTTP 401, 403, 500 or 502 all exit 128, so a
+    rule that refused on "it came back non-zero" refused a phase for a
+    momentary 502 exactly as it did for a dead token. The distinction comes
+    from the transport instead - `workspace_git.observed_push` reads the
+    status the REMOTE sent - and only `PushVerdict.REFUSED`, a 4xx or a
+    ref-level rejection, ends the phase. A fault warns and lets it run, and so
+    does an outcome nothing could place: the exposure that leaves is the one
+    this rehearsal never covered anyway, and it still lands where every
+    uncovered case lands, on a teardown push that fails and reports NOT
+    RECOVERABLE.
 
     Raises:
-        QuarantinePathUnusableError: origin ANSWERED a rehearsal push with a
-            refusal, after bounded retries. Neither a renewal that failed nor
-            an origin that never answered reaches here.
+        QuarantinePathUnusableError: origin ANSWERED a rehearsal push with an
+            authorization or policy refusal, after bounded retries. Neither a
+            renewal that failed, nor an origin that never answered, nor a
+            transport that broke reaches here.
         WorkspaceInspectionFailedError: the workspace would not answer, so
             nothing was rehearsed and no verdict exists. Propagated rather
             than downgraded, for the reason every command in this module is
@@ -269,41 +269,42 @@ async def rehearse_quarantine_credential(
     await _renew_for_the_rehearsal(workspace, phase_id=phase_id)
 
     ref = _quarantine_ref(execution_id, phase_id)
-    unanswered: list[str] = []
+    unrehearsed: list[str] = []
     for repo in repos:
         head = (await git(workspace, repo, "rev-parse", "--revs-only", "HEAD")).strip()
         if not head:
             continue
         rehearsed = await _rehearsal_push(workspace, repo, commit=head, ref=ref)
-        if rehearsed.exit_code == 0:
+        if rehearsed.verdict is PushVerdict.ACCEPTED:
             continue
-        if not answered(rehearsed):
-            # SILENCE IS NOT A VERDICT (#1396). Nothing came back within the
-            # bound, so origin has said nothing about this credential - and a
-            # rehearsal that promises "credential and connectivity" has no
-            # business converting the absence of connectivity into a refusal.
-            # The walk continues rather than returning, because these origins
-            # are per-repository and a later one may still answer with a real
-            # refusal, which IS a verdict and must still be acted on.
-            unanswered.append(repo)
+        if rehearsed.verdict is not PushVerdict.REFUSED:
+            # A FAULT IS NOT A VERDICT (#1396). Either nothing came back
+            # within the bound, or what came back says nothing about this
+            # workspace's credential - and a rehearsal that promises
+            # "credential and connectivity" has no business converting the
+            # absence of connectivity into a refusal. The walk continues
+            # rather than returning, because these origins are per-repository
+            # and a later one may still answer with a real refusal, which IS a
+            # verdict and must still be acted on.
+            unrehearsed.append(f"{repo} ({rehearsed.verdict.value})")
             continue
         raise QuarantinePathUnusableError(
             phase_id=phase_id,
             detail=(
                 f"A rehearsal push of {repo} to {ref} was refused by origin: "
-                f"{(rehearsed.stderr or rehearsed.stdout).strip() or 'no output'}"
+                f"{(rehearsed.result.stderr or rehearsed.result.stdout).strip() or 'no output'}"
             ),
         )
-    if unanswered:
+    if unrehearsed:
         logger.warning(
-            "Phase %s is starting UNREHEARSED: origin never answered a rehearsal push "
-            "of %s within the bound, after %d attempts, so nothing is known about the "
-            "credential this workspace holds. The phase runs because an origin that "
-            "cannot be reached now says nothing about whether it can be reached in an "
-            "hour; if it still cannot be, a quarantine push at teardown will fail and "
-            "that phase's work will be reported NOT RECOVERABLE (#1396).",
+            "Phase %s is starting UNREHEARSED: a rehearsal push of %s never reached a "
+            "verdict, after %d attempts, so nothing is known about the credential this "
+            "workspace holds. The phase runs because an origin that cannot be reached "
+            "now says nothing about whether it can be reached in an hour; if it still "
+            "cannot be, a quarantine push at teardown will fail and that phase's work "
+            "will be reported NOT RECOVERABLE (#1396).",
             phase_id,
-            ", ".join(unanswered),
+            ", ".join(unrehearsed),
             _RENEWAL_ATTEMPTS,
         )
         return
@@ -378,22 +379,22 @@ async def _renew_for_the_rehearsal(workspace: GitWorkspace, *, phase_id: str) ->
 
 async def _rehearsal_push(
     workspace: GitWorkspace, repo: str, *, commit: str, ref: str
-) -> ExecutionResult:
+) -> ObservedPush:
     """The rehearsal's dry run, retried so a blip cannot refuse a viable phase.
 
     The same bound and the same reasoning as the renewal above, one layer
     further out: this push IS the verdict, so a network fault that made it
     fail once would take a whole execution off the board.
 
-    RETURNS THE LAST RESULT, AND DOES NOT JUDGE IT. Every non-zero outcome is
-    retried, including one that looks definitive, because "definitive" here is
-    read from an exit code that a momentarily broken remote also produces -
+    RETURNS THE LAST OBSERVATION, AND DOES NOT JUDGE IT. Every non-accepted
+    outcome is retried, including one already classified `REFUSED`, because a
+    momentarily broken remote produces those too -
     `test_a_rehearsal_push_that_fails_transiently_is_retried_before_it_is_fatal`
-    is a remote that is gone for one push and back for the next, and exits 128
-    exactly as a real refusal does. What the retries establish is therefore
-    only PERSISTENCE, never the kind of failure; the caller classifies what
-    survives them, and this function must not pre-empt that by deciding a
-    failure is final (#1396).
+    is a remote that is gone for one push and back for the next. What the
+    retries establish is therefore only PERSISTENCE, never the kind of
+    failure; `observed_push` supplies the kind and the caller acts on it, and
+    this function must not pre-empt either by deciding a failure is final
+    (#1396).
 
     THE BOUND IS WHAT STOPS THIS DELAYING A PHASE START INDEFINITELY, and it
     is two bounds multiplied rather than one: at most `_RENEWAL_ATTEMPTS`
@@ -404,17 +405,18 @@ async def _rehearsal_push(
     start.
     """
     for attempt in range(1, _RENEWAL_ATTEMPTS + 1):
-        rehearsed = await push(workspace, repo, commit=commit, ref=ref, dry_run=True)
-        if rehearsed.exit_code == 0 or attempt == _RENEWAL_ATTEMPTS:
+        rehearsed = await observed_push(workspace, repo, commit=commit, ref=ref, dry_run=True)
+        if rehearsed.verdict is PushVerdict.ACCEPTED or attempt == _RENEWAL_ATTEMPTS:
             return rehearsed
         logger.info(
-            "A rehearsal push of %s to %s failed (attempt %d of %d): %s. Retrying in "
-            "%.0fs, because one failure establishes nothing about this phase.",
+            "A rehearsal push of %s to %s failed as a %s (attempt %d of %d): %s. Retrying "
+            "in %.0fs, because one failure establishes nothing about this phase.",
             repo,
             ref,
+            rehearsed.verdict.value,
             attempt,
             _RENEWAL_ATTEMPTS,
-            (rehearsed.stderr or rehearsed.stdout).strip() or "no output",
+            (rehearsed.result.stderr or rehearsed.result.stdout).strip() or "no output",
             _RENEWAL_RETRY_SECONDS,
         )
         await asyncio.sleep(_RENEWAL_RETRY_SECONDS)

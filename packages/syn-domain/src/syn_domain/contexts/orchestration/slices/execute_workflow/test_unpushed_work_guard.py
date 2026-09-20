@@ -2125,34 +2125,41 @@ async def test_the_rehearsal_aims_at_the_ref_the_real_quarantine_would_use(
     assert rehearsed == quarantined
 
 
-async def test_the_rehearsal_refuses_the_phase_when_origin_cannot_be_reached(
+async def test_an_origin_that_is_not_there_lets_the_phase_start_with_a_warning(
     clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    instant_retries: None,
 ) -> None:
-    """A REAL push that really fails, at the moment nothing is riding on it.
+    """AN ORIGIN THAT IS GONE IS A FAULT, NOT A VERDICT (#1396).
 
-    Origin is pointed somewhere that is not a repository, so git's own dry run
-    fails for the class of reason this rehearsal exists to catch: it got no
-    further than the connection. Staged on the remote rather than by handing
-    back a failed `ExecutionResult`, which is the correction #1396 asked for -
-    a fabricated failure asserts that the guard reads `exit_code`, and assumes
-    the thing that needed establishing, which is that a dry run comes back
-    non-zero when the push is really impossible.
+    A REAL push that really fails, at the moment nothing is riding on it:
+    origin is pointed somewhere that is not a repository, so git's own dry run
+    comes back non-zero having got no further than the connection. Staged on
+    the remote rather than by handing back a failed `ExecutionResult`, because
+    a fabricated failure asserts that the guard reads `exit_code` and assumes
+    the thing that needs establishing.
 
-    The phase must not run, and the message must name the phase, the ref, and
-    what git actually said: an operator reading it is being told why an
-    execution stopped before it started.
+    This test used to require the opposite, and requiring it was the defect.
+    "The remote is not there" is the ABSENCE of connectivity, and a rehearsal
+    whose whole promise is credential AND connectivity cannot spend the
+    absence of one as evidence about the other - a DNS outage, a proxy that is
+    down and a misconfigured URL all arrive here, and none of them says the
+    token in this container has stopped working. So the phase starts, the
+    warning says what it is trading away, and the exposure lands where every
+    uncovered case lands: a teardown push that fails and reports NOT
+    RECOVERABLE.
     """
     clone.break_the_remote()
 
-    with pytest.raises(QuarantinePathUnusableError) as raised:
+    with caplog.at_level("WARNING"):
         await rehearse_quarantine_credential(
             clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
         )
 
-    message = str(raised.value)
-    assert _PHASE_ID in message
-    assert _QUARANTINE_REF in message
-    assert "does not appear to be a git repository" in message
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "UNREHEARSED" in said
+    assert _PHASE_ID in said
+    assert "NOT RECOVERABLE" in said, "the warning must say what it is trading away"
 
 
 async def test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept(
@@ -2441,31 +2448,36 @@ async def test_a_silent_origin_cannot_delay_a_phase_start_indefinitely(
     assert workspace.pushes == unpushed_work_guard._RENEWAL_ATTEMPTS
 
 
-async def test_a_transport_fault_that_answers_is_not_yet_told_from_a_refusal(
+async def test_a_gateway_that_is_briefly_broken_does_not_refuse_a_viable_phase(
     clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
     instant_retries: None,
 ) -> None:
-    """THE LIMIT OF THE CLASSIFICATION, pinned so it is visible rather than assumed.
+    """THE PAIR TO THE 403 ABOVE, against the same server on the same transport.
 
-    A 502 is a transport fault and under the rule it should NOT refuse the
-    phase - but git gives nothing to separate it from the 403 above. Measured
-    on the image's git 2.39.5: a DNS failure, a refused connection and an HTTP
-    401, 403, 500 and 502 all exit 128, and `GIT_TRACE2_EVENT` reports the
-    same ``"code":128`` and the same error ``fmt`` for every one of them. Only
-    the prose of the message differs, and a classifier built on prose is one
-    git's next release rewrites without telling anyone.
+    The ONLY difference between this test and that one is the number the
+    remote sends back, and the two must reach opposite conclusions. A 502 is
+    the server saying its own upstream is broken - it says nothing whatever
+    about the token in this container - so it must NOT end an execution whose
+    workspace is already built and whose agent has not run.
 
-    So this case is left in the refusing class deliberately, because the
-    conservative error here is the cheaper one: refusing a viable phase costs
-    the provisioning already spent, while admitting one whose credential is
-    actually dead costs the agent-hour AND the work. This test is where that
-    choice is recorded; when a signal that separates the two arrives, this is
-    the test that must be made to fail on purpose and rewritten.
+    THIS IS WHAT EXIT STATUS COULD NOT DO. On the image's git 2.39.5 a DNS
+    failure, a refused connection and an HTTP 401, 403, 500 and 502 all exit
+    128, and `GIT_TRACE2_EVENT` reports the same ``"code":128`` for every one
+    of them; 403 and 502 share an error ``fmt`` too. A rule reading exit codes
+    therefore refused this phase, and a rule reading git's prose would have
+    been a rule git's next release rewrites without telling anyone. The status
+    is the remote's own, is defined by RFC 9110 rather than by git, and is not
+    translated - see `workspace_git._HTTP_STATUS_LINE`.
     """
-    with clone.origin_answering(502), pytest.raises(QuarantinePathUnusableError):
+    with clone.origin_answering(502), caplog.at_level("WARNING"):
         await rehearse_quarantine_credential(
             clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
         )
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "UNREHEARSED" in said
+    assert "NOT RECOVERABLE" in said, "the warning must say what it is trading away"
 
 
 async def test_a_phase_whose_mint_failed_is_still_launched(
@@ -2513,10 +2525,9 @@ async def test_a_phase_whose_quarantine_path_is_unusable_is_never_launched(
     on `provision_workspace_completed` rather than on the raise, because the
     raise alone would also be satisfied by a check that ran too late.
     """
-    clone.break_the_remote()
     run = _PhaseRun(clone.workspace)
 
-    with pytest.raises(QuarantinePathUnusableError):
+    with clone.origin_answering(403), pytest.raises(QuarantinePathUnusableError):
         await run.start()
 
     run.aggregate.provision_workspace_completed.assert_not_called()

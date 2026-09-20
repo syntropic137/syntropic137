@@ -24,16 +24,23 @@ EVERY COMMAND IS ALSO BOUNDED, for the same kind of reason one level down.
 cannot be left off by a caller who forgot it - see `LOCAL_TIMEOUT_SECONDS`
 below for why an unbounded command on this path costs an hour.
 
-TWO DELIBERATE EXCEPTIONS to the check, and both are exceptions on purpose:
-`push`, whose failure is an answer rather than the lack of one, and
+THREE DELIBERATE EXCEPTIONS to the check, and all three are exceptions on
+purpose: `push`, whose failure is an answer rather than the lack of one;
 `unpushed_work_guard._write_protected`, which reads the mount table through
 `run_bounded` directly because there the unreadable case must weaken the gate
-rather than fail it. Both say so at their own definition. Nothing else may.
+rather than fail it; and `_http_statuses`, for the same reason one layer over -
+a transport log that cannot be read leaves the verdict LESS definitive, and
+less definitive can only let a phase run. Each says so at its own definition.
+Nothing else may.
 """
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Final, Protocol
+from uuid import uuid4
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
@@ -155,6 +162,97 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 #: and a reader must not have to know which of the two bounds fired to know
 #: that the answer never arrived.
 BOUND_FIRED_EXIT_CODE: Final[int] = 124
+
+#: git's documented exit status for "the connection worked, the remote
+#: answered, and it declined to move a ref": some refs could not be pushed.
+#: Distinct from 128, which is a fatal error before any ref was discussed.
+#: This is an EXIT STATUS rather than a message, so it survives translation
+#: and rewording, which is the whole reason the classification prefers it.
+_REF_LEVEL_REJECTION_EXIT: Final[int] = 1
+
+#: Where a push's transport log is written INSIDE the workspace, and then read
+#: back for status codes and deleted. A file rather than stderr, deliberately:
+#: git's curl trace carries the request headers, and on a remote whose URL
+#: embeds a token it carries that too. Confined to a file in the container the
+#: credential already lives in, only the matched status codes ever come out,
+#: and nothing of the trace can reach a log line or an operator's error
+#: message. `uuid4` because two repositories are walked in the same container.
+_TRANSPORT_LOG_DIR: Final[str] = "/tmp"
+
+#: HTTP's own status line, as git's curl trace records it arriving. This is
+#: the ONE machine-readable thing that separates "origin refused you" from
+#: "the network broke": measured on the workspace image's git 2.39.5, a DNS
+#: failure, a refused connection and an HTTP 401, 403, 500 or 502 ALL exit 128
+#: and all report the same ``"code":128`` through `GIT_TRACE2_EVENT`, and
+#: 403 and 502 even share one error ``fmt``. Only the status differs.
+#:
+#: NOT A MATCH ON AN ERROR MESSAGE, which is the distinction that matters. A
+#: status code is defined by RFC 9110 and emitted by the SERVER; git's error
+#: prose is written by git, passed through ``_()`` and therefore translated,
+#: so a classifier built on it changes meaning with the operator's locale and
+#: silently with git's next release. This matches neither git's wording nor
+#: its translations - it reads the number the remote itself sent.
+_HTTP_STATUS_LINE: Final[str] = "Recv header: HTTP/[0-9.]+ [0-9][0-9][0-9]"
+_HTTP_STATUS: Final[re.Pattern[str]] = re.compile(r"HTTP/[0-9.]+ ([0-9]{3})$")
+
+#: 4xx is the client's fault by definition - the request will not start
+#: working if it is repeated. For a push that means authorization or policy:
+#: 401 a credential the remote would not take, 403 one it took and will not
+#: let write, 404 a repository this credential cannot see. 5xx is the
+#: server's, and a server's fault is a reason to try later, not a verdict
+#: about this workspace's credential.
+_REFUSING_STATUS: Final[range] = range(400, 500)
+
+#: Turns the curl trace on for one command, with the body dumps off (they are
+#: pack data and enormous) and redaction explicitly on rather than relied on
+#: as a default.
+_TRANSPORT_LOG_ENV: Final[tuple[str, ...]] = ("GIT_TRACE_CURL_NO_DATA=1", "GIT_TRACE_REDACT=1")
+
+
+class PushVerdict(Enum):
+    """What a push outcome is evidence OF - which is not the same as whether it worked.
+
+    THE DISTINCTION #1396 WAS REOPENED FOR. The rehearsal at phase start
+    promises exactly two things, a credential and a connection, and it may
+    refuse a phase only on the first. Counting attempts cannot tell those
+    apart: the third failure of a persistent 502, a DNS outage or a reset
+    connection arrives identically to the third failure of an expired token,
+    and reading the count as a verdict ended viable phases before their agent
+    ran. So every non-zero push is CLASSIFIED, and only one of these four may
+    refuse anything.
+
+    `REFUSED` is the narrow one and is the only definitive member: the remote
+    answered, and what it answered was about authorization or policy - a 4xx
+    on the ref advertisement, or a ref-level rejection from ``receive-pack``.
+
+    `TRANSPORT_FAULT` is everything else that came back. It is deliberately
+    the DEFAULT for an outcome this module cannot place, because "not
+    definitive" is the honest reading of an unclassifiable failure and the
+    rule is that only a definitive refusal may refuse.
+
+    `NO_ANSWER` is `answered`'s case: nothing came back within the bound, so
+    there is not even a failure to classify. Separate from `TRANSPORT_FAULT`
+    only because an operator reading a warning needs to know which happened;
+    both of them let a phase start.
+    """
+
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+    TRANSPORT_FAULT = "transport fault"
+    NO_ANSWER = "no answer"
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedPush:
+    """A push, and what its outcome is evidence of.
+
+    Both halves together because a caller needs both and reading them from
+    two places is how they drift: the verdict decides what happens, and the
+    result carries what to tell an operator it was.
+    """
+
+    result: ExecutionResult
+    verdict: PushVerdict
 
 
 def answered(result: ExecutionResult) -> bool:
@@ -319,7 +417,13 @@ async def repositories(workspace: GitWorkspace) -> list[str]:
     return sorted(line.strip()[: -len(suffix)] for line in found.splitlines() if line.strip())
 
 
-def git_argv(repo: str, *args: str, index: str | None = None, identity: bool = False) -> list[str]:
+def git_argv(
+    repo: str,
+    *args: str,
+    index: str | None = None,
+    identity: bool = False,
+    transport_log: str | None = None,
+) -> list[str]:
     """Argv for one git command in ``repo``, with no hook of the repository's own.
 
     Environment is carried in argv, via ``env``, rather than through the
@@ -332,12 +436,20 @@ def git_argv(repo: str, *args: str, index: str | None = None, identity: bool = F
     that runs a hook today: which subcommands consult hooks is git's business
     and changes between releases, and a prefix applied to all of them cannot
     be left off the one that starts to.
+
+    ``transport_log`` asks git to record what the transport actually did, to
+    a file in the workspace. Purely an observation - it changes nothing about
+    what git sends, receives or decides - and off by default, because the one
+    caller that wants it is the one that has to classify a failure
+    (`observed_push`).
     """
     prefix: list[str] = []
     if index is not None:
         prefix.append(f"GIT_INDEX_FILE={index}")
     if identity:
         prefix.extend(_IDENTITY)
+    if transport_log is not None:
+        prefix.extend((f"GIT_TRACE_CURL={transport_log}", *_TRANSPORT_LOG_ENV))
     env = ["env", *prefix] if prefix else []
     return [*env, "git", *_HOOKS_OFF, "-C", repo, *args]
 
@@ -376,7 +488,13 @@ async def git_remote(workspace: GitWorkspace, repo: str, *args: str, doing: str)
 
 
 async def push(
-    workspace: GitWorkspace, repo: str, *, commit: str, ref: str, dry_run: bool = False
+    workspace: GitWorkspace,
+    repo: str,
+    *,
+    commit: str,
+    ref: str,
+    dry_run: bool = False,
+    transport_log: str | None = None,
 ) -> ExecutionResult:
     """The one command whose failure is an answer rather than the lack of one.
 
@@ -420,6 +538,91 @@ async def push(
     """
     return await run_bounded(
         workspace,
-        git_argv(repo, "push", *(("--dry-run",) if dry_run else ()), "origin", f"{commit}:{ref}"),
+        git_argv(
+            repo,
+            "push",
+            *(("--dry-run",) if dry_run else ()),
+            "origin",
+            f"{commit}:{ref}",
+            transport_log=transport_log,
+        ),
         timeout_seconds=REMOTE_TIMEOUT_SECONDS,
     )
+
+
+async def observed_push(
+    workspace: GitWorkspace, repo: str, *, commit: str, ref: str, dry_run: bool = False
+) -> ObservedPush:
+    """`push`, plus what its outcome is evidence of.
+
+    THE MISSING HALF OF THE PORT (#1396). A caller that has to decide whether
+    a failed push is a verdict about this workspace's credential cannot get
+    that from `ExecutionResult`: the type carries an exit code, and the exit
+    code is 128 for an expired token, a DNS outage, a refused connection and
+    a 502 alike. Deciding it in the caller therefore meant deciding it from a
+    field that does not hold the answer, and every future caller needing the
+    same distinction would have rediscovered the same gap. It is answered
+    here, at the boundary that can actually see the transport, once.
+
+    HOW, in one sentence: the same push, asked to write down what the
+    transport did, read back for status codes only, and the log deleted. The
+    round trip costs two local commands on top of a command that just went to
+    the network, and it buys the only signal git 2.39.5 has that separates a
+    refusal from a fault - see `_HTTP_STATUS_LINE` for why the status and not
+    the message.
+
+    THE LOG IS DELETED WHETHER OR NOT IT COULD BE READ, and reading it is
+    never allowed to fail the call: a workspace that cannot produce a
+    transport log yields no statuses, which lands on `TRANSPORT_FAULT`, which
+    lets the phase run. The failure direction is deliberate - a classifier
+    that could not classify must not be spent as a refusal.
+    """
+    log = f"{_TRANSPORT_LOG_DIR}/syn-push-transport-{uuid4().hex}.log"
+    result = await push(workspace, repo, commit=commit, ref=ref, dry_run=dry_run, transport_log=log)
+    statuses = await _http_statuses(workspace, log)
+    return ObservedPush(result=result, verdict=_verdict(result, statuses))
+
+
+async def _http_statuses(workspace: GitWorkspace, log: str) -> tuple[int, ...]:
+    """Every HTTP status the remote sent during one push, in order, and nothing else.
+
+    UNCHECKED ON PURPOSE - the module docstring's third exception. `grep`
+    exits non-zero when it matched nothing, which is the ordinary outcome for
+    a remote that is not HTTP at all, and a workspace too broken to hold a
+    file is one this call must survive rather than one it may fail. Every one
+    of those paths returns an empty tuple, and an empty tuple is the input
+    that makes `_verdict` LESS willing to refuse.
+
+    ``-o`` is what keeps this safe rather than tidy: only the matched status
+    lines cross back out of the workspace, so the request headers the trace
+    also holds cannot reach a caller, a log or an operator's error message.
+    """
+    found = await run_bounded(workspace, ["grep", "-oE", _HTTP_STATUS_LINE, log])
+    await run_bounded(workspace, ["rm", "-f", log])
+    return tuple(
+        int(matched.group(1))
+        for line in found.stdout.splitlines()
+        if (matched := _HTTP_STATUS.search(line.strip()))
+    )
+
+
+def _verdict(result: ExecutionResult, statuses: tuple[int, ...]) -> PushVerdict:
+    """Place one push outcome, preferring the signal the remote itself produced.
+
+    THE ORDER IS THE RULE. A 4xx is the remote answering about authorization
+    or policy and is the only thing here that may refuse a phase. A ref-level
+    rejection is the same kind of answer arriving through `receive-pack`
+    instead of through HTTP, and is read from an exit STATUS rather than from
+    the reason git printed beside it. Everything else that came back is a
+    fault, including everything this module cannot place: refusing on an
+    outcome nobody has classified is exactly the defect #1396 reopened for.
+    """
+    if result.success and result.exit_code == 0 and not result.timed_out:
+        return PushVerdict.ACCEPTED
+    if not answered(result):
+        return PushVerdict.NO_ANSWER
+    if any(status in _REFUSING_STATUS for status in statuses):
+        return PushVerdict.REFUSED
+    if result.exit_code == _REF_LEVEL_REJECTION_EXIT:
+        return PushVerdict.REFUSED
+    return PushVerdict.TRANSPORT_FAULT
