@@ -11,6 +11,13 @@ killed by a platform error with no agent report at all and one failed on its
 agent's own `TASK_RESULT success=false`, driven through the SAME chain and
 asked whether they carry the same classification. They must not.
 
+#1372 ADDED THE THIRD RUN, and it is the one this chain could not previously
+tell from the second at all. A phase whose agent reported failure AND named
+`"failure_reason": "task"` is not the quality gate working - it is a request
+that cannot be done - and until the reason key existed both arrived at the API
+as `correct_refusal`. `TestATaskFailureIsNotARefusal` drives it down the same
+ten hops and asks the two endpoints to separate them.
+
 The chain is real at every hop, because the defect this guards against is not
 in any one of them - it is a value that survives nine hops and is dropped at
 the tenth by a constructor that does not pass it:
@@ -78,11 +85,19 @@ pytestmark = pytest.mark.unit
 REFUSED_ID = "exec-refused-1357"
 #: The run whose container died with the agent never having reported anything.
 CRASHED_ID = "exec-crashed-1357"
+#: The run whose agent reported failure and named the REQUEST as its cause
+#: (#1372): not an outage, and not the gate working either - a brief that has
+#: to be rewritten before any rerun can do better.
+TASK_ID = "exec-task-1372"
 #: The run that ended BEFORE this field existed. Neither its events nor the row
 #: the projection wrote for it carry the key at all, and no VERSION bump means
 #: that row is never rebuilt - so this is what the store actually holds for the
 #: 221 failures the issue counted.
 HISTORICAL_ID = "exec-historical-1357"
+
+#: A classification no reader here knows, standing in for a newer writer's
+#: member or a corrupted row. Deliberately unspellable as a real one.
+_NEVER_A_MEMBER = "recorded-by-a-version-that-does-not-exist-yet"
 
 WORKFLOW_ID = "wf-1357"
 PHASE_ID = "implement"
@@ -106,6 +121,17 @@ _REFUSAL_MESSAGES = (
 #: reason a real refusal does, and it is NOT evidence the platform worked.
 _UNREADABLE_MESSAGES = ("TASK_RESULT: {success: probably not",)
 
+#: What an agent handed an impossible brief writes (#1372), in the shape the
+#: prompt hands it. The `failure_reason` is the ONLY difference from
+#: `_REFUSAL_MESSAGES` - same `success=false`, same prose, same terminator -
+#: which is the point: nothing else in these bytes could tell the two runs
+#: apart, and before the key existed nothing did.
+_TASK_MESSAGES = (
+    "Issue #9001 names a file this repository has never contained.",
+    'TASK_RESULT: {"success": false, "failure_reason": "task", "comments": "the '
+    'brief names a module that does not exist; no change can satisfy it"}\nTASK_RESULT_END',
+)
+
 
 def _refusal_error() -> PhaseReportedFailureError:
     """The exception a phase that reported `success=false` dies on."""
@@ -119,6 +145,19 @@ def _unreadable_error() -> PhaseReportedFailureError:
     """The exception a phase whose report nobody could parse dies on."""
     reader = VerdictReader()
     for message in _UNREADABLE_MESSAGES:
+        reader.read(message)
+    return PhaseReportedFailureError(phase_id=PHASE_ID, verdict=reader.verdict)
+
+
+def _task_error() -> PhaseReportedFailureError:
+    """The exception a phase that reported an impossible task dies on (#1372).
+
+    Built the same way as `_refusal_error`, through the real reader, so what
+    reaches the chain is whatever `VerdictReader` makes of the bytes above -
+    not a classification this test chose.
+    """
+    reader = VerdictReader()
+    for message in _TASK_MESSAGES:
         reader.read(message)
     return PhaseReportedFailureError(phase_id=PHASE_ID, verdict=reader.verdict)
 
@@ -201,6 +240,7 @@ async def _projections() -> _StubProjectionManager:
     for execution_id, error in (
         (REFUSED_ID, _refusal_error()),
         (CRASHED_ID, _crash_error()),
+        (TASK_ID, _task_error()),
     ):
         for projection in (detail, listing):
             await projection.on_workflow_execution_started(_started(execution_id).model_dump())
@@ -430,9 +470,20 @@ class TestWhatDoubtCountsAs:
         unknown rather than raising `ValueError` and stopping the stream. This
         is the reason `from_stored` exists instead of `FailureClassification(...)`
         at each of the read sites.
+
+        The value is asserted NOT to be a member first, and that guard is the
+        lesson of #1372 rather than belt-and-braces: this test used to spell it
+        `"task"`, which #1372 then made real. The day it did, the test went on
+        passing while asserting the opposite of what it says - a known member
+        reading as unclassified would be a defect, not the contract. So the
+        input is pinned to be unknown rather than trusted to stay that way.
         """
+        assert _NEVER_A_MEMBER not in {member.value for member in FailureClassification}, (
+            "this test's input has become a real member, so it no longer "
+            "exercises a value the reader does not know"
+        )
         payload = _failed(REFUSED_ID, _refusal_error()).model_dump()
-        payload["failure_classification"] = "task"
+        payload["failure_classification"] = _NEVER_A_MEMBER
 
         projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
         await projection.on_workflow_execution_started(_started(REFUSED_ID).model_dump())
@@ -441,6 +492,110 @@ class TestWhatDoubtCountsAs:
 
         assert row is not None
         assert row.failure_classification is FailureClassification.UNCLASSIFIED
+
+
+class TestATaskFailureIsNotARefusal:
+    """#1372: the third class, down the same ten hops as the other two.
+
+    THE DEFECT THIS GUARDS. `correct_refusal` is a claim that the system
+    WORKED, and every reported failure made it - including the ones whose agent
+    had just said the request could not be done by anybody. Those take opposite
+    responses: one is read and closed, the other means the brief is rewritten
+    before a single further dollar is spent re-running it. A record that cannot
+    separate them sends the operator to re-dispatch, which spends a whole run
+    to arrive back at the same sentence.
+
+    WHY THESE TESTS DRIVE BYTES AND NOT AN ENUM. `FailureClassification.TASK`
+    existing proves nothing - the issue's own words are that nothing could
+    PRODUCE one. So the input here is the text an agent writes, read by the
+    production `VerdictReader`, and the assertions are made on what two HTTP
+    endpoints answer at the far end. Every hop between is the real one, which
+    is what catches the failure mode this file was written for: a value carried
+    correctly for nine hops and dropped by a constructor at the tenth.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_task_failure_is_named_task(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The end of the chain, on the endpoint an operator opens."""
+        task = await _detail(monkeypatch, TASK_ID)
+
+        assert task.failure_classification is FailureClassification.TASK, (
+            f"a phase that reported failure_reason=task reaches the API as "
+            f"{task.failure_classification.value!r}; the operator reading it "
+            f"cannot tell an impossible brief from the gate doing its job"
+        )
+
+    @pytest.mark.asyncio
+    async def test_it_is_not_the_same_answer_as_a_plain_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The two runs that differ by ONE key, asked to differ in the record.
+
+        `_REFUSAL_MESSAGES` and `_TASK_MESSAGES` both report `success=false` in
+        prose of the same shape. If the reason key is dropped anywhere between
+        the agent's text and the response model, these two collapse into one
+        answer - and that is exactly the state #1372 was opened about, so it is
+        asserted rather than inferred from the member existing.
+        """
+        task = await _detail(monkeypatch, TASK_ID)
+        refused = await _detail(monkeypatch, REFUSED_ID)
+
+        assert task.failure_classification is not refused.failure_classification
+        assert refused.failure_classification is FailureClassification.CORRECT_REFUSAL
+
+    @pytest.mark.asyncio
+    async def test_the_list_response_carries_it_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other endpoint, off the other projection, on the other model.
+
+        Failure rates are counted over the LIST. A `task` that reaches only the
+        detail page answers the one operator who already went looking.
+        """
+        summaries = await _summaries(monkeypatch)
+
+        assert summaries[TASK_ID].failure_classification is FailureClassification.TASK
+        assert summaries[TASK_ID].status == "failed", "the run still failed; this is its KIND"
+
+    @pytest.mark.asyncio
+    async def test_all_four_classes_are_distinguishable_in_one_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the whole field is for, asked of one list response.
+
+        Three live runs and one older than the field, served together, must
+        report four different classes. Asserted as a set rather than run by run
+        because the property is that the tally SPLITS: any hop that folded two
+        of these together would still satisfy every single-run assertion above.
+        """
+        summaries = await _summaries(monkeypatch, await _projections_with_a_pre_1357_run())
+
+        classes = {
+            execution_id: summaries[execution_id].failure_classification
+            for execution_id in (TASK_ID, REFUSED_ID, CRASHED_ID, HISTORICAL_ID)
+        }
+
+        assert set(classes.values()) == {
+            FailureClassification.TASK,
+            FailureClassification.CORRECT_REFUSAL,
+            FailureClassification.PLATFORM,
+            FailureClassification.UNCLASSIFIED,
+        }, f"four runs of four kinds do not read as four classes: {classes}"
+
+    @pytest.mark.asyncio
+    async def test_it_is_on_the_wire_as_the_word_task(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the HTTP client receives, which is the contract the CLI is generated against.
+
+        The enum member could be carried perfectly to the response model and
+        still reach a client as something else; `"task"` is the literal the
+        regenerated OpenAPI schema and CLI union have to contain, so it is
+        asserted after `model_dump` where the wire value is decided.
+        """
+        detail = (await _detail(monkeypatch, TASK_ID)).model_dump()
+
+        assert detail["failure_classification"] == "task"
 
 
 class TestARunOlderThanTheFieldItself:
