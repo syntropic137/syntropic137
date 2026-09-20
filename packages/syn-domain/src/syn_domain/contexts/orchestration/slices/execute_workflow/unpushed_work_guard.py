@@ -144,6 +144,7 @@ def quarantine_ref(*, execution_id: str, phase_id: str) -> str:
     """
     return f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
 
+
 #: The quarantine commit is written through a scratch index so the doomed
 #: worktree's own index is never touched. Starting from an empty file also
 #: means the tree is the WORKTREE as it stands rather than whatever happened to
