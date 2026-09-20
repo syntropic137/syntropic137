@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_domain.contexts._shared.maintenance import (
+    AdmissionTicket,
     MaintenanceMode,
     MaintenancePausedError,
 )
@@ -199,3 +200,47 @@ class TestTheNextExecutionAfterThat:
             )
 
         assert processor.runs == 0, "refused, but the execution ran anyway"
+
+
+class TestAnExecutionThatArrivesWithATicket:
+    """The gate already said yes, under its transition lock, and the caller has
+    already been told so - a 200, or a ``dispatched`` trigger record.
+
+    Everything here runs inside a fire-and-forget task whose exceptions are
+    logged and dropped, so re-deciding the admission cannot refuse the work. It
+    can only delete it, leaving the record that was written from the first
+    answer describing a run that no longer exists. That is the defect
+    verification found on the first pass at #1387, and it is why a ticket is
+    carried in rather than the flag being read again.
+    """
+
+    async def test_is_not_re_asked_for_permission(self) -> None:
+        gate = _Gate()
+        await gate.set_mode(active=True, reason="pit stop", actor="deploy")
+        processor = _ImmediateProcessor()
+
+        result = await _handler(gate, processor).handle(
+            ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID),
+            admitted=AdmissionTicket(granted_at=datetime.now(UTC), mode=MaintenanceMode()),
+        )
+
+        assert result.status == "completed"
+        assert processor.runs == 1
+        assert gate.reads == 0, (
+            "the handler re-read the flag for an execution the gate had already "
+            "admitted; under a deploy that silently discards the work"
+        )
+
+    async def test_the_same_command_without_one_is_refused(self) -> None:
+        """The negative control, and the safe default: no ticket means nobody
+        asked the gate, so the handler asks."""
+        gate = _Gate()
+        await gate.set_mode(active=True, reason="pit stop", actor="deploy")
+        processor = _ImmediateProcessor()
+
+        with pytest.raises(MaintenancePausedError):
+            await _handler(gate, processor).handle(
+                ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID), admitted=None
+            )
+
+        assert processor.runs == 0
