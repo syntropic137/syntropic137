@@ -127,6 +127,20 @@ services:
   # API - Query and Control Service
   # =============================================================================
   api:
+    # A RESTART MUST NOT COST AN EXECUTION ITS WORK (#1381). On SIGTERM the API
+    # cancels every in-flight execution, and each one then pushes whatever its
+    # workspace is holding that no remote has out to refs/syn/lost/... before
+    # letting the container go. Docker's default grace is 10s, which is shorter
+    # than that save is allowed to take (_PRESERVATION_BUDGET_SECONDS, 120s in
+    # WorkflowExecutionProcessor), so the default SIGKILLs the API mid-push and
+    # preserves nothing - the fix would be in the code and absent in production.
+    #
+    # Declared in the BASE so every overlay inherits it: dev, selfhost,
+    # ondemand and syntropic137 all layer on this file, and a per-overlay
+    # setting is how a stack ends up quietly keeping the 10s default.
+    #
+    # Only spent when there IS something in flight; an idle API exits at once.
+    stop_grace_period: 150s
     build:
       context: ..
       dockerfile: infra/docker/images/syn-api/Dockerfile

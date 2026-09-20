@@ -947,10 +947,35 @@ class BackgroundWorkflowDispatcher:
             )
 
     async def shutdown(self) -> None:
-        for task in list(self._tasks):
+        """Stop every in-flight execution and WAIT for each to preserve its work.
+
+        The cancel is what a restart does to an execution and the `gather` is
+        what makes it survivable (#1381). `CancelledError` is a `BaseException`,
+        so it unwinds past `_run`'s `except Exception` above and out of
+        `WorkflowExecutionProcessor.run`, which since #1381 catches it,
+        quarantines whatever the live workspaces are holding that no remote has,
+        and only then re-raises. Returning before that finished would leave the
+        push half-done, so this must stay an await on every task rather than a
+        fire-and-forget cancel.
+
+        DELIBERATELY UNBOUNDED HERE. The budget belongs to the frame that knows
+        what it is spending it on - `_PRESERVATION_BUDGET_SECONDS`, per
+        execution - and a second bound around it could only cut short a save
+        that the first one had already decided was worth finishing. What must
+        exceed the sum is the container's `stop_grace_period`, which is set in
+        the compose files.
+        """
+        interrupted = list(self._tasks)
+        if not interrupted:
+            return
+        logger.info(
+            "Shutting down: interrupting %d in-flight execution(s) and waiting for "
+            "each to push out work no remote has",
+            len(interrupted),
+        )
+        for task in interrupted:
             task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*interrupted, return_exceptions=True)
 
 
 async def get_execute_workflow_handler() -> ExecuteWorkflowHandler:

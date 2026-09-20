@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -30,6 +31,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
+    describe_saved_work,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
@@ -94,6 +96,37 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: How long an execution interrupted by a restart is given to empty its
+#: workspaces before the shutdown stops waiting for it.
+#:
+#: A BACKSTOP, NOT THE BUDGET. Every git command the save issues already
+#: carries its own bound in its argv (`workspace_git.run_bounded`), so this
+#: number is not what keeps the walk finite - it is what keeps the SHUTDOWN
+#: finite when something outside that walk hangs: session capture, or a docker
+#: teardown against a daemon that has stopped answering. Without it a deploy
+#: that stops the API can wait forever, which is the failure #1381 exists to
+#: remove, arriving from the other side.
+#:
+#: Larger than one repository's worst-case bounded walk on purpose (four local
+#: commands at `LOCAL_TIMEOUT_SECONDS` and two remote ones at
+#: `REMOTE_TIMEOUT_SECONDS`), so the case where a remote is merely slow still
+#: finishes and still reports where the work went. A workspace holding nothing
+#: - the ordinary case - is done in milliseconds and never approaches this.
+#:
+#: THE CONTAINER'S STOP GRACE PERIOD MUST EXCEED IT, or docker's SIGKILL
+#: arrives mid-push and preserves nothing; `docker/docker-compose*.yaml` set
+#: `stop_grace_period` on the api service for exactly this reason.
+_PRESERVATION_BUDGET_SECONDS: Final[float] = 120.0
+
+#: What an interrupted phase's sessions are closed with. Says the process went
+#: away rather than that the work was rejected, because an open session that
+#: will never report again is the one thing worse than a closed one.
+_INTERRUPTED_BY_RESTART: Final[str] = (
+    "The platform restarted while this phase was running. It was not cancelled "
+    "and it did not fail; anything the workspace was holding that no remote had "
+    "was pushed to refs/syn/lost/<execution>/<phase> before the container went."
+)
 
 
 @dataclass
@@ -290,6 +323,22 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 started_at,
             )
+        except asyncio.CancelledError:
+            # THE THIRD WAY OUT, and until #1381 the only one that preserved
+            # nothing. A restart cancels this task (`BackgroundWorkflowDispatcher
+            # .shutdown`), and `CancelledError` is a `BaseException`, so it
+            # unwinds past the `except Exception` below without touching either
+            # terminal path: no quarantine push, no teardown, and an ephemeral
+            # workspace reclaimed with the phase's commits still the only copy.
+            # Every deploy took this path, which is why the deploy had to drain
+            # the platform first and why that drain cost hours.
+            #
+            # Re-raised, always: the task WAS cancelled and the caller must see
+            # that. What changes is only that the work outlives the process.
+            await self._preserve_interrupted_work(
+                execution_id, phase_id=dispatch_ctx.current_phase_id
+            )
+            raise
         except Exception as e:
             logger.exception(
                 "Workflow execution failed (exec=%s, workflow=%s): %s",
@@ -386,6 +435,98 @@ class WorkflowExecutionProcessor:
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
+
+    async def _preserve_interrupted_work(
+        self, execution_id: str, *, phase_id: str | None
+    ) -> None:
+        """Empty this execution's workspaces before the process holding them dies (#1381).
+
+        THE TERMINAL PATH FOR A CANCELLATION NOBODY ASKED FOR. The other two
+        answer "why did this execution end" - it failed, or the user stopped it.
+        This one answers a different question, and the aggregate is deliberately
+        not consulted about it: the execution did not end, the PROCESS did. So
+        nothing here issues a command, nothing reclassifies the run, and the
+        status an operator reads is whatever it was - a user cancellation stays
+        cancelled and an exit 124 stays failed, because neither of them comes
+        through here at all.
+
+        What it does is the one thing that cannot wait for the next process:
+        push whatever the live workspaces are holding that no remote has, then
+        let them go. `save_unpushed_work` is the completion gate's own walk, so
+        the work lands on `refs/syn/lost/<execution>/<phase>` - the same ref,
+        pushed to the same origin, as on every other path that empties a dying
+        container. Nothing is remembered in this process to make that work
+        findable afterwards, and nothing needs to be (ADR-060): the ref is named
+        from the execution and phase ids, which are already in the event store.
+
+        NEVER RAISES, for the reason `save_unpushed_work` does not: the caller
+        is re-raising a `CancelledError` and an exception from here would
+        replace "this task was cancelled" with "we could not tidy up", which is
+        a worse error about a different subject.
+
+        COVERS SIGTERM AND NOT SIGKILL, and that limit is in the mechanism
+        rather than in this code: a process killed outright runs no Python at
+        all, so no in-process hook can preserve anything. What makes the
+        SIGTERM case sufficient for a deploy is that `docker stop` - and so
+        `docker compose up -d` - sends SIGTERM first and waits.
+        """
+        # As a task, so that a SECOND cancellation arriving while we wait (a
+        # repeated SIGTERM, an impatient supervisor) stops us WAITING rather
+        # than stopping the push mid-flight. `asyncio.wait` does not cancel the
+        # futures it is given, which is what makes it the shield here.
+        preserving = asyncio.ensure_future(
+            self._empty_interrupted_workspaces(execution_id, phase_id=phase_id)
+        )
+        done, _still_running = await asyncio.wait(
+            {preserving}, timeout=_PRESERVATION_BUDGET_SECONDS
+        )
+        if not done:
+            preserving.cancel()
+            logger.error(
+                "Execution %s did not finish preserving its work within %ss of the "
+                "restart; whatever phase %s was holding may not have survived",
+                execution_id,
+                _PRESERVATION_BUDGET_SECONDS,
+                phase_id,
+            )
+            return
+        # RETRIEVED, not just awaited. The preservation runs as a task, so an
+        # exception it raised is held on that task until someone asks: nobody
+        # asking means the loop reports it at garbage-collection time, long
+        # after the log line that would have explained it, or not at all
+        # because the process is already going away. This is what makes the
+        # "never raises" above true rather than merely intended.
+        broken = preserving.exception()
+        if broken is not None:
+            logger.error(
+                "Execution %s could not be tidied up after the restart interrupted it",
+                execution_id,
+                exc_info=broken,
+            )
+
+    async def _empty_interrupted_workspaces(
+        self, execution_id: str, *, phase_id: str | None
+    ) -> None:
+        """Save, then close, in the order both other terminal paths use.
+
+        The order IS the guarantee and it is the same one documented at
+        `_cancel_execution` and `_fail_execution`: teardown destroys the
+        container, so work that was only in it is afterwards not somewhere
+        else, it is nowhere.
+        """
+        saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+        if saved.is_worth_reporting:
+            # At ERROR, and spelling out the ref: this is the only place the
+            # location is stated. There is no failure event to carry it,
+            # because the execution has not failed.
+            logger.error(
+                "Execution %s was interrupted by a restart while phase %s was running.\n%s",
+                execution_id,
+                phase_id,
+                describe_saved_work(saved),
+            )
+        await self._runtime.report_cancelled(_INTERRUPTED_BY_RESTART)
+        await self._runtime.abandon_all("interrupted")
 
     async def _cancel_execution(
         self,
