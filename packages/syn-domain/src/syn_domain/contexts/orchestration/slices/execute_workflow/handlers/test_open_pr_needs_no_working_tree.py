@@ -684,6 +684,17 @@ def _run_gh(
 #:   Nothing in the fences is left to substitute, so the copyability the #1324
 #:   entries above argue for is preserved; pinned by
 #:   `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
+#: * #1392 added a fourth word, `unknown`, and the prose that tells an agent
+#:   what each of the four is read AS. The table offered no way to say "I could
+#:   not tell", and the sentence that stood in for one - leave the key out -
+#:   described an omission the parser does not treat that way: an absent reason
+#:   reads as an ordinary reported failure, which is what every report written
+#:   before the key existed means and is the one thing it cannot be used to
+#:   say. So the state got a word of its own, and the paragraph now describes
+#:   what happens rather than what was intended. Shared, seen by every phase:
+#:   a phase that could not tell is not a property of which prompt it got.
+#:   Nothing in the fences is left to substitute, so #1324's copyability holds;
+#:   pinned by `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -789,7 +800,7 @@ orchestrator reads, and a block naming the outcome anything else is not
 guaranteed to be read at all.
 
 **When `success` is `false`, a second key says WHAT KIND of failure it was.**
-`failure_reason` is exactly one of three words - never a sentence, which is
+`failure_reason` is exactly one of four words - never a sentence, which is
 what `comments` is for:
 
 | `failure_reason` | what it means | what someone does about it |
@@ -797,11 +808,18 @@ what `comments` is for:
 | `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
 | `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
 | `refused` | neither: you could have done the work and judged you should not | read what you found |
+| `unknown` | you cannot honestly tell which of the three it was | somebody reads the run |
 
-Those three go to three different people, so the wrong word fetches the wrong
-one and the right one never hears. If none of them is honestly true, leave the
-key out: an omitted reason is read as "could not tell", which is a worse answer
-than the truth and a better one than a guess.
+Those four go to four different people, so the wrong word fetches the wrong one
+and the right one never hears. Write `unknown` rather than guessing: it is
+recorded as a failure nobody has classified, which is exactly what it is.
+
+What it is read as is what you SAID, recorded beside the outcome and shown to
+whoever opens the run - not as a finding about the platform. Leaving the key
+out is not the same as writing `unknown`: an omitted reason is read as an
+ordinary reported failure, which is what every report written before this key
+existed means, and it is the one thing here you cannot use to say "I could not
+tell".
 
 Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
@@ -847,6 +865,13 @@ You could have done the work and judged you should NOT - copy both lines:
 
 ```
 TASK_RESULT: {"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}
+TASK_RESULT_END
+```
+
+It failed and you cannot honestly tell which of the three - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "unknown", "comments": "Specific reason why — what happened, and what you could not establish about it"}
 TASK_RESULT_END
 ```
 
