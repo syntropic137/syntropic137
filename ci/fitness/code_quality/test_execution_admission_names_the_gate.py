@@ -1,14 +1,41 @@
-"""Fitness function: every execution admission path consults the gate (#1387).
+"""Fitness function: every execution admission path NAMES the gate (#1387).
 
-A gate with one unguarded entrance is not a gate. The HTTP route is the
-entrance everybody remembers; the ones that get forgotten are the trigger
-paths - webhooks, the Events API poller, the Checks API poller - because no
-operator is standing at them when a deploy starts.
+WHAT THIS PROVES, exactly: for every discovered admission site, some function
+lexically enclosing it writes one of :data:`_GATE_NAMES` as an identifier. That
+is co-occurrence in a scope, and nothing stronger. It is deliberately named for
+what it measures, because the previous name - "admission is gated" - claimed a
+property this file has never checked, and an over-claiming gate is worse than a
+modest one: it is the reason nobody looks again.
 
-So this does not carry a list of the paths. A list is a third declaration of
+WHAT IT CANNOT PROVE, and is not trying to:
+
+    * that the gate is consulted BEFORE the admission, rather than after it;
+    * that it is consulted on the path that actually runs - a `refuse_if_paused`
+      in one branch of an `if` vouches for an admission in the other;
+    * that the refusal is not caught and discarded two lines later;
+    * that the port passed to it is the durable one.
+
+Those are behaviours, and behaviour is proved by tests that RUN the code: see
+`test_1387_maintenance_gates_admission.py`,
+`test_1387_trigger_dispatch_is_paused_not_dropped.py` and
+`test_1387_a_queued_execution_holds_its_lease.py`, which set the flag and
+assert what each entrance then does. This check is the cheap, whole-codebase
+half - it catches the entrance that was written without the gate anywhere in
+sight, which is the mistake that actually happens - and `TestWhatThisCannotProve`
+keeps its blind spot written down and executable rather than implied.
+
+A control-flow dominance analysis would close some of that, and was considered.
+It was not done here: dominance over `async with`, try/except/else/finally,
+early returns and a ticket handed to a closure that is queued for later is a
+dataflow problem, and a subtly wrong one would be a WORSE gate than an honest
+lexical one - it would claim the strong property while still missing cases, and
+the missing cases would be invisible. If it is built, it belongs in its own
+file with the counterexample below as its first failing test.
+
+HOW THE SITES ARE FOUND. Not from a list: a list is a third declaration of
 something already declared twice, and it drifts silently the moment someone
-adds a fourth entrance. Instead the admission paths are DISCOVERED from the
-AST, by the two things an admission does and cannot avoid doing:
+adds a fourth entrance. The admission paths are DISCOVERED from the AST, by the
+two things an admission does and cannot avoid doing:
 
     * constructing an ``ExecuteWorkflowCommand`` - admitting work directly
     * calling ``run_workflow(...)`` - admitting work through the dispatcher
@@ -94,8 +121,8 @@ _GATE_NAMES = frozenset(
 )
 
 
-#: What an ungated site is reported as. A location, because the reader has to
-#: go and look at exactly one place.
+#: What a site that never names the gate is reported as. A location, because
+#: the reader has to go and look at exactly one place.
 @dataclass(frozen=True)
 class _Site:
     anchor: str
@@ -104,10 +131,16 @@ class _Site:
 
 
 def _names_written_directly_in(node: ast.AST) -> set[str]:
-    """Identifiers written in this scope, NOT counting nested scopes.
+    """Identifiers written anywhere in this scope, NOT counting nested scopes.
 
     Excluding nested functions and classes is what keeps the check per-site: a
     gated helper defined beside an ungated one must not vouch for it.
+
+    A SET, so order and reachability are discarded on purpose - this returns
+    what the scope mentions, never what it does. Two consequences a reader
+    should have in mind: a gate name written after the admission counts, and a
+    gate name written in a branch that never runs counts. See the module
+    docstring and :class:`TestWhatThisCannotProve`.
     """
     found: set[str] = set()
 
@@ -145,13 +178,18 @@ def _anchor_of(call: ast.Call) -> str | None:
     return name if name in _ANCHORS else None
 
 
-def ungated_admission_sites(source: str) -> list[_Site]:
+def admission_sites_not_naming_the_gate(source: str) -> list[_Site]:
     """Every admission in ``source`` whose scope chain never names the gate.
+
+    Named for what it returns. "Ungated" would be a claim about behaviour; this
+    is a claim about identifiers, and the difference is the whole of finding C
+    on #1387 - a site whose enclosing scope mentions the gate is reported as
+    fine here even when the mention cannot reach it.
 
     A pure function over text so the checker can be driven over cases that do
     not exist in the tree - including the ones it used to miss.
     """
-    ungated: list[_Site] = []
+    unnamed: list[_Site] = []
 
     def walk(node: ast.AST, scope: tuple[str, ...], gated: bool) -> None:
         for child in ast.iter_child_nodes(node):
@@ -168,13 +206,13 @@ def ungated_admission_sites(source: str) -> list[_Site]:
                 walk(child, (*scope, child.name), gated)
                 continue
             if isinstance(child, ast.Call) and (anchor := _anchor_of(child)) and not gated:
-                ungated.append(
+                unnamed.append(
                     _Site(anchor=anchor, line=child.lineno, scope=".".join(scope) or "<module>")
                 )
             walk(child, scope, gated)
 
     walk(ast.parse(source), (), gated=False)
-    return ungated
+    return unnamed
 
 
 def _count_anchors(source: str) -> dict[str, int]:
@@ -214,17 +252,21 @@ _ADMITTING_FILES, _COUNTS = _discover()
     _ADMITTING_FILES,
     ids=[p.split("/")[-1] for p in _ADMITTING_FILES] if _ADMITTING_FILES else [],
 )
-def test_every_admission_site_is_gated(file_path: str) -> None:
+def test_every_admission_site_names_the_gate(file_path: str) -> None:
     source = (repo_root() / file_path).read_text(encoding="utf-8")
-    ungated = ungated_admission_sites(source)
-    assert not ungated, (
-        f"{file_path} admits executions without consulting the maintenance "
-        f"gate at: "
-        + ", ".join(f"{s.scope}() line {s.line} ({s.anchor})" for s in ungated)
+    unnamed = admission_sites_not_naming_the_gate(source)
+    assert not unnamed, (
+        f"{file_path} admits executions in scopes that never name the "
+        f"maintenance gate, at: "
+        + ", ".join(f"{s.scope}() line {s.line} ({s.anchor})" for s in unnamed)
         + f". Every admission path must refuse while maintenance mode is set "
         f"(#1387) - see {_GATE_MODULE}. It is not enough that some OTHER "
         f"function in this module consults the gate: a new entrance is a new "
-        f"hole in the deploy drain wherever it is written."
+        f"hole in the deploy drain wherever it is written. "
+        f"Naming the gate is the NECESSARY condition this check can measure, "
+        f"not a sufficient one - satisfying it by writing the identifier "
+        f"somewhere in the scope passes here and still loses executions; the "
+        f"behaviour is what the #1387 tests assert."
     )
 
 
@@ -297,7 +339,7 @@ class TestTheCheckerItself:
     mutation, kept."""
 
     @pytest.mark.architecture
-    def test_an_ungated_admission_in_an_already_gated_module_is_caught(self) -> None:
+    def test_an_admission_in_an_already_gated_module_is_still_asked(self) -> None:
         """The regression. This module gates one path and not the other; the
         module-wide version of this check passed it."""
         source = """
@@ -308,9 +350,9 @@ async def gated(workflow_id: str, gate) -> None:
 async def a_new_path_someone_forgot(workflow_id: str) -> None:
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
 """
-        ungated = ungated_admission_sites(source)
+        unnamed = admission_sites_not_naming_the_gate(source)
 
-        assert [s.scope for s in ungated] == ["a_new_path_someone_forgot"]
+        assert [s.scope for s in unnamed] == ["a_new_path_someone_forgot"]
 
     @pytest.mark.architecture
     def test_a_gated_sibling_does_not_vouch_for_a_nested_one(self) -> None:
@@ -325,9 +367,9 @@ class Dispatcher:
     async def ungated(self, wf):
         await self.run_workflow(workflow_id=wf)
 """
-        ungated = ungated_admission_sites(source)
+        unnamed = admission_sites_not_naming_the_gate(source)
 
-        assert [s.scope for s in ungated] == ["Dispatcher.ungated"]
+        assert [s.scope for s in unnamed] == ["Dispatcher.ungated"]
 
     @pytest.mark.architecture
     def test_a_ticket_handed_to_a_closure_counts(self) -> None:
@@ -340,14 +382,14 @@ async def endpoint(wf, gate):
             await handler.handle(ExecuteWorkflowCommand(aggregate_id=wf))
         queue(_run)
 """
-        assert ungated_admission_sites(source) == []
+        assert admission_sites_not_naming_the_gate(source) == []
 
     @pytest.mark.architecture
     def test_an_admission_at_module_level_is_caught(self) -> None:
         """Nowhere to put a gate check is not the same as not needing one."""
         source = "task = run_workflow(workflow_id='wf-x')\n"
 
-        assert [s.scope for s in ungated_admission_sites(source)] == ["<module>"]
+        assert [s.scope for s in admission_sites_not_naming_the_gate(source)] == ["<module>"]
 
     @pytest.mark.architecture
     def test_a_module_that_does_not_admit_reports_nothing(self) -> None:
@@ -357,7 +399,7 @@ async def endpoint(wf, gate):
 async def unrelated(x):
     return await something_else(x)
 """
-        assert ungated_admission_sites(source) == []
+        assert admission_sites_not_naming_the_gate(source) == []
 
     @pytest.mark.architecture
     def test_a_comment_naming_the_gate_does_not_count(self) -> None:
@@ -368,4 +410,66 @@ async def looks_gated(wf):
     """See AdmissionGate - admitted, ticket, MaintenancePausedError."""
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=wf))
 '''
-        assert [s.scope for s in ungated_admission_sites(source)] == ["looks_gated"]
+        assert [s.scope for s in admission_sites_not_naming_the_gate(source)] == ["looks_gated"]
+
+
+class TestWhatThisCannotProve:
+    """The counterexample, kept executable.
+
+    Each of these is ACCEPTED by the check above, and each is a case where the
+    gate is named but does not guard the admission. They are here so the
+    limitation cannot be forgotten, and so anyone who does build the dominance
+    analysis has its first failing tests already written: flip these to the
+    opposite assertion and make them pass.
+
+    They are not marked xfail. Nothing is broken - the check is doing what it
+    says it does, which is why it now says something narrower.
+    """
+
+    @pytest.mark.architecture
+    def test_a_gate_in_one_branch_vouches_for_an_admission_in_the_other(self) -> None:
+        """The counterexample from #1387's triage, exactly.
+
+        `refuse_if_paused` is called only when `dry_run` is true, and the
+        admission happens only when it is false - so on the path that admits,
+        the gate is never consulted. A set of identifiers cannot see that, and
+        the site is reported as fine.
+        """
+        source = """
+async def admits_in_one_branch(workflow_id: str, gate, dry_run: bool) -> None:
+    if dry_run:
+        await refuse_if_paused(gate)
+        return
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
+"""
+        assert admission_sites_not_naming_the_gate(source) == [], (
+            "the check has become branch-aware; this file's docstring and the "
+            "name of test_every_admission_site_names_the_gate now understate "
+            "what it proves, and should be widened deliberately"
+        )
+
+    @pytest.mark.architecture
+    def test_a_gate_consulted_after_the_admission_counts(self) -> None:
+        """Order is discarded with the rest of the control flow. The work is
+        already admitted by the time anything refuses."""
+        source = """
+async def admits_then_asks(workflow_id: str, gate) -> None:
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
+    await refuse_if_paused(gate)
+"""
+        assert admission_sites_not_naming_the_gate(source) == []
+
+    @pytest.mark.architecture
+    def test_a_swallowed_refusal_counts(self) -> None:
+        """Naming `MaintenancePausedError` is how an entrance says it TRANSLATES
+        a refusal into its own protocol. Catching it and carrying on is the same
+        identifier and the opposite behaviour."""
+        source = """
+async def swallows(workflow_id: str, gate) -> None:
+    try:
+        await refuse_if_paused(gate)
+    except MaintenancePausedError:
+        pass
+    await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
+"""
+        assert admission_sites_not_naming_the_gate(source) == []

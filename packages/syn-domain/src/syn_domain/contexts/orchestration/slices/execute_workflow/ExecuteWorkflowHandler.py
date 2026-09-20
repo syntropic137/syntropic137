@@ -327,7 +327,7 @@ class ExecuteWorkflowHandler:
         # not admitting anything, so requiring the port there would only add
         # ceremony. Production MUST pass it, and the composition root is
         # checked for exactly that by
-        # ci/fitness/code_quality/test_execution_admission_is_gated.py - an
+        # ci/fitness/code_quality/test_execution_admission_names_the_gate.py - an
         # optional dependency nobody verifies is how a gate loses an entrance.
         self._maintenance = maintenance
 
