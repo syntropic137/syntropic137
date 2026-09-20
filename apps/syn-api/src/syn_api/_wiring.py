@@ -13,6 +13,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -438,7 +440,7 @@ def _substitute_builtins(
 def _substitute_inputs(
     template: str,
     phase: ExecutablePhase,
-    inputs: dict[str, Any] | None,
+    inputs: Mapping[str, object] | None,
     phase_outputs: dict[str, str],
 ) -> str:
     """Layers 2a-2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
@@ -479,7 +481,7 @@ async def _build_workspace_prompt(
     workflow_id: str,
     repo_url: str | None,
     phase_outputs: dict[str, str],
-    inputs: dict[str, Any] | None = None,
+    inputs: Mapping[str, object] | None = None,
 ) -> str:
     """Build the workspace prompt for a phase.
 

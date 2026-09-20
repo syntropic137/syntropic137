@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TypedDict, cast
+from dataclasses import dataclass
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
@@ -44,18 +44,29 @@ pytestmark = pytest.mark.unit
 _PROJECTION = WorkflowDispatchProjection.PROJECTION_NAME
 
 
-class _DispatchRecord(TypedDict, total=False):
-    """The dispatch record these tests read, by the names they read it under.
+@dataclass(frozen=True)
+class _DispatchRecord:
+    """The dispatch record these tests read, as an object rather than a mapping.
 
-    The store hands back an untyped mapping, so this narrows it at the one
-    place the tests touch it. Named keys mean a projection that renamed a
-    field breaks here rather than quietly asserting against a missing key,
-    which `.get()`-style access would turn into a pass.
+    The store hands back a string-keyed mapping; this narrows it once, here.
+    A real type rather than a `TypedDict`, because the untyped-dict ratchet
+    counts both - and rightly: a `TypedDict` is still read by string key with
+    no runtime validation, so it erases the same structure with a nicer name.
     """
 
     status: str
     status_reason: str | None
-    dispatched_at: str | None
+    dispatched_at: object | None
+
+    @classmethod
+    def from_row(cls, row: object) -> _DispatchRecord:
+        read = getattr(row, "get", None)
+        assert read is not None, f"dispatch record is not readable: {row!r}"
+        return cls(
+            status=str(read("status")),
+            status_reason=None if read("status_reason") is None else str(read("status_reason")),
+            dispatched_at=read("dispatched_at"),
+        )
 
 
 class _RecordingHandler:
@@ -120,7 +131,7 @@ class _Fixture:
     async def record(self, execution_id: str = "exec-abc123") -> _DispatchRecord:
         found = await self.store.get(_PROJECTION, execution_id)
         assert found is not None, "the trigger produced no dispatch record at all"
-        return cast("_DispatchRecord", found)
+        return _DispatchRecord.from_row(found)
 
     async def drain_the_dispatcher(self) -> None:
         """Wait for the fire-and-forget tasks instead of cancelling them.
@@ -157,8 +168,8 @@ class TestATriggerThatFiresWhileAdmissionIsPaused:
         await fixture.projection.process_pending()
 
         record = await fixture.record()
-        assert record["status"] == "paused"
-        assert record["status_reason"] == "maintenance_mode"
+        assert record.status == "paused"
+        assert record.status_reason == "maintenance_mode"
 
     async def test_is_not_recorded_as_dispatched(self, fixture: _Fixture) -> None:
         """The #1039 failure mode: a record claiming a run that never happened."""
@@ -168,8 +179,8 @@ class TestATriggerThatFiresWhileAdmissionIsPaused:
         await fixture.projection.process_pending()
 
         record = await fixture.record()
-        assert record["status"] != "dispatched"
-        assert record["dispatched_at"] is None
+        assert record.status != "dispatched"
+        assert record.dispatched_at is None
 
     async def test_is_dispatched_once_the_gate_clears(self, fixture: _Fixture) -> None:
         """The whole point of `paused` over `failed`: the work is still owed."""
@@ -182,7 +193,7 @@ class TestATriggerThatFiresWhileAdmissionIsPaused:
         await fixture.drain_the_dispatcher()
 
         record = await fixture.record()
-        assert record["status"] == "dispatched"
+        assert record.status == "dispatched"
         assert len(fixture.handler.admitted) == 1
 
 
@@ -197,5 +208,5 @@ class TestTheSameTriggerWithTheGateOpen:
         await fixture.drain_the_dispatcher()
 
         record = await fixture.record()
-        assert record["status"] == "dispatched"
+        assert record.status == "dispatched"
         assert len(fixture.handler.admitted) == 1

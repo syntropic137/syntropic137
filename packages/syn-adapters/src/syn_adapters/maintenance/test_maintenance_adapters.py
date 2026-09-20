@@ -10,7 +10,8 @@ first one what it remembers.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -27,18 +28,33 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 
-class _StoredRow(TypedDict, total=False):
-    """The one row ``maintenance_mode`` holds, as asyncpg hands it back.
+@dataclass
+class _MaintenanceRow:
+    """The one row ``maintenance_mode`` holds, as the adapter reads it.
 
-    Named keys rather than an untyped mapping, so the double and the adapter
-    cannot drift: the adapter reads these four by name, and a fake agreeing
-    only in shape would still pass while spelling one of them differently.
+    A real object rather than a mapping, for the reason the untyped-dict
+    ratchet exists: a string-keyed mapping is structured state with the
+    structure erased, and a `TypedDict` or a `Mapping` is the same erasure
+    spelled differently. This satisfies the `_Row` protocol the adapter
+    already declares - `__getitem__` and nothing else - so the double agrees
+    with production about the shape rather than about a dict literal.
     """
 
-    active: bool
-    reason: str | None
-    since: datetime | None
-    actor: str | None
+    written: bool = False
+    active: bool = False
+    reason: str | None = None
+    since: datetime | None = None
+    actor: str | None = None
+
+    def __getitem__(self, key: str) -> object:
+        return getattr(self, key)
+
+    def write(self, *, active: object, reason: object, since: object, actor: object) -> None:
+        self.written = True
+        self.active = bool(active)
+        self.reason = None if reason is None else str(reason)
+        self.since = cast("datetime | None", since)
+        self.actor = None if actor is None else str(actor)
 
 
 class _FakeRedis:
@@ -55,37 +71,32 @@ class _FakeRedis:
 
 
 class _FakeConnection:
-    def __init__(self, store: _StoredRow) -> None:
+    def __init__(self, store: _MaintenanceRow) -> None:
         self._store = store
 
     async def execute(self, query: str, *args: object) -> str:
         if query is SET_MODE_SQL or "INSERT INTO maintenance_mode" in query:
             active, reason, since, actor = args
-            self._store.update(
-                cast(
-                    "_StoredRow",
-                    {"active": active, "reason": reason, "since": since, "actor": actor},
-                )
-            )
+            self._store.write(active=active, reason=reason, since=since, actor=actor)
         return "OK"
 
-    async def fetchrow(self, query: str, *args: object) -> _StoredRow | None:
+    async def fetchrow(self, query: str, *args: object) -> _MaintenanceRow | None:
         assert query is CURRENT_SQL or "SELECT" in query
-        return self._store.copy() if self._store else None
+        return self._store if self._store.written else None
 
 
 class _FakePool:
     """A database that survives its pool. Shared across adapter instances."""
 
     def __init__(self) -> None:
-        self.rows: _StoredRow = {}
+        self.rows = _MaintenanceRow()
 
     def acquire(self) -> _FakePoolAcquire:
         return _FakePoolAcquire(self.rows)
 
 
 class _FakePoolAcquire:
-    def __init__(self, rows: _StoredRow) -> None:
+    def __init__(self, rows: _MaintenanceRow) -> None:
         self._rows = rows
 
     async def __aenter__(self) -> _FakeConnection:
