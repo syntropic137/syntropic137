@@ -38,7 +38,7 @@ from syn_adapters.subscriptions.coordinator_service import (
     CoordinatorSubscriptionService,
     SubscriptionNotLiveError,
 )
-from syn_api._wiring import BackgroundWorkflowDispatcher
+from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared import (
     AdmissionAnnouncementFailedError,
     AdmissionGate,
@@ -286,7 +286,7 @@ class TestStartupItself:
     async def _run_init_subscriptions(
         self, monkeypatch: pytest.MonkeyPatch, *, paused: bool
     ) -> _RecordingAnnouncer:
-        from syn_api.services import lifecycle
+        from syn_api.services import admission_announcement, lifecycle
 
         announcer = _RecordingAnnouncer()
         gate = AdmissionGate(InMemoryMaintenanceAdapter(), announcer)  # type: ignore[arg-type]
@@ -301,7 +301,7 @@ class TestStartupItself:
             async def start(self) -> None:
                 self.started = True
 
-        monkeypatch.setattr(lifecycle, "get_admission_gate", lambda: gate)
+        monkeypatch.setattr(admission_announcement, "get_admission_gate", lambda: gate)
         monkeypatch.setattr(lifecycle, "get_realtime", lambda: None)
         monkeypatch.setattr(
             lifecycle, "get_subscription_coordinator", lambda **_kwargs: _Coordinator()
@@ -447,11 +447,11 @@ class TestAClearThatCouldNotAnnounce:
 
         There is no operator on the startup path to hand a failure to, and the
         next start is itself the retry; raising there would only turn a missed
-        wake into a boot loop. So `_announce_admission_if_open` catches, and
+        wake into a boot loop. So `announce_admission_if_open` catches, and
         this asserts the gate lets it - the raise is what the CALLER chooses to
         do with, not something the gate has already decided.
         """
-        from syn_api.services import lifecycle
+        from syn_api.services import admission_announcement
 
         api = _Api(port=InMemoryMaintenanceAdapter(), projection_store=MemoryProjectionStore())
         api.store.down = True
@@ -461,8 +461,8 @@ class TestAClearThatCouldNotAnnounce:
 
         # The startup hook's own body, over the same broken store.
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(lifecycle, "get_admission_gate", lambda: api.gate)
-            await lifecycle._announce_admission_if_open()
+            patch.setattr(admission_announcement, "get_admission_gate", lambda: api.gate)
+            await admission_announcement.announce_admission_if_open()
 
         assert api.store.append_attempts == 2
 
@@ -564,7 +564,7 @@ class TestTheRestartWakeRacesTheCoordinator:
         projection_store: ProjectionStore,
     ) -> _RestartedApi:
         """Boot one process the way `lifespan` does, and announce as it does."""
-        from syn_api.services import lifecycle
+        from syn_api.services import admission_announcement, lifecycle
 
         store = _RacyEventStore()
         gate = AdmissionGate(port, EventStoreAdmissionAnnouncer(store))  # type: ignore[arg-type]
@@ -581,7 +581,7 @@ class TestTheRestartWakeRacesTheCoordinator:
             ],
             checkpoint_store=checkpoints,
         )
-        monkeypatch.setattr(lifecycle, "get_admission_gate", lambda: gate)
+        monkeypatch.setattr(admission_announcement, "get_admission_gate", lambda: gate)
         monkeypatch.setattr(lifecycle, "get_realtime", lambda: None)
         monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kwargs: service)
         state = lifecycle.LifecycleState()
@@ -752,7 +752,7 @@ class TestTheEventStoreThatNeverGoesLive:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> tuple[_NeverLiveEventStore, CoordinatorSubscriptionService]:
         from syn_adapters.subscriptions import coordinator_service
-        from syn_api.services import lifecycle
+        from syn_api.services import admission_announcement, lifecycle
 
         monkeypatch.setattr(coordinator_service, "_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS", 0.0)
         store = _NeverLiveEventStore()
@@ -765,7 +765,7 @@ class TestTheEventStoreThatNeverGoesLive:
             projections=[],
             checkpoint_store=MemoryCheckpointStore(),
         )
-        monkeypatch.setattr(lifecycle, "get_admission_gate", lambda: gate)
+        monkeypatch.setattr(admission_announcement, "get_admission_gate", lambda: gate)
         monkeypatch.setattr(lifecycle, "get_realtime", lambda: None)
         monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kwargs: service)
         return store, service

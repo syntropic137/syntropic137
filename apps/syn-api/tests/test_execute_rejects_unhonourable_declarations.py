@@ -187,7 +187,7 @@ class TestTheTriggerPathRefusesBeforeItAcknowledges:
     """
 
     async def test_run_workflow_raises_instead_of_scheduling_a_doomed_task(self) -> None:
-        from syn_api._wiring import BackgroundWorkflowDispatcher
+        from syn_api._wiring_admission import BackgroundWorkflowDispatcher
         from syn_domain.contexts.orchestration import UnsupportedExecutionTypeError
 
         handled: list[object] = []
@@ -213,7 +213,7 @@ class TestTheTriggerPathRefusesBeforeItAcknowledges:
     async def test_a_valid_template_still_dispatches(self) -> None:
         import asyncio
 
-        from syn_api._wiring import BackgroundWorkflowDispatcher
+        from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 
         handled: list[object] = []
 

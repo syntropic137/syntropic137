@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING
 from syn_api._wiring import (
     disconnect,
     ensure_connected,
-    get_admission_gate,
     get_event_store_instance,
     get_realtime,
     get_subscription_coordinator,
     get_workflow_dispatcher,
 )
+from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.read_path_health import _judge_read_path
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
-    from syn_api._wiring import BackgroundWorkflowDispatcher
+    from syn_api._wiring_admission import BackgroundWorkflowDispatcher
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
@@ -708,40 +708,7 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     state.subscription_service = coordinator
     logger.info("Subscription coordinator started")
 
-    await _announce_admission_if_open()
-
-
-async def _announce_admission_if_open() -> None:
-    """Re-announce "admission is open" once subscriptions are running (#1387).
-
-    This is what makes the wake-up survive a restart. Clearing maintenance mode
-    announces, and the trigger-dispatch ProcessManager re-offers the dispatches
-    the deploy paused - but only if a process is alive to receive it. A crash
-    between the clear and the drain leaves `paused` records and no second
-    prompt, because a flag that is already false never becomes false again.
-
-    So every start says it again. The announcement is durable and idempotent,
-    and lands strictly after the coordinator's live boundary - which is what
-    takes this process out of catch-up, and so what decides whether the
-    ProcessManager's processor side may run at all. Appending it first would
-    make it backlog: delivered, recorded, and never acted on. That ordering is
-    guaranteed by `start()` above, not by the order of these two lines.
-
-    Only when admission is actually open: announcing during a deploy would be
-    false, and the dispatches would be refused and re-paused anyway.
-    """
-    gate = get_admission_gate()
-    try:
-        mode = await gate.current()
-        if mode.active:
-            logger.info("Admission is paused; no re-open announced at startup")
-            return
-        await gate.announce_open(mode, after_restart=True)
-    except Exception:
-        logger.exception(
-            "Could not announce that admission is open at startup; triggers "
-            "paused by a deploy wait for the next subscribed event (#1387)"
-        )
+    await announce_admission_if_open()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:

@@ -32,7 +32,7 @@ from event_sourcing.stores.memory_projection import MemoryProjectionStore
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
-from syn_api._wiring import BackgroundWorkflowDispatcher
+from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (

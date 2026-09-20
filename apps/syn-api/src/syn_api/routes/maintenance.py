@@ -15,7 +15,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from syn_api._wiring import get_admission_gate
+from syn_api._wiring_admission import get_admission_gate
 from syn_api.types import MaintenanceModeResponse, SetMaintenanceModeRequest
 from syn_domain.contexts._shared import AdmissionAnnouncementFailedError
 

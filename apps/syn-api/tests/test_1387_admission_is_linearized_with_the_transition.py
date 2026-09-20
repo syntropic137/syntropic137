@@ -37,7 +37,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
-from syn_api._wiring import BackgroundWorkflowDispatcher
+from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.routes.executions import commands
 from syn_api.routes.maintenance import set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest

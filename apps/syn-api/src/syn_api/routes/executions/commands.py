@@ -631,7 +631,7 @@ async def _refuse_while_paused() -> None:
     and so a paused system pays for no preflight. It decides nothing:
     :func:`_admit_or_409` is what actually admits.
     """
-    from syn_api._wiring import get_admission_gate
+    from syn_api._wiring_admission import get_admission_gate
     from syn_domain.contexts._shared import MaintenancePausedError
 
     try:
@@ -650,7 +650,7 @@ async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
     outside - a repo preflight held inside the gate would stall the operator's
     ``PUT /maintenance`` behind a network round trip.
     """
-    from syn_api._wiring import get_admission_gate
+    from syn_api._wiring_admission import get_admission_gate
     from syn_domain.contexts._shared import MaintenancePausedError
 
     try:
