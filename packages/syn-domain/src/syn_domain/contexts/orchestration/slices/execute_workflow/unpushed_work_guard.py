@@ -86,7 +86,9 @@ import logging
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     QuarantinedWork,
+    QuarantinePathUnusableError,
     SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
@@ -133,6 +135,76 @@ _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 #: be staged - at the cost of re-hashing every tracked file, which is
 #: acceptable on a path that only runs when a phase is already failing.
 _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
+
+
+async def verify_quarantine_path(
+    workspace: GitWorkspace, *, execution_id: str, phase_id: str
+) -> None:
+    """Rehearse the quarantine push now, while a refusal costs nothing (#1393).
+
+    THE NET IS OTHERWISE UNTESTABLE UNTIL THE FALL. Everything below runs
+    exactly once per phase, at teardown, on a phase that has already failed -
+    so a credential that will be refused, or a ruleset that forbids
+    ``refs/syn/*``, is invisible right up to the moment a commit and nine
+    modified files are riding on it. `exec-db6f687e991a` is what that costs.
+
+    So the same push is made here with ``--dry-run``: same `push`, same argv,
+    same ``origin``, same ``refs/syn/lost`` ref this phase would really use,
+    and the credential renewed first exactly as the real one renews it. git
+    authenticates against ``git-receive-pack`` and has the ref update checked;
+    no object is sent and no ref is created. What it proves is not "a push
+    works" in general but "THIS push, with THIS credential, to THIS ref, would
+    be accepted", which is the only statement worth making here.
+
+    RAISES RATHER THAN WARNS, which is the deliberate part. A logged warning
+    at phase start is read by nobody until someone is already looking for why
+    work vanished, which is the position #1393 was reported from. Raising ends
+    the phase before its agent has been given anything to lose: the cost is the
+    provisioning already spent, against an hour of agent time handed to a
+    workspace that has just shown it cannot give the work back.
+
+    A repository with no commits yet is skipped - there is nothing to name as
+    the source of a push, and a phase that later commits into it is covered by
+    every other repository's rehearsal.
+
+    Raises:
+        QuarantinePathUnusableError: the rehearsal was refused, or the
+            credential it depends on could not be renewed.
+        WorkspaceInspectionFailedError: the workspace would not answer, so
+            nothing was rehearsed and no verdict exists. Propagated rather
+            than downgraded, for the reason every command in this module is
+            checked: "I could not look" must never be spent as "I looked and
+            it was fine".
+    """
+    repos = await repositories(workspace)
+    if not repos:
+        return
+    try:
+        await workspace.renew_git_credential()
+    except CredentialRenewalFailedError as unrenewable:
+        raise QuarantinePathUnusableError(
+            phase_id=phase_id,
+            detail=(
+                f"The credential every quarantine push depends on could not be "
+                f"renewed: {unrenewable}"
+            ),
+        ) from unrenewable
+
+    ref = _quarantine_ref(execution_id, phase_id)
+    for repo in repos:
+        head = (await git(workspace, repo, "rev-parse", "--revs-only", "HEAD")).strip()
+        if not head:
+            continue
+        rehearsed = await push(workspace, repo, commit=head, ref=ref, dry_run=True)
+        if rehearsed.exit_code != 0:
+            raise QuarantinePathUnusableError(
+                phase_id=phase_id,
+                detail=(
+                    f"A rehearsal push of {repo} to {ref} was refused with: "
+                    f"{(rehearsed.stderr or rehearsed.stdout).strip() or 'no output'}"
+                ),
+            )
+    logger.info("Quarantine path rehearsed for phase %s: %s is pushable", phase_id, ref)
 
 
 async def refuse_to_complete_unsaved_phase(
@@ -219,7 +291,7 @@ async def quarantine_unpushed_work(
             its push landed: work saved before the failure is not unsaved by
             it, and work whose push failed is not saved by being listed.
     """
-    ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+    ref = _quarantine_ref(execution_id, phase_id)
     quarantined: list[QuarantinedWork] = []
     try:
         repos = await repositories(workspace)
@@ -534,6 +606,15 @@ async def _quarantine(
     That is the same false reassurance as a false ``completed``, in a smaller
     costume, so the only failure this reports as data is the one that happens
     after the objects exist.
+
+    THE CREDENTIAL IS RENEWED IMMEDIATELY BEFORE THE PUSH, and that is the
+    whole of #1393's fix. This runs at teardown, which on a phase that
+    exhausted a 3600s budget is by arithmetic later than the one-hour life
+    GitHub gives the installation token the setup phase installed - so the
+    push that matters most is the one most certain to be refused. Renewing
+    here rather than at the top of the walk keeps the cost on the path that
+    actually pushes: a clean phase, which is almost all of them, pays nothing
+    and needs no flag to remember it.
     """
     await checked(
         workspace,
@@ -553,6 +634,7 @@ async def _quarantine(
         _commit_message(ref),
         identity=True,
     )
+    await _renew_credential(workspace, doing=f"quarantining {repo}")
     pushed = await push(workspace, repo, commit=commit.strip(), ref=ref)
 
     name = repo.rsplit("/", 1)[-1]
@@ -574,6 +656,40 @@ async def _quarantine(
         files=work.files,
         pushed_ref=ref,
     )
+
+
+def _quarantine_ref(execution_id: str, phase_id: str) -> str:
+    """Where this phase's rescued work goes, and where the rehearsal aims.
+
+    One function because the rehearsal at phase start and the push at teardown
+    must name the SAME ref: a rehearsal against a different one would prove
+    something true about a ref nobody uses, which is worse than not rehearsing
+    at all - it would report a working net that had never been tested.
+    """
+    return f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+
+
+async def _renew_credential(workspace: GitWorkspace, *, doing: str) -> None:
+    """Give this workspace a usable credential if it can be given one.
+
+    NEVER RAISES, which is the opposite of what `verify_quarantine_path` wants
+    from the same call and the reason the two ask separately. Here the phase
+    has already failed and a commit is waiting to be pushed: a renewal that
+    could not happen is a reason the push MIGHT fail, not a reason to skip it.
+    The token already in the container may have minutes left, and spending it
+    is the only way to find out. So the failure is logged and the push goes
+    ahead, where its own result is reported honestly either way.
+    """
+    try:
+        await workspace.renew_git_credential()
+    except CredentialRenewalFailedError as unrenewable:
+        logger.error(
+            "Could not renew this workspace's git credential before %s (%s). The push "
+            "will be attempted with the credential already in the container, which on "
+            "a phase that ran its full budget has probably expired.",
+            doing,
+            unrenewable,
+        )
 
 
 def _commit_message(ref: str) -> str:

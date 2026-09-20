@@ -475,12 +475,42 @@ class SetupPhaseSecrets:
             ]
         )
 
+    def build_credential_script(self) -> str:
+        """A script that installs NOTHING but this workspace's git credential.
+
+        THE SAME LINES THE SETUP PHASE WRITES, and deliberately not a second
+        spelling of them: `_append_git_credentials` is the only place that
+        knows where a credential lives, which entries git needs to route a
+        submodule correctly (#953), and that `gh` reads a different file
+        entirely. A renewal that re-derived any of that would drift from the
+        setup phase silently, and the drift would only show up as an
+        authentication failure at the moment the credential was needed - which
+        is the class of bug this exists to close (#1393).
+
+        Safe to run over a workspace that already has a credential, because
+        `_append_git_credentials` truncates before it writes. See there for why
+        appending a second entry would be worse than useless.
+        """
+        lines: list[str] = ["#!/bin/bash", "set -e"]
+        self._append_git_credentials(lines)
+        return "\n".join(lines) + "\n"
+
     def _append_git_credentials(self, lines: list[str]) -> None:
         """Append per-repository GitHub credential configuration."""
         if self.repo_tokens:
             lines.append("")
             lines.append("# Configure per-repo GitHub credentials (ADR-058)")
             lines.append("git config --global credential.helper store")
+            # TRUNCATE FIRST, because these lines run more than once over one
+            # container's life: an installation token expires after an hour
+            # while a phase may run longer, so the credential is rewritten
+            # before it is depended upon (#1393). git-credential-store hands
+            # out the FIRST entry matching the request, so appending a fresh
+            # token behind a stale one leaves the stale one winning every
+            # lookup - a renewal that changes the file and nothing else.
+            # A no-op on the setup phase's first run, where the file does not
+            # exist yet, which is what lets both callers share these lines.
+            lines.append(": > ~/.git-credentials")
             # Without useHttpPath, git-credential-store ignores the path component and
             # matches on host alone, so the FIRST github.com entry is handed out for
             # every github.com request -- including a .gitmodules URL pointing at a

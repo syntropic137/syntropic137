@@ -95,7 +95,23 @@ def _git(*args: str, cwd: Path, home: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-class _Workspace:
+class _RenewsCredential:
+    """The credential half of `GitWorkspace`, for a double modelling a healthy one.
+
+    COUNTED, NEVER MERELY ACCEPTED. #1393 is entirely a question of WHEN the
+    credential is renewed relative to the push that spends it, so a double
+    that swallowed the call would let the renewal be deleted with every test
+    in this file still green - which is the shape of the bug, not a fix for
+    it. `renewals` is what `test_the_quarantine_push_renews...` reads.
+    """
+
+    renewals: int = 0
+
+    async def renew_git_credential(self) -> None:
+        self.renewals += 1
+
+
+class _Workspace(_RenewsCredential):
     """Runs the gate's commands for real, against repositories on disk.
 
     Deliberately provides NO git identity and NO global config: the container
@@ -658,6 +674,9 @@ class _NeverRun:
     async def execute(self, command: list[str]) -> ExecutionResult:
         raise AssertionError(f"ran {command} for a phase it was not asked about")
 
+    async def renew_git_credential(self) -> None:
+        raise AssertionError("renewed the credential of a phase it was not asked about")
+
 
 def _completing(phase_id: str | None, execution_id: str = _EXECUTION_ID) -> TodoItem:
     return TodoItem(
@@ -815,6 +834,11 @@ class _BreaksOn:
         self._in_repo = in_repo
         self.attempted: list[str] = []
 
+    async def renew_git_credential(self) -> None:
+        # Delegated, not counted here: these nest, and a wrapper that answered
+        # for itself would hide whether the workspace underneath was renewed.
+        await self._inner.renew_git_credential()
+
     async def execute(self, command: list[str]) -> ExecutionResult:
         operation = _operation(command)
         self.attempted.append(operation)
@@ -841,6 +865,9 @@ class _MountedReadOnly:
         self._inner = inner
         self._read_only = read_only
 
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
     def _table(self) -> str:
         lines = ["21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"]
         lines += [
@@ -857,7 +884,7 @@ class _MountedReadOnly:
         return await self._inner.execute(command)
 
 
-class _NoRepositories:
+class _NoRepositories(_RenewsCredential):
     """A reachable workspace holding no repositories at all.
 
     Exit 0 and empty stdout - the TRUE NEGATIVE. `/workspace/repos` is created

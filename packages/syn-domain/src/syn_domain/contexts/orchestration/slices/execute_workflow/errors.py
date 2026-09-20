@@ -459,6 +459,55 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
     return lines
 
 
+class CredentialRenewalFailedError(Exception):
+    """This workspace's git credential is not known to be usable (#1393).
+
+    Raised by the adapter that mints and installs the credential, and caught
+    by both of its callers - who want OPPOSITE things from it, which is the
+    reason it is an exception rather than a logged warning. The startup check
+    fails the phase on it, before an agent has been given anything to lose.
+    The quarantine path logs it and pushes anyway, because the token already
+    in the container may still have minutes left and a push that might work
+    beats one that was never attempted.
+
+    It says nothing about whether the OLD credential still works. Nothing can:
+    the only way to find out is to spend it on a push, which is what both
+    callers go on to do.
+    """
+
+
+class QuarantinePathUnusableError(Exception):
+    """This phase could not have saved its work, so it is not given any (#1393).
+
+    THE NET IS TESTED BEFORE THE FALL, WHICH IS THE ONLY TIME IT CAN BE. The
+    unpushed-work guard's quarantine push runs exactly once per phase, at
+    teardown, on a phase that has already failed - so a credential or a ref
+    permission that would reject it is invisible until the moment the work is
+    riding on it, and `exec-db6f687e991a` is what that costs: a commit and
+    nine modified files, correctly detected, correctly pushed at, and refused.
+
+    So the same push is rehearsed at phase start with ``--dry-run``: same
+    remote, same ``refs/syn/lost`` namespace, same credential, no objects sent
+    and no ref created. Failing here ends the phase before its agent runs,
+    when the entire cost is the minute of provisioning already spent. That is
+    a deliberately worse trade than it first looks - a phase whose quarantine
+    push would have worked and whose dry run failed for some unrelated reason
+    is refused for nothing - and it is still the right one, because the
+    alternative is handing an hour of agent time to a workspace that has just
+    demonstrated it cannot give the work back.
+    """
+
+    def __init__(self, *, phase_id: str, detail: str) -> None:
+        super().__init__(
+            f"Phase {phase_id!r} will not be run: the quarantine path it would "
+            f"depend on to hand work back cannot be used, so anything this phase "
+            f"then failed to push would be unrecoverable rather than merely "
+            f"unpushed. {detail}"
+        )
+        self.phase_id = phase_id
+        self.detail = detail
+
+
 class WorkspaceInspectionFailedError(Exception):
     """The gate could not read the workspace, so it refused to call it clean (#1184).
 

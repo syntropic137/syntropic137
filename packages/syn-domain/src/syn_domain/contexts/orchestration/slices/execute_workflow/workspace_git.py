@@ -152,9 +152,33 @@ _BOUND_FIRED_EXIT_CODE: Final[int] = 124
 
 
 class GitWorkspace(Protocol):
-    """The single workspace capability this slice needs: run a command in it."""
+    """A workspace this slice can run git in, and whose credential it can renew.
+
+    TWO CAPABILITIES AND NOT ONE, because every git command here that reaches
+    a remote spends a credential with a shorter life than the container's.
+    The workspace's is a GitHub App installation token: minted once during
+    provisioning, capped by GitHub at an hour, and never extended. A phase may
+    run for longer than that, and the commands that matter most here - the
+    quarantine push, the rehearsal that proves it would work - run at the two
+    ends of that window. So "can I run a command in it" is not enough to know
+    a push will be authorised, and a protocol that promised only the first
+    would have every caller discovering the second by being refused (#1393).
+
+    `renew_git_credential` is therefore not an optional extra a caller probes
+    for. A double that cannot renew is not a workspace this slice can be
+    trusted against, and making it part of the protocol is what says so at the
+    type level rather than at teardown.
+    """
 
     async def execute(self, command: list[str]) -> ExecutionResult: ...
+
+    async def renew_git_credential(self) -> None:
+        """Install a freshly minted credential, or raise `CredentialRenewalFailedError`.
+
+        Says nothing about whether the credential it replaced still worked -
+        see that error for why nothing can.
+        """
+        ...
 
 
 async def run_bounded(
@@ -315,7 +339,9 @@ async def git_remote(workspace: GitWorkspace, repo: str, *args: str, doing: str)
     )
 
 
-async def push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) -> ExecutionResult:
+async def push(
+    workspace: GitWorkspace, repo: str, *, commit: str, ref: str, dry_run: bool = False
+) -> ExecutionResult:
     """The one command whose failure is an answer rather than the lack of one.
 
     A push can fail for reasons that say nothing about whether the workspace
@@ -338,9 +364,19 @@ async def push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) -> 
     A push cut off by the bound exits 124 and is reported as a failed push,
     which is the honest reading: the objects exist locally, the ref may or may
     not have landed, and the caller must not promise it did.
+
+    ``dry_run`` is the SAME push with the last step left out, and the sameness
+    is the point rather than a convenience (#1393). git still contacts the
+    remote, still authenticates against ``git-receive-pack``, and still has
+    the ref update refused if the credential may not write it; what it does
+    not do is send objects or move anything. That is what makes the rehearsal
+    the guard runs at phase start evidence about THIS command - one function,
+    one argv, one credential, so the two cannot drift into testing different
+    things. It is a flag rather than a second function for exactly that
+    reason.
     """
     return await run_bounded(
         workspace,
-        git_argv(repo, "push", "origin", f"{commit}:{ref}"),
+        git_argv(repo, "push", *(("--dry-run",) if dry_run else ()), "origin", f"{commit}:{ref}"),
         timeout_seconds=REMOTE_TIMEOUT_SECONDS,
     )
