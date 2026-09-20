@@ -47,6 +47,15 @@ pytestmark = pytest.mark.unit
 
 _WORKFLOW_ID = "wf-long-running"
 
+#: Long enough that a loaded machine never trips it, short enough that a
+#: mutation which refuses admission fails here instead of hanging CI forever.
+_REACHES_THE_PROCESSOR = 5.0
+
+
+async def _started(processor: _SuspendedProcessor) -> None:
+    async with asyncio.timeout(_REACHES_THE_PROCESSOR):
+        await processor.running.wait()
+
 
 class _Gate:
     """The maintenance port, flipped by the test rather than by the API.
@@ -101,6 +110,32 @@ class _SuspendedProcessor:
         )
 
 
+class _ImmediateProcessor:
+    """Never blocks, so a test that expects a refusal cannot hang waiting."""
+
+    def __init__(self) -> None:
+        self.runs = 0
+
+    async def run(
+        self,
+        *,
+        workflow_id: str,
+        workflow_name: str,
+        phases: list[ExecutablePhase],
+        inputs: dict[str, str],
+        execution_id: str,
+        repos: list[RepositoryRef],
+    ) -> WorkflowExecutionResult:
+        del workflow_name, phases, inputs, repos
+        self.runs += 1
+        return WorkflowExecutionResult(
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="completed",
+            started_at=datetime.now(UTC),
+        )
+
+
 class _Repo:
     def __init__(self) -> None:
         self._workflow = WorkflowTemplateAggregate()
@@ -109,7 +144,7 @@ class _Repo:
         return self._workflow if aggregate_id == _WORKFLOW_ID else None
 
 
-def _handler(gate: _Gate, processor: _SuspendedProcessor) -> ExecuteWorkflowHandler:
+def _handler(gate: _Gate, processor: object) -> ExecuteWorkflowHandler:
     return ExecuteWorkflowHandler(
         processor=processor,  # type: ignore[arg-type]
         workflow_repository=_Repo(),  # type: ignore[arg-type]
@@ -125,7 +160,7 @@ class TestAnExecutionAlreadyRunningWhenTheGateCloses:
             _handler(gate, processor).handle(ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID))
         )
 
-        await processor.running.wait()
+        await _started(processor)
         await gate.set_mode(active=True, reason="pit stop", actor="deploy")
         processor.may_finish.set()
 
@@ -141,7 +176,7 @@ class TestAnExecutionAlreadyRunningWhenTheGateCloses:
             _handler(gate, processor).handle(ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID))
         )
 
-        await processor.running.wait()
+        await _started(processor)
         await gate.set_mode(active=True, reason="pit stop", actor="deploy")
         processor.may_finish.set()
         await admitted
@@ -156,8 +191,11 @@ class TestTheNextExecutionAfterThat:
     async def test_is_refused(self) -> None:
         gate = _Gate()
         await gate.set_mode(active=True, reason="pit stop", actor="deploy")
+        processor = _ImmediateProcessor()
 
         with pytest.raises(MaintenancePausedError):
-            await _handler(gate, _SuspendedProcessor()).handle(
+            await _handler(gate, processor).handle(
                 ExecuteWorkflowCommand(aggregate_id=_WORKFLOW_ID)
             )
+
+        assert processor.runs == 0, "refused, but the execution ran anyway"

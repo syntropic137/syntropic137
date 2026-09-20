@@ -704,11 +704,13 @@ async def execute_workflow_endpoint(
 ) -> ExecuteWorkflowResponse:
     """Start workflow execution in background.
 
-    Refuses with 409 while maintenance mode is active (#1387). The check is
-    SYNCHRONOUS and first: everything below the ``add_task`` line runs after
-    the response has been sent, so a refusal discovered there would arrive as
-    a 200 followed by an execution that never happened.
+    Returns 409 while maintenance mode is active; no execution is started.
     """
+    # #1387, SYNCHRONOUS and first: everything below the `add_task` line runs
+    # after the response has been sent, so a refusal discovered there would
+    # arrive as a 200 followed by an execution that never happened. Before
+    # validation too, so a caller during a deploy is told the gate is shut
+    # rather than being told its workflow does not exist.
     await _refuse_while_paused()
     _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"

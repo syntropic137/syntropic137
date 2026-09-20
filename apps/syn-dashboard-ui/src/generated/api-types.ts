@@ -240,6 +240,8 @@ export interface paths {
         /**
          * Execute Workflow Endpoint
          * @description Start workflow execution in background.
+         *
+         *     Returns 409 while maintenance mode is active; no execution is started.
          */
         post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
         delete?: never;
@@ -1750,6 +1752,37 @@ export interface paths {
          */
         get: operations["get_contribution_heatmap_endpoint_insights_contribution_heatmap_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new executions are being admitted.
+         *
+         *     Read through to the durable store, never from process memory, so this
+         *     answers for the system rather than for this container.
+         */
+        get: operations["get_maintenance_mode_maintenance_get"];
+        /**
+         * Set Maintenance Mode
+         * @description Pause or resume execution admission.
+         *
+         *     Returns only once the state is durably stored. That ordering is the point:
+         *     a caller that has its response knows that every admission path is already
+         *     refusing, so there is no window on the setting side either.
+         */
+        put: operations["set_maintenance_mode_maintenance_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3272,6 +3305,39 @@ export interface components {
             default?: string | null;
         };
         /**
+         * MaintenanceModeResponse
+         * @description Whether new workflow executions are being admitted (#1387).
+         *
+         *     ``active`` is the gate: while it is true every admission path refuses and
+         *     the deploy script may swap containers knowing nothing new can start.
+         *     Executions already running are unaffected.
+         */
+        MaintenanceModeResponse: {
+            /**
+             * Active
+             * @description True when new execution admission is refused.
+             * @default false
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Operator-supplied reason for the pause.
+             * @default
+             */
+            reason: string;
+            /**
+             * Since
+             * @description When admission was paused. Null while admission is open.
+             */
+            since?: string | null;
+            /**
+             * Actor
+             * @description Who set the current state.
+             * @default
+             */
+            actor: string;
+        };
+        /**
          * MetricsResponse
          * @description Aggregated metrics response.
          */
@@ -4638,6 +4704,32 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /**
+         * SetMaintenanceModeRequest
+         * @description Set or clear maintenance mode (#1387).
+         *
+         *     The response is not sent until the state is durably persisted, so a caller
+         *     that has seen a 200 knows no further execution can be admitted.
+         */
+        SetMaintenanceModeRequest: {
+            /**
+             * Active
+             * @description True to refuse new executions, false to resume admitting.
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Why admission is paused; echoed back to every refused caller.
+             * @default
+             */
+            reason: string;
+            /**
+             * Actor
+             * @description Who is pausing. Free text - the deploy script sends its own name.
+             * @default
+             */
+            actor: string;
         };
         /**
          * SkillDetailResponse
@@ -8904,6 +8996,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContributionHeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maintenance_mode_maintenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+        };
+    };
+    set_maintenance_mode_maintenance_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
                 };
             };
             /** @description Validation Error */

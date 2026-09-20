@@ -724,9 +724,7 @@ def get_maintenance_port() -> MaintenancePort:
         from syn_adapters.redis_client import resilient_redis_client
 
         logger.info("Maintenance mode using Redis")
-        _maintenance_singleton = RedisMaintenanceAdapter(
-            resilient_redis_client(settings.redis_url)
-        )
+        _maintenance_singleton = RedisMaintenanceAdapter(resilient_redis_client(settings.redis_url))
         return _maintenance_singleton
     except Exception as exc:
         raise RuntimeError(

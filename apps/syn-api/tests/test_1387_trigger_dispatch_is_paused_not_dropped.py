@@ -104,8 +104,8 @@ class _Fixture:
         `shutdown()` cancels, which is right at process exit and wrong here -
         it would hide whether the handler was ever reached.
         """
-        while self.dispatcher._tasks:  # noqa: SLF001
-            await asyncio.gather(*self.dispatcher._tasks)  # noqa: SLF001
+        while self.dispatcher._tasks:
+            await asyncio.gather(*self.dispatcher._tasks)
 
 
 @pytest.fixture

@@ -42,9 +42,7 @@ class _FakeConnection:
     async def execute(self, query: str, *args: object) -> str:
         if query is SET_MODE_SQL or "INSERT INTO maintenance_mode" in query:
             active, reason, since, actor = args
-            self._store.update(
-                {"active": active, "reason": reason, "since": since, "actor": actor}
-            )
+            self._store.update({"active": active, "reason": reason, "since": since, "actor": actor})
         return "OK"
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:

@@ -222,9 +222,7 @@ class WorkflowDispatchProjection(ProcessManager):
         """
         assert self._store is not None
         records = await self._store.query(self.PROJECTION_NAME, filters={"status": "pending"})
-        records.extend(
-            await self._store.query(self.PROJECTION_NAME, filters={"status": _PAUSED})
-        )
+        records.extend(await self._store.query(self.PROJECTION_NAME, filters={"status": _PAUSED}))
         return records
 
     async def _dispatch_record(self, record: dict[str, str | int | float | bool | None]) -> bool:

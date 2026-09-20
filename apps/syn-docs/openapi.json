@@ -800,7 +800,7 @@
           "execution"
         ],
         "summary": "Execute Workflow Endpoint",
-        "description": "Start workflow execution in background.",
+        "description": "Start workflow execution in background.\n\nReturns 409 while maintenance mode is active; no execution is started.",
         "operationId": "execute_workflow_endpoint_workflows__workflow_id__execute_post",
         "parameters": [
           {
@@ -5417,6 +5417,68 @@
         }
       }
     },
+    "/maintenance": {
+      "get": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Get Maintenance Mode",
+        "description": "Report whether new executions are being admitted.\n\nRead through to the durable store, never from process memory, so this\nanswers for the system rather than for this container.",
+        "operationId": "get_maintenance_mode_maintenance_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceModeResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Set Maintenance Mode",
+        "description": "Pause or resume execution admission.\n\nReturns only once the state is durably stored. That ordering is the point:\na caller that has its response knows that every admission path is already\nrefusing, so there is no window on the setting side either.",
+        "operationId": "set_maintenance_mode_maintenance_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMaintenanceModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceModeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
@@ -8549,6 +8611,45 @@
         ],
         "title": "InputDeclarationModel"
       },
+      "MaintenanceModeResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "True when new execution admission is refused.",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Operator-supplied reason for the pause.",
+            "default": ""
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "When admission was paused. Null while admission is open."
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "description": "Who set the current state.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MaintenanceModeResponse",
+        "description": "Whether new workflow executions are being admitted (#1387).\n\n``active`` is the gate: while it is true every admission path refuses and\nthe deploy script may swap containers knowing nothing new can start.\nExecutions already running are unaffected."
+      },
       "MetricsResponse": {
         "properties": {
           "total_workflows": {
@@ -11225,6 +11326,36 @@
         "title": "SessionTokenMetrics",
         "description": "Token usage metrics for a session."
       },
+      "SetMaintenanceModeRequest": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "True to refuse new executions, false to resume admitting."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "description": "Why admission is paused; echoed back to every refused caller.",
+            "default": ""
+          },
+          "actor": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Actor",
+            "description": "Who is pausing. Free text - the deploy script sends its own name.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "SetMaintenanceModeRequest",
+        "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
+      },
       "SkillDetailResponse": {
         "properties": {
           "skill_name": {
@@ -13138,6 +13269,10 @@
     },
     {
       "name": "insights",
+      "description": ""
+    },
+    {
+      "name": "maintenance",
       "description": ""
     },
     {

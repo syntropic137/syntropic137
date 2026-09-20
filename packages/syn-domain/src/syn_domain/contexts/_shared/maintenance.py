@@ -27,7 +27,10 @@ declaration, so the two cannot drift apart on what "paused" means.
 
 from __future__ import annotations
 
-from datetime import datetime
+# NOT in a TYPE_CHECKING block, despite TC003: `MaintenanceMode` is a
+# Pydantic model and Pydantic resolves `since: datetime | None` against
+# this module's real namespace at class-build time.
+from datetime import datetime  # noqa: TC003
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
