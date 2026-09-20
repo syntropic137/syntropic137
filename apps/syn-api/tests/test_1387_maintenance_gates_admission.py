@@ -204,3 +204,88 @@ class TestTheReportedState:
 
         assert reported.active is False
         assert reported.since is None
+
+
+class _BrokenAnnouncer:
+    """An announcer whose store is down. Counts attempts, so a retry shows."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.down = True
+
+    async def announce_open(self, mode: object, *, after_restart: bool) -> None:
+        del mode, after_restart
+        self.attempts += 1
+        if self.down:
+            raise OSError("event store unavailable")
+
+
+def _gate_whose_announcer_is_broken() -> _BrokenAnnouncer:
+    """Point the process's gate at an announcer that cannot write."""
+    import syn_api._wiring as wiring
+    from syn_adapters.maintenance import InMemoryMaintenanceAdapter
+    from syn_domain.contexts._shared import AdmissionGate
+
+    announcer = _BrokenAnnouncer()
+    wiring._admission_gate_singleton = AdmissionGate(InMemoryMaintenanceAdapter(), announcer)  # type: ignore[arg-type]
+    return announcer
+
+
+class TestClearingWhenTheWakeCannotBeWritten:
+    """The endpoint answers 503, not 200 (#1387).
+
+    Clearing does two things: it opens the flag and it wakes the work the
+    deploy parked. The second is the half nothing else will do - a flag going
+    false is not an event and re-offers nothing - so a clear that could not
+    announce has not finished, and a 200 there is a deploy script reporting
+    success over triggers that will never run. 503 because the repair is to
+    repeat the request: announcing twice is harmless, announcing zero times is
+    the bug.
+    """
+
+    async def test_a_failed_announcement_is_not_a_200(self) -> None:
+        _gate_whose_announcer_is_broken()
+        await set_maintenance_mode(
+            SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await set_maintenance_mode(
+                SetMaintenanceModeRequest(active=False, reason="", actor="deploy")
+            )
+
+        assert exc.value.status_code == 503
+        assert "#1387" in str(exc.value.detail)
+
+    async def test_pausing_is_untouched_by_the_announcer(self) -> None:
+        """The negative control: closing announces nothing, so a broken
+        announcer must not turn a pause into a 503."""
+        _gate_whose_announcer_is_broken()
+
+        reported = await set_maintenance_mode(
+            SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+        )
+
+        assert reported.active is True
+
+    async def test_admission_is_open_and_the_retry_succeeds(self) -> None:
+        """What the caller is being asked to do, and that it works."""
+        announcer = _gate_whose_announcer_is_broken()
+        await set_maintenance_mode(
+            SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+        )
+        with pytest.raises(HTTPException):
+            await set_maintenance_mode(
+                SetMaintenanceModeRequest(active=False, reason="", actor="deploy")
+            )
+
+        # Admission was open the whole time; only the wake was missing.
+        assert (await get_maintenance_mode()).active is False
+
+        announcer.down = False
+        reported = await set_maintenance_mode(
+            SetMaintenanceModeRequest(active=False, reason="", actor="deploy")
+        )
+
+        assert reported.active is False
+        assert announcer.attempts == 2

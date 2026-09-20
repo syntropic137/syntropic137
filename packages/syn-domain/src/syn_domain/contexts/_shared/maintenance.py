@@ -28,7 +28,6 @@ declaration, so the two cannot drift apart on what "paused" means.
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager, contextmanager
 
 # NOT in a TYPE_CHECKING block: `MaintenanceMode` is a Pydantic model and
@@ -41,9 +40,6 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
-
-
-logger = logging.getLogger(__name__)
 
 
 class MaintenanceMode(BaseModel):
@@ -86,6 +82,31 @@ class MaintenancePausedError(Exception):
 
     def __init__(self, mode: MaintenanceMode) -> None:
         super().__init__(mode.refusal_detail)
+        self.mode = mode
+
+
+class AdmissionAnnouncementFailedError(Exception):
+    """The flag was cleared durably, but the wake-up was not written.
+
+    The half-done clear, named so a caller can tell it apart from a failure to
+    clear at all: admission IS open again, and work parked by the deploy has
+    NOT been told. Nothing else re-offers that work - a flag that stops being
+    true wakes no consumer - so the operator's clear has not finished doing
+    what it is for, and reporting success here would hide a trigger that never
+    runs behind a green deploy step.
+
+    Retryable, and retrying is the repair: another ``set_mode(active=False)``
+    re-announces, and so does the next startup. Carries the mode so the entry
+    point can say which state the system is actually in while it asks for that
+    retry.
+    """
+
+    def __init__(self, mode: MaintenanceMode) -> None:
+        super().__init__(
+            "Execution admission was re-opened, but announcing it failed, so work "
+            "paused during maintenance has not been woken. Admission is open; "
+            "repeat the clear to re-announce (#1387)."
+        )
         self.mode = mode
 
 
@@ -372,6 +393,12 @@ class AdmissionGate:
         not discarded, and nothing re-offers it on its own: a flag that stops
         being true is not an event and wakes no consumer. The announcement is
         what turns "admission is open again" into something that arrives.
+
+        Raises:
+            AdmissionAnnouncementFailedError: re-opening stored the flag but
+                could not announce it. The clear did not finish, so it does not
+                return a value the caller can read as success; the flag is open
+                and the parked work is still asleep until this is retried.
         """
         async with self._transition:
             if active:
@@ -396,20 +423,21 @@ class AdmissionGate:
         a crash between clearing the flag and draining the parked work does not
         strand it.
 
-        A failure here is reported and swallowed. The flag is already durably
-        open, so raising would tell the operator their deploy's last step
-        failed when the system is in fact admitting; and the announcement has
-        further chances - any later subscribed event, and the next startup.
-        What it must not do is fail silently, because the visible symptom is a
-        trigger that never runs.
+        A failure here RAISES, and the operator path lets it out (#1387). The
+        announcement is the half of the clear that does the work: the flag
+        going false wakes nobody, so a swallowed failure is a deploy whose last
+        step reports success over triggers that will never run. The gate does
+        not get to decide that logging is enough - that is a delivery policy
+        and it belongs to the caller. The clear path asks for a retry; startup
+        logs and carries on, because there the next start is the retry.
+
+        Raises:
+            AdmissionAnnouncementFailedError: the announcer failed. Retryable:
+                another re-open, or the next startup, announces again.
         """
         if self._announcer is None:
             return
         try:
             await self._announcer.announce_open(mode, after_restart=after_restart)
-        except Exception:
-            logger.exception(
-                "Execution admission re-opened but the announcement failed; "
-                "triggers paused during maintenance stay paused until the next "
-                "subscribed event or the next restart (#1387)"
-            )
+        except Exception as exc:
+            raise AdmissionAnnouncementFailedError(mode) from exc

@@ -11,10 +11,15 @@ of the swap reads what was set before it and stays closed until told otherwise.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, HTTPException
 
 from syn_api._wiring import get_admission_gate
 from syn_api.types import MaintenanceModeResponse, SetMaintenanceModeRequest
+from syn_domain.contexts._shared import AdmissionAnnouncementFailedError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -47,12 +52,27 @@ async def set_maintenance_mode(request: SetMaintenanceModeRequest) -> Maintenanc
 
     Set through the gate rather than the port, because the port can only store
     the flag - it cannot hold the door while it does so.
+
+    Clearing is only done when the work the deploy paused has been woken, so a
+    failed announcement answers 503 and not 200 (#1387). Admission IS open by
+    then - the 503 body says so - but the triggers parked during the deploy are
+    still asleep and nothing else will re-offer them, so reporting success here
+    would close the deploy over work that never runs. Repeating the clear
+    re-announces, which is why this is a retryable status and not a 500.
     """
-    mode = await get_admission_gate().set_mode(
-        active=request.active,
-        reason=request.reason,
-        actor=request.actor,
-    )
+    try:
+        mode = await get_admission_gate().set_mode(
+            active=request.active,
+            reason=request.reason,
+            actor=request.actor,
+        )
+    except AdmissionAnnouncementFailedError as exc:
+        logger.exception(
+            "Execution admission re-opened but the announcement failed; work "
+            "paused during maintenance stays paused until the clear is retried "
+            "or this process restarts (#1387)"
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     return MaintenanceModeResponse(
         active=mode.active,
         reason=mode.reason,

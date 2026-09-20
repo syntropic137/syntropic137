@@ -249,7 +249,7 @@ fi
 # failed should leave the new container refusing rather than admitting work to
 # a version nobody has confirmed is healthy.
 step "gate: resuming execution admission"
-maintenance false "" || die "$TAG is live but admission is still paused; clear it with PUT /maintenance"
+maintenance false "" || die "$TAG is live but the clear did not complete; retry PUT /maintenance (a 503 means admission is open but the paused triggers were not woken, #1387)"
 
 if [ "$DRY" = 1 ]; then
     step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."

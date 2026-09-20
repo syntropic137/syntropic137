@@ -35,7 +35,11 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import EventStoreAdmissionAnnouncer, InMemoryMaintenanceAdapter
 from syn_api._wiring import BackgroundWorkflowDispatcher
-from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
+from syn_domain.contexts._shared import (
+    AdmissionAnnouncementFailedError,
+    AdmissionGate,
+    AdmissionTicket,
+)
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
@@ -67,6 +71,10 @@ class _LiveEventStore:
         self.appended: list[EventEnvelope[DomainEvent]] = []
         self._coordinator: SubscriptionCoordinator | None = None
         self._next_nonce = 100
+        #: The store is down. The shape the happy paths cannot produce: the
+        #: durable flag write succeeds and the announcement's append does not.
+        self.down = False
+        self.append_attempts = 0
 
     def subscribes(self, coordinator: SubscriptionCoordinator) -> None:
         self._coordinator = coordinator
@@ -78,6 +86,9 @@ class _LiveEventStore:
         expected_version: int | None = None,
     ) -> None:
         del stream_name, expected_version
+        self.append_attempts += 1
+        if self.down:
+            raise OSError("event store unavailable")
         for envelope in events:
             self.appended.append(envelope)
             await self.deliver(envelope.event, envelope.metadata)
@@ -346,3 +357,91 @@ class TestTheApiThatCrashesBeforeDraining:
 
         assert restarted.store.appended == []
         assert await restarted.record_status() == "paused"
+
+
+class TestAClearThatCouldNotAnnounce:
+    """A failed wake is not a finished clear (#1387).
+
+    `set_mode(active=False)` writes the flag and then announces. Swallowing a
+    failure there tells the operator the deploy's last step succeeded while the
+    triggers it paused are still parked with nothing left to prompt them: no
+    later GitHub event is guaranteed, and the flag will never go false a second
+    time. Only the operator can retry, so only the operator can be told - which
+    is why the gate raises rather than logging and returning a mode.
+    """
+
+    async def test_the_clear_does_not_report_success(self) -> None:
+        api = _Api(port=InMemoryMaintenanceAdapter(), projection_store=MemoryProjectionStore())
+        await _a_deploy_pauses_a_trigger(api)
+        api.store.down = True
+
+        with pytest.raises(AdmissionAnnouncementFailedError):
+            await api.gate.set_mode(active=False, reason="", actor="deploy")
+
+        assert api.store.append_attempts == 1
+        assert api.store.appended == []
+        assert await api.record_status() == "paused", (
+            "the announcement failed, so the trigger is still parked - a clear "
+            "that returned a mode here would report the deploy finished over "
+            "work that nothing will ever re-offer (#1387)"
+        )
+
+    async def test_the_flag_is_open_all_the_same(self) -> None:
+        """The failure belongs to the announcement, not to the flag.
+
+        Worth pinning because it decides what the caller should do next:
+        admission IS open, so the repair is to re-announce, not to re-clear a
+        gate that is no longer shut.
+        """
+        api = _Api(port=InMemoryMaintenanceAdapter(), projection_store=MemoryProjectionStore())
+        await _a_deploy_pauses_a_trigger(api)
+        api.store.down = True
+
+        with pytest.raises(AdmissionAnnouncementFailedError):
+            await api.gate.set_mode(active=False, reason="", actor="deploy")
+
+        assert (await api.gate.current()).active is False
+
+    async def test_the_retry_wakes_the_exact_paused_record(self) -> None:
+        """What the raise buys: the operator repeats the clear and the record
+        this deploy paused is dispatched, with no further GitHub event."""
+        api = _Api(port=InMemoryMaintenanceAdapter(), projection_store=MemoryProjectionStore())
+        await _a_deploy_pauses_a_trigger(api)
+        api.store.down = True
+
+        with pytest.raises(AdmissionAnnouncementFailedError):
+            await api.gate.set_mode(active=False, reason="", actor="deploy")
+
+        api.store.down = False
+        await api.gate.set_mode(active=False, reason="", actor="deploy")
+        await api.settle()
+
+        assert [e.metadata.event_type for e in api.store.appended] == ["maintenance.AdmissionOpen"]
+        assert await api.record_status() == "dispatched", (
+            "the retried clear announced, but the paused record was not woken"
+        )
+        assert api.handler.executions == [_EXECUTION_ID]
+
+    async def test_startup_still_only_logs(self) -> None:
+        """Startup keeps the other policy, and that is not an inconsistency.
+
+        There is no operator on the startup path to hand a failure to, and the
+        next start is itself the retry; raising there would only turn a missed
+        wake into a boot loop. So `_announce_admission_if_open` catches, and
+        this asserts the gate lets it - the raise is what the CALLER chooses to
+        do with, not something the gate has already decided.
+        """
+        from syn_api.services import lifecycle
+
+        api = _Api(port=InMemoryMaintenanceAdapter(), projection_store=MemoryProjectionStore())
+        api.store.down = True
+
+        with pytest.raises(AdmissionAnnouncementFailedError):
+            await api.gate.announce_open(await api.gate.current(), after_restart=True)
+
+        # The startup hook's own body, over the same broken store.
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(lifecycle, "get_admission_gate", lambda: api.gate)
+            await lifecycle._announce_admission_if_open()
+
+        assert api.store.append_attempts == 2
