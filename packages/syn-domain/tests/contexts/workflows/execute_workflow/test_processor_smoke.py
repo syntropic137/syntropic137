@@ -116,12 +116,25 @@ def _make_processor(
     session_capture: object | None = None,
     artifact_repository: object | None = None,
     retry_policy: UpstreamRetryPolicy | None = None,
+    execution_repository: object | None = None,
+    workspace_service: object | None = None,
 ) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
 
     ``artifact_repository`` is overridable so a test can assert on what was
     STORED rather than only on what the run returned. The default discards
     everything, which is all most of these tests need.
+
+    ``execution_repository`` is overridable for the same reason one step
+    further in: the aggregate `run()` builds is local to that call, so a test
+    about what a restart LEAVES BEHIND (#1381) can only read it back out of the
+    repository the journal saved it to.
+
+    ``workspace_service`` is overridable so a test can give a phase a workspace
+    whose git commands reach a REAL repository on disk. The default memory
+    backend answers them out of a dict, which is enough for every phase whose
+    outcome is decided by the agent and nothing for one decided by what the
+    origin ended up holding.
 
     ``retry_policy`` is overridable so a test of the retry (#1303) can set the
     backoff to zero. The DEFAULT IS PRODUCTION'S - a test that does not pass
@@ -132,9 +145,10 @@ def _make_processor(
     todo_projection = ExecutionTodoProjection(store=todo_store)
 
     return WorkflowExecutionProcessor(
-        execution_repository=FakeExecutionRepository(),
+        execution_repository=execution_repository or FakeExecutionRepository(),  # type: ignore[arg-type]
         session_repository=FakeSessionRepository(),
-        workspace_service=WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
+        workspace_service=workspace_service  # type: ignore[arg-type]
+        or WorkspaceService.create(backend=WorkspaceBackend.MEMORY),
         artifact_repository=artifact_repository or FakeArtifactRepository(),
         artifact_content_storage=None,
         artifact_query=None,

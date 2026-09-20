@@ -18,6 +18,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration import (
@@ -74,6 +75,7 @@ class FakeAgentExecutionHandler:
         stream_error: str | None = None,
         uses_tools: Sequence[str] = (),
         attempts: Sequence[FakeAgentExecutionHandler] = (),
+        never_returns: asyncio.Event | None = None,
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
@@ -134,6 +136,9 @@ class FakeAgentExecutionHandler:
         #: What this agent does on each successive attempt, when that changes
         #: between them. See ``scripted``.
         self._attempts = tuple(attempts)
+        #: Set once this agent is RUNNING, after which it never returns. See
+        #: ``still_running``.
+        self._never_returns = never_returns
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -181,6 +186,13 @@ class FakeAgentExecutionHandler:
         # looking like one that never started (#1047, #1065).
         if self._launches and on_launch is not None:
             await on_launch()
+        if self._never_returns is not None:
+            # Suspended INSIDE the phase, which is where a restart finds an
+            # agent: announced as running, holding a workspace, and nowhere
+            # near returning a result (#1381).
+            self._never_returns.set()
+            await asyncio.Event().wait()
+            raise AssertionError("an agent that never returns returned")
         for index, tool_name in enumerate(self._uses_tools):
             if collector is not None:
                 await collector.record_tool_started(
@@ -356,6 +368,22 @@ class FakeAgentExecutionHandler:
         from one that never happened.
         """
         return cls(attempts=attempts)
+
+    @classmethod
+    def still_running(cls, when_running: asyncio.Event) -> FakeAgentExecutionHandler:
+        """An agent that starts, announces itself, and never finishes.
+
+        The state every long phase spends almost all of its time in, and the
+        only one in which a restart can cost anything: the container is up, the
+        workspace holds commits, and no result has been reported. ``asyncio``
+        has no other way to express it - a double that returned a value, however
+        late, would let the phase reach a terminal path of its own and could
+        never show what cancelling a phase MID-RUN does (#1381).
+
+        ``when_running`` is set once the agent is running, so a test cancels at
+        that point rather than after a sleep it hopes is long enough.
+        """
+        return cls(never_returns=when_running)
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
