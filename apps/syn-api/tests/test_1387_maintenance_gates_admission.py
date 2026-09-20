@@ -60,7 +60,7 @@ def _rebuild_the_gate_over(port: object) -> None:
     stale gate over a discarded store is exactly the "comes back permissive"
     failure these tests are here to catch.
     """
-    import syn_api._wiring as wiring
+    import syn_api._wiring_admission as wiring
 
     wiring._maintenance_singleton = port  # type: ignore[assignment]
     wiring._admission_gate_singleton = None
@@ -222,7 +222,7 @@ class _BrokenAnnouncer:
 
 def _gate_whose_announcer_is_broken() -> _BrokenAnnouncer:
     """Point the process's gate at an announcer that cannot write."""
-    import syn_api._wiring as wiring
+    import syn_api._wiring_admission as wiring
     from syn_adapters.maintenance import InMemoryMaintenanceAdapter
     from syn_domain.contexts._shared import AdmissionGate
 

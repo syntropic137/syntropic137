@@ -374,7 +374,7 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
     async def test_the_transition_cannot_return_until_the_task_opens_its_stream(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import syn_api._wiring as wiring
+        import syn_api._wiring_admission as wiring
 
         gate = AdmissionGate(InMemoryMaintenanceAdapter())
         execution = _DelayedExecution()
@@ -428,7 +428,7 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         """The negative control, and the anti-hang. If the lease only ever
         ended at ``mark_visible()``, a failed background task would stall every
         later deploy for the life of the process."""
-        import syn_api._wiring as wiring
+        import syn_api._wiring_admission as wiring
 
         gate = AdmissionGate(InMemoryMaintenanceAdapter())
         monkeypatch.setattr(wiring, "_admission_gate_singleton", gate, raising=False)
@@ -478,7 +478,7 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         calling it, which is the only observable difference between "Starlette
         will run this" and "Starlette never will".
         """
-        import syn_api._wiring as wiring
+        import syn_api._wiring_admission as wiring
 
         gate = AdmissionGate(InMemoryMaintenanceAdapter())
         execution = _DelayedExecution()

@@ -414,7 +414,7 @@ class _HttpFixture:
         self.started: list[str] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import syn_api._wiring as wiring
+        import syn_api._wiring_admission as wiring
 
         monkeypatch.setattr(wiring, "_admission_gate_singleton", self.gate, raising=False)
         monkeypatch.setattr(commands, "ensure_connected", _nothing_to_connect)
