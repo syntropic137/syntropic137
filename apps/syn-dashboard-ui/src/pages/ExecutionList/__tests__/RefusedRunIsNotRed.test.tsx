@@ -44,6 +44,13 @@ const REFUSED_RUN: FailedRun = {
   status: 'failed',
   failure_classification: 'correct_refusal',
 }
+const TASK_RUN: FailedRun = {
+  ...EXECUTIONS[0],
+  workflow_execution_id: 'exec-task',
+  workflow_name: 'Impossible run',
+  status: 'failed',
+  failure_classification: 'task',
+}
 const BROKEN_RUN: FailedRun = {
   ...EXECUTIONS[1],
   workflow_execution_id: 'exec-broken',
@@ -54,7 +61,7 @@ const BROKEN_RUN: FailedRun = {
 
 serveListEndpoint({
   path: '/api/v1/executions',
-  collection: [REFUSED_RUN, BROKEN_RUN],
+  collection: [REFUSED_RUN, TASK_RUN, BROKEN_RUN],
   matchesSearch: matchesExecutionSearch,
 })
 
@@ -94,6 +101,26 @@ describe('the Executions list and the kind of failure', () => {
 
     expect(row.querySelectorAll('[class*="amber-"]').length).toBeGreaterThan(0)
     expect(row.textContent).toContain('refused')
+  })
+
+  it('draws nothing in a run that could not be done red either (#1372)', async () => {
+    // The platform delivered this run intact; what failed was the request.
+    // Red here sends an operator hunting an outage that never happened.
+    renderPage()
+
+    expect(redWithin(await rowFor('Impossible run'))).toEqual([])
+  })
+
+  it('does not label the impossible run as a refusal', async () => {
+    // The badge word is what the operator acts on, and these two act
+    // oppositely: one is read and closed, the other means the brief is
+    // rewritten before anything is re-dispatched. Amber for both, because
+    // neither is broken machinery - but never the same word (#1372).
+    renderPage()
+    const row = await rowFor('Impossible run')
+
+    expect(row.querySelectorAll('[class*="amber-"]').length).toBeGreaterThan(0)
+    expect(row.textContent).not.toContain('refused')
   })
 
   it('still draws a platform failure red in the same table', async () => {

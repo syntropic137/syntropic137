@@ -7491,6 +7491,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -7693,6 +7703,16 @@
           "failure_classification": {
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
+          },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -7909,6 +7929,16 @@
             "$ref": "#/components/schemas/FailureClassification",
             "default": "unclassified"
           },
+          "reported_failure_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -7983,11 +8013,12 @@
         "type": "string",
         "enum": [
           "platform",
+          "task",
           "correct_refusal",
           "unclassified"
         ],
         "title": "FailureClassification",
-        "description": "Why a failed execution ended: the machinery broke, or the work was refused.\n\nTHE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`\nand nothing else, so a phase that did three phases of real work, found a\ngenuine defect and correctly declined to ship it sat in the same bucket as\na segfault. Of 221 recorded failures an unknown fraction were the platform\nworking exactly as designed, which made every failure rate and every\nlost-spend figure computed from `failed` an upper bound of unknown\ntightness - and made the product look broken to the operator least able to\ncheck.\n\nTHE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a\nphase that ends on its own agent's `TASK_RESULT success=false` report is a\ndifferent fact from one that ends on an exit status, a timeout or a parse\nfailure, and `AgentVerdict` already knows which happened at the moment the\nrun is failed. This is where that fact is written down.\n\nTHE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,\nwhich is what analysts already sort failures into by hand.\n\nWHY `task` IS NOT A MEMBER. classify.md's third class - \"the request was\nwrong, too big for a phase, or impossible\" - is a judgement about the\nREQUEST, and nothing in the stored record supports it: the same exit code,\nthe same error text and the same refusal arise from a bad request and from\na good one the platform mishandled. Deriving it would be a guess, and\nclassify.md's own instruction for that case is to use the fourth bucket\nrather than attribute confidently. A member no code path can honestly\nproduce is a branch every reader has to reason about forever, so it is not\nhere. Whoever adds it must bring the evidence with it.\n\nTHE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep\nwhen changing anything here: `CORRECT_REFUSAL` is a POSITIVE claim, made\nonly where the agent's own readable `success=false` report is what ended\nthe run. Everything else - including a report nobody could read - is\n`PLATFORM`. So a path that forgets to classify itself lands on the answer\nthe system already gave, the failure tally stays the upper bound it has\nalways been, and no omission can ever manufacture evidence that the system\nwas working."
+        "description": "Why a failed execution ended: the machinery, the request, or the work.\n\nTHE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`\nand nothing else, so a phase that did three phases of real work, found a\ngenuine defect and correctly declined to ship it sat in the same bucket as\na segfault. Of 221 recorded failures an unknown fraction were the platform\nworking exactly as designed, which made every failure rate and every\nlost-spend figure computed from `failed` an upper bound of unknown\ntightness - and made the product look broken to the operator least able to\ncheck.\n\nTHE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a\nphase that ends on its own agent's `TASK_RESULT success=false` report is a\ndifferent fact from one that ends on an exit status, a timeout or a parse\nfailure, and `AgentVerdict` already knows which happened at the moment the\nrun is failed. This is where that fact is written down.\n\nTHE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,\nwhich is what analysts already sort failures into by hand.\n\nWHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).\nclassify.md's third class - \"the request was wrong, too big for a phase, or\nimpossible\" - is a judgement about the REQUEST, and the stored record did\nnot support it: the same exit code, the same error text and the same refusal\narise from a bad request and from a good one the platform mishandled.\nDeriving it from any of those would be a guess, so the member was left out\nwith the note that whoever added it had to bring the evidence with them.\n\nThe evidence was asked for - `TASK_RESULT` carries a typed `failure_reason`\nbeside `success`, and the prompt every phase is sent says which word to\nwrite - AND ASKING WAS NOT ENOUGH (#1392). The answer is the run's own\nword about itself, and the only thing standing behind it is that the\nprocess exited cleanly, which is evidence about the harness. So a phase\nthat had given up could write `task`, be believed, and leave the platform's\nfailure count by saying so. Nothing now reaches this member from a report:\nthe agent's word is recorded as `ReportedFailureReason`, beside the\nclassification and never as it, and this member waits for a source of\nevidence that is not the run being measured.\n\nTHE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep\nwhen changing anything here: every member but `PLATFORM` is a POSITIVE\nclaim, made only where the agent's own readable report is what ended the\nrun and only from the field that states it. Everything else - including a\nreport nobody could read - is `PLATFORM`. So a path that forgets to\nclassify itself lands on the answer the system already gave, the failure\ntally stays the upper bound it has always been, and no omission can ever\nmanufacture evidence that the system was working.\n\nOMISSION IS NOT A SIGNAL. A phase that reports failure and names no reason\nclassifies exactly as it did before the field existed - `CORRECT_REFUSAL`\n- because that is the answer the system already gave, a silent agent has\nsaid nothing new to move it, and every report already in the store was\nwritten by an agent that had no key to omit."
       },
       "FailurePatternResponse": {
         "properties": {
@@ -10478,6 +10509,17 @@
         ],
         "title": "RepoSummaryResponse",
         "description": "Summary of a repo for list views."
+      },
+      "ReportedFailureReason": {
+        "type": "string",
+        "enum": [
+          "task",
+          "platform",
+          "refused",
+          "unknown"
+        ],
+        "title": "ReportedFailureReason",
+        "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
       },
       "SSEHealthResponse": {
         "properties": {

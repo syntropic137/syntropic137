@@ -28,6 +28,30 @@ describe('StatusBadge and the kind of failure', () => {
     expect(refused.textContent).not.toBe(failed.textContent)
   })
 
+  it('gives a task failure a word of its own (#1372)', () => {
+    // Three failures, three words. The label IS the operator's next action:
+    // "failed" sends them to the platform, "refused" sends them to read and
+    // close, and neither of those is what to do about a brief that cannot be
+    // carried out. A run that could not be done as asked wearing either of
+    // the other two words is the defect #1372 was opened about, arriving on
+    // the surface where the impression is actually formed.
+    const { unmount } = render(<StatusBadge status="failed" failureClassification="task" />)
+    const task = screen.getByText('task failed')
+    expect(task.className).toContain('amber')
+    unmount()
+
+    render(<StatusBadge status="failed" failureClassification="correct_refusal" />)
+    expect(screen.queryByText('task failed')).toBeNull()
+  })
+
+  it('draws a task failure in no shade of red', () => {
+    // Red is the claim THE MACHINERY BROKE. The platform delivered this run
+    // intact; what could not be done was the request.
+    render(<StatusBadge status="failed" failureClassification="task" />)
+
+    expect(screen.getByText('task failed').className).not.toContain('red')
+  })
+
   it('renders a platform failure exactly as it always did', () => {
     render(<StatusBadge status="failed" failureClassification="platform" />)
 

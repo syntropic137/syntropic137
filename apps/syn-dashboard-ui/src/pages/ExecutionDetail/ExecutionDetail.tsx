@@ -15,9 +15,9 @@ import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
-import type { ExecutionDetailResponse, FailureClassification } from '../../types'
+import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { executionTokenTotals } from '../../utils/executionTokens'
-import { isPlatformFailure } from '../../utils/executionOutcome'
+import { isPlatformFailure, reportedFailureNote } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { PhaseTimeline } from './PhaseTimeline'
@@ -119,17 +119,29 @@ function FreshnessIndicator({
  * The heading and the colour move together, because they are one claim made
  * twice: an operator who cannot separate amber from red must still be able to
  * read which of the two happened.
+ *
+ * AND WHAT THE AGENT SAID IS SHOWN BESIDE THEM, NOT INSTEAD OF THEM (#1392).
+ * The heading, the icon and the colour are all the platform's own finding.
+ * The phase's word for what caused the failure is a different kind of fact -
+ * nothing corroborates it but a clean exit - so it is rendered under them as
+ * a quotation, in the muted register a quotation gets, and it changes none of
+ * the three. An operator who wants to know what the agent thought can read
+ * it; an operator counting outages is not shown a claim the run made about
+ * itself dressed as a measurement.
  */
 function ExecutionErrorCard({
   message,
   status,
   failureClassification,
+  reportedFailureReason,
 }: {
   message: string
   status: string
   failureClassification?: FailureClassification
+  reportedFailureReason?: ReportedFailureReason | null
 }) {
   const broke = isPlatformFailure(status, failureClassification)
+  const reported = reportedFailureNote(reportedFailureReason)
   const Icon = broke ? XCircle : ShieldAlert
   return (
     <Card>
@@ -147,6 +159,9 @@ function ExecutionErrorCard({
             {broke ? 'Execution Failed' : 'Phase Reported Failure'}
           </p>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{message}</p>
+          {reported && (
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">{reported}</p>
+          )}
         </div>
       </div>
     </Card>
@@ -299,6 +314,7 @@ export function ExecutionDetail() {
           message={execution.error_message}
           status={execution.status}
           failureClassification={execution.failure_classification}
+          reportedFailureReason={execution.reported_failure_reason}
         />
       )}
       <ReposPanel repos={execution.repos ?? []} />

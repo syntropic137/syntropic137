@@ -68,6 +68,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionStatus,
     FailureClassification,
     PhaseUsage,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -214,6 +215,7 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "SecurityPolicy",

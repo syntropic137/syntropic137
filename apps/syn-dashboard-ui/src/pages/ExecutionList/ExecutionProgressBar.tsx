@@ -6,7 +6,7 @@
 
 import { clsx } from 'clsx'
 import type { ExecutionListItem } from '../../types'
-import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
+import { REFUSED, TASK_FAILED, outcomeTone } from '../../utils/executionOutcome'
 
 export function ExecutionProgressBar({ exec }: { exec: ExecutionListItem }) {
   const pct = exec.total_phases > 0 ? (exec.completed_phases / exec.total_phases) * 100 : 0
@@ -23,7 +23,7 @@ export function ExecutionProgressBar({ exec }: { exec: ExecutionListItem }) {
             'h-full rounded-full transition-all',
             tone === 'completed' && 'bg-emerald-500',
             tone === 'failed' && 'bg-red-500',
-            tone === REFUSED && 'bg-amber-500',
+            (tone === REFUSED || tone === TASK_FAILED) && 'bg-amber-500',
             tone === 'running' && 'bg-blue-500',
             tone === 'pending' && 'bg-slate-500',
             tone === 'cancelled' && 'bg-slate-400',

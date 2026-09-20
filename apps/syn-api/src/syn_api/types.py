@@ -18,7 +18,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 # time, and the whole point of reusing the DOMAIN enum here is that the API and
 # the CLI cannot grow a second spelling of the same vocabulary (#1357).
 # Imported from the context's public surface, not its internals (ADR-062).
-from syn_domain.contexts.orchestration import FailureClassification
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -475,17 +475,44 @@ class ExecutionSummary(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -526,17 +553,44 @@ class ExecutionDetail(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
@@ -1119,17 +1173,44 @@ class ExecutionDetailFull(BaseModel):
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
 
-    `status` says the run did not deliver; this says whether that was the
-    machinery breaking (`platform`) or a phase reporting `TASK_RESULT
-    success=false` and being recorded faithfully (`correct_refusal`) - the
-    system working. `unclassified` is a run that ended before anything
-    recorded the difference, and is what every failure predating the field
-    reads as.
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
 
     Served rather than derived by the caller: the CLI and the dashboard are
     where failure rates are read off, and a consumer left to infer this from
     `error_message` prose is a consumer that will infer it differently from
     every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
     """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
