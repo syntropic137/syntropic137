@@ -22,6 +22,7 @@ the sequence under test genuine right up to the point of failure.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from datetime import UTC, datetime
@@ -37,6 +38,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     QuarantinedWork,
@@ -2251,3 +2253,204 @@ async def test_the_rehearsal_refuses_the_phase_when_the_renewal_breaks_its_contr
     assert _PHASE_ID in message
     assert "could not be renewed" in message
     assert "no such container" in message
+
+
+# --------------------------------------------------------------------------
+# A CANCELLATION IS NOT A REASON TO ABANDON THE WORK (#1396)
+#
+# Both "never raises" handlers on the salvage path are written `except
+# Exception`, and `asyncio.CancelledError` is a `BaseException` - so an
+# execution cancelled while the credential was being renewed went straight
+# past them and the rescue push was never made at all. The commit existed, the
+# container was about to go, and nothing was attempted: #1393's outcome
+# reached by the one route its fix did not cover.
+#
+# So the tests below raise a REAL `asyncio.CancelledError`, and a real one
+# delivered by a real `task.cancel()`, and ask the origin whether the push
+# happened anyway - then that the cancellation was re-applied, because a
+# cancelled task that reports normal completion is a task nobody can stop.
+# --------------------------------------------------------------------------
+
+
+class _CancelledWhileRenewing:
+    """The real workspace, cancelled at the await the salvage path starts with.
+
+    Raising `CancelledError` from `renew_git_credential` is not a stand-in for
+    a cancellation: it IS what the runtime raises inside a coroutine that has
+    been cancelled at that await. Everything else stays real, so the push that
+    follows is the phase's own.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _AnnouncesThePush:
+    """The real workspace, which says when a push has STARTED and then sleeps.
+
+    The seam a real `task.cancel()` needs. `_Workspace.execute` is a blocking
+    `subprocess.run`, so a cancellation aimed at the moment of the push could
+    never actually be delivered - there is no await for it to land on. This
+    adds exactly one: the event tells the test the push is in flight, and the
+    sleep is where the cancellation arrives.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushing = asyncio.Event()
+        self.pushes = 0
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+            self.pushing.set()
+            await asyncio.sleep(0.05)
+        return await self._inner.execute(command)
+
+
+class _NeverAnswersThePush:
+    """The real workspace, except a push is a wait that never ends.
+
+    A backend that has stopped returning, which is the only thing the salvage
+    path's own bound can protect against: the `timeout` in the push's argv is
+    inside a command this one never runs.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise asyncio.CancelledError
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            await asyncio.sleep(3600)
+        return await self._inner.execute(command)
+
+
+async def test_a_phase_cancelled_during_the_renewal_still_gets_its_work_pushed(
+    clone: _Clone,
+) -> None:
+    """The bug, stated as the thing the origin can be asked about afterwards.
+
+    The cancellation arrives at the renewal - the first await of the salvage -
+    and the commit must still reach the origin, because that is the entire
+    reason this path exists. Read back out of the origin rather than off any
+    return value: the gate never returns here, it re-raises.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+
+
+async def test_a_cancelled_phase_says_where_the_work_it_rescued_went(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The record, which re-raising is what would otherwise destroy.
+
+    A cancellation ends the walk: the `UnpushedWorkQuarantinedError` that
+    names the refs is never built, and the caller sees only that it was
+    cancelled. The ref exists and nobody has been told - which is #1184's own
+    failure, a real thing nobody can find, so the outcome is logged before the
+    cancellation goes back out.
+    """
+    clone.commit("never-pushed.py", "work\n")
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert _QUARANTINE_REF in said
+    assert "cancelled" in said
+    assert "landed" in said
+
+
+async def test_a_cancelled_phase_whose_rescue_push_was_refused_says_so_honestly(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """KEEP THE HONEST REPORTING, under cancellation too.
+
+    The push is attempted, the remote declines the update, and what is written
+    down is that the work is NOT RECOVERABLE - never a ref an operator would
+    go looking for. Then the cancellation is re-applied, unchanged and
+    unsoftened: it is still what stopped this execution.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_CancelledWhileRenewing(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "declined" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_cancellation_arriving_while_the_push_runs_lets_it_finish(
+    clone: _Clone,
+) -> None:
+    """A REAL `task.cancel()`, delivered at the one await that matters.
+
+    The renewal is not the only place a cancellation can land: the push itself
+    is an await, and teardown is exactly when cancellations arrive. `shield`
+    is what makes the difference, and this is the test that can tell - the
+    cancel is delivered while the push is genuinely in flight, and the ref is
+    in the origin afterwards.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+    workspace = _AnnouncesThePush(clone.workspace)
+
+    running = asyncio.ensure_future(clone.run_gate(workspace=workspace))
+    await asyncio.wait_for(workspace.pushing.wait(), timeout=10)
+    running.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert workspace.pushes == 1
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+
+
+async def test_a_cancelled_rescue_push_that_never_answers_is_abandoned_and_reported(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Cancelled" may not become "waits forever", which is the other half.
+
+    A cancellation is a request to stop, so the extra time the push is given
+    is BOUNDED. Here the backend never answers at all - the bound in the
+    push's own argv is inside a command that never runs - and the phase must
+    still end: the push is abandoned, the work reported as unrecoverable
+    rather than as saved, and the cancellation re-applied.
+
+    The bound is lowered through the module global, the way `workspace_git`'s
+    bounds are, so this costs a second rather than thirty.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
+
+    with caplog.at_level("WARNING"), pytest.raises(asyncio.CancelledError):
+        await clone.run_gate(workspace=_NeverAnswersThePush(clone.workspace))
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "NOT RECOVERABLE" in said
+    assert "abandoned" in said
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]

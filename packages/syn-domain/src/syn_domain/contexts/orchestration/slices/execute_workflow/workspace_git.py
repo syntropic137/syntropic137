@@ -148,7 +148,13 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 #: this module is what put the wrapper in the argv, so this module is what can
 #: say that 124 means the command was cut off rather than that it answered
 #: 124. Without it an operator reads "exited 124" and has to go and look it up.
-_BOUND_FIRED_EXIT_CODE: Final[int] = 124
+#:
+#: Public so that a caller which cut a command off ITSELF can report the same
+#: code rather than inventing a second one (#1396): the salvage push in the
+#: unpushed-work guard bounds its own wait when the phase is being cancelled,
+#: and a reader must not have to know which of the two bounds fired to know
+#: that the answer never arrived.
+BOUND_FIRED_EXIT_CODE: Final[int] = 124
 
 
 class GitWorkspace(Protocol):
@@ -252,7 +258,7 @@ async def checked(
             # reader needs "it did not finish" either way, not a number. Every
             # command goes through `run_bounded`, so 124 can be read this way
             # whatever the command was.
-            timed_out=result.timed_out or result.exit_code == _BOUND_FIRED_EXIT_CODE,
+            timed_out=result.timed_out or result.exit_code == BOUND_FIRED_EXIT_CODE,
         ),
     )
 
