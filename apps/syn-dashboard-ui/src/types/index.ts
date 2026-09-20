@@ -284,6 +284,20 @@ export interface WorkflowExecutionSummary {
  */
 export type FailureClassification = components['schemas']['FailureClassification']
 
+/**
+ * What a failing phase SAID caused it, in its own word (#1392).
+ *
+ * A REPORT and not a measurement, which is why it is a separate type from
+ * `FailureClassification` rather than more members on it: the only thing
+ * corroborating anything here is that the process exited cleanly. Rendered as
+ * attribution - see `reportedFailureNote` - and never used to pick a colour.
+ *
+ * Aliased to the generated enum for the same reason the type above is: a word
+ * added on the server is a compile error here rather than a string this UI
+ * silently renders as an unhandled default.
+ */
+export type ReportedFailureReason = components['schemas']['ReportedFailureReason']
+
 /** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
   /** Explicit naming for OTel correlation (ADR-028) */
@@ -405,6 +419,16 @@ export interface ExecutionDetailResponse {
    * the field; it renders as a plain failure, which is what it has always been.
    */
   failure_classification: FailureClassification
+  /**
+   * What the failing phase SAID caused it, in its own word (#1392).
+   *
+   * Optional and nullable because most runs have nothing here: a phase that
+   * named no cause, and every report written before the field existed, both
+   * arrive as absent. Shown as attribution beside the classification above -
+   * see `reportedFailureNote` - and never used to decide a colour, because
+   * the agent chose this word and nothing corroborates it.
+   */
+  reported_failure_reason?: ReportedFailureReason | null
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   // Workspace info (ADR-021)

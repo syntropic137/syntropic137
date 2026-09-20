@@ -1,4 +1,4 @@
-import type { FailureClassification } from '../types'
+import type { FailureClassification, ReportedFailureReason } from '../types'
 
 /**
  * The one decision behind every failure-coloured surface in the dashboard
@@ -95,4 +95,50 @@ export function isPlatformFailure(
   failureClassification?: FailureClassification,
 ): boolean {
   return outcomeTone(status, failureClassification) === 'failed'
+}
+
+/**
+ * What the agent SAID caused the failure, phrased so it reads as a quotation.
+ *
+ * THE DISTINCTION THIS PROTECTS (#1392). `failureClassification` above is a
+ * measurement: it decides colour, it decides the heading, and every failure
+ * number the platform is judged by is computed from it. This is the other
+ * kind of fact entirely - a word the AGENT chose, corroborated by nothing but
+ * the process having exited cleanly, which is evidence about the harness and
+ * not about whether the task was possible. Drawn as the platform's own
+ * finding it would let a run that gave up move itself out of the failure
+ * count by typing one word, which is the defect #1392 was opened on.
+ *
+ * So it renders as attribution and never as a verdict - "the agent reported
+ * …" - and it is deliberately NOT wired into `outcomeTone`: nothing an agent
+ * writes may change a colour, because the colour is the measurement.
+ *
+ * The gloss is here rather than in the components for the reason
+ * `TONE_FOR_CLASSIFICATION` is: a word added to the server's enum should be
+ * one line in one table, not a string spelled the same way on three surfaces.
+ * A member this build has never heard of falls through to the bare word,
+ * which is still the truthful thing to show - the agent did write it.
+ */
+const REPORTED_REASON_MEANS: Partial<Record<ReportedFailureReason, string>> = {
+  task: 'the request was wrong, impossible, or too big for one phase',
+  platform: 'the machinery broke under it',
+  refused: 'it could have done the work and judged it should not',
+  unknown: 'it could not tell which of those it was',
+}
+
+/**
+ * The sentence to show beside a failure, or `null` when the phase named nothing.
+ *
+ * `null` for a phase that named no cause - no key at all, which is every
+ * report written before the field existed - because an absent report must
+ * read as silence rather than as a reported "nothing".
+ */
+export function reportedFailureNote(
+  reportedFailureReason?: ReportedFailureReason | null,
+): string | null {
+  if (!reportedFailureReason) return null
+  const means = REPORTED_REASON_MEANS[reportedFailureReason]
+  return means
+    ? `The agent reported: ${reportedFailureReason} — ${means}.`
+    : `The agent reported: ${reportedFailureReason}.`
 }
