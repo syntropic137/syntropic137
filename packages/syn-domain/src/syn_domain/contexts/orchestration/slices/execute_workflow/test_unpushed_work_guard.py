@@ -23,8 +23,12 @@ the sequence under test genuine right up to the point of failure.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import http.server
 import os
+import socket
 import subprocess
+import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -38,7 +42,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow import unpushed_work_guard
+from syn_domain.contexts.orchestration.slices.execute_workflow import (
+    unpushed_work_guard,
+    workspace_git,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     QuarantinedWork,
@@ -63,6 +70,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
@@ -289,6 +297,82 @@ class _Clone:
         real failure modes, and the code cannot tell it from the others.
         """
         self.git("remote", "set-url", "origin", str(self.root / "no-such-origin.git"))
+
+    @contextlib.contextmanager
+    def silent_origin(self) -> Iterator[None]:
+        """Point origin at a remote that ACCEPTS the connection and then says nothing.
+
+        THE CASE THE GUARD COULD NOT SEE (#1396). A remote that is simply gone
+        fails fast and loudly; this one is the opposite and is the harder
+        failure in production - a hung load balancer, a dropped connection
+        that never resets, a proxy holding the socket open. git connects
+        successfully and then waits for a banner that never comes, so the only
+        thing that ends the command is the bound in its own argv, and the only
+        thing the caller gets back is `BOUND_FIRED_EXIT_CODE`.
+
+        A LISTENING SOCKET THAT IS NEVER ACCEPTED, which is the whole server.
+        The kernel completes the TCP handshake from the listen backlog on its
+        own, so git's connect() succeeds against a process that is doing
+        nothing at all - no thread, no protocol implementation, and nothing
+        that can race. Staged on the REMOTE rather than by handing back a
+        canned `ExecutionResult`, for the reason #1396 gave about the old
+        `_RemoteRejects`: a fabricated result asserts that the caller reads a
+        field and assumes the thing that needs establishing, which here is
+        that a real bound really fires and really reports 124.
+        """
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        try:
+            self.git(
+                "remote", "set-url", "origin", f"git://127.0.0.1:{listener.getsockname()[1]}/r.git"
+            )
+            yield
+        finally:
+            self.restore_the_remote()
+            listener.close()
+
+    @contextlib.contextmanager
+    def origin_answering(self, status: int) -> Iterator[None]:
+        """Point origin at a real HTTP remote that answers every request with ``status``.
+
+        THE PRODUCTION SHAPE, which no local path can stage: the quarantine
+        push goes to ``https://github.com/...`` with a token, and the refusal
+        this guard exists to catch arrives as an HTTP status on the
+        ``info/refs?service=git-receive-pack`` request - 403 when the
+        installation token cannot push to that repository, 401 when it has
+        expired. Neither is reachable through a file:// origin, where the
+        only refusals available are "not a repository" and the update-time
+        hooks a dry run never reaches.
+
+        Real git over real TCP against a real HTTP server, so what the guard
+        classifies is what git actually returned rather than what this file
+        believes git returns.
+        """
+        answered = status
+
+        class _Answers(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(answered)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_POST = do_GET
+
+            def log_message(self, *args: object) -> None:
+                """Keep the suite's output the test's, not the server's."""
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), _Answers)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.git("remote", "set-url", "origin", f"http://127.0.0.1:{server.server_port}/r.git")
+            yield
+        finally:
+            self.restore_the_remote()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def restore_the_remote(self) -> None:
         """Put origin back, so a break can be made to last exactly one command.
@@ -2226,6 +2310,162 @@ async def test_a_rehearsal_push_that_fails_transiently_is_retried_before_it_is_f
     await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
 
     assert workspace.pushes == 2, "the rehearsal never retried, so nothing was tested"
+
+
+# --------------------------------------------------------------------------
+# SILENCE IS NOT A VERDICT (#1396)
+#
+# The rehearsal used to refuse on the third non-zero push for no reason but
+# that it was the third, so a persistent timeout, a hung proxy or a dropped
+# connection ended a phase exactly as a real refusal did. A rehearsal whose
+# stated promise is "credential and connectivity" cannot spend the absence of
+# connectivity as evidence about the credential: an origin that says nothing
+# now says nothing about whether it will answer in an hour, when the push that
+# matters happens.
+#
+# So the OUTCOME is classified, not counted. The three tests below pin the two
+# halves of that classification and its bound; the fourth pins the edge git
+# does not let us classify, so that the limit is visible rather than believed
+# to be closed.
+# --------------------------------------------------------------------------
+
+
+class _CountsPushes(_RenewsCredential):
+    """The real workspace, counting the pushes that reach it.
+
+    The bound is the behaviour here, and "it stopped" and "it stopped after
+    the right number of attempts" are different programs: a classification
+    that gave up after one push would pass a test that only asserted the call
+    returned.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.pushes = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes += 1
+        return await self._inner.execute(command)
+
+
+@pytest.fixture
+def instant_remote_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cut a hung remote off after a second rather than after twenty.
+
+    Through the module global, which is exactly why `workspace_git` reads its
+    bounds that way: the production number is the tuning and the fact that
+    SOMETHING fires is the behaviour, so a test can keep the second and drop
+    the first. Without this the three attempts below cost a minute.
+    """
+    monkeypatch.setattr(workspace_git, "REMOTE_TIMEOUT_SECONDS", 1)
+
+
+async def test_an_origin_that_never_answers_lets_the_phase_start_with_a_warning(
+    clone: _Clone,
+    caplog: pytest.LogCaptureFixture,
+    instant_retries: None,
+    instant_remote_bound: None,
+) -> None:
+    """THE FINDING: a phase that would have run fine, refused for the network.
+
+    Origin accepts the connection and then never answers, so every attempt is
+    cut off by its own bound and git never returns a verdict about anything.
+    The old code read the third of those as "definitive" and raised
+    `QuarantinePathUnusableError`, ending an execution whose workspace, agent
+    and repositories were already provisioned - on evidence about a socket.
+
+    The phase must START, and an operator must be TOLD, because proceeding
+    silently would be the other failure: this phase really is running without
+    the assurance the rehearsal normally gives it, and the warning is what
+    connects a later NOT RECOVERABLE to the reason it was not caught earlier.
+    """
+    with clone.silent_origin(), caplog.at_level("WARNING"):
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    said = "\n".join(record.getMessage() for record in caplog.records)
+    assert "UNREHEARSED" in said
+    assert _PHASE_ID in said
+    assert "NOT RECOVERABLE" in said, "the warning must say what it is trading away"
+
+
+async def test_an_origin_that_refuses_the_credential_still_refuses_the_phase(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """THE OTHER HALF, which the fix must not trade away to get the first.
+
+    A real HTTP origin answering 403 on ``info/refs?service=git-receive-pack``
+    is what GitHub returns when the installation token cannot push to the
+    repository - the production shape of #1393's failure, and the one thing
+    this rehearsal exists to catch before an agent is handed an hour of work
+    it will not be able to give back. Origin ANSWERED, so this is a verdict,
+    and the phase must not start.
+
+    A file:// origin cannot stage this: the only refusals it has are "not a
+    repository" and the update-time hooks a dry run never reaches.
+    """
+    with clone.origin_answering(403), pytest.raises(QuarantinePathUnusableError) as raised:
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    message = str(raised.value)
+    assert _PHASE_ID in message
+    assert _QUARANTINE_REF in message
+    assert "refused by origin" in message
+
+
+async def test_a_silent_origin_cannot_delay_a_phase_start_indefinitely(
+    clone: _Clone,
+    instant_retries: None,
+    instant_remote_bound: None,
+) -> None:
+    """The bound, counted, because "it returned" is not "it was bounded".
+
+    A remote that never answers has no error to return early on, so it is the
+    worst case for the retry loop: nothing ends an attempt but the bound in
+    its own argv, and nothing ends the loop but the attempt count. Both must
+    hold, and the count is the one a future change could quietly remove while
+    every other test here stayed green.
+    """
+    workspace = _CountsPushes(clone.workspace)
+
+    with clone.silent_origin():
+        await rehearse_quarantine_credential(
+            workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    assert workspace.pushes == unpushed_work_guard._RENEWAL_ATTEMPTS
+
+
+async def test_a_transport_fault_that_answers_is_not_yet_told_from_a_refusal(
+    clone: _Clone,
+    instant_retries: None,
+) -> None:
+    """THE LIMIT OF THE CLASSIFICATION, pinned so it is visible rather than assumed.
+
+    A 502 is a transport fault and under the rule it should NOT refuse the
+    phase - but git gives nothing to separate it from the 403 above. Measured
+    on the image's git 2.39.5: a DNS failure, a refused connection and an HTTP
+    401, 403, 500 and 502 all exit 128, and `GIT_TRACE2_EVENT` reports the
+    same ``"code":128`` and the same error ``fmt`` for every one of them. Only
+    the prose of the message differs, and a classifier built on prose is one
+    git's next release rewrites without telling anyone.
+
+    So this case is left in the refusing class deliberately, because the
+    conservative error here is the cheaper one: refusing a viable phase costs
+    the provisioning already spent, while admitting one whose credential is
+    actually dead costs the agent-hour AND the work. This test is where that
+    choice is recorded; when a signal that separates the two arrives, this is
+    the test that must be made to fail on purpose and rewritten.
+    """
+    with clone.origin_answering(502), pytest.raises(QuarantinePathUnusableError):
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
 
 
 async def test_a_phase_whose_mint_failed_is_still_launched(
