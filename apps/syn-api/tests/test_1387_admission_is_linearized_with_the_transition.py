@@ -28,6 +28,7 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TypedDict, cast
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
@@ -55,6 +56,20 @@ _PROJECTION = WorkflowDispatchProjection.PROJECTION_NAME
 #: Long enough that a loaded machine never trips it, short enough that a
 #: mutation which deadlocks fails here instead of hanging CI forever.
 _PATIENCE = 5.0
+
+
+class _DispatchRecord(TypedDict, total=False):
+    """The dispatch record these tests read, by the names they read it under.
+
+    The store hands back an untyped mapping, so this narrows it at the one
+    place the tests touch it. Named keys mean a projection that renamed a
+    field breaks here rather than quietly asserting against a missing key,
+    which `.get()`-style access would turn into a pass.
+    """
+
+    status: str
+    status_reason: str | None
+    dispatched_at: str | None
 
 
 class _SuspendablePort:
@@ -167,10 +182,10 @@ class _Fixture:
             self.checkpoints,
         )
 
-    async def record(self, execution_id: str) -> dict[str, object]:
+    async def record(self, execution_id: str) -> _DispatchRecord:
         found = await self.store.get(_PROJECTION, execution_id)
         assert found is not None, "the trigger produced no dispatch record at all"
-        return found
+        return cast("_DispatchRecord", found)
 
     async def drain_the_dispatcher(self) -> None:
         """Wait for the fire-and-forget tasks rather than cancelling them.

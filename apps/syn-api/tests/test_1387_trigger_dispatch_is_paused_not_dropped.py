@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import TypedDict, cast
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
@@ -41,6 +42,20 @@ from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection im
 pytestmark = pytest.mark.unit
 
 _PROJECTION = WorkflowDispatchProjection.PROJECTION_NAME
+
+
+class _DispatchRecord(TypedDict, total=False):
+    """The dispatch record these tests read, by the names they read it under.
+
+    The store hands back an untyped mapping, so this narrows it at the one
+    place the tests touch it. Named keys mean a projection that renamed a
+    field breaks here rather than quietly asserting against a missing key,
+    which `.get()`-style access would turn into a pass.
+    """
+
+    status: str
+    status_reason: str | None
+    dispatched_at: str | None
 
 
 class _RecordingHandler:
@@ -102,10 +117,10 @@ class _Fixture:
         )
         await self.projection.handle_event(envelope, self.checkpoints)
 
-    async def record(self, execution_id: str = "exec-abc123") -> dict[str, object]:
+    async def record(self, execution_id: str = "exec-abc123") -> _DispatchRecord:
         found = await self.store.get(_PROJECTION, execution_id)
         assert found is not None, "the trigger produced no dispatch record at all"
-        return found
+        return cast("_DispatchRecord", found)
 
     async def drain_the_dispatcher(self) -> None:
         """Wait for the fire-and-forget tasks instead of cancelling them.

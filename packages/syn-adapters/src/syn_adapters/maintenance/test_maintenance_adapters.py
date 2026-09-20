@@ -10,6 +10,8 @@ first one what it remembers.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, TypedDict, cast
+
 import pytest
 
 from syn_adapters.maintenance import (
@@ -19,7 +21,24 @@ from syn_adapters.maintenance import (
 )
 from syn_adapters.maintenance.postgres_maintenance import CURRENT_SQL, SET_MODE_SQL
 
+if TYPE_CHECKING:
+    from datetime import datetime
+
 pytestmark = pytest.mark.unit
+
+
+class _StoredRow(TypedDict, total=False):
+    """The one row ``maintenance_mode`` holds, as asyncpg hands it back.
+
+    Named keys rather than an untyped mapping, so the double and the adapter
+    cannot drift: the adapter reads these four by name, and a fake agreeing
+    only in shape would still pass while spelling one of them differently.
+    """
+
+    active: bool
+    reason: str | None
+    since: datetime | None
+    actor: str | None
 
 
 class _FakeRedis:
@@ -36,32 +55,37 @@ class _FakeRedis:
 
 
 class _FakeConnection:
-    def __init__(self, store: dict[str, object]) -> None:
+    def __init__(self, store: _StoredRow) -> None:
         self._store = store
 
     async def execute(self, query: str, *args: object) -> str:
         if query is SET_MODE_SQL or "INSERT INTO maintenance_mode" in query:
             active, reason, since, actor = args
-            self._store.update({"active": active, "reason": reason, "since": since, "actor": actor})
+            self._store.update(
+                cast(
+                    "_StoredRow",
+                    {"active": active, "reason": reason, "since": since, "actor": actor},
+                )
+            )
         return "OK"
 
-    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+    async def fetchrow(self, query: str, *args: object) -> _StoredRow | None:
         assert query is CURRENT_SQL or "SELECT" in query
-        return dict(self._store) if self._store else None
+        return self._store.copy() if self._store else None
 
 
 class _FakePool:
     """A database that survives its pool. Shared across adapter instances."""
 
     def __init__(self) -> None:
-        self.rows: dict[str, object] = {}
+        self.rows: _StoredRow = {}
 
     def acquire(self) -> _FakePoolAcquire:
         return _FakePoolAcquire(self.rows)
 
 
 class _FakePoolAcquire:
-    def __init__(self, rows: dict[str, object]) -> None:
+    def __init__(self, rows: _StoredRow) -> None:
         self._rows = rows
 
     async def __aenter__(self) -> _FakeConnection:
