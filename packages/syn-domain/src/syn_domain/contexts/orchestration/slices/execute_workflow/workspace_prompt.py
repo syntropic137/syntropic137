@@ -318,7 +318,7 @@ orchestrator reads, and a block naming the outcome anything else is not
 guaranteed to be read at all.
 
 **When `success` is `false`, a second key says WHAT KIND of failure it was.**
-`failure_reason` is exactly one of three words - never a sentence, which is
+`failure_reason` is exactly one of four words - never a sentence, which is
 what `comments` is for:
 
 | `failure_reason` | what it means | what someone does about it |

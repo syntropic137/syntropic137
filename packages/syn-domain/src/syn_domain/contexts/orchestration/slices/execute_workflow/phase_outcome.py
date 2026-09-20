@@ -63,7 +63,6 @@ if TYPE_CHECKING:
     )
 
 
-
 def failed_phase_elapsed_seconds(
     started_at: DateTime | None,
     *,
