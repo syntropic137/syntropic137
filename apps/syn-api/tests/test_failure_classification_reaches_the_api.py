@@ -544,9 +544,7 @@ class TestATaskFailureIsNotARefusal:
         assert refused.failure_classification is FailureClassification.CORRECT_REFUSAL
 
     @pytest.mark.asyncio
-    async def test_the_list_response_carries_it_too(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_the_list_response_carries_it_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The other endpoint, off the other projection, on the other model.
 
         Failure rates are counted over the LIST. A `task` that reaches only the

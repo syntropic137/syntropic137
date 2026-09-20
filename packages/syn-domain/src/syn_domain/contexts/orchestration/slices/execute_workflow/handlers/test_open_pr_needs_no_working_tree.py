@@ -673,6 +673,17 @@ def _run_gh(
 #:   something only demonstrated inside them. Shared, seen by every phase, and
 #:   prose only - no fence changed, so the manufacture-a-completion guarantee
 #:   above is untouched.
+#: * #1372 gave the failure fences a `failure_reason`, and there are now three
+#:   of them rather than one. The classification an operator reads to decide
+#:   whether to re-dispatch could not express "the task was impossible" at
+#:   all, and nothing in a `success=false` report carried the evidence - the
+#:   comments are prose, and the platform cannot read prose. So the phase names
+#:   the cause in the block it already writes. Shared, seen by every phase, and
+#:   necessarily so: a vocabulary offered to some phases and not others would
+#:   make the classification depend on which prompt a run happened to get.
+#:   Nothing in the fences is left to substitute, so the copyability the #1324
+#:   entries above argue for is preserved; pinned by
+#:   `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -777,15 +788,30 @@ key here have lost finished, pushed work: `success` is the field the
 orchestrator reads, and a block naming the outcome anything else is not
 guaranteed to be read at all.
 
-A failure reason is specific. What a useful one looks like:
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of three words - never a sentence, which is
+what `comments` is for:
+
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+
+Those three go to three different people, so the wrong word fetches the wrong
+one and the right one never hears. If none of them is honestly true, leave the
+key out: an omitted reason is read as "could not tell", which is a worse answer
+than the truth and a better one than a guess.
+
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
 Write ONE complete block, for your outcome only. A complete block is read as
-your report wherever it sits, so do not copy out the other one to explain the
-format - once it is closed it is a report and not a quotation, whatever the
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
 words around it say. Discussing the format in prose is free; closing a second
 block is not.
 
@@ -801,11 +827,26 @@ TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplish
 TASK_RESULT_END
 ```
 
-You could NOT complete the task, because you were blocked, lacked access, or hit
-an error - copy both lines:
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
 
 ```
-TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
+TASK_RESULT: {"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}
 TASK_RESULT_END
 ```
 
