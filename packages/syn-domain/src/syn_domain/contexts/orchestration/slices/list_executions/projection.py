@@ -21,6 +21,7 @@ from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
@@ -168,6 +169,11 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             return
 
         classification = FailureClassification.from_stored(event_data.get("failure_classification"))
+        # Beside the classification at every hop, because the two answer to
+        # different evidence and a row that fused them would let a run's own
+        # word be summed as a measurement (#1392).
+        reported = ReportedFailureReason.from_stored(event_data.get("reported_failure_reason"))
+        reported_value = None if reported is None else reported.value
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
@@ -185,6 +191,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
                 tool_call_count=0,
                 error_message=event_data.get("error_message"),
                 failure_classification=classification,
+                reported_failure_reason=reported,
             ).to_dict()
         else:
             existing["status"] = "failed"
@@ -195,6 +202,7 @@ class WorkflowExecutionListProjection(AutoDispatchProjection):
             # a defect (#1357). `from_stored` is what makes a pre-#1357 event
             # replay as `unclassified` rather than raising here.
             existing["failure_classification"] = classification.value
+            existing["reported_failure_reason"] = reported_value
             existing["completed_phases"] = event_data.get(
                 "completed_phases", existing.get("completed_phases", 0)
             )

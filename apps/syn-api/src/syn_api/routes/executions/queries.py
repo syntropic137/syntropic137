@@ -193,6 +193,7 @@ def _build_execution_summary_response(
         tool_call_count=e.tool_call_count,
         error_message=e.error_message,
         failure_classification=e.failure_classification,
+        reported_failure_reason=e.reported_failure_reason,
         repos=list(e.repos),
         repos_display=format_repos(e.repos),
     )
@@ -360,6 +361,7 @@ def _to_execution_summary(
         total_cache_creation_tokens=s.total_cache_creation_tokens,
         total_cache_read_tokens=s.total_cache_read_tokens,
         failure_classification=s.failure_classification,
+        reported_failure_reason=s.reported_failure_reason,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
@@ -433,6 +435,7 @@ async def get(
             artifact_ids=list(detail.artifact_ids),
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
+            reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
         )
     )
@@ -537,6 +540,7 @@ async def get_detail(
             completed_at=detail.completed_at,
             error_message=detail.error_message,
             failure_classification=detail.failure_classification,
+            reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
@@ -579,6 +583,7 @@ async def list_active(
                 ).unpriced_observation_count,
                 error_message=s.error_message,
                 failure_classification=s.failure_classification,
+                reported_failure_reason=s.reported_failure_reason,
                 repos=list(s.repos),
             )
             for s in active
@@ -688,6 +693,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         artifact_ids=artifact_ids,
         error_message=detail.error_message,
         failure_classification=detail.failure_classification,
+        reported_failure_reason=detail.reported_failure_reason,
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,

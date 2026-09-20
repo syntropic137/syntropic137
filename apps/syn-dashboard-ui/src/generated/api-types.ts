@@ -2700,6 +2700,7 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
         };
@@ -2794,6 +2795,7 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
         };
         /**
          * ExecutionStatusResponse
@@ -2904,6 +2906,7 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -2933,7 +2936,7 @@ export interface components {
         };
         /**
          * FailureClassification
-         * @description Why a failed execution ended: the machinery broke, or the work was refused.
+         * @description Why a failed execution ended: the machinery, the request, or the work.
          *
          *     THE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`
          *     and nothing else, so a phase that did three phases of real work, found a
@@ -2953,27 +2956,42 @@ export interface components {
          *     THE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,
          *     which is what analysts already sort failures into by hand.
          *
-         *     WHY `task` IS NOT A MEMBER. classify.md's third class - "the request was
-         *     wrong, too big for a phase, or impossible" - is a judgement about the
-         *     REQUEST, and nothing in the stored record supports it: the same exit code,
-         *     the same error text and the same refusal arise from a bad request and from
-         *     a good one the platform mishandled. Deriving it would be a guess, and
-         *     classify.md's own instruction for that case is to use the fourth bucket
-         *     rather than attribute confidently. A member no code path can honestly
-         *     produce is a branch every reader has to reason about forever, so it is not
-         *     here. Whoever adds it must bring the evidence with it.
+         *     WHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).
+         *     classify.md's third class - "the request was wrong, too big for a phase, or
+         *     impossible" - is a judgement about the REQUEST, and the stored record did
+         *     not support it: the same exit code, the same error text and the same refusal
+         *     arise from a bad request and from a good one the platform mishandled.
+         *     Deriving it from any of those would be a guess, so the member was left out
+         *     with the note that whoever added it had to bring the evidence with them.
+         *
+         *     The evidence was asked for - `TASK_RESULT` carries a typed `failure_reason`
+         *     beside `success`, and the prompt every phase is sent says which word to
+         *     write - AND ASKING WAS NOT ENOUGH (#1392). The answer is the run's own
+         *     word about itself, and the only thing standing behind it is that the
+         *     process exited cleanly, which is evidence about the harness. So a phase
+         *     that had given up could write `task`, be believed, and leave the platform's
+         *     failure count by saying so. Nothing now reaches this member from a report:
+         *     the agent's word is recorded as `ReportedFailureReason`, beside the
+         *     classification and never as it, and this member waits for a source of
+         *     evidence that is not the run being measured.
          *
          *     THE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep
-         *     when changing anything here: `CORRECT_REFUSAL` is a POSITIVE claim, made
-         *     only where the agent's own readable `success=false` report is what ended
-         *     the run. Everything else - including a report nobody could read - is
-         *     `PLATFORM`. So a path that forgets to classify itself lands on the answer
-         *     the system already gave, the failure tally stays the upper bound it has
-         *     always been, and no omission can ever manufacture evidence that the system
-         *     was working.
+         *     when changing anything here: every member but `PLATFORM` is a POSITIVE
+         *     claim, made only where the agent's own readable report is what ended the
+         *     run and only from the field that states it. Everything else - including a
+         *     report nobody could read - is `PLATFORM`. So a path that forgets to
+         *     classify itself lands on the answer the system already gave, the failure
+         *     tally stays the upper bound it has always been, and no omission can ever
+         *     manufacture evidence that the system was working.
+         *
+         *     OMISSION IS NOT A SIGNAL. A phase that reports failure and names no reason
+         *     classifies exactly as it did before the field existed - `CORRECT_REFUSAL`
+         *     - because that is the answer the system already gave, a silent agent has
+         *     said nothing new to move it, and every report already in the store was
+         *     written by an agent that had no key to omit.
          * @enum {string}
          */
-        FailureClassification: "platform" | "correct_refusal" | "unclassified";
+        FailureClassification: "platform" | "task" | "correct_refusal" | "unclassified";
         /**
          * FailurePatternResponse
          * @description A recurring failure pattern within a system.
@@ -4222,6 +4240,52 @@ export interface components {
             /** Created At */
             created_at?: string | null;
         };
+        /**
+         * ReportedFailureReason
+         * @description What a phase says CAUSED the failure it is reporting (#1372).
+         *
+         *     THE QUESTION THIS ANSWERS, and why it had to be asked rather than worked
+         *     out. A readable ``success=false`` says THAT a phase failed and nothing
+         *     more, so every reported failure was recorded as a correct refusal - the
+         *     system working - including the one whose agent had just written "GH_TOKEN
+         *     is not set", which is the system not working, and the one that said the
+         *     task was impossible, which is neither. Those three take opposite responses:
+         *     retry, fix the platform, rewrite the brief. An operator re-dispatching off
+         *     a record that cannot tell them apart spends a whole run to find out.
+         *
+         *     THE SPELLINGS ARE classify.md's, which is the vocabulary analysts already
+         *     sort failures into by hand and the one `FailureClassification` was built
+         *     from. Three words, closed, written here and nowhere else - a closed set in
+         *     one place is what separates a contract from the habit of adding one more
+         *     string every time a run is lost, and it is the definition the negative
+         *     tests are written against.
+         *
+         *     IT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,
+         *     an exception message or an exit status to reach a member of this; the only
+         *     way into one is a phase that wrote it.
+         *
+         *     AND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A
+         *     MEASUREMENT (#1392). This is the whole of what the type means, and the
+         *     reason it is spelled `reported_failure_reason` everywhere it is carried:
+         *     the platform's only corroboration of anything written here is that the
+         *     process exited cleanly and its stream arrived intact, which is evidence
+         *     about the HARNESS and not about whether the task was possible. A run that
+         *     named itself ``task`` established nothing about the request; it said
+         *     something about it. So the word travels the whole way to the operator - who
+         *     wants to know what the agent said - and `FailureClassification`, which is
+         *     what failure NUMBERS are computed from, is never decided by it. The one
+         *     thing a phase can do to that record is WITHDRAW a claim; see
+         *     `_corroborated_classification`, which holds the whole rule.
+         *
+         *     AND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when
+         *     editing anything here. This decides a LABEL on a failure already decided by
+         *     ``success``. A word nobody recognises, a sentence, a number, or no key at
+         *     all all read as "no reason given" and leave the verdict exactly as it was.
+         *     Making a misspelling fatal would let a tally field refuse a finished run,
+         *     which is #1324's defect bought back in exchange for nothing.
+         * @enum {string}
+         */
+        ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
          * SSEHealthResponse
          * @description Health status of the SSE subsystem.

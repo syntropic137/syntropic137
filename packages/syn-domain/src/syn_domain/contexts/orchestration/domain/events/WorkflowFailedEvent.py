@@ -11,6 +11,7 @@ from pydantic import Field
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     FailureClassification,
+    ReportedFailureReason,
 )
 
 
@@ -59,6 +60,25 @@ class WorkflowFailedEvent(DomainEvent):
     # historical rows claiming a status the new vocabulary has no word for. A
     # field beside it adds the answer without moving the question.
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+
+    # WHAT THE FAILING PHASE SAID CAUSED IT (#1372), which is a different kind
+    # of fact from the field above and is stored apart from it for exactly
+    # that reason (#1392).
+    #
+    # The classification is a MEASUREMENT: the platform observed how the run
+    # ended and recorded it, and every failure number is computed from it.
+    # This is a REPORT: one of a closed set of words an agent chose to write
+    # about itself, corroborated by nothing but the fact that the process it
+    # was written by exited cleanly. Both belong in the record - an operator
+    # asking why a run failed wants the phase's own word first - and the one
+    # thing that must never happen is a number being computed from this one.
+    # Folding them into a single field is what made that possible, because a
+    # sink reading it could no longer tell which kind of fact it held.
+    #
+    # `None` for every failure that named no reason: the whole store before
+    # #1372, every failure with no agent anywhere near it, and every report
+    # whose word this reader does not know.
+    reported_failure_reason: ReportedFailureReason | None = None
 
     # How long failed_phase_id had been running when the failure was caught.
     # None when no phase was in flight (e.g. failure between phases).

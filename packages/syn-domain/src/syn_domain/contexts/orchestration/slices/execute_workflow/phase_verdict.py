@@ -220,6 +220,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
+    ReportedFailureReason,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +229,7 @@ __all__ = [
     "TASK_RESULT_MARKER",
     "TASK_RESULT_TERMINATOR",
     "AgentVerdict",
+    "ReportedFailureReason",
     "VerdictReader",
     "VerdictStatus",
 ]
@@ -282,11 +284,28 @@ class AgentVerdict:
     quotes what the agent actually wrote - and it exists because an alias that
     leaves no trace in the outcome is indistinguishable from the format having
     quietly changed.
+
+    ``reported_failure_reason`` is the word the phase wrote for what CAUSED the
+    failure (#1372), already matched against the closed set and `None` when it
+    wrote nothing this reader knows. It is carried on every verdict rather than
+    only on the failing ones because a phase that reports success and a reason
+    has written both of those things; `failure_classification` is the one place
+    that decides the reason is meaningless beside anything but a FAILURE, and
+    dropping it here would be that decision made twice.
+
+    IT IS SPELLED ``reported_`` SO THAT NO CALL SITE CAN LOSE THE DISTINCTION
+    (#1392). Beside `failure_classification` - which is authoritative, is what
+    every failure number is computed from, and is derived from what the
+    PLATFORM observed - this field is what the AGENT SAID, and the two are one
+    attribute access apart. A reader who has to remember which is which will
+    eventually not; a name that says so at every hop it travels does not
+    depend on remembering.
     """
 
     status: VerdictStatus
     comments: str = ""
     via_status_alias: bool = False
+    reported_failure_reason: ReportedFailureReason | None = None
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -336,6 +355,7 @@ class AgentVerdict:
         return cls(
             VerdictStatus.SUCCESS if reported.success else VerdictStatus.FAILURE,
             reported.said,
+            reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
         )
 
     @classmethod
@@ -375,7 +395,12 @@ class AgentVerdict:
             aliased.status.verdict.name,
             _excerpt(report.payload),
         )
-        return cls(aliased.status.verdict, aliased.said, via_status_alias=True)
+        return cls(
+            aliased.status.verdict,
+            aliased.said,
+            via_status_alias=True,
+            reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
+        )
 
     @property
     def refuses_completion(self) -> bool:
@@ -405,10 +430,17 @@ class AgentVerdict:
         The non-refusing states never reach a failure and answer `PLATFORM`
         for the same reason `refusal` answers "": a caller that asks anyway
         gets the conservative answer rather than an exception.
+
+        WHAT THE REPORTED REASON MOVES, AND WHAT IT CANNOT (#1372, #1392). The
+        word the agent wrote is a REPORT - see `ReportedFailureReason` - and
+        the answer here is a MEASUREMENT, so almost nothing the agent can write
+        moves it. `_corroborated_classification` holds the whole of that rule
+        and is where it is argued; the report itself travels beside this,
+        unaltered, on `reported_failure_reason`.
         """
-        if self.status is VerdictStatus.FAILURE:
-            return FailureClassification.CORRECT_REFUSAL
-        return FailureClassification.PLATFORM
+        if self.status is not VerdictStatus.FAILURE:
+            return FailureClassification.PLATFORM
+        return _corroborated_classification(self.reported_failure_reason)
 
     def refusal(self, *, phase_id: str) -> str:
         """Why the phase may not complete, in the words an operator needs.
@@ -437,6 +469,55 @@ class AgentVerdict:
                 f"rather than completing on a verdict nobody could read."
             )
         return ""
+
+
+def _corroborated_classification(
+    reported: ReportedFailureReason | None,
+) -> FailureClassification:
+    """What a failure the PLATFORM corroborated is recorded as, having heard this word.
+
+    Reached only for a run that got this far: a readable ``success=false`` from
+    a process the platform delivered intact (`agent_run_outcome._ran_cleanly`).
+    That much is corroborated - the harness watched it happen - and it is the
+    whole of what is corroborated.
+
+    THE RULE, WHICH IS THE POINT OF THIS FUNCTION EXISTING (#1392). A word the
+    AGENT CHOOSES may never ADD a claim to the record; it may only WITHDRAW
+    one. So:
+
+      - ``task`` and ``platform`` leave the measurement exactly where the
+        corroborated evidence put it. They are claims about the REQUEST and
+        about the MACHINERY, and the only thing standing behind either is the
+        run's own say-so. A phase that has given up exits cleanly and can write
+        ``task``; a phase that would rather not be counted as the gate working
+        can write ``platform``. Believing either would let a run decide what
+        number it lands in, which is the defect this function was extracted to
+        close - stated as a class, so the next self-reported word inherits the
+        answer rather than the bug.
+      - ``refused`` agrees with that measurement, and always did.
+      - ``unknown`` takes the measurement AWAY, to `UNCLASSIFIED`. That is the
+        withdrawal, and it is safe in the direction every rule here runs in: it
+        costs the platform a "the system worked" data point and cannot earn the
+        run one.
+      - NOTHING AT ALL - no key, a misspelling, a null, a number - is the
+        answer the system gave before any of this existed, and keeps it. Every
+        report already in the store was written that way, and a new reading of
+        those bytes would be a new claim about history rather than a fix.
+
+    Total over the members deliberately: adding one is a decision made here,
+    against the rule above, rather than a value that quietly acquires whichever
+    branch it falls through to.
+    """
+    match reported:
+        case ReportedFailureReason.UNKNOWN:
+            return FailureClassification.UNCLASSIFIED
+        case (
+            ReportedFailureReason.TASK
+            | ReportedFailureReason.PLATFORM
+            | ReportedFailureReason.REFUSED
+            | None
+        ):
+            return FailureClassification.CORRECT_REFUSAL
 
 
 class VerdictReader:
@@ -539,6 +620,15 @@ class _ReportedResult(BaseModel):
     success: bool
     comments: object | None = None
 
+    #: Declared as `object` so that NOTHING an agent can write here fails the
+    #: model (#1372). Typing it as the enum would make a misspelled reason a
+    #: validation error, which under `strict` discards the whole block and
+    #: turns a phase's perfectly readable outcome UNREADABLE - a label field
+    #: deciding whether a run completed. `ReportedFailureReason.from_reported`
+    #: does the matching afterwards, where failing to match costs the label and
+    #: only the label.
+    failure_reason: object | None = None
+
     @property
     def said(self) -> str:
         """The comments as an operator will read them, never None."""
@@ -588,6 +678,12 @@ class _StatusAliasResult(BaseModel):
     #: are all refused, each pinned by a test.
     status: _StatusAlias = Field(strict=False)
     comments: object | None = None
+    #: Read on this path too, for the same reason `comments` is: a block that
+    #: named its outcome the wrong way may still have named its cause the right
+    #: one, and a reason that worked only under the contract spelling would be
+    #: a rule no reader could state. Declared as `object` on the same grounds
+    #: as the contract model's.
+    failure_reason: object | None = None
 
     @model_validator(mode="before")
     @classmethod
