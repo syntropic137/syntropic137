@@ -30,7 +30,7 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
-from syn_domain.contexts._shared.maintenance import carrying
+from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
@@ -802,6 +802,14 @@ async def execute_workflow_endpoint(
     # started work, and `_run` above owns the lease from here.
     async with _admit_or_409() as admitted:
         background_tasks.add_task(_run)
+        # Starlette runs queued tasks after the response is sent, and promises
+        # nothing about a response that is never sent - a client that goes away
+        # mid-send, a middleware that replaces the response. `_run` would then
+        # never be entered, so its `carrying` would never settle and the next
+        # deploy's `PUT /maintenance` would wait on this lease forever. Bind
+        # the lease to the queued callable itself, which outlives this block
+        # for exactly as long as Starlette may still call it (#1387).
+        guarantee_settled(admitted, _run)
     logger.info(
         "Started workflow execution",
         extra={

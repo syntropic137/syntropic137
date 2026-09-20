@@ -27,6 +27,7 @@ and the real route function with a real ``BackgroundTasks`` for the HTTP path.
 from __future__ import annotations
 
 import asyncio
+import gc
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -233,6 +234,82 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
         assert handler.opened == []
 
 
+class TestATaskCancelledBeforeItEverRan:
+    """The lease has to end on the path where the coroutine body never runs.
+
+    `carrying()` lives inside `_run_with_semaphore`, so it settles on every
+    path that coroutine TAKES. A task cancelled between `create_task` and its
+    first turn takes none of them: the loop throws `CancelledError` in at the
+    very start, the body never executes, and no `finally` of its own is
+    reached. The lease then stays outstanding for the life of the process and
+    the next `PUT /maintenance` waits on it forever.
+
+    Which way that fails is the point. It does not lose an execution - it
+    deadlocks the gate, so the deploy stalls instead of swapping over work it
+    cannot see. Safe, and still wrong: a gate that can hang is a gate an
+    operator has to sit and watch, and unattended deploys are what this is for.
+    """
+
+    async def test_shutdown_before_the_first_turn_releases_the_deploy(self) -> None:
+        gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        handler = _StreamOpeningHandler()
+        dispatcher = BackgroundWorkflowDispatcher(
+            handler,  # type: ignore[arg-type]
+            max_concurrent=1,
+            maintenance=gate,
+        )
+
+        # No loop turn between these two lines, deliberately: the task is
+        # created and cancelled without ever being scheduled, which is exactly
+        # what a shutdown racing a trigger dispatch does.
+        ticket = await dispatcher.run_workflow("wf-a", {}, "exec-a")
+        await dispatcher.shutdown()
+        await _let_the_loop_run()
+
+        assert ticket is not None
+        assert not handler.reached.is_set(), (
+            "the execution coroutine ran, so this is no longer the case the "
+            "test is about - it must be cancelled before its first turn"
+        )
+        assert ticket.is_settled, (
+            "a lease granted for a task that was cancelled before it ever ran "
+            "was never returned; nothing else will ever return it (#1387)"
+        )
+
+        async with asyncio.timeout(_PATIENCE):
+            mode = await gate.set_mode(active=True, reason="pit stop", actor="deploy")
+
+        assert mode.active is True
+        assert handler.opened == []
+
+    async def test_the_lease_is_settled_exactly_once(self) -> None:
+        """The backstop must not double-count. `_lease_ended` decrements, so a
+        second settlement would take the gate's outstanding count negative and
+        let a LATER admission's lease be overtaken by a transition."""
+        gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        handler = _StreamOpeningHandler()
+        handler.may_open_the_stream.set()
+        dispatcher = BackgroundWorkflowDispatcher(
+            handler,  # type: ignore[arg-type]
+            max_concurrent=1,
+            maintenance=gate,
+        )
+
+        # This one runs to completion and opens its stream, so `mark_visible()`
+        # ends the lease and the task's done callback aborts afterwards.
+        await dispatcher.run_workflow("wf-a", {}, "exec-a")
+        async with asyncio.timeout(_PATIENCE):
+            await asyncio.gather(*dispatcher._tasks)
+        await _let_the_loop_run()
+
+        assert handler.opened == ["exec-a"]
+        assert gate._outstanding == 0, (
+            f"the gate has {gate._outstanding} outstanding leases after one "
+            "admission settled once; a second settlement per ticket would let "
+            "a transition return over a lease that is still held"
+        )
+
+
 # -- The manual path ----------------------------------------------------------
 
 
@@ -385,3 +462,59 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         assert mode.active is True
         assert mode.since is not None
         assert mode.since <= datetime.now(UTC)
+
+    async def test_a_queued_task_starlette_never_runs_releases_the_deploy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The HTTP twin of a task cancelled before its first turn.
+
+        Starlette runs background tasks after the response has been sent, and
+        promises nothing about a response that is never sent - a client that
+        disappears mid-send, a middleware that swaps the response out. The
+        queued coroutine is then never entered, so the `carrying()` inside it
+        never settles, and every later deploy waits on that lease forever.
+
+        Expressed here as the framework dropping the queued task without
+        calling it, which is the only observable difference between "Starlette
+        will run this" and "Starlette never will".
+        """
+        import syn_api._wiring as wiring
+
+        gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        execution = _DelayedExecution()
+        monkeypatch.setattr(wiring, "_admission_gate_singleton", gate, raising=False)
+        monkeypatch.setattr(commands, "ensure_connected", _nothing_to_connect)
+        monkeypatch.setattr(commands, "get_workflow_repo", _WorkflowRepo)
+        monkeypatch.setattr(commands, "execute", execution)
+
+        tasks = BackgroundTasks()
+        await commands.execute_workflow_endpoint(
+            "wf-ci-self-healing",
+            _Request(),  # type: ignore[arg-type]
+            tasks,
+        )
+
+        closing = asyncio.create_task(
+            set_maintenance_mode(
+                SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+            )
+        )
+        await _let_the_loop_run()
+        assert not closing.done(), (
+            "the transition returned while the queued task might still run and "
+            "open a stream; the lease was released at the hand-off (#1387)"
+        )
+
+        # The response was never sent, so the queued task is discarded unrun.
+        del tasks
+        gc.collect()
+        await _let_the_loop_run()
+
+        async with asyncio.timeout(_PATIENCE):
+            mode = await closing
+
+        assert mode.active is True
+        assert execution.opened == [], (
+            "the background task ran after all, so this test no longer covers "
+            "the case where Starlette never invokes it"
+        )

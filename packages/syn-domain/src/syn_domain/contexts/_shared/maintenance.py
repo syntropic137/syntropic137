@@ -28,6 +28,7 @@ declaration, so the two cannot drift apart on what "paused" means.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from contextlib import asynccontextmanager, contextmanager
 
 # NOT in a TYPE_CHECKING block: `MaintenanceMode` is a Pydantic model and
@@ -265,6 +266,50 @@ def carrying(ticket: AdmissionTicket | None) -> Iterator[None]:
     finally:
         if ticket is not None:
             ticket.abort()
+
+
+def guarantee_settled(ticket: AdmissionTicket | None, work: object) -> None:
+    """End the lease when ``work`` ends, INCLUDING when its body never runs.
+
+    :func:`carrying` settles on every path the work's own body takes, and a
+    body that never executes takes none of them. A task cancelled before its
+    first turn is torn down without running a line, and a callable queued with
+    a framework that never invokes it runs no line either; both leave a granted
+    lease outstanding for the life of the process, and the next
+    ``set_mode(active=True)`` then waits for it forever. That fails safe - the
+    deploy stalls rather than losing an execution - but a gate that can hang is
+    not a gate that lets a deploy proceed unattended, which is the point of
+    having one.
+
+    So this is the backstop, and it belongs here rather than at the entrances:
+    both of them queue admitted work onto something they do not control, and
+    neither should be re-deriving what "the lease always ends" means.
+
+    The caller passes whatever the scheduler is holding; how settlement is
+    guaranteed is this function's decision, not theirs:
+
+    * an ``asyncio`` future or task settles from its DONE callback, which the
+      loop invokes for every outcome - returned, raised, or cancelled before
+      the coroutine ever ran;
+    * anything else settles when it becomes unreachable. A queued callable is
+      reachable for exactly as long as it may still be called, so collecting it
+      is the framework saying it never will be.
+
+    Idempotent with the work itself: :meth:`AdmissionTicket.abort` after
+    :meth:`AdmissionTicket.mark_visible` is a no-op, so the normal path still
+    ends its lease promptly, at the durable write, and this only ever catches
+    what that path missed.
+
+    ``None`` is accepted and does nothing, for the fixtures that build a
+    dispatcher with no gate at all.
+    """
+    if ticket is None:
+        return
+    if isinstance(work, asyncio.Future):
+        finished: asyncio.Future[object] = work
+        finished.add_done_callback(lambda _finished: ticket.abort())
+        return
+    weakref.finalize(work, ticket.abort)
 
 
 class AdmissionGate:

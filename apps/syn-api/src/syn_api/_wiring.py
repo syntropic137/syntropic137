@@ -111,7 +111,7 @@ from syn_adapters.storage.repositories import (
     get_workflow_execution_repository,
 )
 from syn_adapters.workspace_backends.service import WorkspaceService
-from syn_domain.contexts._shared.maintenance import carrying
+from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared.agents import (
@@ -1056,6 +1056,12 @@ class BackgroundWorkflowDispatcher:
         the semaphore for as long as the execution ahead of it runs, and until
         it opens its stream the drain cannot see it - so the lease it carries
         is ended by the task itself, not by this line.
+
+        Ended by the task, not by its BODY. `shutdown()` can cancel a task
+        between `create_task` and its first turn, and a coroutine torn down
+        before it ever ran reaches no `finally` of its own - so the lease is
+        also bound to the task's completion here, which the loop reports for
+        every outcome including that one.
         """
         asyncio_task = asyncio.create_task(
             self._run_with_semaphore(
@@ -1065,6 +1071,7 @@ class BackgroundWorkflowDispatcher:
         )
         self._tasks.add(asyncio_task)
         asyncio_task.add_done_callback(self._tasks.discard)
+        guarantee_settled(ticket, asyncio_task)
 
     async def _run_with_semaphore(
         self,
@@ -1080,7 +1087,9 @@ class BackgroundWorkflowDispatcher:
         # while the execution sat queued behind another one, invisible to the
         # drain. `carrying` ends the lease however this task leaves: the
         # execution became durable and ended it already, `_run` swallowed a
-        # failure, or shutdown cancelled us while still queued.
+        # failure, or shutdown cancelled us while still queued. It ends the
+        # lease at the moment the body stops rather than a loop turn later;
+        # `_spawn`'s backstop covers the body that never starts at all.
         with carrying(admitted):
             async with self._semaphore:
                 await self._run(
