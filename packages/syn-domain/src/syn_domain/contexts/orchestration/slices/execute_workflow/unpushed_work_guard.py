@@ -137,24 +137,41 @@ _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
 
 
-async def verify_quarantine_path(
+async def rehearse_quarantine_credential(
     workspace: GitWorkspace, *, execution_id: str, phase_id: str
 ) -> None:
-    """Rehearse the quarantine push now, while a refusal costs nothing (#1393).
+    """Prove this phase HAS a credential that reaches origin, before it runs (#1393).
 
     THE NET IS OTHERWISE UNTESTABLE UNTIL THE FALL. Everything below runs
     exactly once per phase, at teardown, on a phase that has already failed -
-    so a credential that will be refused, or a ruleset that forbids
-    ``refs/syn/*``, is invisible right up to the moment a commit and nine
+    so a workspace that holds no usable credential at all, or that cannot
+    reach ``origin``, is invisible right up to the moment a commit and nine
     modified files are riding on it. `exec-db6f687e991a` is what that costs.
 
     So the same push is made here with ``--dry-run``: same `push`, same argv,
     same ``origin``, same ``refs/syn/lost`` ref this phase would really use,
-    and the credential renewed first exactly as the real one renews it. git
-    authenticates against ``git-receive-pack`` and has the ref update checked;
-    no object is sent and no ref is created. What it proves is not "a push
-    works" in general but "THIS push, with THIS credential, to THIS ref, would
-    be accepted", which is the only statement worth making here.
+    and the credential renewed first exactly as the real one renews it.
+
+    WHAT THAT DOES AND DOES NOT ESTABLISH, stated narrowly on purpose (#1396).
+    git connects, authenticates, and negotiates - so a missing or unusable
+    credential, a remote that is not there, and a transport that will not
+    answer are all found here, and those are the failures this function is
+    named for. What ``--dry-run`` never does is run ``git-receive-pack``'s
+    update phase: no ``pre-receive`` hook fires, no ruleset is consulted, no
+    ref is locked. A remote that accepts the connection and then declines the
+    ref update passes this rehearsal and refuses the real push, and that is
+    demonstrated, not assumed - see
+    `test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept`.
+
+    So this is a CREDENTIAL AND CONNECTIVITY rehearsal and is not evidence
+    that the quarantine push will be accepted. The stronger claim would need a
+    real ref created on the remote and then deleted, which spends a write on
+    every phase start to test a path almost none of them take; the modest
+    claim that is actually true is worth more than an over-claiming one,
+    because the only thing worse than an untested net is a net reported as
+    tested. The remaining exposure is covered where it lands: a refused
+    quarantine push at teardown still reports ``pushed_ref=None`` with the
+    remote's own words and prints NOT RECOVERABLE.
 
     RAISES RATHER THAN WARNS, which is the deliberate part. A logged warning
     at phase start is read by nobody until someone is already looking for why
@@ -168,8 +185,8 @@ async def verify_quarantine_path(
     every other repository's rehearsal.
 
     Raises:
-        QuarantinePathUnusableError: the rehearsal was refused, or the
-            credential it depends on could not be renewed.
+        QuarantinePathUnusableError: origin could not be reached with a
+            credential, or the credential it depends on could not be renewed.
         WorkspaceInspectionFailedError: the workspace would not answer, so
             nothing was rehearsed and no verdict exists. Propagated rather
             than downgraded, for the reason every command in this module is
@@ -208,11 +225,18 @@ async def verify_quarantine_path(
             raise QuarantinePathUnusableError(
                 phase_id=phase_id,
                 detail=(
-                    f"A rehearsal push of {repo} to {ref} was refused with: "
+                    f"A rehearsal push of {repo} to {ref} could not reach origin "
+                    f"with a credential: "
                     f"{(rehearsed.stderr or rehearsed.stdout).strip() or 'no output'}"
                 ),
             )
-    logger.info("Quarantine path rehearsed for phase %s: %s is pushable", phase_id, ref)
+    logger.info(
+        "Phase %s holds a credential that reaches origin, so a quarantine push to %s "
+        "would be attempted with one. Server-side acceptance of that ref is NOT "
+        "covered by this rehearsal (#1396).",
+        phase_id,
+        ref,
+    )
 
 
 async def refuse_to_complete_unsaved_phase(
@@ -680,7 +704,7 @@ def _quarantine_ref(execution_id: str, phase_id: str) -> str:
 async def _renew_credential(workspace: GitWorkspace, *, doing: str) -> None:
     """Give this workspace a usable credential if it can be given one.
 
-    NEVER RAISES, which is the opposite of what `verify_quarantine_path` wants
+    NEVER RAISES, which is the opposite of what the phase-start rehearsal wants
     from the same call and the reason the two ask separately. Here the phase
     has already failed and a commit is waiting to be pushed: a renewal that
     could not happen is a reason the push MIGHT fail, not a reason to skip it.

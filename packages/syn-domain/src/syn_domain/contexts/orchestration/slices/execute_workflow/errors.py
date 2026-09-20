@@ -477,14 +477,15 @@ class CredentialRenewalFailedError(Exception):
 
 
 class QuarantinePathUnusableError(Exception):
-    """This phase could not have saved its work, so it is not given any (#1393).
+    """This phase has no credential that reaches origin, so it is given no work (#1393).
 
-    THE NET IS TESTED BEFORE THE FALL, WHICH IS THE ONLY TIME IT CAN BE. The
-    unpushed-work guard's quarantine push runs exactly once per phase, at
-    teardown, on a phase that has already failed - so a credential or a ref
-    permission that would reject it is invisible until the moment the work is
-    riding on it, and `exec-db6f687e991a` is what that costs: a commit and
-    nine modified files, correctly detected, correctly pushed at, and refused.
+    THE HALF OF THE NET THAT CAN BE TESTED BEFORE THE FALL. The unpushed-work
+    guard's quarantine push runs exactly once per phase, at teardown, on a
+    phase that has already failed - so a workspace that cannot be given a
+    credential, or cannot reach ``origin`` at all, is invisible until the
+    moment the work is riding on it, and `exec-db6f687e991a` is what that
+    costs: a commit and nine modified files, correctly detected, correctly
+    pushed at, and refused.
 
     So the same push is rehearsed at phase start with ``--dry-run``: same
     remote, same ``refs/syn/lost`` namespace, same credential, no objects sent
@@ -495,6 +496,14 @@ class QuarantinePathUnusableError(Exception):
     is refused for nothing - and it is still the right one, because the
     alternative is handing an hour of agent time to a workspace that has just
     demonstrated it cannot give the work back.
+
+    WHAT IT DOES NOT MEAN (#1396): that the remote would ACCEPT the push. A
+    dry run stops before ``git-receive-pack``'s update phase, so no
+    ``pre-receive`` hook and no ruleset is consulted, and a remote that
+    declines ``refs/syn/lost`` declines it for the first time at teardown.
+    This error is therefore raised for a credential or a connection, never for
+    a policy - see `rehearse_quarantine_credential`, which is named for what
+    it can prove.
     """
 
     def __init__(self, *, phase_id: str, detail: str) -> None:

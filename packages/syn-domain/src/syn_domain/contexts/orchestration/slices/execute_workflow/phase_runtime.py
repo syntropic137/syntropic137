@@ -54,8 +54,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_im
     remember_leader_native_id,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    rehearse_quarantine_credential,
     save_unpushed_work,
-    verify_quarantine_path,
 )
 
 if TYPE_CHECKING:
@@ -287,22 +287,29 @@ class PhaseRuntime:
         if workspace is not None:
             await self._starting_points.record(phase_id, workspace)
 
-    async def rehearse_quarantine_path(self, phase_id: str, *, execution_id: str) -> None:
-        """Prove this phase could save its work, before it is given any (#1393).
+    async def rehearse_quarantine_credential(self, phase_id: str, *, execution_id: str) -> None:
+        """Prove this phase can reach origin with a credential, before it runs (#1393).
 
         The other step here whose timing is a domain decision, and for the
         mirror-image reason to `record_starting_point`'s: the quarantine push
-        happens once, at teardown, so the only moment it can be TESTED without
-        something riding on it is before the agent starts.
+        happens once, at teardown, so the only moment its credential can be
+        TESTED without something riding on it is before the agent starts.
+
+        Named for what it establishes and not for the quarantine path as a
+        whole (#1396): the dry run it makes never reaches the remote's update
+        checks, so server-side acceptance of ``refs/syn/lost`` is not among
+        the things a green rehearsal has shown.
 
         Raises:
             QuarantinePathUnusableError: it could not, so the phase does not
-                run. See `verify_quarantine_path` for why that is the better
-                of two bad trades.
+                run. See `rehearse_quarantine_credential` in the guard for why
+                that is the better of two bad trades.
         """
         workspace = self._workspaces.get(phase_id)
         if workspace is not None:
-            await verify_quarantine_path(workspace, execution_id=execution_id, phase_id=phase_id)
+            await rehearse_quarantine_credential(
+                workspace, execution_id=execution_id, phase_id=phase_id
+            )
 
     # ── while its agent runs ──────────────────────────────────────────────
 

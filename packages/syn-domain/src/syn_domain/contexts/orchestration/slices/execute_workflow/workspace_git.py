@@ -365,15 +365,22 @@ async def push(
     which is the honest reading: the objects exist locally, the ref may or may
     not have landed, and the caller must not promise it did.
 
-    ``dry_run`` is the SAME push with the last step left out, and the sameness
-    is the point rather than a convenience (#1393). git still contacts the
-    remote, still authenticates against ``git-receive-pack``, and still has
-    the ref update refused if the credential may not write it; what it does
-    not do is send objects or move anything. That is what makes the rehearsal
-    the guard runs at phase start evidence about THIS command - one function,
-    one argv, one credential, so the two cannot drift into testing different
-    things. It is a flag rather than a second function for exactly that
-    reason.
+    ``dry_run`` is the SAME push with the last steps left out, and the
+    sameness is the point rather than a convenience (#1393). git still
+    contacts the remote, still authenticates, and still negotiates with
+    ``git-receive-pack``; what it does not do is send objects or ask for any
+    ref to move. That is what makes the rehearsal the guard runs at phase
+    start evidence about THIS command - one function, one argv, one
+    credential, so the two cannot drift into testing different things. It is a
+    flag rather than a second function for exactly that reason.
+
+    WHAT A DRY RUN CANNOT SEE (#1396): the update itself. ``receive-pack``
+    runs ``pre-receive``, evaluates rulesets and locks refs only for a real
+    update, so a remote that accepts the connection and then declines
+    ``refs/syn/lost`` returns 0 here and non-zero for the real push. Callers
+    must not read a dry run as "this push would be accepted"; the guard's
+    `rehearse_quarantine_credential` is named and documented for the narrower
+    claim that is actually true.
     """
     return await run_bounded(
         workspace,

@@ -200,10 +200,12 @@ class PhaseWorkspace:
         )
         await self._runtime.record_starting_point(todo.phase_id)
         # BEFORE the agent is launched and AFTER the workspace exists, which is
-        # the only window in which the quarantine push can be tested with
-        # nothing riding on it. Raising here fails the phase while the only
-        # thing spent is provisioning (#1393).
-        await self._runtime.rehearse_quarantine_path(todo.phase_id, execution_id=todo.execution_id)
+        # the only window in which the quarantine push's credential can be
+        # tested with nothing riding on it. Raising here fails the phase while
+        # the only thing spent is provisioning (#1393).
+        await self._runtime.rehearse_quarantine_credential(
+            todo.phase_id, execution_id=todo.execution_id
+        )
         aggregate.provision_workspace_completed(result.command)
         await self._journal.append(aggregate)
 

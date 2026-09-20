@@ -52,7 +52,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     _read_only_mount,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
-    verify_quarantine_path,
+    rehearse_quarantine_credential,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -255,6 +255,28 @@ class _Clone:
         """
         (self.path / ".gitattributes").write_text("* filter=syn-hang\n")
         self.git("config", "filter.syn-hang.clean", f"sleep {seconds}")
+
+    def decline_pushes_server_side(self) -> None:
+        """Make the ORIGIN refuse the update, the way a ruleset does (#1396).
+
+        THE FAILURE A DRY RUN CANNOT SEE, and the reason the phase-start
+        rehearsal is documented as a credential-and-connectivity check rather
+        than a promise of acceptance. `pre-receive` runs only for a real
+        update: git connects, authenticates and negotiates identically either
+        way, so ``--dry-run`` returns 0 against this origin and the real push
+        comes back ``! [remote rejected] ... (pre-receive hook declined)`` -
+        which is GitHub's own wording when a ruleset refuses a ref.
+
+        A SYMLINK TO `/bin/false` rather than a script, for the reason
+        `hang_the_clean_filter` avoids hook files altogether: a tmpdir may be
+        mounted ``noexec``, where a shell script hook is silently IGNORED and
+        the push succeeds. The target of a symlink is executed from wherever
+        IT lives, so this stages the refusal on a noexec tmpfs too. It
+        declines every push, which here is exactly the quarantine ref: the
+        fixture's own setup pushes are already done by the time it is called.
+        """
+        (self.origin / "hooks").mkdir(exist_ok=True)
+        (self.origin / "hooks" / "pre-receive").symlink_to("/bin/false")
 
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
@@ -1821,18 +1843,6 @@ def test_the_mount_table_is_read_for_the_path_that_governs(
 # different claims and only the second one is the bug.
 # --------------------------------------------------------------------------
 
-_REJECTED_BY_GITHUB = ExecutionResult(
-    exit_code=128,
-    success=False,
-    duration_ms=0.0,
-    stdout="",
-    stderr=(
-        "remote: Invalid username or token. Password authentication is not supported "
-        "for Git operations.\n"
-        "fatal: Authentication failed for 'https://github.com/syntropic137/syntropic137/'"
-    ),
-)
-
 
 class _RecordsCredentialOrder:
     """The real workspace, with renewals and pushes written into ONE sequence.
@@ -1899,27 +1909,6 @@ class _CannotRenew:
         raise CredentialRenewalFailedError("the installation token could not be minted")
 
     async def execute(self, command: list[str]) -> ExecutionResult:
-        return await self._inner.execute(command)
-
-
-class _RemoteRejects:
-    """The real workspace, with a REACHABLE remote that refuses the push.
-
-    Not `_BreaksOn`, which answers like a dead container: the container in
-    #1393 was alive and every other command in it worked. What failed was one
-    push, refused by GitHub with the stderr reproduced above - so that is the
-    only thing substituted here, and the phase's own git does the rest.
-    """
-
-    def __init__(self, inner: GitWorkspace) -> None:
-        self._inner = inner
-
-    async def renew_git_credential(self) -> None:
-        await self._inner.renew_git_credential()
-
-    async def execute(self, command: list[str]) -> ExecutionResult:
-        if _operation(command) == "push":
-            return _REJECTED_BY_GITHUB
         return await self._inner.execute(command)
 
 
@@ -1994,7 +1983,7 @@ async def test_a_rehearsal_that_passes_leaves_the_origin_exactly_as_it_found_it(
     order = _RecordsCredentialOrder(clone.workspace)
     workspace = _RecordsPushedRefs(order)
 
-    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
 
     assert order.sequence == ["renew", "push"]
     assert workspace.refs == [_QUARANTINE_REF]
@@ -2014,7 +2003,7 @@ async def test_the_rehearsal_aims_at_the_ref_the_real_quarantine_would_use(
     """
     workspace = _RecordsPushedRefs(clone.workspace)
 
-    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
     rehearsed = list(workspace.refs)
 
     clone.commit("never-pushed.py", "work\n")
@@ -2027,25 +2016,69 @@ async def test_the_rehearsal_aims_at_the_ref_the_real_quarantine_would_use(
     assert rehearsed == quarantined
 
 
-async def test_the_rehearsal_refuses_the_phase_when_the_push_would_be_rejected(
+async def test_the_rehearsal_refuses_the_phase_when_origin_cannot_be_reached(
     clone: _Clone,
 ) -> None:
-    """#1393's own stderr, at the moment nothing is riding on it.
+    """A REAL push that really fails, at the moment nothing is riding on it.
 
-    The phase must not run. The message must name the phase, the ref, and what
-    the remote actually said - an operator reading it is being told why an
-    execution stopped before it started, and "authentication failed" is the
-    whole of the answer.
+    Origin is pointed somewhere that is not a repository, so git's own dry run
+    fails for the class of reason this rehearsal exists to catch: it got no
+    further than the connection. Staged on the remote rather than by handing
+    back a failed `ExecutionResult`, which is the correction #1396 asked for -
+    a fabricated failure asserts that the guard reads `exit_code`, and assumes
+    the thing that needed establishing, which is that a dry run comes back
+    non-zero when the push is really impossible.
+
+    The phase must not run, and the message must name the phase, the ref, and
+    what git actually said: an operator reading it is being told why an
+    execution stopped before it started.
     """
+    clone.break_the_remote()
+
     with pytest.raises(QuarantinePathUnusableError) as raised:
-        await verify_quarantine_path(
-            _RemoteRejects(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        await rehearse_quarantine_credential(
+            clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
         )
 
     message = str(raised.value)
     assert _PHASE_ID in message
     assert _QUARANTINE_REF in message
-    assert "Invalid username or token" in message
+    assert "does not appear to be a git repository" in message
+
+
+async def test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept(
+    clone: _Clone,
+) -> None:
+    """THE LIMIT OF THE REHEARSAL, demonstrated rather than documented (#1396).
+
+    ``--dry-run`` stops before ``git-receive-pack``'s update phase, so no
+    `pre-receive` hook fires, no ruleset is consulted and no ref is locked. A
+    remote that takes the connection and then declines the ref therefore
+    passes the rehearsal and refuses the real push - which is why the
+    rehearsal is named and documented for the credential and the connection,
+    and why nothing anywhere says the quarantine push has been shown to be
+    acceptable.
+
+    Both halves in one test, against ONE origin, because the claim is exactly
+    that these two disagree. If a future dry run does start catching this, the
+    first assertion fails and this file is where the docstrings get corrected.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
+
+    await rehearse_quarantine_credential(
+        clone.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+    )
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "declined" in message
+    assert "quarantined at" not in message
+    assert _QUARANTINE_REF not in clone.origin_refs()
+    assert not clone.reachable_in_origin(committed, "refs/heads/main")
 
 
 async def test_the_rehearsal_refuses_the_phase_when_the_credential_cannot_be_minted(
@@ -2059,7 +2092,7 @@ async def test_the_rehearsal_refuses_the_phase_when_the_credential_cannot_be_min
     refusing, so it refuses.
     """
     with pytest.raises(QuarantinePathUnusableError) as raised:
-        await verify_quarantine_path(
+        await rehearse_quarantine_credential(
             _CannotRenew(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
         )
 
@@ -2074,7 +2107,7 @@ async def test_a_workspace_with_no_repositories_has_no_quarantine_path_to_rehear
     """
     workspace = _NoRepositories()
 
-    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+    await rehearse_quarantine_credential(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
 
     assert workspace.renewals == 0
 
@@ -2151,26 +2184,6 @@ class _BreaksItsContract:
         return await self._inner.execute(command)
 
 
-class _CannotRenewAndRemoteRejects:
-    """Both #1393 failures at once: no fresh token, and the old one refused.
-
-    The state `exec-db6f687e991a` would have been in if the fix were in place
-    and the mint had ALSO failed. Nothing can be saved here, and the only thing
-    left to get right is what the phase says about it.
-    """
-
-    def __init__(self, inner: GitWorkspace) -> None:
-        self._inner = inner
-
-    async def renew_git_credential(self) -> None:
-        raise CredentialRenewalFailedError("the installation token could not be minted")
-
-    async def execute(self, command: list[str]) -> ExecutionResult:
-        if _operation(command) == "push":
-            return _REJECTED_BY_GITHUB
-        return await self._inner.execute(command)
-
-
 async def test_a_renewal_that_broke_its_own_contract_still_gets_the_push_attempted(
     clone: _Clone,
 ) -> None:
@@ -2198,21 +2211,23 @@ async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
 ) -> None:
     """KEEP THE HONEST REPORTING, which is the one thing worse than losing work.
 
-    Two failures, and the message must be about the second one. A phase whose
-    quarantine push was refused has lost the work, and the report that matters
-    is NOT RECOVERABLE with the remote's own words - not "the credential could
+    Two REAL failures - no fresh token, and an origin whose `pre-receive` hook
+    declines the update - and the message must be about the second one. A
+    phase whose quarantine push was refused has lost the work, and the report
+    that matters is NOT RECOVERABLE with the remote's own words - not "the credential could
     not be renewed", which reads like an aside, and emphatically not the
     "quarantined at" line that would send an operator to fetch a ref that does
     not exist.
     """
     clone.commit("never-pushed.py", "work\n")
+    clone.decline_pushes_server_side()
 
     with pytest.raises(UnpushedWorkQuarantinedError) as raised:
-        await clone.run_gate(workspace=_CannotRenewAndRemoteRejects(clone.workspace))
+        await clone.run_gate(workspace=_CannotRenew(clone.workspace))
 
     message = str(raised.value)
     assert "NOT RECOVERABLE" in message
-    assert "Invalid username or token" in message
+    assert "declined" in message
     assert "quarantined at" not in message
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
@@ -2228,7 +2243,7 @@ async def test_the_rehearsal_refuses_the_phase_when_the_renewal_breaks_its_contr
     the only thing at stake is the provisioning already spent.
     """
     with pytest.raises(QuarantinePathUnusableError) as raised:
-        await verify_quarantine_path(
+        await rehearse_quarantine_credential(
             _BreaksItsContract(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
         )
 
