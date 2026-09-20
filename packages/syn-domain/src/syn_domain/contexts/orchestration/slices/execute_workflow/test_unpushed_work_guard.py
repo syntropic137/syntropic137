@@ -2123,3 +2123,116 @@ async def test_the_quarantine_push_asks_for_a_credential_the_same_way_any_push_d
         assert not [arg for arg in argv if arg.startswith("credential.")], argv
         assert not [arg for arg in argv if "@github.com" in arg], argv
         assert not [arg for arg in argv if arg.startswith("http")], argv
+
+
+class _BreaksItsContract:
+    """The real workspace, except renewal raises what its protocol says it will not.
+
+    The isolation provider's own failures, which is what `renew_git_credential`
+    is made of underneath: injecting a file and running it both reach a real
+    container and both raise whatever docker raises - an API error, a timeout,
+    a handle for a container that has already gone.
+
+    The adapter now normalizes those to `CredentialRenewalFailedError`, and the
+    sibling adapter suite is where that is proved. This class exists because
+    the guard must not DEPEND on it having been proved: an optional improvement
+    to a credential is the last thing that should be able to take the rescue
+    push down with it, and a workspace that breaks the contract is exactly the
+    input that would.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise RuntimeError("no such container: the workspace has already gone")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _CannotRenewAndRemoteRejects:
+    """Both #1393 failures at once: no fresh token, and the old one refused.
+
+    The state `exec-db6f687e991a` would have been in if the fix were in place
+    and the mint had ALSO failed. Nothing can be saved here, and the only thing
+    left to get right is what the phase says about it.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise CredentialRenewalFailedError("the installation token could not be minted")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            return _REJECTED_BY_GITHUB
+        return await self._inner.execute(command)
+
+
+async def test_a_renewal_that_broke_its_own_contract_still_gets_the_push_attempted(
+    clone: _Clone,
+) -> None:
+    """The renewal is an improvement on the old token for EVERY way it can fail.
+
+    Catching only the documented exception made the rescue conditional on every
+    workspace keeping its half of a protocol, and the cost of one that does not
+    is the whole of #1393 twice over: the push is never attempted, so the work
+    dies with the container AND the honest report the push's own result would
+    have produced is never written. Here the old token still works, and the
+    commit lands.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_BreaksItsContract(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+    assert "quarantined at" in str(raised.value)
+
+
+async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
+    clone: _Clone,
+) -> None:
+    """KEEP THE HONEST REPORTING, which is the one thing worse than losing work.
+
+    Two failures, and the message must be about the second one. A phase whose
+    quarantine push was refused has lost the work, and the report that matters
+    is NOT RECOVERABLE with the remote's own words - not "the credential could
+    not be renewed", which reads like an aside, and emphatically not the
+    "quarantined at" line that would send an operator to fetch a ref that does
+    not exist.
+    """
+    clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_CannotRenewAndRemoteRejects(clone.workspace))
+
+    message = str(raised.value)
+    assert "NOT RECOVERABLE" in message
+    assert "Invalid username or token" in message
+    assert "quarantined at" not in message
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_rehearsal_refuses_the_phase_when_the_renewal_breaks_its_contract(
+    clone: _Clone,
+) -> None:
+    """The same input as the teardown test above, and the opposite verdict.
+
+    One contract, two policies, and neither of them conditional on the type
+    raised. A workspace that cannot be given a credential now will not be able
+    to give one back an hour from now either - so it is refused, by name, while
+    the only thing at stake is the provisioning already spent.
+    """
+    with pytest.raises(QuarantinePathUnusableError) as raised:
+        await verify_quarantine_path(
+            _BreaksItsContract(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    message = str(raised.value)
+    assert _PHASE_ID in message
+    assert "could not be renewed" in message
+    assert "no such container" in message

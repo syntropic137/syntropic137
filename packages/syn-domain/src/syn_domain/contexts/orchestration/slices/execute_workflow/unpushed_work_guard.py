@@ -181,7 +181,15 @@ async def verify_quarantine_path(
         return
     try:
         await workspace.renew_git_credential()
-    except CredentialRenewalFailedError as unrenewable:
+    except Exception as unrenewable:
+        # ANY exception, for the same reason the teardown caller swallows any:
+        # the protocol names one type, and a policy that only applied to that
+        # one would be a policy conditional on every workspace keeping its
+        # half of it. Here the conclusion is identical whatever was raised -
+        # this workspace cannot be given a credential, so an hour from now it
+        # will not be able to hand back the work it was given. What differs is
+        # only that the phase now fails by NAME rather than by whatever the
+        # isolation provider happened to call the problem.
         raise QuarantinePathUnusableError(
             phase_id=phase_id,
             detail=(
