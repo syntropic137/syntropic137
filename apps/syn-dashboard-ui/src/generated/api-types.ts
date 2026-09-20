@@ -240,6 +240,8 @@ export interface paths {
         /**
          * Execute Workflow Endpoint
          * @description Start workflow execution in background.
+         *
+         *     Returns 409 while maintenance mode is active; no execution is started.
          */
         post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
         delete?: never;
@@ -1750,6 +1752,49 @@ export interface paths {
          */
         get: operations["get_contribution_heatmap_endpoint_insights_contribution_heatmap_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new executions are being admitted.
+         *
+         *     Read through to the durable store, never from process memory, so this
+         *     answers for the system rather than for this container.
+         */
+        get: operations["get_maintenance_mode_maintenance_get"];
+        /**
+         * Set Maintenance Mode
+         * @description Pause or resume execution admission.
+         *
+         *     Returns only once the state is durably stored AND every admission already
+         *     part-way through deciding has finished deciding. That ordering is the whole
+         *     point: a caller holding this response knows not only that the flag is set
+         *     but that nothing is still on its way through the old answer, so there is no
+         *     window on the setting side either.
+         *
+         *     Set through the gate rather than the port, because the port can only store
+         *     the flag - it cannot hold the door while it does so.
+         *
+         *     Clearing is only done when the work the deploy paused has been woken, so a
+         *     failed announcement answers 503 and not 200 (#1387). Admission IS open by
+         *     then - the 503 body says so - but the triggers parked during the deploy are
+         *     still asleep and nothing else will re-offer them, so reporting success here
+         *     would close the deploy over work that never runs. Repeating the clear
+         *     re-announces, which is why this is a retryable status and not a 500.
+         */
+        put: operations["set_maintenance_mode_maintenance_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3290,6 +3335,39 @@ export interface components {
             default?: string | null;
         };
         /**
+         * MaintenanceModeResponse
+         * @description Whether new workflow executions are being admitted (#1387).
+         *
+         *     ``active`` is the gate: while it is true every admission path refuses and
+         *     the deploy script may swap containers knowing nothing new can start.
+         *     Executions already running are unaffected.
+         */
+        MaintenanceModeResponse: {
+            /**
+             * Active
+             * @description True when new execution admission is refused.
+             * @default false
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Operator-supplied reason for the pause.
+             * @default
+             */
+            reason: string;
+            /**
+             * Since
+             * @description When admission was paused. Null while admission is open.
+             */
+            since?: string | null;
+            /**
+             * Actor
+             * @description Who set the current state.
+             * @default
+             */
+            actor: string;
+        };
+        /**
          * MetricsResponse
          * @description Aggregated metrics response.
          */
@@ -4702,6 +4780,32 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /**
+         * SetMaintenanceModeRequest
+         * @description Set or clear maintenance mode (#1387).
+         *
+         *     The response is not sent until the state is durably persisted, so a caller
+         *     that has seen a 200 knows no further execution can be admitted.
+         */
+        SetMaintenanceModeRequest: {
+            /**
+             * Active
+             * @description True to refuse new executions, false to resume admitting.
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Why admission is paused; echoed back to every refused caller.
+             * @default
+             */
+            reason: string;
+            /**
+             * Actor
+             * @description Who is pausing. Free text - the deploy script sends its own name.
+             * @default
+             */
+            actor: string;
         };
         /**
          * SkillDetailResponse
@@ -8968,6 +9072,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContributionHeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maintenance_mode_maintenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+        };
+    };
+    set_maintenance_mode_maintenance_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
                 };
             };
             /** @description Validation Error */
