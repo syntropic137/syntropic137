@@ -196,7 +196,8 @@ class TestTheTriggerPathRefusesBeforeItAcknowledges:
             async def validate_stored_declarations(self, _wid: str) -> None:
                 raise UnsupportedExecutionTypeError("parallel", phase_id="plan")
 
-            async def handle(self, cmd: object) -> None:
+            async def handle(self, cmd: object, *, admitted: object = None) -> None:
+                del admitted
                 handled.append(cmd)
 
         dispatcher = BackgroundWorkflowDispatcher(_Handler())  # type: ignore[arg-type]
@@ -220,7 +221,8 @@ class TestTheTriggerPathRefusesBeforeItAcknowledges:
             async def validate_stored_declarations(self, _wid: str) -> None:
                 return None
 
-            async def handle(self, cmd: object) -> None:
+            async def handle(self, cmd: object, *, admitted: object = None) -> None:
+                del admitted
                 handled.append(cmd)
 
         dispatcher = BackgroundWorkflowDispatcher(_Handler())  # type: ignore[arg-type]
