@@ -38,7 +38,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     QuarantinedWork,
+    QuarantinePathUnusableError,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
@@ -50,6 +52,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
     _read_only_mount,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
+    verify_quarantine_path,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -912,6 +915,7 @@ class _PhaseRun:
             ExecutionTodoProjection,
         )
 
+        self.workspace = workspace
         self.aggregate = MagicMock(workflow_id="wf-1")
         # What ExecutionJournal reads off an aggregate before every save.
         self.aggregate.get_uncommitted_events.return_value = []
@@ -974,6 +978,52 @@ class _PhaseRun:
             self.aggregate,
             self.phase_results,
             self.completed_phase_ids,
+        )
+
+    async def start(self) -> None:
+        """START the phase, the hop that hands its agent an hour of workspace.
+
+        Provisioning itself is stubbed - building a container is not what any
+        assertion here is about - but the RESULT carries this run's workspace,
+        so everything `start_phase` then does with it is done with the double
+        the test chose. What is under test is the order of the remaining steps
+        in this frame (#1393).
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            ProvisionResult,
+        )
+
+        self.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
+        # `_workspaces` builds a new seam per access (it reads collaborators
+        # that are replaceable on the processor), so the stub has to go on the
+        # instance this call actually uses.
+        workspaces = self.processor._workspaces
+        workspaces.provision = AsyncMock(  # type: ignore[method-assign]
+            return_value=ProvisionResult(
+                workspace=self.workspace,  # type: ignore[arg-type]
+                workspace_cm=AsyncMock(),
+                agent_env={},
+                claude_cmd=[],
+                command=MagicMock(),
+            )
+        )
+        await workspaces.start_phase(
+            TodoItem(
+                execution_id=_EXECUTION_ID,
+                action=TodoAction.PROVISION_WORKSPACE,
+                phase_id=_PHASE_ID,
+                session_id="sess-1",
+            ),
+            ExecutablePhase(
+                phase_id=_PHASE_ID,
+                name="Make the change",
+                order=1,
+                delivers_repo_changes=True,
+            ),
+            self.aggregate,
+            None,
+            self.completed_phase_ids,
+            PhaseOutputCache(),
         )
 
     async def dispatch_complete(self, phase_id: str, phases: list[ExecutablePhase]) -> None:
@@ -1751,3 +1801,325 @@ def test_the_mount_table_is_read_for_the_path_that_governs(
 ) -> None:
     """One repository path, nine tables, and the reading that decides the gate."""
     assert _read_only_mount(table, "/workspace/repos/app") is expected, why
+
+
+# --------------------------------------------------------------------------
+# #1393: WHICH credential the quarantine push spends, and WHEN it was minted.
+#
+# The ordinary push and the quarantine push were never reading different
+# credential stores - they read the same `~/.git-credentials`, in the same
+# container, as the same user. They diverge in TIME: the installation token
+# GitHub mints lives one hour and cannot be refreshed, and a phase's
+# quarantine push happens by construction at teardown, after a budget that is
+# additive to setup. `exec-db6f687e991a` pushed successfully minutes before the
+# push that was refused.
+#
+# So the fix is a fresh credential immediately before the push that matters,
+# and a rehearsal of that push at phase start. Both halves are below, and both
+# are written as questions about ORDER and about the ORIGIN's refs, because
+# "a renewal happened" and "a renewal happened in time to be spent" are
+# different claims and only the second one is the bug.
+# --------------------------------------------------------------------------
+
+_REJECTED_BY_GITHUB = ExecutionResult(
+    exit_code=128,
+    success=False,
+    duration_ms=0.0,
+    stdout="",
+    stderr=(
+        "remote: Invalid username or token. Password authentication is not supported "
+        "for Git operations.\n"
+        "fatal: Authentication failed for 'https://github.com/syntropic137/syntropic137/'"
+    ),
+)
+
+
+class _RecordsCredentialOrder:
+    """The real workspace, with renewals and pushes written into ONE sequence.
+
+    Two counters could not say what this file needs to say. A renewal that
+    happened after the push is a renewal that changed nothing, and it would
+    satisfy any assertion that merely counted calls - so the thing recorded
+    here is the order, in the order it happened.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.sequence: list[str] = []
+
+    async def renew_git_credential(self) -> None:
+        self.sequence.append("renew")
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.sequence.append("push")
+        return await self._inner.execute(command)
+
+
+class _RecordsPushedRefs:
+    """The real workspace, remembering every ref a push was aimed at.
+
+    Reads the ref off the argv rather than out of the origin afterwards,
+    because the rehearsal deliberately leaves nothing in the origin to read -
+    and "where did the rehearsal aim" is exactly the question a rehearsal
+    against the wrong ref would answer wrongly while passing everything else.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.refs: list[str] = []
+        self.pushes: list[list[str]] = []
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            self.pushes.append(_unbounded(command))
+            # `<commit>:<ref>`, the last argument of every push this module makes.
+            self.refs.append(_unbounded(command)[-1].split(":", 1)[-1])
+        return await self._inner.execute(command)
+
+
+class _CannotRenew:
+    """The real workspace, except a fresh credential cannot be obtained.
+
+    The adapter raises this when minting fails - a GitHub App outage, a
+    revoked installation, a setup phase that never recorded what to mint for.
+    It says nothing about whether the credential already in the container
+    still works, which is why its two callers are allowed to disagree about
+    what to do next.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        raise CredentialRenewalFailedError("the installation token could not be minted")
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        return await self._inner.execute(command)
+
+
+class _RemoteRejects:
+    """The real workspace, with a REACHABLE remote that refuses the push.
+
+    Not `_BreaksOn`, which answers like a dead container: the container in
+    #1393 was alive and every other command in it worked. What failed was one
+    push, refused by GitHub with the stderr reproduced above - so that is the
+    only thing substituted here, and the phase's own git does the rest.
+    """
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) == "push":
+            return _REJECTED_BY_GITHUB
+        return await self._inner.execute(command)
+
+
+async def test_the_quarantine_renews_the_credential_before_it_spends_it(
+    clone: _Clone,
+) -> None:
+    """The fix, stated as the only thing that distinguishes it from the bug.
+
+    A renewal anywhere else in the walk is not this fix. The teardown push is
+    the last thing a dying phase does, and the token it would otherwise use was
+    minted before the phase started - so the renewal has to sit between the
+    commit and the push, and the assertion is on that position.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    workspace = _RecordsCredentialOrder(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.sequence == ["renew", "push"]
+
+
+async def test_a_clean_phase_is_not_charged_for_a_credential_it_never_spends(
+    clone: _Clone,
+) -> None:
+    """Nothing to save means nothing to push, and so nothing to mint.
+
+    Renewing at the top of the walk would have been simpler and would pass the
+    test above. It would also mint a token on every phase in the system, almost
+    all of which push nothing here - a cost paid forever for a path that
+    rarely runs.
+    """
+    workspace = _RecordsCredentialOrder(clone.workspace)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.sequence == []
+
+
+async def test_a_credential_that_could_not_be_renewed_still_gets_the_push_attempted(
+    clone: _Clone,
+) -> None:
+    """The renewal is an improvement on the old token, never a gate in front of it.
+
+    At teardown the commit already exists and the phase has already failed. A
+    renewal that could not happen is a reason the push MIGHT be refused, not a
+    reason to skip it: the token in the container may have minutes left, and
+    spending it is the only way to find out. Here it does have them, and the
+    work lands - which a fix that raised on the renewal would have lost.
+    """
+    committed = clone.commit("never-pushed.py", "work\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(workspace=_CannotRenew(clone.workspace))
+
+    assert _QUARANTINE_REF in clone.origin_refs()
+    assert clone.reachable_in_origin(committed, _QUARANTINE_REF)
+    assert "quarantined at" in str(raised.value)
+
+
+async def test_a_rehearsal_that_passes_leaves_the_origin_exactly_as_it_found_it(
+    clone: _Clone,
+) -> None:
+    """The rehearsal is a real push to the real ref that creates nothing.
+
+    Both halves are the test. A rehearsal that skipped the push would leave
+    the origin untouched too, so the sequence is asserted as well: the
+    credential was renewed, a push really was made, and afterwards the
+    quarantine namespace is still empty.
+    """
+    before = clone.origin_refs()
+    order = _RecordsCredentialOrder(clone.workspace)
+    workspace = _RecordsPushedRefs(order)
+
+    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert order.sequence == ["renew", "push"]
+    assert workspace.refs == [_QUARANTINE_REF]
+    assert clone.origin_refs() == before
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_rehearsal_aims_at_the_ref_the_real_quarantine_would_use(
+    clone: _Clone,
+) -> None:
+    """Anti-drift, and the one failure a rehearsal can have that is worse than none.
+
+    A rehearsal against a ref the quarantine never uses proves something true
+    about nothing, and reports a working net that was never tested. So both
+    pushes are made in one test, against one workspace, and the refs they
+    named are compared to each other rather than to a literal.
+    """
+    workspace = _RecordsPushedRefs(clone.workspace)
+
+    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+    rehearsed = list(workspace.refs)
+
+    clone.commit("never-pushed.py", "work\n")
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+    quarantined = workspace.refs[len(rehearsed) :]
+
+    assert rehearsed, "the rehearsal pushed nothing, so it compared nothing"
+    assert quarantined, "the quarantine pushed nothing, so it compared nothing"
+    assert rehearsed == quarantined
+
+
+async def test_the_rehearsal_refuses_the_phase_when_the_push_would_be_rejected(
+    clone: _Clone,
+) -> None:
+    """#1393's own stderr, at the moment nothing is riding on it.
+
+    The phase must not run. The message must name the phase, the ref, and what
+    the remote actually said - an operator reading it is being told why an
+    execution stopped before it started, and "authentication failed" is the
+    whole of the answer.
+    """
+    with pytest.raises(QuarantinePathUnusableError) as raised:
+        await verify_quarantine_path(
+            _RemoteRejects(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    message = str(raised.value)
+    assert _PHASE_ID in message
+    assert _QUARANTINE_REF in message
+    assert "Invalid username or token" in message
+
+
+async def test_the_rehearsal_refuses_the_phase_when_the_credential_cannot_be_minted(
+    clone: _Clone,
+) -> None:
+    """The other way the path is unusable, and the one a push cannot report.
+
+    A workspace that cannot be given a credential at all will not be able to
+    quarantine anything an hour from now, whatever the token in it does in the
+    meantime. Unlike the teardown caller, this one has nothing to lose by
+    refusing, so it refuses.
+    """
+    with pytest.raises(QuarantinePathUnusableError) as raised:
+        await verify_quarantine_path(
+            _CannotRenew(clone.workspace), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        )
+
+    assert "could not be renewed" in str(raised.value)
+
+
+async def test_a_workspace_with_no_repositories_has_no_quarantine_path_to_rehearse() -> None:
+    """The true negative: no repositories means no push to make and none to fail.
+
+    `open_pr` runs with credentials and no checkout (#1187). Refusing it here
+    would take a working phase off the board to protect work it cannot produce.
+    """
+    workspace = _NoRepositories()
+
+    await verify_quarantine_path(workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID)
+
+    assert workspace.renewals == 0
+
+
+async def test_a_phase_whose_quarantine_path_is_unusable_is_never_launched(
+    clone: _Clone,
+) -> None:
+    """The wiring, without which every test above describes unreachable code.
+
+    THE HOP, not the function: `start_phase` provisions the workspace and then
+    tells the aggregate provisioning completed, which is what lets the agent
+    run. The rehearsal sits between those two, so a phase that cannot hand
+    work back never gets given an hour of agent time to produce any. Asserted
+    on `provision_workspace_completed` rather than on the raise, because the
+    raise alone would also be satisfied by a check that ran too late.
+    """
+    run = _PhaseRun(_CannotRenew(clone.workspace))
+
+    with pytest.raises(QuarantinePathUnusableError):
+        await run.start()
+
+    run.aggregate.provision_workspace_completed.assert_not_called()
+
+
+async def test_the_quarantine_push_asks_for_a_credential_the_same_way_any_push_does(
+    clone: _Clone,
+) -> None:
+    """The other half of "the same credential", and the half a test can pin.
+
+    The adapter suite proves what the container's store RESOLVES after a
+    renewal. This proves the quarantine push is asking it the same question
+    the agent's own `git push origin` asks: a bare remote name, no credential
+    override, no URL carrying a token of its own. A push that supplied its own
+    credential would be a second credential path - the thing #1393 was
+    reported as, and the thing that would let the two drift apart for real.
+    """
+    clone.commit("never-pushed.py", "work\n")
+    workspace = _RecordsPushedRefs(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.pushes, "nothing pushed, so nothing was inspected"
+    for argv in workspace.pushes:
+        assert "origin" in argv, argv
+        assert not [arg for arg in argv if arg.startswith("credential.")], argv
+        assert not [arg for arg in argv if "@github.com" in arg], argv
+        assert not [arg for arg in argv if arg.startswith("http")], argv
