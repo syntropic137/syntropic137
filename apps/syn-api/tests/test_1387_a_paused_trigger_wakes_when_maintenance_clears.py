@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
@@ -34,6 +34,7 @@ from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_adapters.maintenance import EventStoreAdmissionAnnouncer, InMemoryMaintenanceAdapter
+from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
 from syn_api._wiring import BackgroundWorkflowDispatcher
 from syn_domain.contexts._shared import (
     AdmissionAnnouncementFailedError,
@@ -47,11 +48,18 @@ from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection im
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from event_sourcing import ProjectionStore
 
 pytestmark = pytest.mark.unit
 
 _PATIENCE = 5.0
+#: Loop turns the racy store spends inside its head snapshot. Any number large
+#: enough to contain the announcement's own turns will do; what it buys is that
+#: an announcement made while `start()` is in flight lands INSIDE the snapshot
+#: window every run, rather than sometimes.
+_HEAD_SNAPSHOT_TURNS = 50
 _EXECUTION_ID = "exec-paused-by-the-deploy"
 _TRIGGER_ID = "trg-ci-self-healing"
 
@@ -157,9 +165,14 @@ class _Api:
             checkpoint_store=self.checkpoints,
             projections=[self.projection],
         )
-        # Past the boundary: this process has caught up, so ProcessManagers
-        # are allowed to run their processor side. Exactly the state a real
-        # coordinator reaches after replay.
+        # A process that is already live: caught up, so ProcessManagers are
+        # allowed to run their processor side. Set by hand because these tests
+        # are about what an announcement DOES once it is observed live, and a
+        # real coordinator reaches this state after replay anyway.
+        #
+        # It is deliberately not how a real process gets here, and that gap is
+        # its own bug: `TestTheRestartWakeRacesTheCoordinator` drives the real
+        # startup path, where reaching this state is exactly what is in doubt.
         self.coordinator.live_boundary_nonce = 0
         self.coordinator.is_catching_up = False
         self.store.subscribes(self.coordinator)
@@ -261,6 +274,10 @@ class TestStartupItself:
     the re-announcement belongs; a helper nobody calls would leave every
     restart silent and this whole mechanism resting on the process that cleared
     maintenance surviving.
+
+    Only the wiring - announced, or quiet - which is why a stub coordinator is
+    enough here. Whether the announcement is heard LIVE is a different question
+    and a different class: `TestTheRestartWakeRacesTheCoordinator`.
     """
 
     async def _run_init_subscriptions(
@@ -445,3 +462,220 @@ class TestAClearThatCouldNotAnnounce:
             await lifecycle._announce_admission_if_open()
 
         assert api.store.append_attempts == 2
+
+
+class _RacyEventStore:
+    """A store whose head snapshot takes turns to come back, as a real one does.
+
+    The whole of this race is "what was in the store when the coordinator read
+    the head", so a test has to be able to put something there DURING that
+    read. An instant fake cannot: it returns before the announcement can be
+    made, which is the fixed behaviour handed to the test for free.
+
+    The turns are not timing. The announcement either lands inside the snapshot
+    window - and is then backlog, at or below the boundary - or `start()` held
+    it until after the subscription was open. There is nothing in between, so
+    the test is deterministic in both directions.
+    """
+
+    def __init__(self) -> None:
+        self.appended: list[EventEnvelope[DomainEvent]] = []
+        self._live: asyncio.Queue[EventEnvelope[DomainEvent]] = asyncio.Queue()
+        self._next_nonce = 100
+
+    async def append_events(
+        self,
+        stream_name: str,
+        events: list[EventEnvelope[DomainEvent]],
+        expected_version: int | None = None,
+    ) -> None:
+        del stream_name, expected_version
+        for envelope in events:
+            self._next_nonce += 1
+            stamped = EventEnvelope(
+                event=envelope.event,
+                metadata=envelope.metadata.model_copy(update={"global_nonce": self._next_nonce}),
+            )
+            self.appended.append(stamped)
+            self._live.put_nowait(stamped)
+
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        del from_global_nonce, max_count
+        for _ in range(_HEAD_SNAPSHOT_TURNS):
+            await asyncio.sleep(0)
+        if not forward:
+            return (self.appended[-1:], True, 0)
+        return (list(self.appended), True, self._next_nonce + 1)
+
+    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        del from_global_nonce
+        return self._stream()
+
+    async def _stream(self) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        while True:
+            yield await self._live.get()
+
+
+class _RestartedApi(NamedTuple):
+    """The pieces of one restarted process a test needs to look at."""
+
+    service: CoordinatorSubscriptionService
+    store: _RacyEventStore
+    checkpoints: MemoryCheckpointStore
+    dispatcher: BackgroundWorkflowDispatcher
+    handler: _RecordingHandler
+    projection_store: ProjectionStore
+
+
+class TestTheRestartWakeRacesTheCoordinator:
+    """A started coordinator is not a live one, and startup announces into that gap.
+
+    `_init_subscriptions` calls `coordinator.start()` and announces as soon as
+    it returns. If "started" means only that a task object exists, the
+    announcement can be appended before the coordinator has snapshotted the
+    store head - and then the announcement IS the head. It arrives at the
+    boundary rather than above it, so the coordinator stays in catch-up, never
+    runs the processor side, and the paused record the restart was supposed to
+    release stays paused with nothing left to prompt it.
+
+    The failure is silent in every place an operator would look: the deploy
+    cleared cleanly, the API is up, the announcement is in the event store and
+    was delivered to the projection. Only the work never moves.
+
+    So these drive the PRODUCTION startup path over a real
+    `CoordinatorSubscriptionService`, a real `SubscriptionCoordinator` and the
+    real projection, and let them decide. Nothing here sets `is_catching_up`,
+    and nothing here calls `process_pending()`.
+    """
+
+    async def _restart_through_init_subscriptions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        port: InMemoryMaintenanceAdapter,
+        projection_store: ProjectionStore,
+    ) -> _RestartedApi:
+        """Boot one process the way `lifespan` does, and announce as it does."""
+        from syn_api.services import lifecycle
+
+        store = _RacyEventStore()
+        gate = AdmissionGate(port, EventStoreAdmissionAnnouncer(store))  # type: ignore[arg-type]
+        handler = _RecordingHandler()
+        dispatcher = BackgroundWorkflowDispatcher(
+            handler,  # type: ignore[arg-type]
+            maintenance=gate,
+        )
+        checkpoints = MemoryCheckpointStore()
+        service = CoordinatorSubscriptionService(
+            event_store=store,  # type: ignore[arg-type]
+            projections=[
+                WorkflowDispatchProjection(execution_service=dispatcher, store=projection_store)
+            ],
+            checkpoint_store=checkpoints,
+        )
+        monkeypatch.setattr(lifecycle, "get_admission_gate", lambda: gate)
+        monkeypatch.setattr(lifecycle, "get_realtime", lambda: None)
+        monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kwargs: service)
+        state = lifecycle.LifecycleState()
+        state.workflow_dispatcher = dispatcher  # type: ignore[assignment]
+
+        await lifecycle._init_subscriptions(state)
+        assert store.appended, "startup announced nothing at all; wrong bug"
+        return _RestartedApi(
+            service=service,
+            store=store,
+            checkpoints=checkpoints,
+            dispatcher=dispatcher,
+            handler=handler,
+            projection_store=projection_store,
+        )
+
+    async def _once_the_announcement_was_handled(self, api: _RestartedApi) -> None:
+        """Wait for the coordinator to have SEEN the announcement.
+
+        It gets there either way - live or as backlog - so every assertion
+        after this one is about what the coordinator decided, never about
+        whether it had got round to it yet. Without this wait the broken
+        behaviour is indistinguishable from the not-yet behaviour, and a test
+        that asserts too early passes for the wrong reason.
+        """
+        announced_at = api.store.appended[-1].metadata.global_nonce or 0
+        async with asyncio.timeout(_PATIENCE):
+            while True:
+                checkpoint = await api.checkpoints.get_checkpoint(WORKFLOW_DISPATCH)
+                if checkpoint is not None and checkpoint.global_position >= announced_at:
+                    return
+                await asyncio.sleep(0)
+
+    async def test_the_restarted_api_dispatches_the_paused_trigger(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        port = InMemoryMaintenanceAdapter()
+        projection_store = MemoryProjectionStore()
+
+        died = _Api(port=port, projection_store=projection_store)
+        await _a_deploy_pauses_a_trigger(died)
+        # Cleared through the port: the flag reached the durable store and the
+        # process was gone before it could announce. The restart is the only
+        # wake this record will ever get.
+        await port.set_mode(active=False, reason="", actor="deploy")
+
+        api = await self._restart_through_init_subscriptions(
+            monkeypatch, port=port, projection_store=projection_store
+        )
+        try:
+            await self._once_the_announcement_was_handled(api)
+            async with asyncio.timeout(_PATIENCE):
+                while api.dispatcher._tasks:
+                    await asyncio.gather(*api.dispatcher._tasks, return_exceptions=True)
+                    await asyncio.sleep(0)
+
+            found = await projection_store.get(WORKFLOW_DISPATCH, _EXECUTION_ID)
+            assert found is not None
+            assert str(found.get("status", "")) == "dispatched", (
+                "the restart announced that admission was open and the "
+                "coordinator read its own announcement as history, so the "
+                "processor side never ran and the trigger the deploy paused is "
+                "still parked (#1387, finding B)"
+            )
+            assert api.handler.executions == [_EXECUTION_ID]
+        finally:
+            await api.service.stop()
+
+    async def test_the_announcement_is_above_the_live_boundary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same guarantee, stated as the property rather than its effect.
+
+        Worth having separately because the effect above can be restored by
+        luck - an extra event, a different order - while the announcement is
+        still being read as history. This one names what `start()` now owes its
+        caller, so giving it up has to be deliberate.
+        """
+        api = await self._restart_through_init_subscriptions(
+            monkeypatch,
+            port=InMemoryMaintenanceAdapter(),
+            projection_store=MemoryProjectionStore(),
+        )
+        try:
+            await self._once_the_announcement_was_handled(api)
+
+            coordinator = api.service._coordinator
+            assert coordinator is not None
+            announced_at = api.store.appended[-1].metadata.global_nonce or 0
+            assert coordinator.live_boundary_nonce < announced_at, (
+                "the coordinator's live boundary includes the startup "
+                "announcement, so the announcement is history to it and the "
+                "processor side will not run for it (#1387, finding B)"
+            )
+            assert coordinator.is_catching_up is False, (
+                "the announcement was handled and the coordinator is still in "
+                "catch-up, so no ProcessManager may run its processor side"
+            )
+        finally:
+            await api.service.stop()

@@ -690,6 +690,10 @@ async def _init_subscriptions(state: LifecycleState) -> None:
         realtime_projection=realtime,
         execution_service=workflow_dispatcher,
     )
+    # Returns only once the coordinator has fixed its live boundary and
+    # subscribed, so the announcement below cannot land underneath it and be
+    # read as backlog (#1387). The wait lives in the service because "started"
+    # is its word to keep, not something each caller should have to arrange.
     await coordinator.start()
     # Only assign to state after coordinator starts successfully,
     # so a partial failure doesn't orphan the dispatcher.
@@ -709,9 +713,12 @@ async def _announce_admission_if_open() -> None:
     between the clear and the drain leaves `paused` records and no second
     prompt, because a flag that is already false never becomes false again.
 
-    So every start says it again. The announcement is durable, idempotent and
-    past the coordinator's live boundary, which is also what takes this process
-    out of catch-up so the ProcessManager's processor side may run at all.
+    So every start says it again. The announcement is durable and idempotent,
+    and lands strictly after the coordinator's live boundary - which is what
+    takes this process out of catch-up, and so what decides whether the
+    ProcessManager's processor side may run at all. Appending it first would
+    make it backlog: delivered, recorded, and never acted on. That ordering is
+    guaranteed by `start()` above, not by the order of these two lines.
 
     Only when admission is actually open: announcing during a deploy would be
     false, and the dispatches would be refused and re-paused anyway.

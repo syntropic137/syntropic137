@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import asyncpg
 from agentic_logging import get_logger
@@ -37,7 +37,9 @@ from syn_adapters.subscriptions.realtime_adapter import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from event_sourcing import EventStoreClient
+    from collections.abc import AsyncIterator
+
+    from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
@@ -48,6 +50,54 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+#: How long :meth:`CoordinatorSubscriptionService.start` waits for the
+#: coordinator to open its subscription before returning anyway. Only reached
+#: when the event store is unreachable, and then the coordinator's own backoff
+#: is already retrying and whatever the caller meant to do next would have
+#: failed too. The cap is here so a store outage cannot hold up process start,
+#: not because the wait is optional.
+_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS: Final[float] = 30.0
+
+
+class _SignalsWhenSubscribed:
+    """The store the coordinator reads, plus the one moment it does not report.
+
+    :class:`SubscriptionCoordinator` snapshots the store head and only then
+    subscribes, and it treats every event at or below that snapshot as
+    backlog - for which it deliberately does not run a ProcessManager's
+    processor side. So the call to ``subscribe()`` is exactly the point after
+    which an append is guaranteed to arrive live, and nothing else about the
+    coordinator is observable from out here.
+
+    Wrapping the store is how that moment is observed, because the coordinator
+    publishes no signal of its own and this repository cannot change it. The
+    order it depends on - head snapshot, then subscribe - is the coordinator's
+    documented catch-up boundary rather than an incidental detail, and
+    ``TestTheRestartWakeRacesTheCoordinator`` drives the real coordinator over
+    a real append so a change to that order fails there rather than silently
+    reopening the race.
+    """
+
+    def __init__(self, inner: EventStoreClient, subscribed: asyncio.Event) -> None:
+        self._inner = inner
+        self._subscribed = subscribed
+
+    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        self._subscribed.set()
+        return self._inner.subscribe(from_global_nonce=from_global_nonce)
+
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[EventEnvelope[DomainEvent]], bool, int]:
+        return await self._inner.read_all(
+            from_global_nonce=from_global_nonce,
+            max_count=max_count,
+            forward=forward,
+        )
 
 
 class CoordinatorSubscriptionService:
@@ -94,6 +144,8 @@ class CoordinatorSubscriptionService:
         self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
+        #: Set once the coordinator has fixed its live boundary and subscribed.
+        self._subscribed = asyncio.Event()
 
     @property
     def is_running(self) -> bool:
@@ -213,8 +265,9 @@ class CoordinatorSubscriptionService:
 
         # Create coordinator
         self._coordinator_started_at = datetime.now(UTC)
+        self._subscribed = asyncio.Event()
         self._coordinator = SubscriptionCoordinator(
-            event_store=self._event_store,
+            event_store=_SignalsWhenSubscribed(self._event_store, self._subscribed),
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
         )
@@ -225,11 +278,39 @@ class CoordinatorSubscriptionService:
             self._run_coordinator(),
             name="coordinator-subscription",
         )
+        await self._wait_until_subscribed()
 
         logger.info(
             "Coordinator subscription service started",
             extra={"projection_count": len(all_projections)},
         )
+
+    async def _wait_until_subscribed(self) -> None:
+        """Do not return from ``start()`` until an append would arrive live.
+
+        Creating the coordinator's task is not the same as having started it.
+        Until that task has snapshotted the store head and subscribed, an
+        append races the snapshot and loses: it lands at or below the boundary,
+        is read as backlog, and the coordinator will not run a ProcessManager's
+        processor side for backlog. The event is delivered and then ignored.
+
+        That difference is invisible to the caller and decides whether the work
+        the append was meant to release ever moves. The restart wake for
+        maintenance mode announces immediately after ``start()`` returns
+        (#1387), so a trigger a deploy paused could still be stranded by the
+        restart that was supposed to release it. Rather than have every caller
+        learn what a live boundary is, ``start()`` means started.
+        """
+        try:
+            async with asyncio.timeout(_SUBSCRIPTION_OPEN_TIMEOUT_SECONDS):
+                await self._subscribed.wait()
+        except TimeoutError:
+            logger.warning(
+                "Coordinator did not open its subscription within %.0fs; continuing, "
+                "but an event appended now may be read as historical and a "
+                "ProcessManager woken by it will not run until the next live event",
+                _SUBSCRIPTION_OPEN_TIMEOUT_SECONDS,
+            )
 
     async def _run_coordinator(self) -> None:
         """Run the coordinator with exponential-backoff reconnect on error."""
