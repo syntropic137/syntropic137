@@ -8,6 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from apss_session_capture.inventory import CaptureReceipt
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 if TYPE_CHECKING:
@@ -56,12 +57,8 @@ class CaptureDrain(BaseModel):
     remaining: int = Field(ge=0)
 
 
-class ExporterCaptureReceipt(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-    storage_key: str = Field(pattern=r"^qts1:[a-f0-9]{64}$")
-    content_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
-    stored_content_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
-    duplicate: bool
+# Preserve the adapter's public name while sharing the APSS wire contract.
+ExporterCaptureReceipt = CaptureReceipt
 
 
 class CaptureReceiptLookup(BaseModel):

@@ -2,6 +2,30 @@
 
 Checkpoint: 2026-09-22. Incomplete. Do not close issue 1398 or treat this as release-ready.
 
+## Follow-up after draft PR creation
+
+Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
+preflight failed on unpublished `apss-session-capture==2.1.0`; the local hook
+was bypassed to publish the explicitly incomplete draft. Upstream dependencies
+remain unpublished and are not included through updated gitlinks.
+
+The subsequent local follow-up moves Python capture receipts into the APSS
+contract and replaces Syntropic137's duplicate model with that shared type.
+Rust and Python now consume common receipt acceptance/rejection fixtures,
+including wrong namespaces, original hashes, malformed stored hashes, duplicate
+acknowledgements and invalid field types. Python contract tests (4), Rust
+inventory tests (6), and focused Syntropic137 adapter tests (22) passed.
+APSS repository validation reported zero errors and warnings. This does not
+establish full integration or published dependency availability.
+
+The APSS contract is now committed as `d8924a557cfb114534f4cdb69ed1535f0eec4c8f`
+in [upstream draft PR #139](https://github.com/AgentParadise/agent-paradise-standards-system/pull/139).
+It adds isolated Python sdist/wheel validation to `just check` and a Python
+3.11/3.14 CI matrix. Full local APSS `just check` passed after correcting two
+Clippy module-order violations. Local validation included unrelated topology
+changes that were excluded from the commit; hosted CI must verify the committed
+tree. APSS 2.1 remains unpublished.
+
 ## Scope remains unchanged
 
 Deliver workflow-run session discovery and centralized relationship reconstruction across Syntropic137 and required upstream repositories, including integration tests, coordinated dependencies and releases, and a PR that closes #1398 only after the complete acceptance matrix is proven. The governing plan is `workflow-run-session-discovery-plan.md` in the parent workspace.
