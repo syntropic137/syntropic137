@@ -47,7 +47,7 @@ from .inventory_corrections import active_evidence
 from .invocation_contexts import context_memberships
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/2"
+RESOLVER_VERSION = "syn-session-relationships/3"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -132,7 +132,7 @@ def _coverage(
             supported=contract.supported,
             conflicting=any(len(s) > 1 for s in states.values()),
             sealed=contract.sealed,
-            missing=bool(missing),
+            missing=bool(missing or evidence.acquisition_gaps),
         ),
         contract_id=contract.contract_id,
         expected_count=len(expected),

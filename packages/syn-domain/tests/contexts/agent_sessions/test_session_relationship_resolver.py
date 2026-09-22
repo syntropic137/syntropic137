@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
+    AcquisitionGapEvidence,
     CaptureEvidence,
     CoverageContract,
     LineageEvidence,
@@ -19,6 +20,8 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     CoverageState,
     EvidenceClass,
     EvidenceReference,
+    EvidenceRetraction,
+    InventoryGap,
     InventoryNodeRef,
     RunIdentity,
 )
@@ -427,3 +430,45 @@ def test_conflicting_identity_bindings_do_not_transfer_membership() -> None:
     assert all(binding.confidence is EvidenceClass.CONFLICTING for binding in result.bindings)
     assert result.gaps[0].reason == "conflicting_native_binding"
     assert all(item.ref.kind != "invocation" for item in result.nodes)
+
+
+def test_acquisition_gap_prevents_reconciled_coverage_until_explicit_retraction() -> None:
+    failure = receipt("unreadable-child-journal")
+    evidence = SessionEvidence(
+        run=RUN,
+        coverage_contract=CoverageContract(
+            contract_id="supported/1", expected_nodes=(node("root"),), sealed=True
+        ),
+        captures=(
+            CaptureEvidence(
+                node=node("root"),
+                availability=BodyAvailability.PRESENT,
+                archived_byte_hash="0" * 64,
+                receipt_sequence=1,
+                evidence=receipt("root-body"),
+            ),
+        ),
+        acquisition_gaps=(
+            AcquisitionGapEvidence(
+                gap=InventoryGap(
+                    reason="child_journal_unreadable", evidence_ids=(failure.evidence_id,)
+                ),
+                evidence=failure,
+            ),
+        ),
+    )
+    unresolved = resolve_relationships(evidence)
+    assert unresolved.coverage.state is CoverageState.MISSING
+    assert unresolved.coverage.missing_keys == ()  # Root bytes exist; discovery is incomplete.
+    assert any(gap.reason == "child_journal_unreadable" for gap in unresolved.gaps)
+    corrected = evidence.model_copy(
+        update={
+            "retractions": (
+                EvidenceRetraction(target=failure, evidence=receipt("journal-recovered")),
+            )
+        }
+    )
+    recovered = resolve_relationships(corrected)
+    assert recovered.coverage.state is CoverageState.RECONCILED
+    assert all(gap.reason != "child_journal_unreadable" for gap in recovered.gaps)
+    assert recovered.revision != unresolved.revision
