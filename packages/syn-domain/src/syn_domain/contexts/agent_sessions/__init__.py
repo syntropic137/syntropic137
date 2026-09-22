@@ -238,6 +238,7 @@ __all__ = [
     "InventoryReplicationProcessManager",
     "InventorySnapshot",
     "InventoryStepHandler",
+    "InvocationContextEvidence",
     "InvocationStatus",
     "ItemKind",
     "LineageEdge",
@@ -313,6 +314,7 @@ from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocat
 from .domain.read_models.session_evidence import (
     CaptureEvidence,
     IdentityBindingEvidence,
+    InvocationContextEvidence,
     LineageEvidence,
     NodeEvidence,
     SessionEvidence,

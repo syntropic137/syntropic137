@@ -162,3 +162,23 @@ No thresholds or exceptions changed. Eight focused UI tests and TypeScript pass.
 Full dashboard CI passed after the refactor: 41 files, 324 tests, lint (one existing
 warning), TypeScript and production build. Log:
 `/private/tmp/1398-dashboard-refactor.log`. Repository-wide QA must still be rerun.
+
+Central child attribution now retains explicit invocation-context observations.
+The resolver joins controller invocation and attempt IDs only against active
+REGISTERED host membership. Matching context yields corroborated child membership
+with host and workspace provenance, then the existing binding logic attributes
+the native transcript. Stale attempts, absent host facts and conflicting contexts
+produce gaps instead of fabricated membership. Retractions remove derived claims.
+Context records participate in assembly, serialization, scope validation and quota
+accounting. The broader session-domain/drain run passed 195 tests; seven focused
+attribution tests then passed including assembly and quota checks. Type checking
+reported zero errors and two existing import warnings. This does not establish
+live harness capture, descendant settlement or full acceptance.
+
+Attribution review added ambiguous-host-phase and workspace-retraction cases.
+Duplicate host/hook delivery now unions provenance before generating memberships,
+preventing a Cartesian-product expansion. Resolver version is now
+`syn-session-relationships/2` to identify the changed interpretation rules.
+All 200 selected session-domain/drain tests pass; focused Pyright reports no
+errors or warnings. Fresh topology keeps attribution functions below existing
+complexity limits. No capture-completeness or release-readiness claim follows.

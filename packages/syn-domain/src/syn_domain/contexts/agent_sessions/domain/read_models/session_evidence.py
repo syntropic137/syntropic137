@@ -100,9 +100,27 @@ class CoverageContract(InventoryModel):
     supported: bool = True
 
 
+class InvocationContextEvidence(InventoryModel):
+    """Workspace claim linking a child to an existing host invocation attempt."""
+
+    controller: InventoryNodeRef
+    child: InventoryNodeRef
+    attempt_id: Identifier
+    evidence: EvidenceReference
+
+    @model_validator(mode="after")
+    def _invocation_kinds(self) -> InvocationContextEvidence:
+        if self.controller.kind != "invocation" or self.child.kind != "invocation":
+            raise ValueError("invocation context requires invocation references")
+        if self.controller == self.child:
+            raise ValueError("child context cannot reference itself")
+        return self
+
+
 class SessionEvidence(InventoryModel):
     run: RunIdentity
     nodes: tuple[NodeEvidence, ...] = ()
+    invocation_contexts: tuple[InvocationContextEvidence, ...] = ()
     memberships: tuple[MembershipEvidence, ...] = ()
     edges: tuple[LineageEvidence, ...] = ()
     bindings: tuple[IdentityBindingEvidence, ...] = ()
@@ -121,6 +139,8 @@ class SessionEvidence(InventoryModel):
         refs.extend(claim.node for claim in self.memberships)
         refs.extend(claim.node for claim in self.captures)
         refs.extend(claim.node for claim in self.native_transcripts)
+        for context in self.invocation_contexts:
+            refs.extend((context.controller, context.child))
         for edge in self.edges:
             refs.extend((edge.parent, edge.child))
         for binding in self.bindings:

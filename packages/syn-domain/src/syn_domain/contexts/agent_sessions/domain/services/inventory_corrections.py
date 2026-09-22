@@ -33,6 +33,7 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
         claim.evidence
         for group in (
             evidence.nodes,
+            evidence.invocation_contexts,
             evidence.memberships,
             evidence.edges,
             evidence.bindings,
@@ -53,6 +54,7 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
         coverage_contract=evidence.coverage_contract,
         retractions=evidence.retractions,
         nodes=_retain(evidence.nodes, revoked),
+        invocation_contexts=_retain(evidence.invocation_contexts, revoked),
         memberships=_retain(evidence.memberships, revoked),
         edges=_retain(evidence.edges, revoked),
         bindings=_retain(evidence.bindings, revoked),

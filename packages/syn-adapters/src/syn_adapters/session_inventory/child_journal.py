@@ -16,6 +16,7 @@ from syn_domain.contexts.agent_sessions import (
     EvidenceReference,
     IdentityBindingEvidence,
     InventoryNodeRef,
+    InvocationContextEvidence,
     LineageEvidence,
     NodeEvidence,
     RunIdentity,
@@ -72,6 +73,18 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
         evidence=SessionEvidence(
             run=run,
             nodes=(NodeEvidence(node=child, evidence=reference),),
+            invocation_contexts=(
+                InvocationContextEvidence(
+                    controller=InventoryNodeRef(
+                        kind="invocation",
+                        source_instance_id=run.source_instance_id,
+                        local_id=intent.call.invocation_id,
+                    ),
+                    child=child,
+                    attempt_id=intent.call.attempt_id,
+                    evidence=reference,
+                ),
+            ),
             edges=(
                 LineageEvidence(
                     parent=parent,

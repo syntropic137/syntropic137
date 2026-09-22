@@ -9,6 +9,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
     CaptureEvidence,
     CoverageContract,
     IdentityBindingEvidence,
+    InvocationContextEvidence,
     LineageEvidence,
     MembershipEvidence,
     NativeTranscriptObservation,
@@ -34,6 +35,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
     claims explicitly; arrival order never silently replaces historical lineage.
     """
     nodes: list[NodeEvidence] = []
+    invocation_contexts: list[InvocationContextEvidence] = []
     acquisition_gaps: list[AcquisitionGapEvidence] = []
     native_transcripts: list[NativeTranscriptObservation] = []
     memberships: list[MembershipEvidence] = []
@@ -53,6 +55,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         if evidence.run != run:
             raise ValueError("evidence journal crossed run scope")
         nodes.extend(evidence.nodes)
+        invocation_contexts.extend(evidence.invocation_contexts)
         acquisition_gaps.extend(evidence.acquisition_gaps)
         native_transcripts.extend(evidence.native_transcripts)
         memberships.extend(evidence.memberships)
@@ -77,6 +80,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
     return SessionEvidence(
         run=run,
         nodes=tuple(nodes),
+        invocation_contexts=tuple(invocation_contexts),
         acquisition_gaps=tuple(acquisition_gaps),
         native_transcripts=tuple(native_transcripts),
         memberships=tuple(memberships),

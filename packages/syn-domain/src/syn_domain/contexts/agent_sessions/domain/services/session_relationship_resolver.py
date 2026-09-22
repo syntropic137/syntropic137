@@ -44,9 +44,10 @@ if TYPE_CHECKING:
     )
 
 from .inventory_corrections import active_evidence
+from .invocation_contexts import context_memberships
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/1"
+RESOLVER_VERSION = "syn-session-relationships/2"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -60,6 +61,10 @@ def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
     ):
         refs[claim.node.key] = claim.node
         origins[claim.node.key].append(claim.evidence)
+    for context in evidence.invocation_contexts:
+        for ref in (context.controller, context.child):
+            refs[ref.key] = ref
+            origins[ref.key].append(context.evidence)
     for edge in evidence.edges:
         for ref in (edge.parent, edge.child):
             refs[ref.key] = ref
@@ -143,11 +148,20 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
             "edges": (*evidence.edges, *native_relationships(evidence.native_transcripts)),
         }
     )
+    child_memberships, context_gaps = context_memberships(evidence)
+    evidence = evidence.model_copy(
+        update={"memberships": (*evidence.memberships, *child_memberships)}
+    )
     nodes = _nodes(evidence)
     resolved_edges, conflict_gaps = resolve_parent_conflicts(lineage(evidence.edges))
     cycles = cyclic_edges(resolved_edges)
     bindings, binding_gaps = resolve_bindings(evidence.bindings)
-    gaps = [*conflict_gaps, *binding_gaps, *(item.gap for item in evidence.acquisition_gaps)]
+    gaps = [
+        *context_gaps,
+        *conflict_gaps,
+        *binding_gaps,
+        *(item.gap for item in evidence.acquisition_gaps),
+    ]
     if cycles:
         gaps.append(
             InventoryGap(
