@@ -48,6 +48,7 @@ def _record_count(stored: StoredEvidenceBatch) -> int:
             evidence.captures,
             evidence.retractions,
             evidence.acquisition_gaps,
+            evidence.acquisition_statuses,
         )
     )
     count += sum(1 + len(item.facts.relationships) for item in evidence.native_transcripts)

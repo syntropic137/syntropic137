@@ -190,6 +190,7 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
     "CANONICAL_USAGE_EVENT_FILTER",
+    "AcquisitionStatusEvidence",
     "AgentLaunch",
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
@@ -312,6 +313,7 @@ from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryC
 from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand
 from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocationCommand
 from .domain.read_models.session_evidence import (
+    AcquisitionStatusEvidence,
     CaptureEvidence,
     IdentityBindingEvidence,
     InvocationContextEvidence,

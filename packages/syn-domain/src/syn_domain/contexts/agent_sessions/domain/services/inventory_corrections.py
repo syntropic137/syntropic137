@@ -39,6 +39,7 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
             evidence.bindings,
             evidence.captures,
             evidence.acquisition_gaps,
+            evidence.acquisition_statuses,
             evidence.native_transcripts,
         )
         for claim in group
@@ -60,5 +61,6 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
         bindings=_retain(evidence.bindings, revoked),
         captures=_retain(evidence.captures, revoked),
         acquisition_gaps=_retain(evidence.acquisition_gaps, revoked),
+        acquisition_statuses=_retain(evidence.acquisition_statuses, revoked),
         native_transcripts=_retain(evidence.native_transcripts, revoked),
     )

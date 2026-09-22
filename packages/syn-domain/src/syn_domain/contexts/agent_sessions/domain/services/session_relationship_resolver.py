@@ -38,6 +38,8 @@ from syn_domain.contexts.agent_sessions.domain.services.inventory_resolution imp
     resolve_parent_conflicts,
 )
 
+from .acquisition_status import acquisition_gaps
+
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
         SessionEvidence,
@@ -47,7 +49,7 @@ from .inventory_corrections import active_evidence
 from .invocation_contexts import context_memberships
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/3"
+RESOLVER_VERSION = "syn-session-relationships/4"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -143,6 +145,14 @@ def _coverage(
 def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     """Resolve a complete acquired evidence set; caller owns paging and commits."""
     evidence = active_evidence(evidence)
+    evidence = evidence.model_copy(
+        update={
+            "acquisition_gaps": (
+                *evidence.acquisition_gaps,
+                *acquisition_gaps(evidence.acquisition_statuses),
+            )
+        }
+    )
     evidence = evidence.model_copy(
         update={
             "edges": (*evidence.edges, *native_relationships(evidence.native_transcripts)),

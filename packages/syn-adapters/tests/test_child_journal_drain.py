@@ -54,14 +54,15 @@ async def test_page_returns_progress_only_after_every_append_succeeds() -> None:
     evidence.append.side_effect = [1, ConnectionError("unavailable")]
     drain = ChildJournalDrain(evidence)
     with pytest.raises(ConnectionError):
-        await drain.page(reader, run=run, spool_id="spool")
+        await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
     first_batches = [call.args[0] for call in evidence.append.await_args_list]
     evidence.append.reset_mock(side_effect=True)
-    result = await drain.page(reader, run=run, spool_id="spool")
+    result = await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
     assert result.persisted == 2
     assert result.watermark == 2
     assert result.next_after is None
-    assert [call.args[0] for call in evidence.append.await_args_list] == first_batches
+    assert [call.args[0] for call in evidence.append.await_args_list][:-1] == first_batches
+    assert not evidence.append.await_args.args[0].evidence.acquisition_statuses[0].failed
 
 
 def test_central_resolver_reconstructs_depth_three_from_child_journal_changes() -> None:
@@ -120,3 +121,55 @@ def test_central_resolver_reconstructs_depth_three_from_child_journal_changes() 
         )
         == resolved
     )
+
+
+async def test_read_failure_is_durable_and_later_recovery_supersedes_it() -> None:
+    from syn_domain.contexts.agent_sessions import SessionEvidence
+    from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
+        resolve_relationships,
+    )
+
+    run = RunIdentity(source_instance_id="source", execution_id="run")
+    reader, evidence = AsyncMock(), AsyncMock()
+    reader.page.side_effect = OSError("private/path/must-not-leak")
+    drain = ChildJournalDrain(evidence)
+    with pytest.raises(OSError):
+        await drain.page(reader, run=run, spool_id="spool", observation_sequence=7)
+    failed = evidence.append.await_args.args[0]
+    assert "private/path" not in failed.model_dump_json()
+    before = resolve_relationships(failed.evidence)
+    assert any(gap.reason == "child_journal_unreadable" for gap in before.gaps)
+    reader.page.side_effect = None
+    reader.page.return_value = ChildPage(watermark=0, changes=(), next_after=None)
+    await drain.page(reader, run=run, spool_id="spool", observation_sequence=8)
+    recovered = evidence.append.await_args.args[0]
+    statuses = (*failed.evidence.acquisition_statuses, *recovered.evidence.acquisition_statuses)
+    for order in (statuses, statuses[::-1]):
+        after = resolve_relationships(SessionEvidence(run=run, acquisition_statuses=order))
+        assert not any(gap.reason == "child_journal_unreadable" for gap in after.gaps)
+        assert after.coverage.state == "unknown"
+    # A fresh failure after recovery remains visible, even at an unchanged cursor.
+    reader.page.side_effect = OSError("unavailable")
+    with pytest.raises(OSError):
+        await drain.page(reader, run=run, spool_id="spool", observation_sequence=9)
+    latest = evidence.append.await_args.args[0]
+    result = resolve_relationships(
+        SessionEvidence(
+            run=run, acquisition_statuses=(*statuses, *latest.evidence.acquisition_statuses)
+        )
+    )
+    assert any(gap.reason == "child_journal_unreadable" for gap in result.gaps)
+
+
+async def test_success_status_must_be_durable_before_page_acknowledgement() -> None:
+    reader, evidence = AsyncMock(), AsyncMock()
+    reader.page.return_value = ChildPage(watermark=0, changes=(), next_after=None)
+    evidence.append.side_effect = ConnectionError("journal database unavailable")
+    with pytest.raises(ConnectionError):
+        await ChildJournalDrain(evidence).page(
+            reader,
+            run=RunIdentity(source_instance_id="source", execution_id="run"),
+            spool_id="spool",
+            observation_sequence=1,
+        )
+    assert not evidence.append.await_args.args[0].evidence.acquisition_statuses[0].failed

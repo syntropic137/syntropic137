@@ -182,3 +182,25 @@ preventing a Cartesian-product expansion. Resolver version is now
 All 200 selected session-domain/drain tests pass; focused Pyright reports no
 errors or warnings. Fresh topology keeps attribution functions below existing
 complexity limits. No capture-completeness or release-readiness claim follows.
+
+## Durable child acquisition outcomes
+
+The host now appends a bounded acquisition outcome for each child-journal read,
+using the persisted spool lease token as its monotonic sequence. Read failures
+produce a visible `child_journal_unreadable` gap without recording exception text.
+A successful later read supersedes earlier failures; delivery order cannot let a
+stale worker restore an obsolete gap. Producers and streams remain isolated.
+Same-sequence conflicting outcomes retain the failure. Explicit evidence
+retractions remain effective, and all status records count toward batch limits.
+Child cursor acknowledgement follows durable evidence and outcome writes.
+
+Resolver version is now `syn-session-relationships/4`. Active acquisition gaps
+prevent reconciled coverage even when every known transcript body is present.
+Recovery alone does not establish supported or complete capture.
+
+Validation: 211 session-domain and focused child-drain/recovery tests passed.
+Changed Python files pass Ruff. Upstream agentic-primitives QA run 35799170837
+passed at bca76ba. Full coordinated integration remains unfinished. Each recovery
+poll currently retains an outcome, including unchanged success; status retention
+and polling volume need addressing before final acceptance. Real pinned harness
+capture and the broader issue acceptance matrix remain open.

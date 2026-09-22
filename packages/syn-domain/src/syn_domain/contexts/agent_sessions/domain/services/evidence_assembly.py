@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     AcquisitionGapEvidence,
+    AcquisitionStatusEvidence,
     CaptureEvidence,
     CoverageContract,
     IdentityBindingEvidence,
@@ -37,6 +38,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
     nodes: list[NodeEvidence] = []
     invocation_contexts: list[InvocationContextEvidence] = []
     acquisition_gaps: list[AcquisitionGapEvidence] = []
+    acquisition_statuses: list[AcquisitionStatusEvidence] = []
     native_transcripts: list[NativeTranscriptObservation] = []
     memberships: list[MembershipEvidence] = []
     edges: list[LineageEvidence] = []
@@ -57,6 +59,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         nodes.extend(evidence.nodes)
         invocation_contexts.extend(evidence.invocation_contexts)
         acquisition_gaps.extend(evidence.acquisition_gaps)
+        acquisition_statuses.extend(evidence.acquisition_statuses)
         native_transcripts.extend(evidence.native_transcripts)
         memberships.extend(evidence.memberships)
         edges.extend(evidence.edges)
@@ -82,6 +85,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         nodes=tuple(nodes),
         invocation_contexts=tuple(invocation_contexts),
         acquisition_gaps=tuple(acquisition_gaps),
+        acquisition_statuses=tuple(acquisition_statuses),
         native_transcripts=tuple(native_transcripts),
         memberships=tuple(memberships),
         edges=tuple(edges),

@@ -106,6 +106,7 @@ class CaptureRecoveryWorker:
                 readers.children,
                 run=lease.spool.run,
                 spool_id=lease.spool.session_id,
+                observation_sequence=lease.token,
                 after=lease.child_after,
                 watermark=lease.child_watermark,
             )

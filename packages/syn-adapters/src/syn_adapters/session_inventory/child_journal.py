@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions import (
+    AcquisitionStatusEvidence,
     EvidenceBatch,
     EvidenceClass,
     EvidenceReference,
@@ -99,6 +100,36 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
     )
 
 
+def child_read_status(
+    run: RunIdentity, spool_id: str, sequence: int, *, failed: bool
+) -> EvidenceBatch:
+    producer = "child-journal:" + hashlib.sha256(spool_id.encode()).hexdigest()
+    batch_id = f"read:{sequence}"
+    reference = EvidenceReference(
+        producer_id=producer,
+        evidence_id=f"{producer}:{batch_id}",
+        source_revision=str(sequence),
+        locator="children.sqlite",
+        extractor_version="host-child-recovery/1",
+    )
+    return EvidenceBatch(
+        batch_id=batch_id,
+        producer_id=producer,
+        evidence=SessionEvidence(
+            run=run,
+            acquisition_statuses=(
+                AcquisitionStatusEvidence(
+                    stream_id="child-journal-read",
+                    sequence=sequence,
+                    failed=failed,
+                    reason="child_journal_unreadable",
+                    evidence=reference,
+                ),
+            ),
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class ChildDrainProgress:
     watermark: int
@@ -116,12 +147,21 @@ class ChildJournalDrain:
         *,
         run: RunIdentity,
         spool_id: str,
+        observation_sequence: int,
         after: int = 0,
         watermark: int | None = None,
     ) -> ChildDrainProgress:
         if not spool_id.strip():
             raise ValueError("Host-assigned spool identity is required")
-        page = await reader.page(after, watermark)
+        success = child_read_status(run, spool_id, observation_sequence, failed=False)
+        try:
+            page = await reader.page(after, watermark)
+        except Exception:
+            await self._evidence.append(
+                child_read_status(run, spool_id, observation_sequence, failed=True)
+            )
+            raise
         for change in page.changes:
             await self._evidence.append(child_evidence(change, run, spool_id))
+        await self._evidence.append(success)
         return ChildDrainProgress(page.watermark, page.next_after, len(page.changes))

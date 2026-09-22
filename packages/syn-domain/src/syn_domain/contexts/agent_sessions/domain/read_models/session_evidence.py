@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     CaptureReceipt,
@@ -39,6 +39,16 @@ class NativeTranscriptObservation(InventoryModel):
 
 class AcquisitionGapEvidence(InventoryModel):
     gap: InventoryGap
+    evidence: EvidenceReference
+
+
+class AcquisitionStatusEvidence(InventoryModel):
+    """Host-sequenced acquisition outcome; arrival order cannot override recovery."""
+
+    stream_id: Identifier
+    sequence: int = Field(ge=1)
+    failed: bool
+    reason: Identifier
     evidence: EvidenceReference
 
 
@@ -128,6 +138,7 @@ class SessionEvidence(InventoryModel):
     coverage_contract: CoverageContract | None = None
     retractions: tuple[EvidenceRetraction, ...] = ()
     acquisition_gaps: tuple[AcquisitionGapEvidence, ...] = ()
+    acquisition_statuses: tuple[AcquisitionStatusEvidence, ...] = ()
     native_transcripts: tuple[NativeTranscriptObservation, ...] = ()
 
     @model_validator(mode="after")
