@@ -42,7 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 )
 from syn_shared.agents import runner_for_provider
 
-from .invocation_attempt import registered_attempt
+from .invocation_attempt import invocation_environment, registered_attempt
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
@@ -177,11 +177,11 @@ async def run_phase_agent(
     # there is no budget arithmetic here to get wrong.
     grant = attempts.first_attempt()
     while True:
-        async with registered_attempt(launch.session_manager, runner):
+        async with registered_attempt(launch.session_manager, runner) as invocation:
             result = await handler.handle(
                 todo=todo,
                 workspace=launch.workspace,
-                agent_env=launch.agent_env,
+                agent_env=invocation_environment(launch.agent_env, invocation),
                 claude_cmd=launch.claude_cmd,
                 session_id=session_id,
                 agent_model=phase.agent_config.model,

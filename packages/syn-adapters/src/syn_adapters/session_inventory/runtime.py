@@ -22,6 +22,7 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 from .capture_catalog import PostgresCaptureCatalog
+from .child_journal import ChildJournalDrain
 from .clock import InventoryRecoveryClock
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
@@ -119,6 +120,7 @@ async def create_inventory_runtime(
             drain,
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
+            children=ChildJournalDrain(evidence),
         )
         if recovery_image is not None
         else None,

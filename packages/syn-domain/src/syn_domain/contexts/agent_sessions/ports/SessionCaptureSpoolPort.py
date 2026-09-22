@@ -23,6 +23,8 @@ class CaptureSpoolLease(InventoryModel):
     token: int = Field(ge=1)
     after: int = Field(ge=0)
     watermark: int | None = Field(default=None, ge=0)
+    child_after: int = Field(default=0, ge=0)
+    child_watermark: int | None = Field(default=None, ge=0)
 
 
 class CaptureSpoolLeaseLost(Exception):
@@ -47,4 +49,10 @@ class SessionCaptureSpoolPort(Protocol):
         retry_seconds: int,
     ) -> None:
         """Persist only a fully archived and journaled page, under a live lease."""
+        ...
+
+    async def advance_children(
+        self, lease: CaptureSpoolLease, *, after: int, watermark: int | None
+    ) -> None:
+        """Persist journal progress under the lease without releasing transcript work."""
         ...

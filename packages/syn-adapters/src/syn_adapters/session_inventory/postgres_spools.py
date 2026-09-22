@@ -50,7 +50,8 @@ class PostgresCaptureSpools:
                 ) UPDATE session_capture_spools s SET lease_token=s.lease_token+1,
                     leased_until=now()+$1::double precision*interval '1 second'
                 FROM candidate c WHERE s.source_instance_id=c.source_instance_id AND s.session_id=c.session_id
-                RETURNING s.payload::text,s.lease_token::text,s.after_sequence::text,s.watermark::text""",
+                RETURNING s.payload::text,s.lease_token::text,s.after_sequence::text,s.watermark::text,
+                    s.child_after_sequence::text,s.child_watermark::text""",
                 lease_seconds,
                 self._source,
             )
@@ -62,6 +63,8 @@ class PostgresCaptureSpools:
             token=int(row["lease_token"]),
             after=int(row["after_sequence"]),
             watermark=None if row["watermark"] is None else int(row["watermark"]),
+            child_after=int(row["child_after_sequence"]),
+            child_watermark=None if row["child_watermark"] is None else int(row["child_watermark"]),
         )
 
     async def renew(self, lease: CaptureSpoolLease, *, lease_seconds: int) -> None:
@@ -106,6 +109,37 @@ class PostgresCaptureSpools:
             )
         if changed is None:
             raise CaptureSpoolLeaseLost("Capture cursor lease expired or was superseded")
+
+    async def advance_children(
+        self, lease: CaptureSpoolLease, *, after: int, watermark: int | None
+    ) -> None:
+        if lease.spool.run.source_instance_id != self._source:
+            raise ValueError("Capture lease belongs to another installation")
+        child_cursor = lease.model_copy(
+            update={
+                "after": lease.child_after,
+                "watermark": lease.child_watermark,
+            }
+        )
+        _validate_progress(child_cursor, after, watermark, 0)
+        async with self._pool.acquire() as conn:
+            changed = await conn.fetchval(
+                """UPDATE session_capture_spools
+                SET child_after_sequence=$4,child_watermark=$5
+                WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3
+                  AND leased_until>now() AND child_after_sequence=$6
+                  AND child_watermark IS NOT DISTINCT FROM $7::bigint
+                RETURNING session_id""",
+                self._source,
+                lease.spool.session_id,
+                lease.token,
+                after,
+                watermark,
+                lease.child_after,
+                lease.child_watermark,
+            )
+        if changed is None:
+            raise CaptureSpoolLeaseLost("Child cursor lease expired or progress was superseded")
 
 
 def _validate_progress(

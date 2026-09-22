@@ -210,11 +210,13 @@ __all__ = [
     "CompleteSessionHandler",
     "CostCalculator",
     "EvidenceBatch",
+    "EvidenceClass",
     "EvidencePage",
     "EvidenceReference",
     "EvidenceRetraction",
     "HostSessionEvidenceProjector",
     "IdentityBinding",
+    "IdentityBindingEvidence",
     "ImportLedger",
     "ImportLedgerPort",
     "InventoryClockAggregate",
@@ -239,6 +241,7 @@ __all__ = [
     "InvocationStatus",
     "ItemKind",
     "LineageEdge",
+    "LineageEvidence",
     "LocalCaptureResult",
     "LocalTranscriptCapture",
     "LocalTranscriptRead",
@@ -248,6 +251,7 @@ __all__ = [
     "NativeRelationshipFact",
     "NativeSessionEvidencePort",
     "NativeTranscriptFacts",
+    "NodeEvidence",
     "ObservationType",
     "ObserveInventoryClockCommand",
     "OperationRecord",
@@ -306,9 +310,16 @@ from ._shared.session_invocation import InvocationStatus, SessionInvocationState
 from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryClockAggregate
 from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand
 from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocationCommand
-from .domain.read_models.session_evidence import CaptureEvidence, SessionEvidence
+from .domain.read_models.session_evidence import (
+    CaptureEvidence,
+    IdentityBindingEvidence,
+    LineageEvidence,
+    NodeEvidence,
+    SessionEvidence,
+)
 from .domain.read_models.session_inventory import (
     BodyAvailability,
+    EvidenceClass,
     EvidenceReference,
     InventoryNodeRef,
 )

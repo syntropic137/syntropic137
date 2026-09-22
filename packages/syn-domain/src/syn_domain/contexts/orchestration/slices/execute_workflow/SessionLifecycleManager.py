@@ -159,7 +159,7 @@ class SessionLifecycleManager:
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
 
-    async def prepare_invocation(self, harness: str) -> None:
+    async def prepare_invocation(self, harness: str) -> SessionInvocationState | None:
         """Persist intent before every launch, including capacity retries."""
         if self._repo is None:
             return
@@ -179,6 +179,7 @@ class SessionLifecycleManager:
         # Failure propagates to admission: no controlled process may launch yet.
         await self._repo.save(self._session)
         self._invocation = invocation
+        return invocation
 
     def _advance_invocation(self, invocation: SessionInvocationState) -> None:
         assert self._session is not None

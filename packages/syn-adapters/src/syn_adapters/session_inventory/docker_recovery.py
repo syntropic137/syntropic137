@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from agentic_isolation.child_journal import WorkspaceChildJournalReader
 from agentic_isolation.providers.base import ExecuteResult
 from agentic_isolation.session_spool import WorkspaceSpoolReader, capture_retained_partition
 
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 
+from .recovery_worker import RecoveryReaders
 from .workspace_location import workspace_capture_location
 
 if TYPE_CHECKING:
@@ -64,7 +66,7 @@ class DockerSpoolRecovery:
         self._image = image
 
     @asynccontextmanager
-    async def open(self, spool: CaptureSpool) -> AsyncIterator[WorkspaceSpoolReader]:
+    async def open(self, spool: CaptureSpool) -> AsyncIterator[RecoveryReaders]:
         location = workspace_capture_location(spool.run, spool.session_id)
         # Never manufacture an empty replacement for a lost capture volume.
         exists = await _docker(["volume", "inspect", location.volume_name], max_bytes=65536)
@@ -117,6 +119,11 @@ class DockerSpoolRecovery:
                 return await _docker([*args, name, "/bin/sh", "-c", command], timeout=timeout or 30)
 
             await capture_retained_partition(execute, "/spool", location.partition)
-            yield WorkspaceSpoolReader(execute, location.envelope_dir)
+            yield RecoveryReaders(
+                transcripts=WorkspaceSpoolReader(execute, location.envelope_dir),
+                children=WorkspaceChildJournalReader(
+                    execute, f"/spool/.agentic-session-store/{location.partition}/children.sqlite"
+                ),
+            )
         finally:
             await _docker(["rm", "-f", name], timeout=15, max_bytes=65536)

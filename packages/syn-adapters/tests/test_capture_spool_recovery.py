@@ -62,3 +62,40 @@ async def test_replay_preserves_cursor_and_expired_worker_cannot_advance(
     assert final is not None and final.after == 10 and final.watermark is None
     with pytest.raises(ValueError, match="rebound"):
         await restarted.project(spool.model_copy(update={"phase_id": "other"}))
+
+
+async def test_child_cursor_is_independent_restart_safe_and_fenced(db_pool: asyncpg.Pool) -> None:
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    spools = PostgresCaptureSpools(db_pool, source)
+    spool = CaptureSpool(
+        run=RunIdentity(source_instance_id=source, execution_id="run"),
+        session_id="session",
+        phase_id="phase",
+    )
+    await spools.project(spool)
+    lease = await spools.claim(lease_seconds=60)
+    assert lease is not None
+    assert lease.child_after == 0 and lease.child_watermark is None
+    await spools.advance_children(lease, after=2, watermark=5)
+    # Advancing child work neither releases the lease nor changes envelope progress.
+    assert await spools.claim(lease_seconds=60) is None
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.advance_children(lease, after=1, watermark=5)
+    await spools.advance(lease, after=40, watermark=50, retry_seconds=0)
+    restarted = PostgresCaptureSpools(db_pool, source)
+    current = await restarted.claim(lease_seconds=60)
+    assert current is not None
+    assert (current.after, current.watermark) == (40, 50)
+    assert (current.child_after, current.child_watermark) == (2, 5)
+    with pytest.raises(ValueError, match="incomplete"):
+        await restarted.advance_children(current, after=3, watermark=None)
+    with pytest.raises(ValueError, match="watermark"):
+        await restarted.advance_children(current, after=3, watermark=6)
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.advance_children(lease, after=5, watermark=None)
+    await restarted.advance_children(current, after=5, watermark=None)
+    await restarted.advance(current, after=50, watermark=None, retry_seconds=0)
+    final = await restarted.claim(lease_seconds=60)
+    assert final is not None
+    assert (final.after, final.child_after, final.child_watermark) == (50, 5, None)

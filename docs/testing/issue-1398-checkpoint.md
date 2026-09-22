@@ -7,7 +7,8 @@ Checkpoint: 2026-09-22. Incomplete. Do not close issue 1398 or treat this as rel
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
 preflight failed on unpublished `apss-session-capture==2.1.0`; the local hook
 was bypassed to publish the explicitly incomplete draft. Upstream dependencies
-remain unpublished and are not included through updated gitlinks.
+remain unpublished. The agentic-primitives gitlink now references the published
+checkpoint commit described below; released image pins remain unchanged.
 
 The subsequent local follow-up moves Python capture receipts into the APSS
 contract and replaces Syntropic137's duplicate model with that shared type.
@@ -30,17 +31,19 @@ tree. APSS 2.1 remains unpublished.
 
 Deliver workflow-run session discovery and centralized relationship reconstruction across Syntropic137 and required upstream repositories, including integration tests, coordinated dependencies and releases, and a PR that closes #1398 only after the complete acceptance matrix is proven. The governing plan is `workflow-run-session-discovery-plan.md` in the parent workspace.
 
-## Current worktrees
+## Coordinated review artifacts
 
-| Repository | Branch | Git status entries at checkpoint |
-| --- | --- | ---: |
-| Syntropic137 | codex/1398-session-discovery | 146 |
-| agentic-session-exporter | codex/1398-local-capture | 28 |
-| seshmagic-session-store | codex/1398-run-inventory | 50 |
-| agent-paradise-standards-system | codex/1398-inventory-profile | 19 |
-| agentic-primitives | codex/1398-session-evidence | 24 |
+- Main draft: https://github.com/syntropic137/syntropic137/pull/1401
+- Agentic primitives: https://github.com/AgentParadise/agentic-primitives/pull/418,
+  pinned here at `eabd93bccc6b74f47f64fd83df4ed2c802f1f02d`.
+- APSS contract: https://github.com/AgentParadise/agent-paradise-standards-system/pull/139
+- Exporter: https://github.com/AgentParadise/agentic-session-exporter/pull/24
+- SeshMagic: https://github.com/seshmagic/seshmagic_session_store/pull/55
 
-Counts include untracked directory entries, not recursive file counts. Tracked diff statistics exclude new untracked files. Changes are still uncommitted; no release delivery is established by these working trees.
+These are draft checkpoints, not release delivery. Agentic-primitives includes
+local Codex hook installation and durable child-journal recovery transport.
+Live pinned-harness execution, Claude child hooks and complete acceptance remain
+unverified. Its full QA currently stops on stale locks outside session-store.
 
 ## Implemented paths, with limits
 
@@ -80,4 +83,71 @@ Logs below are local checkpoint artifacts, not committed CI evidence. Later chan
 
 ## Next checkpoint
 
-First produce an acceptance-to-code/test map and a coherent review package from the existing five worktrees. Avoid treating isolated green tests as proof of the full feature. The next implementation batch should target a named missing acceptance item and end with its end-to-end evidence.
+Next verify installed hooks with pinned harness execution, then complete verified child phase/attempt attribution and the remaining acceptance matrix. Isolated green tests do not prove the full feature.
+
+## Per-attempt dispatch identity checkpoint
+
+The phase dispatcher now supplies `AGENTIC_INVOCATION_ID` and
+`AGENTIC_ATTEMPT_ID` only after the session repository saves the registration.
+Each capacity retry gets its own pair. Dispatch copies the launch environment,
+removes inherited values, and leaves the shared launch environment unchanged.
+These are runtime context values, not operator settings. Their names are
+centralized in `syn_shared.env_constants`.
+
+Validation: 60 lifecycle, retry-dispatch and workflow-processor tests passed;
+focused Pyright passed with zero errors or warnings. The new cases cover Claude
+and Codex retries, stale identity removal without a repository, and failed
+registration preventing handler dispatch. Log:
+`/private/tmp/1398-invocation-dispatch-tests.log`.
+
+This establishes the top-level handoff only. Native child hooks do not yet
+consume the context, and no native-child completeness guarantee is claimed.
+
+## Child journal ingestion checkpoint
+
+The agentic-primitives worktree now contains durable child hook observations,
+immutable change pages, read-only export and a validated workspace reader.
+Syntropic137's `session_inventory/child_journal.py` translates those observations
+into the existing evidence journal, returning page progress only after every
+append succeeds. Hook observations carry corroborated lineage/binding evidence;
+they do not claim host registration, coverage, capture bodies or membership.
+
+A depth-three adapter-to-resolver test verifies immediate-parent edges, exact
+native bindings and order-independent reconstruction. The focused drain plus
+existing relationship suites pass 27 tests. This is not a pinned-harness test.
+
+Remaining wiring constraints found during inspection:
+
+- `CaptureRecoveryWorker` and `session_capture_spools` currently have only the
+  transcript-envelope cursor. Child changes require an independent durable
+  cursor with the same lease fencing; never reuse the envelope sequence.
+- The resolver transfers explicit membership through identity bindings, not
+  arbitrary lineage edges. An earlier adapter comment overstated propagation
+  and was corrected. Phase/attempt attribution for child observations still
+  requires a verified invocation-context join or explicit segment-aware rule.
+- Hooks are not installed in the workspace image. Missing child journals must
+  remain explicit gaps, not empty-success evidence.
+
+Independent child cursor storage is now implemented on `session_capture_spools`.
+`advance_children` checks the live lease token plus prior child cursor, updates
+only child progress and leaves the lease held for transcript work. Claims recover
+both cursor domains. Additive schema migration preserves existing envelope work.
+Two real PostgreSQL integration tests pass, including independent cursor restart,
+stale writer fencing and incomplete traversal rejection. Five focused worker/drain
+tests and focused Pyright/Ruff also pass. Worker invocation of child reads and
+hook installation remain outstanding.
+
+The runtime now supplies `ChildJournalDrain` to `CaptureRecoveryWorker`.
+`DockerSpoolRecovery` exposes both readers from the same retained-volume helper.
+The worker persists a child page before advancing its independently fenced cursor;
+an unreadable journal retains that cursor, logs failure and does not block already
+durable transcript progress. Pending child pages request immediate subsequent
+work. Six worker/drain tests and focused type checks pass. Installed hooks and a
+real image-level child capture/recovery acceptance run remain unverified.
+
+
+Latest main validation: 229 selected session/inventory/attempt tests passed;
+repository-wide Pyright reported zero errors and 16 optional-dependency warnings.
+The full QA result is recorded separately and must not be inferred from these
+focused checks. Main includes the published AP source commit, but its workspace
+image still requires the coordinated build/release/pin update.

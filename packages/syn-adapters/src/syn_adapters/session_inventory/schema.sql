@@ -164,3 +164,9 @@ CREATE TABLE IF NOT EXISTS session_transcript_revocations (
     revoked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (source_instance_id, archive_sha256)
 );
+
+-- Child changes use their own sequence domain, never the envelope cursor.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_after_sequence
+    BIGINT NOT NULL DEFAULT 0 CHECK (child_after_sequence >= 0);
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_watermark
+    BIGINT CHECK (child_watermark >= child_after_sequence);
