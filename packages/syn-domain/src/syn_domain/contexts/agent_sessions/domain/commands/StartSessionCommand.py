@@ -25,6 +25,9 @@ class StartSessionCommand(BaseModel):
     # Context
     workflow_id: str = Field(..., description="Workflow this session belongs to")
     execution_id: str | None = Field(default=None, description="Workflow execution/run ID")
+    capture_profile: str | None = Field(
+        default=None, description="Host-planned capture contract; absent on historical sessions"
+    )
     phase_id: str = Field(..., description="Phase within the workflow")
     milestone_id: str | None = Field(default=None, description="Optional milestone")
 

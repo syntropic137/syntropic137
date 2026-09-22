@@ -166,6 +166,8 @@ class TestAgentRunnerSelection:
 
         session_mgr = MagicMock()
         session_mgr.mark_launched = AsyncMock()
+        session_mgr.prepare_invocation = AsyncMock()
+        session_mgr.finish_invocation = AsyncMock()
         processor._runtime.begin("p-1", session_manager=session_mgr, started_at=datetime.now(UTC))
 
         phase = ExecutablePhase(

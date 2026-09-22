@@ -10,6 +10,8 @@ import type { components } from "../generated/api-types.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, RED } from "../output/ansi.js";
 import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
+import { executionSessionsCommand } from "./execution-sessions.js";
+import { executionTranscriptCommand } from "./execution-transcript.js";
 import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
@@ -139,4 +141,4 @@ const showCommand: CommandDef = {
 };
 
 export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
-executionGroup.command(listCommand).command(showCommand);
+executionGroup.command(listCommand).command(showCommand).command(executionSessionsCommand).command(executionTranscriptCommand);

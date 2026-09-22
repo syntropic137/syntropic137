@@ -233,7 +233,7 @@ async def probe_capture(
             )
 
         return parse_capture_result(result.stdout, result.exit_code, expectations=expectations)
-    except Exception as exc:
+    except Exception:
         # Deliberately broad, and deliberately wrapping the PARSE as well as
         # the call: a malformed result must not escape either. This runs during
         # teardown of a phase that may have SUCCEEDED, and no exporter problem
@@ -243,8 +243,8 @@ async def probe_capture(
         # Swallowing cancellation during teardown hangs shutdown, which is
         # worse than losing a verdict, and it matches what the isolation
         # provider's logs() does for the same reason.
-        logger.warning("session-capture probe could not run: %s", exc)
+        logger.warning("session-capture probe could not run; capture remains unknown")
         return AuthoritativeCapture(
             state=CaptureState.UNKNOWN,
-            reason=f"capture probe could not run: {exc}",
+            reason="capture probe could not run",
         )

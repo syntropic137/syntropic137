@@ -1,0 +1,50 @@
+"""Durable recovery work projected from pre-launch session capture intent."""
+
+from typing import Literal, Protocol
+
+from pydantic import Field
+
+from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+    InventoryModel,
+    RoutingIdentifier,
+    RunIdentity,
+)
+
+
+class CaptureSpool(InventoryModel):
+    run: RunIdentity
+    session_id: RoutingIdentifier
+    phase_id: RoutingIdentifier
+    profile: Literal["local-spool/1"] = "local-spool/1"
+
+
+class CaptureSpoolLease(InventoryModel):
+    spool: CaptureSpool
+    token: int = Field(ge=1)
+    after: int = Field(ge=0)
+    watermark: int | None = Field(default=None, ge=0)
+
+
+class CaptureSpoolLeaseLost(Exception):
+    """Another worker owns this spool; the stale worker cannot advance it."""
+
+
+class SessionCaptureSpoolPort(Protocol):
+    async def project(self, spool: CaptureSpool) -> None:
+        """Idempotent projection only. Never run capture while replaying."""
+        ...
+
+    async def claim(self, *, lease_seconds: int) -> CaptureSpoolLease | None: ...
+
+    async def renew(self, lease: CaptureSpoolLease, *, lease_seconds: int) -> None: ...
+
+    async def advance(
+        self,
+        lease: CaptureSpoolLease,
+        *,
+        after: int,
+        watermark: int | None,
+        retry_seconds: int,
+    ) -> None:
+        """Persist only a fully archived and journaled page, under a live lease."""
+        ...

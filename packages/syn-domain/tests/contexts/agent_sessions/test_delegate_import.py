@@ -192,3 +192,58 @@ class TestReimportDerivesTheSameIdentity:
         await _run(store, second, leader="s-lead", captured=["s-lead", "s-del"])
 
         assert [s for s, _, _ in first.written] == [s for s, _, _ in second.written]
+
+
+@pytest.mark.parametrize("mapping", ["unique", "duplicate", "missing", "conflict"])
+async def test_qualified_import_never_uses_bare_lookup_or_prices_ambiguous_mapping(
+    mapping: str,
+) -> None:
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+    )
+
+    identity = QualifiedSessionIdentity(
+        kind="transcript", source_instance_id="source", harness="claude", local_id="delegate"
+    )
+
+    class QualifiedStore:
+        def __init__(self) -> None:
+            self.fetched: list[QualifiedSessionIdentity] = []
+
+        async def fetch_session(self, session_id: str) -> StoredSession | None:
+            raise AssertionError("qualified import must not use bare lookup")
+
+        async def fetch_qualified_session(
+            self, requested: QualifiedSessionIdentity
+        ) -> StoredSession | None:
+            self.fetched.append(requested)
+            return _claude_session(requested.local_id, 7)
+
+    identities = (identity,)
+    if mapping == "duplicate":
+        identities = (identity, identity)
+    elif mapping == "missing":
+        identities = ()
+    elif mapping == "conflict":
+        identities = (identity, identity.model_copy(update={"harness": "codex"}))
+    store, writer = QualifiedStore(), _Writer()
+    result = await import_phase_delegates(
+        store,
+        writer,
+        leader_native_session_id="leader",
+        captured_session_ids=("leader", "delegate"),
+        execution_id="execution",
+        phase_id="phase",
+        attempts_remaining=0,
+        qualified_session_identities=identities,
+    )
+    assert len(result.imported) == 1
+    assert len(writer.written) == 1
+    if mapping in ("unique", "duplicate"):
+        assert store.fetched == [identity]
+        assert writer.written[0][1] is not None
+        assert writer.written[0][2] is None
+    else:
+        assert store.fetched == []
+        assert writer.written[0][1] is None
+        assert "qualified identity" in (writer.written[0][2] or "")

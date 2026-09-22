@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.agent_sessions import InvocationStatus
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
@@ -40,6 +41,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
     ObservabilityCollector,
 )
 from syn_shared.agents import runner_for_provider
+
+from .invocation_attempt import registered_attempt
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
@@ -118,6 +121,12 @@ def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityC
     return collector.saw_agent_activity or result.stream_result.last_agent_message is not None
 
 
+def _invocation_outcome(result: AgentExecutionResult) -> InvocationStatus:
+    if result.stream_result.interrupt_requested:
+        return InvocationStatus.CANCELLED
+    return InvocationStatus.COMPLETED if result.command.exit_code == 0 else InvocationStatus.FAILED
+
+
 async def run_phase_agent(
     *,
     handler: AgentHandlerProtocol,
@@ -168,18 +177,24 @@ async def run_phase_agent(
     # there is no budget arithmetic here to get wrong.
     grant = attempts.first_attempt()
     while True:
-        result = await handler.handle(
-            todo=todo,
-            workspace=launch.workspace,
-            agent_env=launch.agent_env,
-            claude_cmd=launch.claude_cmd,
-            session_id=session_id,
-            agent_model=phase.agent_config.model,
-            timeout_seconds=grant.timeout_seconds,
-            collector=collector,
-            runner=runner,
-            on_launch=observer_for(launch.session_manager),
-        )
+        async with registered_attempt(launch.session_manager, runner):
+            result = await handler.handle(
+                todo=todo,
+                workspace=launch.workspace,
+                agent_env=launch.agent_env,
+                claude_cmd=launch.claude_cmd,
+                session_id=session_id,
+                agent_model=phase.agent_config.model,
+                timeout_seconds=grant.timeout_seconds,
+                collector=collector,
+                runner=runner,
+                on_launch=observer_for(launch.session_manager),
+            )
+        if launch.session_manager is not None:
+            await launch.session_manager.finish_invocation(
+                native_session_id=result.stream_result.leader_native_session_id,
+                status=_invocation_outcome(result),
+            )
         if _attempt_is_settled(result):
             return result
         successor = await attempts.wait_before_retry(

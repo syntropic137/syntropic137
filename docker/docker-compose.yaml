@@ -151,6 +151,15 @@ services:
       # the failure was indistinguishable from "capture deliberately off".
       # Keep this in the base so a new overlay inherits it instead of having to
       # remember it.
+      # Local capture is durable and independent of the optional remote store.
+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory
+      SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID: ${SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID:-}
+      SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS: ${SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS:-30}
+      SYN_SESSION_INVENTORY_LEASE_SECONDS: ${SYN_SESSION_INVENTORY_LEASE_SECONDS:-120}
+      SYN_SESSION_INVENTORY_RETRY_SECONDS: ${SYN_SESSION_INVENTORY_RETRY_SECONDS:-10}
+      SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK: ${SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK:-2}
+      SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS:-100000}
+      SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES:-10000}
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
@@ -170,6 +179,8 @@ services:
       SYN_WORKSPACE_DOCKER_IMAGE:
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
+    volumes:
+      - session_inventory_data:/app/data/session-inventory
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -275,3 +286,6 @@ networks:
     # agents only hold a "proxy-managed" placeholder, so direct api.anthropic.com
     # calls fail. Full network isolation (internal: true) deferred to Phase 2
     # when git traffic is also routed through the proxy via CONNECT tunneling.
+
+volumes:
+  session_inventory_data:

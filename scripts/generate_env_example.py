@@ -37,6 +37,7 @@ from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
@@ -456,6 +457,15 @@ def generate_env_example() -> str:
             "OBJECT STORAGE (MinIO / artifacts / claude plugins)",
             prefix="SYN_STORAGE_",
             description="MinIO buckets and credentials. See ADR-012 (artifacts) and issue #726 (claude plugins).",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            SessionInventorySettings,
+            "LOCAL SESSION INVENTORY",
+            prefix="SYN_SESSION_INVENTORY_",
+            description="Local discovery and transcript archive work without SeshMagic. Empty archive path uses ~/.syntropic137/session-inventory; Docker uses its persistent inventory volume.",
         )
     )
 

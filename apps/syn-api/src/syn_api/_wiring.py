@@ -262,6 +262,11 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_shared.settings import get_settings
 
     _settings = get_settings()
+    from syn_api._wiring_inventory import get_inventory_runtime
+
+    capture_source_id = (
+        None if _settings.uses_in_memory_stores else get_inventory_runtime().source_instance_id
+    )
     session_capture = SessionCaptureService(
         _settings.session_store,
         _settings.app_environment,
@@ -274,6 +279,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         workspace_service=WorkspaceService.create(
             config=ws_config,
             environment=_build_workspace_env(),
+            capture_source_instance_id=capture_source_id,
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
@@ -1038,6 +1044,7 @@ def get_subscription_coordinator(
     """
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.subscriptions import create_coordinator_service
+    from syn_api._wiring_inventory import get_inventory_runtime
     from syn_shared.settings import get_settings
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
@@ -1055,6 +1062,12 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        inventory_replication_manager=(
+            None if settings.uses_in_memory_stores else get_inventory_runtime().replication
+        ),
+        inventory_process_manager=(
+            None if settings.uses_in_memory_stores else get_inventory_runtime().processor
+        ),
     )
 
 

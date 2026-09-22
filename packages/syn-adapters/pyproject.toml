@@ -5,6 +5,7 @@ description = "External integrations for Syntropic137"
 requires-python = ">=3.12"
 
 dependencies = [
+    "apss-session-capture==2.1.0", # Canonical optional inventory transport contract
     "syn-shared",
     "syn-domain",
     "syn-tokens", # Token vending service (ADR-022)

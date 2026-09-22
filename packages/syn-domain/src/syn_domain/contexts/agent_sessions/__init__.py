@@ -56,17 +56,67 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
     SessionStorePort,
     StoredSession,
 )
+from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliation.InventoryReconciliationAggregate import (
+    InventoryReconciliationAggregate,
+)
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
+)
+from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
+    InventoryReconciliationSweepEvent,
 )
 from syn_domain.contexts.agent_sessions.domain.events.observation_payloads import (
     SessionSummaryData,
     TokenUsageData,
 )
+from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+    CaptureReceipt,
+    EvidenceRetraction,
+    IdentityBinding,
+    InventoryCoverage,
+    InventoryGap,
+    InventoryNode,
+    LineageEdge,
+    Membership,
+    ResolvedInventory,
+    RunIdentity,
+)
 from syn_domain.contexts.agent_sessions.import_ledger import (
     BilledUsage,
     ImportLedger,
     ImportLedgerPort,
+)
+from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
+    EvidenceBatch,
+    EvidencePage,
+    PendingEvidence,
+    SessionEvidenceReadPort,
+    SessionEvidenceWritePort,
+    StoredEvidenceBatch,
+)
+from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
+    InventoryJob,
+    InventoryJobLease,
+    InventoryLeaseLost,
+    SessionInventoryJobPort,
+)
+from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
+    InventoryCounts,
+    InventoryItem,
+    InventoryPage,
+    InventorySnapshot,
+    ItemKind,
+    SessionInventoryReadPort,
+)
+from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
+    InventoryNotFound,
+    InventoryPublicationConflict,
+    SessionInventoryWritePort,
+)
+from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
+    ArchivedTranscript,
+    SessionTranscriptArchivePort,
+    TranscriptIntegrityError,
 )
 from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
     CanonicalTotals,
@@ -85,6 +135,21 @@ from syn_domain.contexts.agent_sessions.slices.mark_agent_launched import (
 )
 from syn_domain.contexts.agent_sessions.slices.mark_agent_launched.MarkAgentLaunchedHandler import (
     MarkAgentLaunchedHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.BuildInventorySnapshotHandler import (
+    BuildInventorySnapshotHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.InventoryStepHandler import (
+    InventoryStepHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
+    InventoryReconciliationProcessManager,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.RefreshSessionInventoryHandler import (
+    RefreshSessionInventoryHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.SchedulePendingInventoryHandler import (
+    SchedulePendingInventoryHandler,
 )
 from syn_domain.contexts.agent_sessions.slices.record_operation import (
     OperationRecordedEvent,
@@ -128,37 +193,103 @@ __all__ = [
     "AgentLaunch",
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
+    "ArchivedTranscript",
     "BilledUsage",
+    "BodyAvailability",
+    "BuildInventorySnapshotHandler",
     "CanonicalTotals",
     "CanonicalUsageQueryService",
+    "CaptureEvidence",
+    "CaptureLocalTranscriptHandler",
+    "CaptureReceipt",
+    "CaptureSpool",
+    "CaptureSpoolLease",
+    "CaptureSpoolLeaseLost",
+    "CataloguedCapture",
     "CompleteSessionCommand",
     "CompleteSessionHandler",
     "CostCalculator",
+    "EvidenceBatch",
+    "EvidencePage",
+    "EvidenceReference",
+    "EvidenceRetraction",
+    "HostSessionEvidenceProjector",
+    "IdentityBinding",
     "ImportLedger",
     "ImportLedgerPort",
+    "InventoryClockAggregate",
+    "InventoryCounts",
+    "InventoryCoverage",
+    "InventoryGap",
+    "InventoryItem",
+    "InventoryJob",
+    "InventoryJobLease",
+    "InventoryLeaseLost",
+    "InventoryNode",
+    "InventoryNodeRef",
+    "InventoryNotFound",
+    "InventoryPage",
+    "InventoryPublicationConflict",
+    "InventoryReconciliationAggregate",
+    "InventoryReconciliationProcessManager",
+    "InventoryReconciliationSweepEvent",
+    "InventoryReplicationProcessManager",
+    "InventorySnapshot",
+    "InventoryStepHandler",
+    "InvocationStatus",
+    "ItemKind",
+    "LineageEdge",
+    "LocalCaptureResult",
+    "LocalTranscriptCapture",
+    "LocalTranscriptRead",
     "MarkAgentLaunchedCommand",
     "MarkAgentLaunchedHandler",
+    "Membership",
+    "NativeRelationshipFact",
+    "NativeSessionEvidencePort",
+    "NativeTranscriptFacts",
     "ObservationType",
+    "ObserveInventoryClockCommand",
     "OperationRecord",
     "OperationRecordedEvent",
     "OperationType",
+    "PendingEvidence",
     "PricedUsage",
+    "QualifiedSessionIdentity",
+    "ReadLocalTranscriptHandler",
     "RecordOperationCommand",
     "RecordOperationHandler",
+    "RecordSessionInvocationCommand",
+    "RefreshSessionInventoryHandler",
+    "ResolvedInventory",
     "RolloutDocument",
     "RolloutRecord",
+    "RunIdentity",
+    "SchedulePendingInventoryHandler",
+    "SessionCaptureCatalogPort",
+    "SessionCaptureSpoolPort",
     "SessionCompletedEvent",
     "SessionCostQueryService",
+    "SessionEvidence",
+    "SessionEvidenceReadPort",
+    "SessionEvidenceWritePort",
+    "SessionInventoryJobPort",
+    "SessionInventoryReadPort",
+    "SessionInventoryWritePort",
+    "SessionInvocationState",
     "SessionStartedEvent",
     "SessionStatus",
     "SessionStorePort",
     "SessionSummaryData",
+    "SessionTranscriptArchivePort",
     "StartSessionCommand",
     "StartSessionHandler",
+    "StoredEvidenceBatch",
     "StoredSession",
     "StoredTranscript",
     "TokenMetrics",
     "TokenUsageData",
+    "TranscriptIntegrityError",
     "import_phase_delegates",
     "model_from_rollout",
     "price_canonical_row",
@@ -170,3 +301,40 @@ __all__ = [
     "record_tool_completed",
     "record_tool_started",
 ]
+
+from ._shared.session_invocation import InvocationStatus, SessionInvocationState
+from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryClockAggregate
+from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand
+from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocationCommand
+from .domain.read_models.session_evidence import CaptureEvidence, SessionEvidence
+from .domain.read_models.session_inventory import (
+    BodyAvailability,
+    EvidenceReference,
+    InventoryNodeRef,
+)
+from .ports.NativeSessionEvidencePort import (
+    NativeRelationshipFact,
+    NativeSessionEvidencePort,
+    NativeTranscriptFacts,
+)
+from .ports.QualifiedSessionStorePort import QualifiedSessionIdentity
+from .ports.SessionCaptureCatalogPort import CataloguedCapture, SessionCaptureCatalogPort
+from .ports.SessionCaptureSpoolPort import (
+    CaptureSpool,
+    CaptureSpoolLease,
+    CaptureSpoolLeaseLost,
+    SessionCaptureSpoolPort,
+)
+from .slices.capture_local_transcript.CaptureLocalTranscriptHandler import (
+    CaptureLocalTranscriptHandler,
+    LocalCaptureResult,
+    LocalTranscriptCapture,
+)
+from .slices.read_local_transcript.ReadLocalTranscriptHandler import (
+    LocalTranscriptRead,
+    ReadLocalTranscriptHandler,
+)
+from .slices.reconcile_session_inventory.HostSessionEvidenceProjector import (
+    HostSessionEvidenceProjector,
+)
+from .slices.replicate_session_inventory.projection import InventoryReplicationProcessManager

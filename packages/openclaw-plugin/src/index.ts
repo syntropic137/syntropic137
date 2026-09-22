@@ -5,6 +5,7 @@ import { synGetArtifact, synListArtifacts, artifactToolDefs } from "./tools/arti
 import { synCancelExecution, synInjectContext, synPauseExecution, synResumeExecution, controlToolDefs } from "./tools/control.js";
 import { synGetExecution, synListExecutions, executionToolDefs } from "./tools/executions.js";
 import { synGetExecutionCost, synGetMetrics, synGetSession, observabilityToolDefs } from "./tools/observability.js";
+import { synGetSessionInventory, sessionInventoryToolDefs } from "./tools/session_inventory.js";
 import { synCreateTrigger, synListTriggers, triggerToolDefs } from "./tools/triggers.js";
 import { synExecuteWorkflow, synListWorkflows, workflowToolDefs } from "./tools/workflows.js";
 
@@ -15,6 +16,7 @@ import { synExecuteWorkflow, synListWorkflows, workflowToolDefs } from "./tools/
 export const allToolDefs = [
   ...workflowToolDefs,
   ...executionToolDefs,
+  ...sessionInventoryToolDefs,
   ...controlToolDefs,
   ...observabilityToolDefs,
   ...artifactToolDefs,
@@ -31,6 +33,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   syn_execute_workflow: synExecuteWorkflow,
   syn_list_executions: synListExecutions,
   syn_get_execution: synGetExecution,
+  syn_get_session_inventory: synGetSessionInventory,
   syn_pause_execution: synPauseExecution,
   syn_resume_execution: synResumeExecution,
   syn_cancel_execution: synCancelExecution,

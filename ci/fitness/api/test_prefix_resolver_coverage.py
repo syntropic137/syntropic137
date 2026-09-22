@@ -48,7 +48,13 @@ _EXEMPT: set[tuple[str, str]] = {
 # need safety-guard queries (fire counts, cooldowns, delivery dedup) that the
 # generic projection store doesn't support. _resolve_trigger_id() provides
 # equivalent prefix matching against the trigger store. See #542.
-_ALTERNATIVE_RESOLVERS: set[str] = {"_resolve_trigger_id"}
+# Inventory execution routes resolve through _visible_run before checking access;
+# job reads use a source-scoped job index and then check the owning execution.
+_ALTERNATIVE_RESOLVERS: set[str] = {
+    "_resolve_trigger_id",
+    "_visible_run",
+    "_resolve_inventory_job_id",
+}
 
 
 def _repo_root() -> Path:

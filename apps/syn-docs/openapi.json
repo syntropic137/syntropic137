@@ -1208,6 +1208,311 @@
         }
       }
     },
+    "/executions/{execution_id}/session-inventory": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Session Inventory",
+        "operationId": "get_session_inventory_executions__execution_id__session_inventory_get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Session Inventory Page",
+        "operationId": "get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Snapshot Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "node",
+                "membership",
+                "edge",
+                "capture",
+                "gap",
+                "retraction",
+                "binding"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": -1,
+              "default": -1,
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryPageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-inventory/reconcile": {
+      "post": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Refresh Session Inventory",
+        "operationId": "refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionInventoryRefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session-inventory-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Session Inventory Job",
+        "operationId": "get_session_inventory_job_session_inventory_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-transcripts/{archive_hash}": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Local Transcript Revision",
+        "operationId": "get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "archive_hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Archive Hash"
+            }
+          },
+          {
+            "name": "harness",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^[^\\x00]+$",
+              "title": "Harness"
+            }
+          },
+          {
+            "name": "native_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^[^\\x00]+$",
+              "title": "Native Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalTranscriptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -5927,6 +6232,17 @@
         "title": "AssignRepoToSystemRequest",
         "description": "Request body for assigning a repo to a system."
       },
+      "BodyAvailability": {
+        "type": "string",
+        "enum": [
+          "present",
+          "pending",
+          "missing",
+          "expired",
+          "unknown"
+        ],
+        "title": "BodyAvailability"
+      },
       "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post": {
         "properties": {
           "file": {
@@ -6018,6 +6334,66 @@
         "type": "object",
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
+      },
+      "CaptureReceipt": {
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/BodyAvailability"
+          },
+          "receipt_sequence": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Receipt Sequence"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceReference"
+          },
+          "destination": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ],
+            "title": "Destination",
+            "default": "local"
+          },
+          "transcript_revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript Revision"
+          },
+          "archived_byte_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Byte Hash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node",
+          "availability",
+          "receipt_sequence",
+          "evidence"
+        ],
+        "title": "CaptureReceipt"
       },
       "CaptureStatusEntry": {
         "properties": {
@@ -6677,6 +7053,18 @@
         "title": "CostOutlierResponse",
         "description": "An execution with unusually high cost."
       },
+      "CoverageState": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "open",
+          "reconciled",
+          "missing",
+          "unsupported",
+          "conflicting"
+        ],
+        "title": "CoverageState"
+      },
       "CreateArtifactRequest": {
         "properties": {
           "workflow_id": {
@@ -7117,6 +7505,73 @@
         ],
         "title": "EventResponse",
         "description": "Single event response."
+      },
+      "EvidenceClass": {
+        "type": "string",
+        "enum": [
+          "registered",
+          "corroborated",
+          "candidate",
+          "conflicting"
+        ],
+        "title": "EvidenceClass"
+      },
+      "EvidenceReference": {
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Evidence Id"
+          },
+          "producer_id": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Producer Id"
+          },
+          "source_revision": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Source Revision"
+          },
+          "locator": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Locator"
+          },
+          "extractor_version": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Extractor Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "producer_id",
+          "source_revision",
+          "locator",
+          "extractor_version"
+        ],
+        "title": "EvidenceReference"
+      },
+      "EvidenceRetraction": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/EvidenceReference"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceReference"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target",
+          "evidence"
+        ],
+        "title": "EvidenceRetraction",
+        "description": "An explicit producer correction; it cannot revoke another producer's facts."
       },
       "ExecuteWorkflowRequest": {
         "properties": {
@@ -8579,6 +9034,48 @@
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
       },
+      "IdentityBinding": {
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "transcript": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EvidenceClass"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "owner",
+          "transcript",
+          "confidence",
+          "evidence"
+        ],
+        "title": "IdentityBinding",
+        "description": "A platform session or registered invocation represents native transcript work."
+      },
       "InjectRequest": {
         "properties": {
           "message": {
@@ -8642,6 +9139,369 @@
         ],
         "title": "InputDeclarationModel"
       },
+      "InventoryCounts": {
+        "properties": {
+          "node": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Node"
+          },
+          "membership": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Membership"
+          },
+          "edge": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Edge"
+          },
+          "capture": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Capture"
+          },
+          "gap": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Gap"
+          },
+          "retraction": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Retraction",
+            "default": 0
+          },
+          "binding": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Binding",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node",
+          "membership",
+          "edge",
+          "capture",
+          "gap"
+        ],
+        "title": "InventoryCounts"
+      },
+      "InventoryCoverage": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/CoverageState"
+          },
+          "contract_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Id"
+          },
+          "expected_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Count"
+          },
+          "missing_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Keys",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "InventoryCoverage"
+      },
+      "InventoryGap": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Reason"
+          },
+          "node_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Node Keys",
+            "default": []
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Ids",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "InventoryGap"
+      },
+      "InventoryNode": {
+        "properties": {
+          "ref": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "type": "array",
+            "title": "Evidence",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ref"
+        ],
+        "title": "InventoryNode"
+      },
+      "InventoryNodeRef": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "invocation",
+              "transcript"
+            ],
+            "title": "Kind"
+          },
+          "source_instance_id": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Source Instance Id"
+          },
+          "local_id": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Local Id"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "source_instance_id",
+          "local_id"
+        ],
+        "title": "InventoryNodeRef",
+        "description": "A reference never changes the native ID or its source-content hash."
+      },
+      "InventorySnapshot": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Snapshot Id"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunIdentity"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "resolver_version": {
+            "type": "string",
+            "title": "Resolver Version"
+          },
+          "evidence_watermark": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Evidence Watermark"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/InventoryCoverage"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/InventoryCounts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "run",
+          "revision",
+          "resolver_version",
+          "evidence_watermark",
+          "coverage",
+          "counts"
+        ],
+        "title": "InventorySnapshot"
+      },
+      "LineageEdge": {
+        "properties": {
+          "parent": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "child": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "spawn",
+              "resume",
+              "fork"
+            ],
+            "title": "Relation"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EvidenceClass"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "parent_segment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Segment"
+          },
+          "child_segment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Segment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent",
+          "child",
+          "relation",
+          "confidence",
+          "evidence"
+        ],
+        "title": "LineageEdge"
+      },
+      "LocalTranscriptResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "present",
+              "not_captured",
+              "missing",
+              "too_large"
+            ],
+            "title": "Status"
+          },
+          "archive_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Archive Sha256"
+          },
+          "content_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "envelope"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Format"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "content_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Base64"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "archive_sha256"
+        ],
+        "title": "LocalTranscriptResponse",
+        "description": "Exact archive bytes, base64 encoded without parsing provider content."
+      },
       "MaintenanceModeResponse": {
         "properties": {
           "active": {
@@ -8680,6 +9540,71 @@
         "type": "object",
         "title": "MaintenanceModeResponse",
         "description": "Whether new workflow executions are being admitted (#1387).\n\n``active`` is the gate: while it is true every admission path refuses and\nthe deploy script may swap containers knowing nothing new can start.\nExecutions already running are unaffected."
+      },
+      "Membership": {
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/InventoryNodeRef"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunIdentity"
+          },
+          "phase_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/EvidenceClass"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node",
+          "run",
+          "confidence",
+          "evidence"
+        ],
+        "title": "Membership"
       },
       "MetricsResponse": {
         "properties": {
@@ -10521,6 +11446,27 @@
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
       },
+      "RunIdentity": {
+        "properties": {
+          "source_instance_id": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Source Instance Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Execution Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_instance_id",
+          "execution_id"
+        ],
+        "title": "RunIdentity"
+      },
       "SSEHealthResponse": {
         "properties": {
           "status": {
@@ -10739,6 +11685,235 @@
         ],
         "title": "SessionCostResponse",
         "description": "Cost for a single session."
+      },
+      "SessionInventoryJobResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunIdentity"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "publishing",
+              "completed",
+              "failed"
+            ],
+            "title": "Stage"
+          },
+          "evidence_watermark": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Evidence Watermark"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "resolver_version": {
+            "type": "string",
+            "title": "Resolver Version"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "run",
+          "stage",
+          "evidence_watermark",
+          "snapshot_id",
+          "resolver_version",
+          "revision",
+          "failure_code"
+        ],
+        "title": "SessionInventoryJobResponse"
+      },
+      "SessionInventoryPageResponse": {
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/InventorySnapshot"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "node",
+              "membership",
+              "edge",
+              "capture",
+              "gap",
+              "retraction",
+              "binding"
+            ],
+            "title": "Kind"
+          },
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/InventoryNode"
+                },
+                {
+                  "$ref": "#/components/schemas/Membership"
+                },
+                {
+                  "$ref": "#/components/schemas/LineageEdge"
+                },
+                {
+                  "$ref": "#/components/schemas/CaptureReceipt"
+                },
+                {
+                  "$ref": "#/components/schemas/InventoryGap"
+                },
+                {
+                  "$ref": "#/components/schemas/EvidenceRetraction"
+                },
+                {
+                  "$ref": "#/components/schemas/IdentityBinding"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_after": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot",
+          "kind",
+          "items"
+        ],
+        "title": "SessionInventoryPageResponse",
+        "description": "A bounded page of one immutable published revision."
+      },
+      "SessionInventoryRefreshRequest": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "SessionInventoryRefreshRequest"
+      },
+      "SessionInventoryRefreshResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "SessionInventoryRefreshResponse"
+      },
+      "SessionInventoryResponse": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunIdentity"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventorySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reconstruction_status": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "pending",
+              "running",
+              "current",
+              "failed"
+            ],
+            "title": "Reconstruction Status"
+          },
+          "observed_evidence_watermark": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Observed Evidence Watermark"
+          },
+          "later_evidence_pending": {
+            "type": "boolean",
+            "title": "Later Evidence Pending"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "run",
+          "snapshot",
+          "reconstruction_status",
+          "observed_evidence_watermark",
+          "later_evidence_pending"
+        ],
+        "title": "SessionInventoryResponse",
+        "description": "Published inventory and observed reconstruction progress, without read side effects."
       },
       "SessionListResponse": {
         "properties": {

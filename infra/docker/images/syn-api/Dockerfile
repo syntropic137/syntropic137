@@ -129,6 +129,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -u 1000 syn && \
     mkdir -p /app/logs && \
+    mkdir -p /app/data/session-inventory && \
     chown -R syn:syn /app
 
 USER syn

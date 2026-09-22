@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     CompleteSessionCommand,
     CompleteSessionHandler,
+    InvocationStatus,
     MarkAgentLaunchedCommand,
     OperationType,
     RecordOperationCommand,
     RecordOperationHandler,
+    RecordSessionInvocationCommand,
+    SessionInvocationState,
     SessionStatus,
     StartSessionCommand,
 )
@@ -84,6 +88,7 @@ class SessionLifecycleManager:
         self._agent_provider = agent_provider
         self._agent_model = agent_model
         self._repos = list(repos) if repos else []
+        self._invocation: SessionInvocationState | None = None
 
     @property
     def session(self) -> AgentSessionAggregate | None:
@@ -144,6 +149,7 @@ class SessionLifecycleManager:
             aggregate_id=self._session_id,
             workflow_id=self._workflow_id,
             execution_id=self._execution_id,
+            capture_profile="local-spool/1",
             phase_id=self._phase_id,
             agent_provider=self._agent_provider,
             agent_model=self._agent_model,
@@ -152,6 +158,61 @@ class SessionLifecycleManager:
         self._session.start_session(cmd)
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
+
+    async def prepare_invocation(self, harness: str) -> None:
+        """Persist intent before every launch, including capacity retries."""
+        if self._repo is None:
+            return
+        if self._session is None:
+            raise ValueError("session must be started before registering an invocation")
+        invocation = SessionInvocationState(
+            invocation_id=str(uuid4()),
+            attempt_id=str(uuid4()),
+            harness=harness,
+        )
+        self._session.record_invocation(
+            RecordSessionInvocationCommand(
+                aggregate_id=self._session_id,
+                invocation=invocation,
+            )
+        )
+        # Failure propagates to admission: no controlled process may launch yet.
+        await self._repo.save(self._session)
+        self._invocation = invocation
+
+    def _advance_invocation(self, invocation: SessionInvocationState) -> None:
+        assert self._session is not None
+        self._session.record_invocation(
+            RecordSessionInvocationCommand(
+                aggregate_id=self._session_id,
+                invocation=invocation,
+            )
+        )
+        self._invocation = invocation
+
+    async def finish_invocation(
+        self,
+        *,
+        native_session_id: str | None,
+        status: InvocationStatus,
+    ) -> None:
+        if self._invocation is None or self._session is None or self._repo is None:
+            return
+        self._advance_invocation(
+            SessionInvocationState(
+                invocation_id=self._invocation.invocation_id,
+                attempt_id=self._invocation.attempt_id,
+                harness=self._invocation.harness,
+                native_session_id=native_session_id or self._invocation.native_session_id,
+                status=status,
+            )
+        )
+        try:
+            await self._repo.save(self._session)
+        except Exception:
+            # Keep the uncommitted fact for the normal session completion save.
+            # Post-launch recording failure must not change the work's result.
+            logger.exception("Invocation result remains pending for session %s", self._session_id)
 
     async def mark_launched(self) -> None:
         """Record that an agent process demonstrably existed for this session.
@@ -178,6 +239,12 @@ class SessionLifecycleManager:
             return
 
         self._session.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id=self._session_id))
+        if self._invocation is not None:
+            self._advance_invocation(
+                self._invocation.model_copy(
+                    update={"status": InvocationStatus.LAUNCHED},
+                )
+            )
         try:
             await self._repo.save(self._session)
         except Exception as launch_err:

@@ -20,6 +20,7 @@ import { executionTokenTotals } from '../../utils/executionTokens'
 import { isPlatformFailure, reportedFailureNote } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
+import { SessionInventory } from './SessionInventory'
 import { PhaseTimeline } from './PhaseTimeline'
 
 type Phase = ExecutionDetailResponse['phases'][number]
@@ -343,6 +344,7 @@ export function ExecutionDetail() {
       <section id="phase-timeline">
         <PhaseTimeline execution={execution} now={now} />
       </section>
+      <SessionInventory key={execution.workflow_execution_id} executionId={execution.workflow_execution_id} />
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />
       )}

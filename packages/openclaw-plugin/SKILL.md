@@ -36,3 +36,21 @@ Use these tools when the user wants to:
 - **Mid-run corrections** — use `syn_inject_context` to send messages to a running agent
 - **Cost awareness** — use `syn_get_execution_cost` to check spend, especially for multi-phase workflows
 - **Metrics** — `syn_get_metrics` gives a platform-wide overview of usage and costs
+
+
+## Find sessions for a workflow run
+
+Use `syn_get_session_inventory` with `execution_id` to read reconstruction status
+and the latest committed snapshot. If `snapshot` is null, report that no revision
+has been published yet. Do not describe this as a run with no sessions.
+
+Pass the returned `snapshot_id` to read a bounded page. `kind` selects `node`,
+`membership`, `edge`, `capture`, `gap`, `binding`, or `retraction`. Keep the same
+snapshot ID and pass each `next_after` as `after` until it is null. Never combine
+pages from different revisions. Read memberships for phase/attempt attribution,
+edges for parentage, and captures for body availability. Preserve full IDs and
+confidence; do not infer verified relationships from names or timestamps.
+
+Reconstruction being `current` does not mean coverage is complete. Report the
+snapshot coverage and any pending evidence or gaps. These reads use Syntropic137
+and do not require SeshMagic. They do not start workflows or refresh jobs.

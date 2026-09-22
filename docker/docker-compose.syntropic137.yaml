@@ -221,6 +221,14 @@ services:
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
       DOCKER_HOST: tcp://docker-socket-proxy:2375
+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory
+      SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID: ${SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID:-}
+      SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS: ${SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS:-30}
+      SYN_SESSION_INVENTORY_LEASE_SECONDS: ${SYN_SESSION_INVENTORY_LEASE_SECONDS:-120}
+      SYN_SESSION_INVENTORY_RETRY_SECONDS: ${SYN_SESSION_INVENTORY_RETRY_SECONDS:-10}
+      SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK: ${SYN_SESSION_INVENTORY_MAX_JOBS_PER_TICK:-2}
+      SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_RECORDS:-100000}
+      SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES: ${SYN_SESSION_INVENTORY_MAX_EVIDENCE_BATCHES:-10000}
       SYN_SESSION_STORE_URL: ${SYN_SESSION_STORE_URL:-}
       SYN_SESSION_STORE_AUTH_TOKEN: ${SYN_SESSION_STORE_AUTH_TOKEN:-}
       SYN_SESSION_STORE_LABEL: ${SYN_SESSION_STORE_LABEL:-}
@@ -250,6 +258,11 @@ services:
       SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
       SYN_PROXY_URL: http://envoy-proxy:8081
       SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+    volumes:
+    - session_inventory_data:/app/data/session-inventory
+    - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+    - api_logs:/app/logs
+    - ./workspaces:/workspaces
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -276,10 +289,6 @@ services:
     - syn-internal
     - docker-proxy
     container_name: syn137-api
-    volumes:
-    - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
-    - api_logs:/app/logs
-    - ./workspaces:/workspaces
     entrypoint:
     - /bin/sh
     - /selfhost-entrypoint.sh
@@ -532,6 +541,7 @@ secrets:
   github_app_private_key:
     file: ./secrets/github-app-private-key.pem
 volumes:
+  session_inventory_data: null
   db_data:
     name: syn137_db_data
   api_logs:

@@ -390,6 +390,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/session-inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory */
+        get: operations["get_session_inventory_executions__execution_id__session_inventory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory Page */
+        get: operations["get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Session Inventory */
+        post: operations["refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/session-inventory-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory Job */
+        get: operations["get_session_inventory_job_session_inventory_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Local Transcript Revision */
+        get: operations["get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -2009,6 +2094,11 @@ export interface components {
             /** System Id */
             system_id: string;
         };
+        /**
+         * BodyAvailability
+         * @enum {string}
+         */
+        BodyAvailability: "present" | "pending" | "missing" | "expired" | "unknown";
         /** Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post */
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
             /** File */
@@ -2060,6 +2150,24 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /** CaptureReceipt */
+        CaptureReceipt: {
+            node: components["schemas"]["InventoryNodeRef"];
+            availability: components["schemas"]["BodyAvailability"];
+            /** Receipt Sequence */
+            receipt_sequence: number;
+            evidence: components["schemas"]["EvidenceReference"];
+            /**
+             * Destination
+             * @default local
+             * @enum {string}
+             */
+            destination: "local" | "remote";
+            /** Transcript Revision */
+            transcript_revision?: string | null;
+            /** Archived Byte Hash */
+            archived_byte_hash?: string | null;
         };
         /**
          * CaptureStatusEntry
@@ -2334,6 +2442,11 @@ export interface components {
              */
             executed_at: string;
         };
+        /**
+         * CoverageState
+         * @enum {string}
+         */
+        CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -2527,6 +2640,32 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * EvidenceClass
+         * @enum {string}
+         */
+        EvidenceClass: "registered" | "corroborated" | "candidate" | "conflicting";
+        /** EvidenceReference */
+        EvidenceReference: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Producer Id */
+            producer_id: string;
+            /** Source Revision */
+            source_revision: string;
+            /** Locator */
+            locator: string;
+            /** Extractor Version */
+            extractor_version: string;
+        };
+        /**
+         * EvidenceRetraction
+         * @description An explicit producer correction; it cannot revoke another producer's facts.
+         */
+        EvidenceRetraction: {
+            target: components["schemas"]["EvidenceReference"];
+            evidence: components["schemas"]["EvidenceReference"];
         };
         /**
          * ExecuteWorkflowRequest
@@ -3307,6 +3446,19 @@ export interface components {
             };
         };
         /**
+         * IdentityBinding
+         * @description A platform session or registered invocation represents native transcript work.
+         */
+        IdentityBinding: {
+            owner: components["schemas"]["InventoryNodeRef"];
+            transcript: components["schemas"]["InventoryNodeRef"];
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
          * InjectRequest
          * @description Request to inject context into an execution.
          */
@@ -3333,6 +3485,136 @@ export interface components {
             required: boolean;
             /** Default */
             default?: string | null;
+        };
+        /** InventoryCounts */
+        InventoryCounts: {
+            /** Node */
+            node: number;
+            /** Membership */
+            membership: number;
+            /** Edge */
+            edge: number;
+            /** Capture */
+            capture: number;
+            /** Gap */
+            gap: number;
+            /**
+             * Retraction
+             * @default 0
+             */
+            retraction: number;
+            /**
+             * Binding
+             * @default 0
+             */
+            binding: number;
+        };
+        /** InventoryCoverage */
+        InventoryCoverage: {
+            state: components["schemas"]["CoverageState"];
+            /** Contract Id */
+            contract_id?: string | null;
+            /** Expected Count */
+            expected_count?: number | null;
+            /**
+             * Missing Keys
+             * @default []
+             */
+            missing_keys: string[];
+        };
+        /** InventoryGap */
+        InventoryGap: {
+            /** Reason */
+            reason: string;
+            /**
+             * Node Keys
+             * @default []
+             */
+            node_keys: string[];
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+        };
+        /** InventoryNode */
+        InventoryNode: {
+            ref: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
+         * InventoryNodeRef
+         * @description A reference never changes the native ID or its source-content hash.
+         */
+        InventoryNodeRef: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Local Id */
+            local_id: string;
+            /** Harness */
+            harness?: string | null;
+        };
+        /** InventorySnapshot */
+        InventorySnapshot: {
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /** Revision */
+            revision: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            coverage: components["schemas"]["InventoryCoverage"];
+            counts: components["schemas"]["InventoryCounts"];
+        };
+        /** LineageEdge */
+        LineageEdge: {
+            parent: components["schemas"]["InventoryNodeRef"];
+            child: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "spawn" | "resume" | "fork";
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+            /** Parent Segment */
+            parent_segment?: string | null;
+            /** Child Segment */
+            child_segment?: string | null;
+        };
+        /**
+         * LocalTranscriptResponse
+         * @description Exact archive bytes, base64 encoded without parsing provider content.
+         */
+        LocalTranscriptResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "present" | "not_captured" | "missing" | "too_large";
+            /** Archive Sha256 */
+            archive_sha256: string;
+            /** Content Format */
+            content_format?: ("native" | "envelope") | null;
+            /** Size */
+            size?: number | null;
+            /** Content Base64 */
+            content_base64?: string | null;
         };
         /**
          * MaintenanceModeResponse
@@ -3366,6 +3648,20 @@ export interface components {
              * @default
              */
             actor: string;
+        };
+        /** Membership */
+        Membership: {
+            node: components["schemas"]["InventoryNodeRef"];
+            run: components["schemas"]["RunIdentity"];
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
         };
         /**
          * MetricsResponse
@@ -4364,6 +4660,13 @@ export interface components {
          * @enum {string}
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
+        /** RunIdentity */
+        RunIdentity: {
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Execution Id */
+            execution_id: string;
+        };
         /**
          * SSEHealthResponse
          * @description Health status of the SSE subsystem.
@@ -4478,6 +4781,72 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+        };
+        /** SessionInventoryJobResponse */
+        SessionInventoryJobResponse: {
+            /** Job Id */
+            job_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "pending" | "publishing" | "completed" | "failed";
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Revision */
+            revision: string | null;
+            /** Failure Code */
+            failure_code: string | null;
+        };
+        /**
+         * SessionInventoryPageResponse
+         * @description A bounded page of one immutable published revision.
+         */
+        SessionInventoryPageResponse: {
+            snapshot: components["schemas"]["InventorySnapshot"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            /** Items */
+            items: (components["schemas"]["InventoryNode"] | components["schemas"]["Membership"] | components["schemas"]["LineageEdge"] | components["schemas"]["CaptureReceipt"] | components["schemas"]["InventoryGap"] | components["schemas"]["EvidenceRetraction"] | components["schemas"]["IdentityBinding"])[];
+            /** Next After */
+            next_after?: number | null;
+        };
+        /** SessionInventoryRefreshRequest */
+        SessionInventoryRefreshRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** SessionInventoryRefreshResponse */
+        SessionInventoryRefreshResponse: {
+            /** Job Id */
+            job_id: string;
+        };
+        /**
+         * SessionInventoryResponse
+         * @description Published inventory and observed reconstruction progress, without read side effects.
+         */
+        SessionInventoryResponse: {
+            run: components["schemas"]["RunIdentity"];
+            snapshot: components["schemas"]["InventorySnapshot"] | null;
+            /**
+             * Reconstruction Status
+             * @enum {string}
+             */
+            reconstruction_status: "not_started" | "pending" | "running" | "current" | "failed";
+            /** Observed Evidence Watermark */
+            observed_evidence_watermark: number;
+            /** Later Evidence Pending */
+            later_evidence_pending: boolean;
+            /** Job Id */
+            job_id?: string | null;
         };
         /**
          * SessionListResponse
@@ -6497,6 +6866,174 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_executions__execution_id__session_inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_job_session_inventory_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalTranscriptResponse"];
                 };
             };
             /** @description Validation Error */

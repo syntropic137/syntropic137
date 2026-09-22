@@ -477,6 +477,7 @@ class WorkspaceProvisionHandler:
             phase_id=todo.phase_id,
             with_sidecar=True,
             inject_tokens=True,
+            capture_session_id=session_id,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)

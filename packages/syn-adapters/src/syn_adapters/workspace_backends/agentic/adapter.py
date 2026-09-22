@@ -139,6 +139,7 @@ class AgenticIsolationAdapter:
         workspace_container_dir: str | None = None,
         workspace_host_dir: str | None = None,
         session_store: SessionStoreSettings | None = None,
+        capture_source_instance_id: str | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -170,6 +171,7 @@ class AgenticIsolationAdapter:
 
             session_store = get_settings().session_store
         self._session_store = session_store
+        self._capture_source_instance_id = capture_source_instance_id
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
@@ -200,28 +202,9 @@ class AgenticIsolationAdapter:
 
     def _build_environment(self, config: IsolationConfig) -> dict[str, str]:
         """Build the container environment, including the session-store block."""
-        # Central session-store capture (SeshMagic). The capability lives in the
-        # workspace image and activates purely from these variables; Syn137 only
-        # supplies the contract.
-        #
-        # OPT-IN, DEFAULT OFF: when no store URL is configured this STRIPS the
-        # reserved AGENTIC_SESSION_STORE_* keys and adds nothing, so a
-        # self-hoster with no SeshMagic instance gets a container environment
-        # byte-identical to before this integration existed — including when a
-        # caller passes those keys itself via `extra_environment`. The opt-in
-        # switch must not be defeatable from the public workspace API.
-        #
-        # When enabled the adapter's values win over any caller-supplied value of
-        # the same name: URL, token, partition and tags are derived from host
-        # settings and THIS execution, and must not be redirectable or spoofable
-        # by a phase's environment block.
-        #
-        # SPOOL is container-local (/spool), deliberately NOT a mounted volume.
-        # Tradeoff: if the container is SIGKILLed before finalize runs, that
-        # session is lost. This is not a regression — today nothing is captured
-        # at all. A persistent volume would fix it but drags in volume lifecycle
-        # management that nobody has designed yet, so it is a deliberate
-        # follow-up rather than an omission.
+        # Remote export remains optional. Controlled workflow launches add the
+        # local provider and durable mount after this host-owned contract is built.
+        # Caller-supplied capture settings never override configured credentials.
         return apply_session_store_env(
             _with_executable_tmpdir(config.environment or {}),
             self._session_store,
@@ -270,6 +253,13 @@ class AgenticIsolationAdapter:
         )
 
         environment = self._build_environment(config)
+        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
+
+        capture_mounts = (
+            apply_workspace_capture(config, self._capture_source_instance_id, environment)
+            if self._capture_source_instance_id is not None
+            else []
+        )
 
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
@@ -298,6 +288,7 @@ class AgenticIsolationAdapter:
             image=image,
             working_dir="/workspace",
             environment=environment,
+            mounts=capture_mounts,
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,

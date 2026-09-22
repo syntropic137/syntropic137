@@ -14,6 +14,23 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
+from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
+from syn_api.inventory_types import (
+    SessionInventoryJobResponse as SessionInventoryJobResponse,
+)
+from syn_api.inventory_types import (
+    SessionInventoryPageResponse as SessionInventoryPageResponse,
+)
+from syn_api.inventory_types import (
+    SessionInventoryRefreshRequest as SessionInventoryRefreshRequest,
+)
+from syn_api.inventory_types import (
+    SessionInventoryRefreshResponse as SessionInventoryRefreshResponse,
+)
+from syn_api.inventory_types import (
+    SessionInventoryResponse as SessionInventoryResponse,
+)
+
 # Runtime import: pydantic resolves the annotation below at class-construction
 # time, and the whole point of reusing the DOMAIN enum here is that the API and
 # the CLI cannot grow a second spelling of the same vocabulary (#1357).

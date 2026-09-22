@@ -108,18 +108,22 @@ class TestItAsksTheRightQuestion:
 @pytest.mark.unit
 class TestNotKnowingIsNeverSuccess:
     @pytest.mark.asyncio
-    async def test_an_exec_that_raises_does_not_propagate(self) -> None:
+    async def test_an_exec_that_raises_does_not_propagate(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         # This runs during teardown of a phase that may have SUCCEEDED. No
         # exporter problem is worth converting that into a failure.
         async def _exec(
             _argv: list[str], *, timeout_seconds: int, environment=None
         ) -> ExecutionResult:
-            raise RuntimeError("container already gone")
+            raise RuntimeError("container already gone: Bearer private-capture-token")
 
         out = await probe_capture(_exec, expectations=_EXPECT)
         assert out.state is CaptureState.UNKNOWN
         assert out.needs_backfill
         assert "could not run" in (out.reason or "")
+        assert "private-capture-token" not in out.model_dump_json()
+        assert "private-capture-token" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_timeout_is_failed(self) -> None:

@@ -36,6 +36,9 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
+from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+    QualifiedSessionIdentity,  # noqa: TC001 - Pydantic field resolved at runtime
+)
 
 __all__ = [
     "LOSS_COUNTERS",
@@ -153,6 +156,7 @@ class AuthoritativeCapture(BaseModel):
     #: disjoint namespaces - the host id is never given to the agent - so this
     #: is a recorded mapping, not a comparison.
     agent_session_ids: tuple[str, ...] | None = None
+    qualified_session_identities: tuple[QualifiedSessionIdentity, ...] | None = None
 
     @property
     def needs_backfill(self) -> bool:

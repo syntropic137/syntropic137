@@ -68,6 +68,17 @@ describe("sessions commands", () => {
     expect(stdout()).toContain("No sessions found");
   });
 
+  it("list forwards execution filter without changing the platform session endpoint", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ sessions: [], total: 0 }));
+    await sessionsGroup.getCommand("list")!.handler({
+      positionals: [], values: { execution: "run-123" },
+    });
+    const request = mockFetch.mock.calls[0]![0] as Request;
+    const url = new URL(request.url);
+    expect(url.pathname).toBe("/api/v1/sessions");
+    expect(url.searchParams.get("execution_id")).toBe("run-123");
+  });
+
   it("show renders session detail", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({

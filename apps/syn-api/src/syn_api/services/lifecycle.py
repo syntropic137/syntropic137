@@ -29,6 +29,9 @@ from syn_api._wiring import (
 from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.inventory_lifecycle import (
+    initialize_session_inventory as _init_session_inventory,
+)
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -494,7 +497,10 @@ async def _init_durable_stores() -> Result[None, LifecycleError]:
     except Exception:
         logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
 
-    return await _init_import_ledger()
+    ledger_result = await _init_import_ledger()
+    if isinstance(ledger_result, Err):
+        return ledger_result
+    return await _init_session_inventory()
 
 
 async def _init_import_ledger() -> Result[None, LifecycleError]:
@@ -702,6 +708,13 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     # boundary. Continuing past a failed start would announce into a store
     # nothing is listening to live and report the API healthy while doing it.
     await coordinator.start()
+    from syn_api._wiring_inventory import get_inventory_runtime
+
+    try:
+        await get_inventory_runtime().clock.start()
+    except Exception:
+        await coordinator.stop()
+        raise
     # Only assign to state after coordinator starts successfully,
     # so a partial failure doesn't orphan the dispatcher.
     state.workflow_dispatcher = workflow_dispatcher
@@ -713,6 +726,9 @@ async def _init_subscriptions(state: LifecycleState) -> None:
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
+    from syn_api._wiring_inventory import stop_inventory_runtime
+
+    await stop_inventory_runtime()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()
         state.workflow_dispatcher = None
