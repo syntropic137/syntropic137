@@ -151,3 +151,14 @@ repository-wide Pyright reported zero errors and 16 optional-dependency warnings
 The full QA result is recorded separately and must not be inferred from these
 focused checks. Main includes the published AP source commit, but its workspace
 image still requires the coordinated build/release/pin update.
+
+The subsequent full `qa-ci` run reached topology fitness and found cognitive/
+cyclomatic violations in LocalTranscript and InventoryItem. Those components
+were refactored by separating archive validation/loading, preview rendering and
+capture-row rendering. Targeted fresh topology reports all functions in both
+files below existing thresholds: LocalTranscript cognitive/cyclomatic 4/4;
+InventoryItem 7/8; the maximum across their helpers is cognitive 8, cyclomatic 8.
+No thresholds or exceptions changed. Eight focused UI tests and TypeScript pass.
+Full dashboard CI passed after the refactor: 41 files, 324 tests, lint (one existing
+warning), TypeScript and production build. Log:
+`/private/tmp/1398-dashboard-refactor.log`. Repository-wide QA must still be rerun.

@@ -12,6 +12,19 @@ const sections: { kind: InventoryKind; label: string }[] = [
   { kind: 'retraction', label: 'Corrections' },
 ]
 
+type Capture = Extract<InventoryPage['items'][number], { availability: unknown }>
+
+function CaptureItem({ item, executionId }: { item: Capture; executionId: string }) {
+  return <>
+    <code className="break-all">{item.node.local_id}</code>
+    <p>{item.destination ?? 'local'} transcript: {item.availability}</p>
+    {item.transcript_revision && <p className="break-all">Transcript revision: {item.transcript_revision}</p>}
+    {(item.destination ?? 'local') === 'local' && item.archived_byte_hash && item.node.harness && <LocalTranscript
+      key={JSON.stringify([executionId, item.node.source_instance_id, item.node.harness, item.node.local_id, item.archived_byte_hash])} executionId={executionId} harness={item.node.harness}
+      nativeId={item.node.local_id} revision={item.archived_byte_hash} />}
+  </>
+}
+
 function InventoryItem({ item, executionId }: { item: InventoryPage['items'][number]; executionId: string }) {
   if ('ref' in item) return <>
     <span>{item.ref.kind} {item.ref.harness ?? ''}</span>
@@ -23,14 +36,7 @@ function InventoryItem({ item, executionId }: { item: InventoryPage['items'][num
     <p className="break-all">Parent: <code>{item.parent.local_id}</code></p>
     <p className="break-all">Child: <code>{item.child.local_id}</code></p>
   </>
-  if ('availability' in item) return <>
-    <code className="break-all">{item.node.local_id}</code>
-    <p>{item.destination ?? 'local'} transcript: {item.availability}</p>
-    {item.transcript_revision && <p className="break-all">Transcript revision: {item.transcript_revision}</p>}
-    {(item.destination ?? 'local') === 'local' && item.archived_byte_hash && item.node.harness && <LocalTranscript
-      key={JSON.stringify([executionId, item.node.source_instance_id, item.node.harness, item.node.local_id, item.archived_byte_hash])} executionId={executionId} harness={item.node.harness}
-      nativeId={item.node.local_id} revision={item.archived_byte_hash} />}
-  </>
+  if ('availability' in item) return <CaptureItem item={item} executionId={executionId} />
   if ('run' in item) return <>
     <code className="break-all">{item.node.local_id}</code>
     <p>Phase: {item.phase_id ?? 'Unassigned'}. Attempt: {item.attempt_id ?? 'Unknown'}. Confidence: {item.confidence}.</p>
