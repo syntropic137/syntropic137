@@ -527,6 +527,10 @@ class TestTheVerdictSurvivesEveryHop:
         # attribute of a MagicMock is truthy.
         agent_result.stream_result.verdict = AgentVerdict.from_agent_text(SAID)
         agent_result.command.exit_code = 0
+        # The status the processor actually reads, which is the run's own rather
+        # than the completion's since #1341. On a MagicMock this would otherwise
+        # be a truthy mock and read as a non-zero exit.
+        agent_result.exit_code = 0
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)
         processor._agent_handler = agent_handler

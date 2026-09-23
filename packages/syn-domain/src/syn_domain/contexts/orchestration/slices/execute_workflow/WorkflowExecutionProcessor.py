@@ -34,6 +34,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
+    record_failure_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -328,6 +331,11 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        finally:
+            # A shutdown may cancel the minutes-long agent await before either
+            # terminal path runs. Always release any workspace still held, and
+            # let CancelledError continue propagating (#1319).
+            await self._runtime.abandon_all("shutdown")
 
     async def _drain_todo_list(
         self,
@@ -429,13 +437,20 @@ class WorkflowExecutionProcessor:
         # phase's container and commits that exist only in it go with it. The
         # user asked for the run to stop, not for the work to be deleted
         # (#1231).
-        saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
-        cancellation = cancelled_execution(
-            cancel_reason, phase_results, all_artifact_ids, saved=saved
-        )
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
-        return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        try:
+            saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+            cancellation = cancelled_execution(
+                cancel_reason, phase_results, all_artifact_ids, saved=saved
+            )
+            try:
+                await self._runtime.report_cancelled(cancellation.reason)
+            except Exception:
+                logger.exception(
+                    "Could not close the sessions of execution %s as cancelled", execution_id
+                )
+            return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        finally:
+            await self._runtime.abandon_all("cancel")
 
     async def _complete_execution(
         self,
@@ -533,17 +548,15 @@ class WorkflowExecutionProcessor:
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
-
-        fail_cmd = failure.as_command(
-            execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
+        await record_failure_and_release(
+            failure,
+            aggregate=aggregate,
+            journal=self._journal,
+            runtime=self._runtime,
+            execution_id=execution_id,
+            completed_phases=len(completed_phase_ids),
+            total_phases=len(phases),
         )
-        try:
-            aggregate.fail_execution(fail_cmd)
-            await self._journal.append(aggregate)
-        except Exception as save_err:
-            logger.error("Failed to save failure event: %s", save_err)
         return failure.execution_result(
             workflow_id,
             execution_id,
@@ -622,6 +635,8 @@ class WorkflowExecutionProcessor:
         # a raise added later cannot forget it, and it never raises itself, so
         # the reason the phase failed always reaches the caller intact.
         try:
+            command = result.command
+            assert command is not None, "a non-cancelled run must carry its completion command"
             # THE PHASE'S OWN REPORT, on the same footing as its exit status
             # and checked before the aggregate is told the run completed
             # (#1256). A phase that wrote `TASK_RESULT: {"success": false, ...}`
@@ -639,7 +654,7 @@ class WorkflowExecutionProcessor:
                 logger.error(str(failure))
                 raise failure
 
-            aggregate.agent_execution_completed(result.command)
+            aggregate.agent_execution_completed(command)
             await self._journal.append(aggregate)
         except Exception:
             dispatch_ctx.kept_artifact_ids = await self._workspaces.keep_unfinished_output(

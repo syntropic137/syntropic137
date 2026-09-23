@@ -274,19 +274,16 @@ class _Clone:
         than a promise of acceptance. `pre-receive` runs only for a real
         update: git connects, authenticates and negotiates identically either
         way, so ``--dry-run`` returns 0 against this origin and the real push
-        comes back ``! [remote rejected] ... (pre-receive hook declined)`` -
-        which is GitHub's own wording when a ruleset refuses a ref.
+        comes back ``! [remote rejected] ... (deny updating a hidden ref)``.
 
-        A SYMLINK TO `/bin/false` rather than a script, for the reason
-        `hang_the_clean_filter` avoids hook files altogether: a tmpdir may be
-        mounted ``noexec``, where a shell script hook is silently IGNORED and
-        the push succeeds. The target of a symlink is executed from wherever
-        IT lives, so this stages the refusal on a noexec tmpfs too. It
-        declines every push, which here is exactly the quarantine ref: the
-        fixture's own setup pushes are already done by the time it is called.
+        ``receive.hideRefs`` is an update-time server policy and remains active
+        when the client disables repository hooks. The fixture's setup pushes
+        are already done before this hides only the quarantine namespace.
         """
-        (self.origin / "hooks").mkdir(exist_ok=True)
-        (self.origin / "hooks" / "pre-receive").symlink_to("/bin/false")
+        subprocess.run(
+            ["git", f"--git-dir={self.origin}", "config", "receive.hideRefs", "refs/syn/lost"],
+            check=True,
+        )
 
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
@@ -979,6 +976,99 @@ class _BreaksOn:
         if operation == self._failing and (self._in_repo is None or self._in_repo in command):
             return _UNREACHABLE
         return await self._inner.execute(command)
+
+
+class _FlakesOn:
+    """A real workspace whose named operation fails a bounded number of times."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        times: int,
+        returning: ExecutionResult = _UNREACHABLE,
+    ) -> None:
+        self._inner = inner
+        self._failing = failing
+        self._times = times
+        self._returning = returning
+        self.asked = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != self._failing:
+            return await self._inner.execute(command)
+        self.asked += 1
+        if self.asked <= self._times:
+            return self._returning
+        return await self._inner.execute(command)
+
+
+async def _skip_retry_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(workspace_git.asyncio, "sleep", no_wait)
+
+
+async def test_a_probe_that_dies_once_can_recover_a_clean_real_repository(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("shipped.py", "work that reached the remote\n")
+    clone.git("push", "origin", _BRANCH)
+    workspace = _FlakesOn(clone.workspace, "rev-parse", times=1)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+
+
+async def test_a_recovered_probe_still_quarantines_real_unpushed_work(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("never-pushed.py", "work that must survive\n")
+    workspace = _FlakesOn(clone.workspace, "status", times=1)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_every_failed_attempt_still_fails_closed(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    workspace = _FlakesOn(
+        clone.workspace,
+        "find",
+        times=workspace_git._MAX_ATTEMPTS,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == workspace_git._MAX_ATTEMPTS  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_fired_bound_is_not_retried(clone: _Clone, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _skip_retry_waits(monkeypatch)
+    bound = ExecutionResult(
+        exit_code=124,
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr="",
+    )
+    workspace = _FlakesOn(clone.workspace, "find", times=1, returning=bound)
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 1
 
 
 class _MountedReadOnly:
@@ -2184,7 +2274,7 @@ async def test_a_rehearsal_that_passed_is_no_promise_that_the_server_will_accept
 
     message = str(raised.value)
     assert "NOT RECOVERABLE" in message
-    assert "declined" in message
+    assert "remote rejected" in message
     assert "quarantined at" not in message
     assert _QUARANTINE_REF not in clone.origin_refs()
     assert not clone.reachable_in_origin(committed, "refs/heads/main")
@@ -2601,7 +2691,7 @@ async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
 ) -> None:
     """KEEP THE HONEST REPORTING, which is the one thing worse than losing work.
 
-    Two REAL failures - no fresh token, and an origin whose `pre-receive` hook
+    Two REAL failures - no fresh token, and an origin whose receive policy
     declines the update - and the message must be about the second one. A
     phase whose quarantine push was refused has lost the work, and the report
     that matters is NOT RECOVERABLE with the remote's own words - not "the credential could
@@ -2617,7 +2707,7 @@ async def test_a_renewal_that_failed_never_softens_what_the_push_then_reported(
 
     message = str(raised.value)
     assert "NOT RECOVERABLE" in message
-    assert "declined" in message
+    assert "remote rejected" in message
     assert "quarantined at" not in message
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
@@ -2782,7 +2872,7 @@ async def test_a_cancelled_phase_whose_rescue_push_was_refused_says_so_honestly(
 
     said = "\n".join(record.getMessage() for record in caplog.records)
     assert "NOT RECOVERABLE" in said
-    assert "declined" in said
+    assert "remote rejected" in said
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
 

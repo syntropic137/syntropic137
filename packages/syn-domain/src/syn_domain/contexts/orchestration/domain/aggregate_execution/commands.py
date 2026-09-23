@@ -88,6 +88,7 @@ class FailExecutionCommand:
         classification: FailureClassification,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
@@ -109,6 +110,12 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
         #: What the failed phase had already written, kept out of its workspace
         #: before this failure tore it down (#1321). `()` when it wrote nothing
         #: collectable, which is every failure that got this far before.
