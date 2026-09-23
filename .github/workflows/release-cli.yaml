@@ -14,9 +14,9 @@
 #   3. Publish to npm with provenance
 #
 # Prerequisites:
-#   - Configure Trusted Publisher on npmjs.com for @syntropic137/cli:
+#   - Configure both Trusted Publishers on npmjs.com for @syntropic137/cli:
 #     repo: syntropic137/syntropic137
-#     workflow: release-create.yml   <-- the CALLER, not this file
+#     workflows: release-create.yml and release-beta.yaml (the callers)
 #     environment: npm-publish-cli
 #   - Requires npm >= 11.5.1 and Node >= 22 for OIDC token exchange
 #
