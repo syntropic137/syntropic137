@@ -237,6 +237,23 @@ text separates recorded capture availability from current restrictions. Wrong
 section/run responses are rejected. All 523 CLI tests, type checking and codegen
 pass. Log: `/private/tmp/1398-cli-sections-full.log`.
 
+## Repository-wide gate follow-up
+
+The full gate exposed and prompted fixes for test formatting, generated retention
+environment documentation, and two complexity violations. Status-batch validation
+and CLI row formatting now have separate responsibilities. Complexity checks
+pass; architecture invariants report 770 passed, five skipped, and only the two
+known upstream-default-branch reachability failures for AP and APSS. The focused
+status PostgreSQL tests (3) and CLI section tests (11) pass after refactoring.
+
+Required client CI completes successfully: CLI 523 tests, OpenClaw 53 tests,
+dashboard 330 tests, drift checks and documentation production build. The full
+Python unit run is still in progress. Its first invocation inherited UV_FROZEN,
+which incorrectly blocked an isolated version test from creating its own lock;
+the corrected run freezes only the outer uv invocation. No Python-suite success
+is claimed yet. Logs: `/private/tmp/1398-current-fitness.log`,
+`/private/tmp/1398-current-client-ci.log`, `/private/tmp/1398-current-unit-ci.log`.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push

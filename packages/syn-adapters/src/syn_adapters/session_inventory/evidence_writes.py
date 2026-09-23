@@ -11,7 +11,7 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions import RunIdentity
+    from syn_domain.contexts.agent_sessions import AcquisitionStatusEvidence, RunIdentity
 
     from .database import Connection
 
@@ -67,7 +67,7 @@ async def append_locked(conn: Connection, batch: EvidenceBatch, current: int) ->
     return sequence
 
 
-async def observe_status(conn: Connection, batch: EvidenceBatch, current: int) -> int:
+def _validated_status(batch: EvidenceBatch) -> AcquisitionStatusEvidence:
     source = batch.evidence
     if len(source.acquisition_statuses) != 1 or source != SessionEvidence(
         run=source.run, acquisition_statuses=source.acquisition_statuses
@@ -76,6 +76,12 @@ async def observe_status(conn: Connection, batch: EvidenceBatch, current: int) -
     status = source.acquisition_statuses[0]
     if status.evidence.producer_id != batch.producer_id:
         raise ValueError("Acquisition producer differs from its batch")
+    return status
+
+
+async def observe_status(conn: Connection, batch: EvidenceBatch, current: int) -> int:
+    source = batch.evidence
+    status = _validated_status(batch)
     args = (
         source.run.source_instance_id,
         source.run.execution_id,

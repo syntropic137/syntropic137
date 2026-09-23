@@ -105,20 +105,24 @@ export const executionSessionsCommand: CommandDef = {
 };
 
 
-function printInventoryItems(page: components["schemas"]["SessionInventoryPageResponse"]): void {
-  for (const item of page.items) {
-    if (page.kind === "node") {
-      if (!("ref" in item)) throw new CLIError("Invalid node inventory page");
-      print(`${item.ref.kind}\t${item.ref.harness ?? ""}\t${item.ref.local_id}`);
-    } else if (page.kind === "capture") {
-      if (!("availability" in item)) throw new CLIError("Invalid capture inventory page");
-      const current = item.destination === "local"
-        ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
-        : undefined;
-      print(`${item.node.harness ?? ""}\t${item.node.local_id}\t${item.destination}: recorded=${item.availability}; current=${current ?? "unchecked"}`);
-      if (item.archived_byte_hash) print(`Archive: ${item.archived_byte_hash}`);
-    } else {
-      print(JSON.stringify(item));
-    }
+type InventoryPage = components["schemas"]["SessionInventoryPageResponse"];
+
+function printInventoryItems(page: InventoryPage): void {
+  for (const item of page.items) printInventoryItem(item, page);
+}
+
+function printInventoryItem(item: InventoryPage["items"][number], page: InventoryPage): void {
+  if (page.kind === "node") {
+    if (!("ref" in item)) throw new CLIError("Invalid node inventory page");
+    print(`${item.ref.kind}\t${item.ref.harness ?? ""}\t${item.ref.local_id}`);
+  } else if (page.kind === "capture") {
+    if (!("availability" in item)) throw new CLIError("Invalid capture inventory page");
+    const current = item.destination === "local"
+      ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
+      : undefined;
+    print(`${item.node.harness ?? ""}\t${item.node.local_id}\t${item.destination}: recorded=${item.availability}; current=${current ?? "unchecked"}`);
+    if (item.archived_byte_hash) print(`Archive: ${item.archived_byte_hash}`);
+  } else {
+    print(JSON.stringify(item));
   }
 }
