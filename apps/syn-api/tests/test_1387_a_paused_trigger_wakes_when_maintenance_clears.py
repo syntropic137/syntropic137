@@ -483,7 +483,7 @@ class _RacyEventStore:
 
     def __init__(self) -> None:
         self.appended: list[EventEnvelope[DomainEvent]] = []
-        self._live: asyncio.Queue[EventEnvelope[DomainEvent]] = asyncio.Queue()
+        self._subscribers: list[asyncio.Queue[EventEnvelope[DomainEvent]]] = []
         self._next_nonce = 100
 
     async def append_events(
@@ -500,7 +500,8 @@ class _RacyEventStore:
                 metadata=envelope.metadata.model_copy(update={"global_nonce": self._next_nonce}),
             )
             self.appended.append(stamped)
-            self._live.put_nowait(stamped)
+            for subscriber in self._subscribers:
+                subscriber.put_nowait(stamped)
 
     async def read_all(
         self,
@@ -516,12 +517,22 @@ class _RacyEventStore:
         return (list(self.appended), True, self._next_nonce + 1)
 
     def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
-        del from_global_nonce
-        return self._stream()
+        subscriber: asyncio.Queue[EventEnvelope[DomainEvent]] = asyncio.Queue()
+        for envelope in self.appended:
+            nonce = envelope.metadata.global_nonce or 0
+            if nonce >= from_global_nonce:
+                subscriber.put_nowait(envelope)
+        self._subscribers.append(subscriber)
+        return self._stream(subscriber)
 
-    async def _stream(self) -> AsyncIterator[EventEnvelope[DomainEvent]]:
-        while True:
-            yield await self._live.get()
+    async def _stream(
+        self, subscriber: asyncio.Queue[EventEnvelope[DomainEvent]]
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        try:
+            while True:
+                yield await subscriber.get()
+        finally:
+            self._subscribers.remove(subscriber)
 
 
 class _RestartedApi(NamedTuple):
