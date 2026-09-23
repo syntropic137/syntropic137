@@ -66,7 +66,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionStatus,
+    FailureClassification,
     PhaseUsage,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -107,6 +109,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_obse
     AGENT_LAUNCH_MARKER,
     announce_as,
     mint_wrapper_name,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    AttemptClock,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
@@ -168,6 +173,8 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    # The clock a phase's retry budget is measured on (#1303)
+    "AttemptClock",
     # Claude plugin types + errors (issue #726)
     "ClaudePluginError",
     "ClaudePluginInvalidName",
@@ -192,6 +199,7 @@ __all__ = [
     "ExecutionCostQueryService",
     "ExecutionStatus",
     "FailExecutionCommand",
+    "FailureClassification",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     # Aggregates
@@ -207,6 +215,7 @@ __all__ = [
     "PhaseExecutionType",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
+    "ReportedFailureReason",
     "ResolvedClaudePlugin",
     "ResolvedSkill",
     "SecurityPolicy",

@@ -1147,6 +1147,7 @@ test-unit-ci:
         --cov=packages/syn-adapters/src \
         --cov=packages/syn-shared/src \
         --cov-report=term-missing \
+        --durations=20 \
         -x -q
 
 # Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
@@ -1305,12 +1306,10 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
-# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
-# happily reuses a binary compiled from a different submodule revision.
+# Build APS CLI. Local freshness belongs to Cargo. CI can reuse an executable
+# only after an exact source/toolchain/platform cache hit and checkout validation.
 aps-build:
-    @echo "🔨 Building APS CLI..."
-    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+    bash scripts/build-aps.sh
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
@@ -2390,6 +2389,21 @@ release-local version:
 #
 # Callable on its own, including from CI:
 #   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+# Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
+# Codifies docs/deployment/test-deploy.md (direct path). Not a release.
+#   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
+#   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
+#   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
+#   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
+pit-stop version *flags:
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
+
 verify-image-capabilities image ref:
     #!/usr/bin/env bash
     set -euo pipefail
