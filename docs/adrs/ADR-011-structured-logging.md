@@ -144,5 +144,5 @@ Components that have been updated to use `agentic_logging`:
 
 ## References
 
-- [agentic-primitives ADR-014](../../lib/agentic-primitives/docs/adrs/014-centralized-agentic-logging.md) - Original logging design
-- [agentic_logging README](../../lib/agentic-primitives/lib/python/agentic_logging/README.md) - Detailed usage guide
+- [agentic-primitives ADR-014](https://github.com/AgentParadise/agentic-primitives/blob/a6b5d3f/docs/adrs/014-centralized-agentic-logging.md) - Original logging design
+- [agentic_logging README](../../lib/agentic-workspace/lib/python/agentic_logging/README.md) - Detailed usage guide

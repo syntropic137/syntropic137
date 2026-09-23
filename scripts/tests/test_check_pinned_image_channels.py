@@ -128,8 +128,8 @@ class TestSubmoduleGitlink:
         assert all(c in "0123456789abcdef" for c in got), got
 
     def test_a_regular_file_is_not_a_gitlink(self) -> None:
-        """`git ls-tree` returns a blob line happily; parsing it as a commit
-        would compare the image revision against a file hash."""
+        """The index lists a blob happily; parsing it as a gitlink would
+        compare the image revision against a file hash."""
         with pytest.raises(RuntimeError, match="not a submodule gitlink"):
             submodule_gitlink("justfile")
 

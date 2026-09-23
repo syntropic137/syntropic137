@@ -51,7 +51,7 @@ Each task ends with an independently testable deliverable.
 ### Task A1: Commit codex CLI into the claude-cli image
 
 **Files:**
-- Modify: `lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile` (near line 41 for the ARG, line 98 for the install, and the final verify/label region ~249)
+- Modify: `lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile` (near line 41 for the ARG, line 98 for the install, and the final verify/label region ~249)
 
 **Interfaces:**
 - Produces: a committed image `agentic-workspace-claude-cli` with both `claude` and `codex` on PATH (the running local image already has this at codex 0.144.6; this makes it reproducible).
@@ -91,7 +91,7 @@ LABEL agentic.codex_cli_version=${CODEX_CLI_VERSION}
 
 The Dockerfile is NOT built from `providers/workspaces/claude-cli/` directly — its context needs staged `packages/`, `plugins/`, `scripts/`, `memory/`. Use the repo's builder:
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:delegation-test
 docker run --rm --entrypoint sh agentic-workspace-claude-cli:delegation-test -lc 'claude --version && codex --version'
 ```
@@ -107,8 +107,8 @@ git commit -m "feat(claude-cli): install codex CLI alongside claude for delegati
 ### Task A2: Bake the `delegation` plugin into the base skill set
 
 **Files:**
-- Modify: `lib/agentic-primitives/providers/workspaces/claude-cli/manifest.yaml` (the `plugins.include` list, ~line 35-38)
-- Possibly create: `lib/agentic-primitives/plugins/delegation/plugin.yaml` (only if the bake step requires it — verified in Step 2)
+- Modify: `lib/agentic-workspace/providers/workspaces/claude-cli/manifest.yaml` (the `plugins.include` list, ~line 35-38)
+- Possibly create: `lib/agentic-primitives/plugins/delegation/plugin.yaml` (historical location; the skill now lives in Agentic Skills)
 
 **Interfaces:**
 - Produces: `/opt/agentic/plugins/delegation/skills/{delegating-to-codex,delegating-to-claude-p}/SKILL.md` baked into the image as an on-disk reference. Runtime delegation *guidance* is delivered via the injected `CLAUDE.md`/`AGENTS.md` (Task B4), not via `--plugin-dir`; the baked SKILL.md is the fuller reference those notes point at.
@@ -130,7 +130,7 @@ plugins:
 
 - [ ] **Step 2: Verify the delegation plugin is bakeable**
 
-Run (from `lib/agentic-primitives`):
+Run (from `lib/agentic-workspace`):
 ```bash
 ls plugins/delegation/skills/delegating-to-codex/SKILL.md plugins/delegation/skills/delegating-to-claude-p/SKILL.md
 # Compare structure to an already-baked plugin:
@@ -141,7 +141,7 @@ Expected: both SKILL.md files exist. If `plugins/sdlc/` has a `plugin.yaml`/`mar
 - [ ] **Step 3: Rebuild the image and verify the skill baked in**
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:delegation-test
 docker run --rm --entrypoint sh agentic-workspace-claude-cli:delegation-test -lc \
   'ls /opt/agentic/plugins/delegation/skills/delegating-to-claude-p/SKILL.md /opt/agentic/plugins/delegation/skills/delegating-to-codex/SKILL.md'
@@ -794,7 +794,7 @@ Register + run `multi-agent-programmatic.yaml`; confirm phase 1 streams as a cla
 ## Cross-repo sequencing
 
 1. Land Part A (agentic-primitives PR) first; it produces the image both delegation and the committed reproducibility depend on.
-2. Bump the `lib/agentic-primitives` submodule pointer in syntropic137 only after the agentic-primitives PR merges (per feedback_local_build_before_base_bump + submodule discipline).
+2. Bump the `lib/agentic-workspace` submodule pointer in syntropic137 only after the agentic-primitives PR merges (per feedback_local_build_before_base_bump + submodule discipline).
 3. Land Part B (syntropic137 PR, stacked on `feat/codex-bridge`).
 4. Both PRs get a codex cross-model review before merge (feedback_codex_review_prs).
 

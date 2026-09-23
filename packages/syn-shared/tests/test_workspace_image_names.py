@@ -1,6 +1,6 @@
-"""Image names must match what agentic-primitives actually publishes.
+"""Image names must match what agentic-workspace actually publishes.
 
-A workspace image name is a cross-repo contract: agentic-primitives decides the
+A workspace image name is a cross-repo contract: agentic-workspace decides the
 repository name from ``image.tag`` in each provider manifest, and this repo has
 to reference the same string. Deriving it from a pattern is the tempting move
 and it is wrong - omni-agent publishes as ``omni-agent-workspace``, not
@@ -28,7 +28,7 @@ from syn_shared.settings.workspace_images import (
 )
 
 _PROVIDERS_DIR = (
-    Path(__file__).resolve().parents[3] / "lib" / "agentic-primitives" / "providers" / "workspaces"
+    Path(__file__).resolve().parents[3] / "lib" / "agentic-workspace" / "providers" / "workspaces"
 )
 
 
@@ -56,11 +56,11 @@ def _manifest_image_tag(provider: WorkspaceImageProvider) -> str | None:
 def test_image_name_matches_the_provider_manifest(provider: WorkspaceImageProvider) -> None:
     tag = _manifest_image_tag(provider)
     if tag is None:
-        pytest.skip(f"agentic-primitives manifest for {provider.value} not available")
+        pytest.skip(f"agentic-workspace manifest for {provider.value} not available")
 
     assert workspace_image_name(provider) == tag, (
         f"{provider.value}: this repo references {workspace_image_name(provider)!r} but "
-        f"agentic-primitives publishes {tag!r}. Add or correct an entry in "
+        f"agentic-workspace publishes {tag!r}. Add or correct an entry in "
         f"IMAGE_NAME_OVERRIDES - do NOT change the derivation pattern, other "
         f"providers depend on it."
     )

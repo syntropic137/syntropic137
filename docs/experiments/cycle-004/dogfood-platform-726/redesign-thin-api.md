@@ -121,7 +121,7 @@ The CLI parses the YAML, finds `claude_plugins:`, and for each ref that is not a
 ### Infrastructure
 
 - **Revert** the `git` install line from `infra/docker/images/syn-api/Dockerfile`. Already reverted locally.
-- **Confirm** the workspace image (`lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile`) still has git (it does, line 56).
+- **Confirm** the workspace image (`lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile`) still has git (it does, line 56).
 
 ### Tests
 

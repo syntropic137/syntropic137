@@ -52,8 +52,8 @@ syntropic137/
 │   ├── syn-adapters/          # Orchestration + observability adapters
 │   ├── syn-collector/         # Event ingestion API
 │   └── syn-shared/            # Shared settings, configuration
-├── lib/                       # Git submodules (we manage both - dogfooding)
-│   ├── agentic-primitives/    # Composable agent building blocks, isolation providers
+├── lib/                       # Git submodules (we manage these - dogfooding)
+│   ├── agentic-workspace/     # Workspace runtime, images, isolation providers
 │   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections
 ├── infra/                     # Docker Compose, setup wizard, secrets
 ├── docs/                      # Internal/local development docs (ADRs, architecture notes,
@@ -65,9 +65,10 @@ syntropic137/
 
 ### Submodules (`lib/`)
 
-Both are our own projects - we dogfood them. If something needs fixing, push the fix directly to the submodule repo. Don't work around it.
+These are our own projects - we dogfood them. If something needs fixing, push the fix directly to the owning repo. Don't work around it.
 
-- **agentic-primitives**: Agent event recording/playback, Claude CLI/SDK adapters, workspace isolation providers
+- **agentic-workspace**: Agent event recording/playback, harness adapters, workspace images and isolation providers
+- **agentic-skills**: Independently installable skills and collections. Not a runtime submodule.
 - **event-sourcing-platform**: Rust event store, Python SDK, VSA validation CLI, projection framework
 
 #### Where does this change belong?
@@ -75,10 +76,10 @@ Both are our own projects - we dogfood them. If something needs fixing, push the
 The boundary is harness knowledge vs domain meaning, and there is a test for it:
 
 > **If it changes when Anthropic or OpenAI ships a new CLI version, it belongs
-> in agentic-primitives. If it changes when we decide what a cost, a session or
+> in agentic-workspace. If it changes when we decide what a cost, a session or
 > an execution IS, it belongs here.**
 
-| agentic-primitives | Syntropic137 |
+| agentic-workspace | Syntropic137 |
 |---|---|
 | Stream and transcript formats, where a harness puts its session id | Domain events, aggregates, what a session means |
 | Anything baked into the workspace image, including binaries agents call | Pricing, execution totals, attribution |
@@ -91,15 +92,14 @@ and never reimplement a harness detail here: it will drift the moment that CLI
 changes, and the drift is silent.
 
 **Depend on a port, not on a format.** When this repo needs something
-harness-specific, define a Protocol here and let agentic-primitives satisfy it.
+harness-specific, define a Protocol here and let agentic-workspace satisfy it.
 That keeps the domain testable against a double and stops CLI details leaking
 into the domain model.
 
 **The split has a real delivery cost, so plan for it.** A change in
-agentic-primitives reaches a running workspace only after: merge -> image
-build -> the protected `release` channel -> a `PINNED_DIGESTS` bump here.
-Pushing to `main` publishes `:edge` only, which is explicitly unreviewed and is
-NOT what consumers pull. So put as little in the submodule as genuinely needs
+agentic-workspace reaches a running workspace only after: merge -> signed
+release tag -> immutable digest -> a `PINNED_DIGESTS` bump here. So put as
+little in the submodule as genuinely needs
 to be there, and define the contract first so work on both sides can proceed in
 parallel instead of serialising behind the image.
 
@@ -505,7 +505,7 @@ The canonical release process lives in [docs/release-process.md](docs/release-pr
 - **Docs:** `release` → Vercel production, `main` → preview only.
 - **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules - wrong entry points are blocked by design.
 
-Submodules (agentic-primitives, event-sourcing-platform) have independent versioning - never bumped by the release script.
+Submodules (agentic-workspace, event-sourcing-platform) have independent versioning - never bumped by the release script.
 
 ## Security
 

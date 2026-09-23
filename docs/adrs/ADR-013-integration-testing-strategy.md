@@ -306,7 +306,7 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 
 - [pytest-testcontainers](https://github.com/testcontainers/testcontainers-python)
 - [event-sourcing-platform testing docs](lib/event-sourcing-platform/docs-site/docs/development/fast-testing.md)
-- [agentic-primitives TDD ADR](lib/agentic-primitives/docs/adrs/008-test-driven-development.md)
+- [agentic-primitives TDD ADR](https://github.com/AgentParadise/agentic-primitives/blob/a6b5d3f/docs/adrs/008-test-driven-development.md)
 - ADR-004: Environment Configuration
 - ADR-006: Event Sourcing with EventStoreDB
 - ADR-018: Commands vs Observations Event Architecture

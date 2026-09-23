@@ -13,14 +13,14 @@ publish silently changes what Syntropic137 runs. That is not a hypothetical: on
 2026-08-16 a regression in the workspace entrypoint reached a mutable tag and
 any deployment pulling in that window picked it up.
 
-Which upstream tag moves when is itself a trap, and it differs per branch.
-agentic-primitives publishes ``:edge`` and the commit SHA from ``main``, and
-moves ``:latest`` only from its ``release`` branch. So ``:latest`` is not
-"the newest image" - it can be considerably OLDER than what main has built.
-On 2026-08-19 ``:latest`` for omni-agent still resolved to an image carrying
+Which upstream tag moves when is itself a trap. The legacy agentic-primitives
+publisher moved different tags from different branches. On 2026-08-19 its
+``:latest`` tag for omni-agent still resolved to an image carrying
 agentic-session-exporter v0.1.1, which wrote an out-of-spec
 ``origin.environment``, while main had already built v0.2.1. A digest taken
-from ``:latest`` that day would have pinned the defect.
+from ``:latest`` that day would have pinned the defect. Agentic Workspace now
+publishes only from protected semantic-version tags, but its tags remain
+mutable registry references rather than consumer pins.
 
 Take digests from the upstream build run, never from a mutable tag.
 
@@ -40,10 +40,10 @@ build.
 To bump::
 
     docker buildx imagetools inspect \\
-        ghcr.io/agentparadise/agentic-workspace-claude-cli:latest
+        ghcr.io/agentparadise/agentic-workspace-claude-cli:vX.Y.Z
 
 Take the top-level ``Digest:`` value (the multi-arch image index digest, not a
-per-platform manifest digest), record which agentic-primitives commit produced
+per-platform manifest digest), record which agentic-workspace commit produced
 it, and open a PR. Signature verification
 (``syn_adapters.workspace_backends.image_verification``) runs against the
 digest at provision time, so a bump to an unsigned or unexpectedly-built image
@@ -90,7 +90,7 @@ IMAGE_PREFIX: str = "agentic-workspace"
 class WorkspaceImageProvider(StrEnum):
     """Available workspace image providers.
 
-    Each provider corresponds to a Docker image built by agentic-primitives.
+    Each provider corresponds to a Docker image built by agentic-workspace.
     """
 
     CLAUDE_CLI = "claude-cli"
@@ -108,7 +108,7 @@ class WorkspaceImageProvider(StrEnum):
 
 
 # Most providers publish as ``<IMAGE_PREFIX>-<provider>``. omni-agent does not:
-# agentic-primitives takes its repository name from ``image.tag`` in the
+# agentic-workspace takes its repository name from ``image.tag`` in the
 # provider manifest, which reads ``omni-agent-workspace``, and its build matrix
 # publishes under exactly that. Deriving the name would silently produce
 # ``agentic-workspace-omni-agent``, which does not exist - the workspace would
@@ -131,12 +131,12 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # date; there is no single date for the whole table, because pins move
 # independently.
 #
-# claude-cli       built from agentic-primitives d31c88a, which carries the
+# claude-cli       built from legacy agentic-primitives d31c88a, which carries the
 #                  capability runtime, the entrypoint `exec` fix (so the agent
 #                  process is PID 1 and honours `docker stop -t`) and the
 #                  credential-repr fix. Tags :latest and :d31c88a both resolved
 #                  to this digest at pin time.
-# omni-agent       built from agentic-primitives a6b5d3f, omni-agent manifest
+# omni-agent       built from legacy agentic-primitives a6b5d3f, omni-agent manifest
 #                  1.3.0. Verified on 2026-08-21 by running the binary OUT OF
 #                  THIS DIGEST on BOTH architectures: linux/amd64 and
 #                  linux/arm64 each report
@@ -174,7 +174,7 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  (agentic-session-exporter#22).
 #
 #                  Previous pin, for the record:
-# omni-agent       built from agentic-primitives 1bc7253. Verified on
+# omni-agent       built from legacy agentic-primitives 1bc7253. Verified on
 #                  2026-08-20 by running OUT OF THIS DIGEST: the baked
 #                  exporter reports "apss-session-exporter 0.3.0", and the
 #                  session-store finalizer both understands the exporter's new
@@ -193,7 +193,7 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 #                  capture as a failed one.
 #
 #                  Previous pin, for the record:
-# omni-agent       built from agentic-primitives 066e977, the first omni image
+# omni-agent       built from legacy agentic-primitives 066e977, the first omni image
 #                  carrying agentic-session-exporter v0.2.1. Verified on
 #                  2026-08-19 by running the binary OUT OF THIS DIGEST:
 #                  reports "apss-session-exporter 0.2.1", and

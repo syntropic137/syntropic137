@@ -133,7 +133,7 @@ only place where the engine reads the stream. Using `stderr=PIPE` or
 | File | Context |
 |------|---------|
 | `packages/syn-adapters/.../workspace_backends/agentic/adapter.py` | Dashboard / workspace service (production path) |
-| `lib/agentic-primitives/.../agentic_isolation/providers/docker.py` | agentic_isolation library |
+| `lib/agentic-workspace/.../agentic_isolation/providers/docker.py` | agentic_isolation library |
 
 #### 4. Event discrimination (`parse_jsonl_line()`)
 
@@ -230,10 +230,10 @@ step. `core.hooksPath` is simpler and works automatically for all repos.
 
 ## Related ADRs
 
-- [ADR-022](../../lib/agentic-primitives/docs/adrs/022-git-hook-observability.md) — original git hook design in agentic-primitives (pre-container, file-based)
-- [ADR-029](../../lib/agentic-primitives/docs/adrs/029-simplified-event-system.md) — JSONL event system (`agentic_events`)
+- [ADR-022](https://github.com/AgentParadise/agentic-primitives/blob/a6b5d3f/docs/adrs/022-git-hook-observability.md) — original git hook design in agentic-primitives (pre-container, file-based)
+- [ADR-029](https://github.com/AgentParadise/agentic-primitives/blob/a6b5d3f/docs/adrs/029-simplified-event-system.md) — JSONL event system (`agentic_events`)
 - [ADR-015](./ADR-015-agent-observability.md) — agent session observability
-- [ADR-033](../../lib/agentic-primitives/docs/adrs/033-plugin-native-workspace-images.md) — plugin architecture for workspace images
+- [ADR-033](../../lib/agentic-workspace/docs/adrs/033-plugin-native-workspace-images.md) — plugin architecture for workspace images
 
 ## Files Implementing This ADR
 
@@ -241,16 +241,16 @@ step. `core.hooksPath` is simpler and works automatically for all repos.
 packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
     AgenticEventStreamAdapter.stream() — stderr=STDOUT (production path)
 
-lib/agentic-primitives/lib/python/agentic_isolation/agentic_isolation/providers/docker.py
+lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py
     WorkspaceDockerProvider.stream() — stderr=STDOUT (agentic_isolation path)
 
-lib/agentic-primitives/plugins/observability/hooks/git/post-commit
+lib/agentic-workspace/plugins/observability/hooks/git/post-commit
     Emits git_commit to sys.stderr via EventEmitter
 
-lib/agentic-primitives/plugins/observability/hooks/git/pre-push
+lib/agentic-workspace/plugins/observability/hooks/git/pre-push
     Emits git_push to sys.stderr via EventEmitter
 
-lib/agentic-primitives/providers/workspaces/claude-cli/scripts/entrypoint.sh
+agentic-primitives/providers/workspaces/claude-cli/scripts/entrypoint.sh  # historical
     git config --global core.hooksPath  (global hook installation)
 
 packages/syn-domain/.../WorkflowExecutionEngine.py

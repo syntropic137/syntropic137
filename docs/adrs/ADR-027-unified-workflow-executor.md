@@ -95,7 +95,7 @@ We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
 ### Files Created
 
 ```
-lib/agentic-primitives/lib/python/agentic_observability/
+agentic-primitives/lib/python/agentic_observability/  # historical
 ├── agentic_observability/
 │   ├── __init__.py          # Exports
 │   ├── protocol.py          # ObservabilityPort, ObservationType, ObservationContext

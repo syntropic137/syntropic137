@@ -693,9 +693,9 @@ Note the install runs AFTER `run_setup_phase` (secrets already cleared) and work
 
 ### Task 10: Bake the pinned `skills` CLI into workspace images (agentic-primitives submodule)
 
-**Files (inside `lib/agentic-primitives` - this is our own submodule; commit there directly, then bump the pin here):**
-- Modify: `lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile`
-- Modify: `lib/agentic-primitives/providers/workspaces/interactive-tmux/Dockerfile`
+**Files (inside `lib/agentic-workspace` - this is our own submodule; commit there directly, then bump the pin here):**
+- Modify: `lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile`
+- Modify: `lib/agentic-workspace/providers/workspaces/interactive-tmux/Dockerfile`
 
 **Interfaces:**
 - Produces: `skills` binary on PATH inside both images, exact version `1.5.14`.
@@ -709,8 +709,8 @@ RUN npm install -g skills@1.5.14
 - [ ] **Step 2: Local build BEFORE any push** (hard rule from prior incidents):
 
 ```bash
-docker build -t agentic-workspace-claude-cli:skills-test lib/agentic-primitives/providers/workspaces/claude-cli/
-docker build -t agentic-workspace-interactive-tmux:skills-test lib/agentic-primitives/providers/workspaces/interactive-tmux/
+docker build -t agentic-workspace-claude-cli:skills-test lib/agentic-workspace/providers/workspaces/claude-cli/
+docker build -t agentic-workspace-interactive-tmux:skills-test lib/agentic-workspace/providers/workspaces/interactive-tmux/
 ```
 
 Expected: both builds succeed.
@@ -738,11 +738,11 @@ Expected: exit 0 and the skill folder appears in the claude skills directory (no
 - [ ] **Step 5: Commit in the submodule, push, bump the pin:**
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 git checkout -b feat/bake-skills-cli && git add -A && git commit -m "feat(workspaces): bake skills CLI 1.5.14 into claude-cli and interactive-tmux images"
 git push -u origin feat/bake-skills-cli
 # open PR in agentic-primitives per its process; after merge, from the syn137 worktree:
-cd ../.. && git add lib/agentic-primitives && git commit -m "chore: bump agentic-primitives for baked skills CLI (#772)"
+cd ../.. && git add lib/agentic-workspace && git commit -m "chore: bump agentic-primitives for baked skills CLI (#772)"
 ```
 
 (If the submodule PR round-trip blocks the session, keep the submodule on the feature branch locally and flag it in the PR description - do NOT pin syn137 to an unmerged submodule sha in the final PR.)

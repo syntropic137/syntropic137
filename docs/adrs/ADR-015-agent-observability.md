@@ -17,7 +17,7 @@
 >   type for projections
 >
 > The core concepts (operation types, timeline projection) remain valid.
-> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
+> See the legacy `agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 >
 > **📝 Note (2026-02-19)**: Git events (`git_commit`, `git_push`, etc.) now come
 > from **real git hooks** installed globally in the workspace container, NOT from

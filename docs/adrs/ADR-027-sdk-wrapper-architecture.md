@@ -13,7 +13,7 @@
 > 3. Storing events directly in TimescaleDB via `AgentEventStore`
 >
 > The `syn-agent-runner` package referenced here has been deleted.
-> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
+> See the legacy `agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 
@@ -157,7 +157,7 @@ class TimescaleDBBackend(Backend):
 ```toml
 # packages/syn-agent-runner/pyproject.toml
 dependencies = [
-    "agentic-hooks>=0.1.0",  # From lib/agentic-primitives
+    "agentic-hooks>=0.1.0",  # From lib/agentic-workspace
 ]
 ```
 
@@ -199,7 +199,7 @@ dependencies = [
 
 ## References
 
-- `lib/agentic-primitives/lib/python/agentic_hooks/` - Hook client library
-- `lib/agentic-primitives/examples/001-claude-agent-sdk-integration/` - SDK wrapper example
+- `agentic-primitives/lib/python/agentic_hooks/` - Historical hook client library
+- `agentic-primitives/examples/001-claude-agent-sdk-integration/` - Historical SDK wrapper example
 - ADR-018: Commands vs Observations Event Architecture
 - ADR-026: TimescaleDB for Observability Storage

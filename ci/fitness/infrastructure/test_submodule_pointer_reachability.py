@@ -41,9 +41,10 @@ Two deliberate deviations from the issue's sketch:
   `origin/HEAD`. `origin/HEAD` is written once at clone time and never refreshed,
   so on a clone predating a default-branch rename it names a branch the remote no
   longer defaults to - and this gate's whole job is to not trust local state.
-* the pointer is read from the superproject's HEAD commit, not from
-  `git submodule status`. What merges is the gitlink in the commit; the checked
-  out submodule working tree is not it, and can differ from it.
+* the pointer is read from the superproject's stage-zero index entry, not from
+  `git submodule status`. The index is the exact gitlink about to be committed
+  and is identical to HEAD in CI; the checked-out submodule working tree can
+  differ from both. Reading only HEAD made preflight reject every staged bump.
 
 A SHALLOW SUBMODULE CLONE IS THE HARD CASE, AND CI ALWAYS HAS ONE
 ================================================================
@@ -241,9 +242,15 @@ def unmerged_pointer(sub: Submodule) -> str | None:
             f"against {sub.url}.\nRun: just submodules-init"
         )
 
-    pointer = _git("rev-parse", f"HEAD:{sub.path}", cwd=sub.root)
-    assert pointer.returncode == 0, f"{sub.path}: no gitlink in HEAD:\n{pointer.stderr}"
-    sha = pointer.stdout.strip()
+    pointer = _git("ls-files", "--stage", "--", sub.path, cwd=sub.root)
+    fields = pointer.stdout.split()
+    assert pointer.returncode == 0 and len(fields) >= 4, (
+        f"{sub.path}: no stage-zero index entry:\n{pointer.stderr}"
+    )
+    assert fields[0] == "160000" and fields[2] == "0", (
+        f"{sub.path}: index entry is not a stage-zero gitlink: {pointer.stdout.strip()}"
+    )
+    sha = fields[1]
 
     branch = _default_branch(sub)
     fetch = _fetch_until_answerable(sub)

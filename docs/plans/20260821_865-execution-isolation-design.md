@@ -261,7 +261,7 @@ pool at all.
 `WorkspaceService.create()` builds an `AgenticIsolationAdapter` and a
 `WorkspaceDockerProvider`, both of which only assign attributes
 (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:101-134`;
-`lib/agentic-primitives/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:86-101`).
+`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:86-101`).
 No Docker client, no socket. That is included in the 0.508 ms.
 
 **`_shared_workspaces`.** Unchanged and still correct. It is keyed by

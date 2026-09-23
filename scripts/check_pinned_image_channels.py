@@ -7,12 +7,12 @@ digest whose own OCI labels said:
     org.opencontainers.image.version  = edge
 
 So the image every agent ran was an unreviewed `main` build, bypassing the
-documented chain: merge -> image build -> protected `release` -> a
+documented chain: merge -> protected version tag -> signed image -> a
 `PINNED_DIGESTS` bump. It went unnoticed for weeks.
 
-WHY COSIGN DID NOT CATCH IT. Signature verification accepts identities from
-both `main` and `release`. It proves an image was built by our CI, not that it
-was approved for release. Provenance is not approval.
+WHY COSIGN DID NOT CATCH IT. The former identity policy accepted branch builds.
+The current agentic-workspace policy accepts release-tag identities only, while
+this independent label check keeps approval explicit and testable.
 
 WHY THE EXISTING GATE DID NOT CATCH IT. `check-default-workspace-image` probes
 only `DEFAULT_WORKSPACE_IMAGE`. `CLAUDE_CLI` was pinned to a stale digest from
@@ -109,18 +109,19 @@ def agreed_label(labels_by_platform: dict[str, dict[str, str]], label: str) -> s
 
 #: The submodule whose source builds these images. The pins ship alongside this
 #: exact commit, so the build they came from must BE this commit.
-SUBMODULE_PATH = "lib/agentic-primitives"
+SUBMODULE_PATH = "lib/agentic-workspace"
 
 
 def submodule_gitlink(path: str = SUBMODULE_PATH) -> str:
-    """The commit this repo vendors for `path`.
+    """The commit this repo will vendor for `path`.
 
-    Read from the gitlink rather than the submodule's own checked-out HEAD:
-    a working tree can sit on any commit, but the gitlink is what the repo
-    actually ships, and it is what CI would clone.
+    Read the stage-zero index entry rather than the submodule's checked-out
+    HEAD. A working tree can sit on any commit, while the index is the exact
+    gitlink about to be committed. In CI it is identical to HEAD. Reading HEAD
+    made this required pre-commit gate fail every legitimate submodule bump.
     """
     result = subprocess.run(
-        ["git", "ls-tree", "HEAD", path],
+        ["git", "ls-files", "--stage", "--", path],
         capture_output=True,
         text=True,
         check=False,
@@ -129,12 +130,12 @@ def submodule_gitlink(path: str = SUBMODULE_PATH) -> str:
     if result.returncode != 0 or not result.stdout.strip():
         msg = f"could not read the gitlink for {path}: {result.stderr.strip()[:200]}"
         raise RuntimeError(msg)
-    # "160000 commit <sha>\t<path>"
+    # "160000 <sha> 0\t<path>"
     fields = result.stdout.split()
-    if len(fields) < 3 or fields[1] != "commit":
+    if len(fields) < 4 or fields[0] != "160000" or fields[2] != "0":
         msg = f"{path} is not a submodule gitlink: {result.stdout.strip()[:120]}"
         raise RuntimeError(msg)
-    return fields[2]
+    return fields[1]
 
 
 def inspect_channel(provider: str, ref: str) -> ImageChannel:
@@ -183,7 +184,7 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
         lines.append("")
         lines.append(f"{len(bad)} pinned image(s) are not from the '{REQUIRED_CHANNEL}' channel.")
         lines.append("A pin must come from the protected release build, not from main/edge:")
-        lines.append("  merge -> image build -> release branch -> bump PINNED_DIGESTS")
+        lines.append("  merge -> version tag -> signed image -> bump PINNED_DIGESTS")
         lines.extend(f"  {r.provider}: {r.ref}" for r in bad)
         return 1, lines
 
@@ -210,7 +211,7 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
     # THIRD: that revision is the submodule we vendor.
     #
     # THIS IS OUR POLICY, NOT AN UPSTREAM CONTRACT. A codex review checked the
-    # upstream workflow: agentic-primitives documents `agentic.image.channel`,
+    # upstream workflow: agentic-workspace documents `agentic.image.channel`,
     # but nothing upstream promises that `org.opencontainers.image.revision`
     # equals a consumer's gitlink - the label comes from docker/metadata-action's
     # implicit default rather than an explicit stamp. It is true today and we

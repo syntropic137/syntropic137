@@ -38,7 +38,7 @@ from syn_shared.testing import (
 # Set AGENTIC_RECORDINGS_DIR for recording-based tests
 _SYN_ROOT = Path(__file__).parent.parent.parent  # syn_tests/fixtures/infrastructure.py -> SYN root
 _RECORDINGS_DIR = (
-    _SYN_ROOT / "lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings"
+    _SYN_ROOT / "lib/agentic-workspace/providers/workspaces/claude-cli/fixtures/recordings"
 )
 if _RECORDINGS_DIR.exists() and "AGENTIC_RECORDINGS_DIR" not in os.environ:
     os.environ["AGENTIC_RECORDINGS_DIR"] = str(_RECORDINGS_DIR)

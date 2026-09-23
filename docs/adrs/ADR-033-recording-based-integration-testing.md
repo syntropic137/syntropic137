@@ -123,7 +123,7 @@ packages/syn-adapters/tests/workspace_backends/recording/
 ### Recordings Location
 
 ```
-lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings/
+lib/agentic-workspace/providers/workspaces/claude-cli/fixtures/recordings/
 ├── v2.0.74_claude-sonnet-4-5_simple-bash.jsonl
 ├── v2.0.74_claude-sonnet-4-5_file-create.jsonl
 ├── v2.0.74_claude-sonnet-4-5_multi-tool.jsonl
@@ -133,5 +133,5 @@ lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings/
 ## References
 
 - [ADR-029: AI Agent Testing & Verification](ADR-029-ai-agent-testing-verification.md)
-- [ADR-030: Session Recording for Testing](../../lib/agentic-primitives/docs/adrs/030-session-recording-testing.md) (agentic-primitives)
+- [ADR-030: Session Recording for Testing](https://github.com/AgentParadise/agentic-primitives/blob/a6b5d3f/docs/adrs/030-session-recording-testing.md) (legacy agentic-primitives)
 - [ADR-013: Integration Testing Strategy](ADR-013-integration-testing-strategy.md)

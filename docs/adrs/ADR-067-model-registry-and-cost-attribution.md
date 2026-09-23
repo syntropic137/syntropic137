@@ -27,7 +27,7 @@ verified mechanically, and any model it does not know must fail loudly rather th
 priced by guess.** Correctness cannot depend on a human noticing a vendor announcement.
 
 **1. Two model catalogs, neither complete.**
-`lib/agentic-primitives` already defines a model registry (ADR-018, Accepted 2025-12-02):
+`lib/agentic-workspace` already defines a model registry (ADR-018, Accepted 2025-12-02):
 three-tier aliases, one schema-validated YAML per model, 20+ cards across
 anthropic/openai/google, and an agent-facing `UPDATE_GUIDE.md`. `grep -rn "providers/models"
 packages/ apps/` returns **zero hits** - syn137 ignores it and hardcodes a parallel table

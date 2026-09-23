@@ -1,7 +1,7 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
-agentic-primitives signs every published workspace image with cosign keyless
-OIDC at build time (``.github/workflows/build-workspace-images.yml``, the
+agentic-workspace signs every published workspace image with cosign keyless
+OIDC at build time (``.github/workflows/release-images.yml``, the
 "Sign image with cosign" step). Until this module existed nothing on the
 Syntropic137 side checked those signatures, which made them evidence nobody
 read.
@@ -18,14 +18,11 @@ off the publishing workflow, not guessed:
   keyless signature is the workflow reference:
   ``https://github.com/<owner>/<repo>/<workflow path>@<git ref>``.
   For this publisher that is
-  ``https://github.com/AgentParadise/agentic-primitives/.github/workflows/build-workspace-images.yml@refs/heads/main``.
+  ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/tags/v0.1.0``.
 
-The default is a regexp rather than an exact identity for one reason: the
-publishing branch is planned to move from ``main`` to a protected ``release``
-branch. The regexp admits exactly those two refs of exactly that workflow in
-exactly that repository, so the branch move does not require an emergency
-config change while still naming the signer precisely. It does not admit any
-other workflow, repository, or ref.
+The default admits semantic-version release tags from exactly this workflow
+and repository. It does not admit branch builds, other workflows, or other
+repositories.
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
@@ -39,12 +36,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: OIDC issuer for GitHub Actions keyless signing.
 GITHUB_ACTIONS_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
-#: Certificate identity (SAN) regexp for the agentic-primitives image publisher.
+#: Certificate identity (SAN) regexp for the agentic-workspace image publisher.
 #: Anchored at both ends so it matches the whole SAN, not a substring.
-AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
-    r"^https://github\.com/AgentParadise/agentic-primitives"
-    r"/\.github/workflows/build-workspace-images\.yml"
-    r"@refs/heads/(main|release)$"
+AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
+    r"^https://github\.com/AgentParadise/agentic-workspace"
+    r"/\.github/workflows/release-images\.yml"
+    r"@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$"
 )
 
 #: Lowest cosign major version accepted by the verifier probe.
@@ -84,7 +81,7 @@ class ImageVerificationSettings(BaseSettings):
     )
 
     certificate_identity_regexp: str = Field(
-        default=AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+        default=AGENTIC_WORKSPACE_IDENTITY_REGEXP,
         description=(
             "Regexp matched against the signing certificate identity (SAN). "
             "For GitHub Actions keyless signing this is the workflow reference "

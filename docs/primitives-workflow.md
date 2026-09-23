@@ -4,7 +4,7 @@ This document describes how to work with Claude commands, tools, and hooks (prim
 
 ## Overview
 
-Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-primitives/`). The workflow supports:
+Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-workspace/`). The workflow supports:
 
 1. **Syncing shared primitives** from `agentic-primitives` → Syn137
 2. **Creating repo-specific commands** that stay only in Syn137
@@ -94,7 +94,7 @@ just primitives-local
 ### 2. Create the Primitive in agentic-primitives
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 
 # Create the primitive structure
 mkdir -p primitives/v1/prompts/commands/{category}/{command-name}
@@ -133,7 +133,7 @@ EOF
 ### 3. Submit PR to agentic-primitives
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 git checkout -b feat/add-new-command
 git add primitives/
 git commit -m "feat(commands): add new-command primitive"
@@ -145,7 +145,7 @@ git push origin feat/add-new-command
 
 ```bash
 cd ../..  # Back to Syn137 root
-git submodule update --remote lib/agentic-primitives
+git submodule update --remote lib/agentic-workspace
 just primitives-sync
 ```
 
@@ -156,7 +156,7 @@ Your command will now be managed, and you can delete the local copy if desired.
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        agentic-primitives                           │
-│  (lib/agentic-primitives/)                                         │
+│  (lib/agentic-workspace/)                                         │
 │                                                                     │
 │  primitives/v1/prompts/commands/                                   │
 │  ├── devops/manage-security-patches/                               │

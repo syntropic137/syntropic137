@@ -1240,7 +1240,7 @@ config = WorkspaceConfig(
     base_dir=Path("/tmp/test-workspace"),
     workflow_id="wf-1",
     phase_id="p-1",
-    hooks_source=Path("lib/agentic-primitives/examples/settings.json"),
+    hooks_source=Path("lib/agentic-primitives/examples/settings.json"),  # historical example
 )
 
 async with await LocalWorkspace.create(config) as ws:

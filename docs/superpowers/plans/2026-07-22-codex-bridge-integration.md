@@ -113,7 +113,7 @@ the built command + recorded events for claude phases are unchanged (not a liter
    is direct. See Task 8 / the networking note for what a future hardening would require.
 
 6. **Codex `--json` schema** (grounded in
-   `lib/agentic-primitives/plugins/delegation/skills/delegating-to-codex/SKILL.md` and a
+   `AgentParadise/agentic-skills/skills/delegation/delegating-to-codex/SKILL.md` and a
    real 2026-06-08 capture): JSONL, one event per line -
    `thread.started{thread_id}`, `turn.started`, `item.started`/`item.completed`
    with `item.type ∈ {agent_message, command_execution{command,aggregated_output,exit_code,status}, file_change}`,
@@ -125,7 +125,7 @@ the built command + recorded events for claude phases are unchanged (not a liter
 
 7. **Codex is NOT in the default `claude-cli` workspace image.** Only the
    `interactive-tmux` image installs `@openai/codex@0.139.0`. The default image
-   (`lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile`) must gain codex,
+   (`lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile`) must gain codex,
    built via the staged flow `uv run scripts/build-provider.py claude-cli` (NOT a raw
    `docker build` from the provider dir - the build stages wheels/plugins first).
    `/home/agent` is tmpfs-backed at runtime (image bakes are wiped), so `~/.codex` must be
@@ -242,7 +242,7 @@ packages/syn-domain/.../agent_sessions/slices/session_cost/projection.py        
 packages/syn-domain/.../agent_sessions/slices/session_cost/timescale_query.py               (C) pass model to calculate_token_cost (bug-class fix)
 packages/syn-domain/.../agent_sessions/slices/session_cost/test_cost_model_resolution.py     (N) regression tests
 
-lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile                           (C, SUBMODULE) install @openai/codex@0.139.0
+lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile                           (C, SUBMODULE) install @openai/codex@0.139.0
 
 workflows/demo/codex-bridge-demo.yaml                                                        (N) demo workflow (single codex phase)
 docs/adrs/ADR-0XX-codex-bridge.md                                                             (N) short ADR recording the reuse decision
@@ -890,7 +890,7 @@ the workflow_definition and value-object test modules.
 
 ## Task 8 - Codex CLI in the default workspace image (SUBMODULE)
 
-**Files:** `lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile`.
+**Files:** `lib/agentic-workspace/providers/workspaces/claude-cli/Dockerfile`.
 
 **Why:** the default `claude-cli` image (what the docker `WorkspaceService` provisions)
 does not install codex; only `interactive-tmux` does. The bridge runs codex in the default
@@ -911,7 +911,7 @@ Codex installs globally to `/usr/local` (survives the `/home/agent` tmpfs mount)
    a raw `docker build` from the provider dir will fail). Build locally before pushing any
    tag (feedback_local_build_before_base_bump):
    ```bash
-   cd lib/agentic-primitives
+   cd lib/agentic-workspace
    uv run scripts/build-provider.py claude-cli --tag codex-bridge
    docker run --rm <built-image>:codex-bridge codex --version
    docker run --rm <built-image>:codex-bridge claude --version

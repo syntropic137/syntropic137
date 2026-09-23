@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 # Set recordings directory for agentic_events when running from Syntropic137
 _SYN_ROOT = Path(__file__).parent.parent.parent.parent
 _RECORDINGS_DIR = (
-    _SYN_ROOT / "lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings"
+    _SYN_ROOT / "lib/agentic-workspace/providers/workspaces/claude-cli/fixtures/recordings"
 )
 
 if _RECORDINGS_DIR.exists() and "AGENTIC_RECORDINGS_DIR" not in os.environ:

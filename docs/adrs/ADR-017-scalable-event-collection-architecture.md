@@ -522,4 +522,4 @@ This architecture provides a foundation for:
 | `packages/syn-adapters/src/syn_adapters/events/watcher.py` | File watching pattern to extend |
 | `packages/syn-adapters/src/syn_adapters/events/bridge.py` | Event bridging pattern |
 | `packages/syn-adapters/src/syn_adapters/hooks/client.py` | HTTP client pattern |
-| `lib/agentic-primitives/primitives/v1/hooks/handlers/` | Existing hook implementations |
+| `agentic-primitives/primitives/v1/hooks/handlers/` | Historical hook implementations |

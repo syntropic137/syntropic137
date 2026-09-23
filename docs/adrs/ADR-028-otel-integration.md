@@ -26,7 +26,7 @@ author: Neural
 >
 > The `syn-adapters/observability/otel_config.py` and `conventions.py` files
 > referenced here have been deleted.
-> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
+> See the legacy `agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 

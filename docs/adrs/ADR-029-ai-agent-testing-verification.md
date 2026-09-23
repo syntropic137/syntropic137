@@ -215,7 +215,7 @@ In tests, we need to:
 #### Mock Registry Pattern (agentic-primitives)
 
 ```python
-# lib/agentic-primitives/lib/python/agentic_events/mocks/cli_tools.py
+# agentic-primitives/lib/python/agentic_events/mocks/cli_tools.py  # historical
 
 class CLIToolMockRegistry:
     """Registry for mock CLI tool responses during testing.
@@ -449,5 +449,5 @@ Traditional pyramid doesn't work for AI. Here's the adapted version:
 ## Files Changed
 
 - `docs/adrs/ADR-029-ai-agent-testing-verification.md` - This ADR
-- `lib/agentic-primitives/primitives/v1/skills/testing/testing-expert/` - Testing expert skill
+- `AgentParadise/agentic-skills/skills/sdlc/testing-expert/` - Testing expert skill
 - `PROJECT-PLAN_20251218_TESTING-PHILOSOPHY.md` - Implementation plan
