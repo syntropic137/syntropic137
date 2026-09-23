@@ -5,9 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import partial
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -19,35 +17,29 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CancelExecutionCommand,
     StartExecutionCommand,
-    StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
-    observer_for,
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
+    run_phase_agent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
-    ArtifactCollector,
-    UnfinishedPhase,
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
+    phase_failure,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+    UpstreamRetryPolicy,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    PhaseReportedFailureError,
+    SavedWork,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
+    record_failure_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
-    ArtifactCollectionHandler,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-    ProvisionResult,
-    WorkspaceProvisionHandler,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
-    ObservabilityCollector,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
@@ -61,6 +53,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
     PhaseRuntime,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace import (
+    PhaseWorkspace,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     AgentHandlerProtocol,
     ArtifactRepository,
@@ -68,18 +63,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     ExecutionRepository,
     PhaseOutputCache,
     PromptBuilder,
-    Runner,
     SessionRepository,
     TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
-    SessionLifecycleManager,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    already_saved_by_the_completion_gate,
     refuse_to_complete_unsaved_phase,
 )
-from syn_shared.agents import runner_for_provider
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
@@ -88,15 +79,15 @@ if TYPE_CHECKING:
         SessionCapturePort,
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
-    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
@@ -154,8 +145,13 @@ class WorkflowExecutionProcessor:
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
         import_ledger: ImportLedgerPort | None = None,
+        retry_policy: UpstreamRetryPolicy | None = None,
     ) -> None:
         self._session_repo = session_repository
+        # How a phase answers a provider that is simply busy (#1303). Injected
+        # only so a test can collapse the backoff to zero; production takes the
+        # policy's own numbers and no caller chooses them.
+        self._retry_policy = retry_policy or UpstreamRetryPolicy()
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -184,6 +180,38 @@ class WorkflowExecutionProcessor:
             writer=observability_writer,
             ledger=import_ledger,
         )
+        #: This run's inputs, written by `run` before any phase is provisioned.
+        self._inputs: dict[str, Any] = {}
+
+    @property
+    def _workspaces(self) -> PhaseWorkspace:
+        """The storage seam of a phase: provision it, claim what it produced.
+
+        Dispatching to it is a dispatch decision; how any of it is built is
+        not, so the building moved to `phase_workspace` (#1367).
+
+        Built per access, NOT once in `__init__`, because the collaborators it
+        needs are replaceable on the processor after construction - the journal
+        and the artifact repository are both swapped that way - and a seam that
+        snapshotted them at construction would quietly keep using the originals.
+        The handlers inside it were already constructed per call, so reading
+        the current references here costs nothing the old code did not.
+        """
+        return PhaseWorkspace(
+            session_repository=self._session_repo,
+            workspace_service=self._workspace_service,
+            artifact_repository=self._artifact_repo,
+            artifact_content_storage=self._artifact_content_storage,
+            artifact_query=self._artifact_query,
+            observability_writer=self._observability_writer,
+            prompt_builder=self._prompt_builder,
+            command_builder=self._command_builder,
+            claude_plugin_materializer=self._claude_plugin_materializer,
+            skill_materializer=self._skill_materializer,
+            runtime=self._runtime,
+            journal=self._journal,
+            inputs=self._inputs,
+        )
 
     async def run(
         self,
@@ -194,8 +222,16 @@ class WorkflowExecutionProcessor:
         execution_id: str,
         repos: list[RepositoryRef] | None = None,
         expected_completion_at: datetime | None = None,
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        """Execute a workflow using the Processor To-Do List pattern."""
+        """Execute a workflow using the Processor To-Do List pattern.
+
+        ``admitted`` is the admission lease this execution was started under
+        (#1387), and it ends a few lines below, at the moment the start event
+        is durable. Nowhere earlier would be true: everything between the
+        admission decision and that write is queueing, and a deploy that
+        drained over it would count a quiet system and then kill this run.
+        """
         started_at = datetime.now(UTC)
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
@@ -229,6 +265,15 @@ class WorkflowExecutionProcessor:
         aggregate.start_execution(start_cmd)
         await self._journal.open(aggregate)
 
+        # #1387: durable, therefore visible. From here the drain counts this
+        # execution and a maintenance transition may proceed over it; before
+        # here it existed only as a queued task, and `set_mode(active=True)`
+        # was waiting on this line. If `open()` raised - a duplicate stream,
+        # a store that is down - the lease is ended by the worker instead,
+        # which is the other honest answer: nothing started.
+        if admitted is not None:
+            admitted.mark_visible()
+
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
@@ -255,6 +300,7 @@ class WorkflowExecutionProcessor:
                     all_artifact_ids,
                     started_at,
                     cancel_reason=aggregate.cancel_reason,
+                    phase_id=dispatch_ctx.current_phase_id,
                 )
             return await self._complete_execution(
                 aggregate,
@@ -285,6 +331,11 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        finally:
+            # A shutdown may cancel the minutes-long agent await before either
+            # terminal path runs. Always release any workspace still held, and
+            # let CancelledError continue propagating (#1319).
+            await self._runtime.abandon_all("shutdown")
 
     async def _drain_todo_list(
         self,
@@ -336,7 +387,7 @@ class WorkflowExecutionProcessor:
         # the per-run _DispatchContext, never on the shared processor.
         dispatch_ctx.current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
-            await self._handle_provision(
+            await self._workspaces.start_phase(
                 todo,
                 phase,
                 aggregate,
@@ -347,7 +398,7 @@ class WorkflowExecutionProcessor:
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
-            await self._handle_collect_artifacts(
+            await self._workspaces.collect(
                 todo,
                 phase,
                 aggregate,
@@ -355,7 +406,9 @@ class WorkflowExecutionProcessor:
                 phase_outputs,
             )
         elif todo.action == TodoAction.COMPLETE_PHASE:
-            await self._handle_complete_phase(todo, aggregate, phase_results, completed_phase_ids)
+            await self._handle_complete_phase(
+                todo, phase, aggregate, phase_results, completed_phase_ids
+            )
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
@@ -368,16 +421,36 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str],
         started_at: datetime,
         cancel_reason: str | None = None,
+        phase_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions as cancelled and return cancelled result.
 
         Called when the to-do list empties due to ExecutionCancelledEvent.
         The aggregate is already in CANCELLED status - no new command needed.
+
+        ``phase_id`` is the phase that was mid-flight when the cancel landed,
+        from the run's own _DispatchContext for the reason ``failed_phase_id``
+        is: with concurrent runs sharing this processor, anything else could
+        name another execution's phase.
         """
-        cancellation = cancelled_execution(cancel_reason, phase_results, all_artifact_ids)
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
-        return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        # BEFORE the teardown below. `abandon_all` destroys the cancelled
+        # phase's container and commits that exist only in it go with it. The
+        # user asked for the run to stop, not for the work to be deleted
+        # (#1231).
+        try:
+            saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+            cancellation = cancelled_execution(
+                cancel_reason, phase_results, all_artifact_ids, saved=saved
+            )
+            try:
+                await self._runtime.report_cancelled(cancellation.reason)
+            except Exception:
+                logger.exception(
+                    "Could not close the sessions of execution %s as cancelled", execution_id
+                )
+            return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        finally:
+            await self._runtime.abandon_all("cancel")
 
     async def _complete_execution(
         self,
@@ -427,7 +500,40 @@ class WorkflowExecutionProcessor:
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
         timings = self._runtime.timings()
-        # Before the teardown below, the only window in which it is askable (#1200).
+        # Read in the same breath as the timings, and for the same reason: the
+        # counts are the dying phase's own, and this is the last frame in which
+        # anything can still ask for them (#1262). Without this the phase
+        # reported zero tokens no matter what it had burned, so an exit 124
+        # after 735 tokens - a stall - was indistinguishable from one after
+        # 300k, which needed a bigger budget rather than a retry.
+        #
+        # Asked with `execution_id`, not just the phase: this processor is
+        # shared across concurrent dispatches and two runs of one workflow have
+        # the same phase ids, so "what did `implement` spend" names two answers.
+        # The id is the run's own, so it always names this one's.
+        usage = self._runtime.usage_for(execution_id, failed_phase_id)
+        # Before the teardown below, the only window in which either is
+        # possible: SAVE what would die with the container (#1231), then read
+        # where that leaves the branches (#1200). Saving first is what lets the
+        # branch report point at a quarantine ref instead of at nothing.
+        #
+        # This does not make the phase succeed and must not be read as doing
+        # so. `error` is untouched, `failed_phase_outcome` appends to its reason
+        # rather than replacing it, and the aggregate is still told the
+        # execution failed: a phase killed at its timeout_seconds is still a
+        # phase that ran out of time. What changes is only that the time is now
+        # the whole of what the timeout costs.
+        #
+        # The one failure that arrives with the workspace already emptied is
+        # the completion gate's own refusal, which quarantined before it raised
+        # (#1184). Saving again would push a second, differently-timestamped
+        # commit to the same ref, be rejected as a non-fast-forward, and report
+        # the work as lost directly under the gate's report that it is not.
+        saved = (
+            SavedWork()
+            if already_saved_by_the_completion_gate(error)
+            else await self._runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
+        )
         observed = await self._runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
             error,
@@ -436,121 +542,27 @@ class WorkflowExecutionProcessor:
             timings.session_ids,
             observed=observed,
             kept_artifact_ids=kept,
+            usage=usage,
+            saved=saved,
         )
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
-
-        fail_cmd = failure.as_command(
-            execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
+        await record_failure_and_release(
+            failure,
+            aggregate=aggregate,
+            journal=self._journal,
+            runtime=self._runtime,
+            execution_id=execution_id,
+            completed_phases=len(completed_phase_ids),
+            total_phases=len(phases),
         )
-        try:
-            aggregate.fail_execution(fail_cmd)
-            await self._journal.append(aggregate)
-        except Exception as save_err:
-            logger.error("Failed to save failure event: %s", save_err)
         return failure.execution_result(
             workflow_id,
             execution_id,
             started_at=started_at,
             phase_results=phase_results,
             artifact_ids=all_artifact_ids,
-        )
-
-    async def _handle_provision(
-        self,
-        todo: TodoItem,
-        phase: ExecutablePhase,
-        aggregate: WorkflowExecutionAggregate,
-        repos: list[RepositoryRef] | None,
-        completed_phase_ids: list[str],
-        phase_outputs: PhaseOutputCache,
-    ) -> None:
-        """Dispatch PROVISION_WORKSPACE."""
-        assert todo.phase_id is not None
-        session_id = str(uuid4())
-        start_cmd = StartPhaseCommand(
-            execution_id=todo.execution_id,
-            workflow_id=aggregate.workflow_id or "",
-            phase_id=todo.phase_id,
-            phase_name=phase.name,
-            phase_order=phase.order,
-            session_id=session_id,
-        )
-        aggregate.start_phase(start_cmd)
-
-        session_mgr = SessionLifecycleManager(
-            repository=self._session_repo,
-            session_id=session_id,
-            workflow_id=aggregate.workflow_id or "",
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            agent_provider=phase.agent_config.provider,
-            agent_model=phase.agent_config.model,
-            repos=[r.slug for r in repos] if repos else [],
-            observability=self._observability_writer,
-        )
-        await session_mgr.start()
-        self._runtime.begin(
-            todo.phase_id, session_manager=session_mgr, started_at=datetime.now(UTC)
-        )
-
-        # ADR-063: convert typed RepositoryRef → HTTPS URL at the workspace seam.
-        repo_urls = [r.https_url for r in (repos or [])]
-        result = await self._provision_workspace(
-            todo=todo,
-            phase=phase,
-            aggregate=aggregate,
-            session_id=session_id,
-            repo_urls=repo_urls,
-            completed_phase_ids=completed_phase_ids,
-            phase_outputs=phase_outputs,
-        )
-        self._runtime.attach_workspace(
-            todo.phase_id,
-            workspace=result.workspace,
-            workspace_cm=result.workspace_cm,
-            agent_env=result.agent_env,
-            claude_cmd=result.claude_cmd,
-        )
-        await self._runtime.record_starting_point(todo.phase_id)
-        aggregate.provision_workspace_completed(result.command)
-        await self._journal.append(aggregate)
-
-    async def _provision_workspace(
-        self,
-        *,
-        todo: TodoItem,
-        phase: ExecutablePhase,
-        aggregate: WorkflowExecutionAggregate,
-        session_id: str,
-        repo_urls: list[str],
-        completed_phase_ids: list[str],
-        phase_outputs: PhaseOutputCache,
-    ) -> ProvisionResult:
-        """Provision this phase's own workspace and build its ProvisionResult."""
-        provision_handler = WorkspaceProvisionHandler(
-            workspace_service=self._workspace_service,
-            prompt_builder=self._prompt_builder,
-            command_builder=self._command_builder,
-            claude_plugin_materializer=self._claude_plugin_materializer,
-            skill_materializer=self._skill_materializer,
-        )
-        artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query
-        )
-        return await provision_handler.handle(
-            todo=todo,
-            phase=phase,
-            workflow_id=aggregate.workflow_id or "",
-            session_id=session_id,
-            repos=repo_urls,
-            artifacts=artifacts,
-            completed_phase_ids=completed_phase_ids,
-            phase_outputs=phase_outputs,
-            inputs=self._inputs,
         )
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
@@ -571,32 +583,21 @@ class WorkflowExecutionProcessor:
         session_id = todo.session_id or ""
         launch = self._runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
-        timeout = phase.timeout_seconds or phase.agent_config.timeout_seconds
-        # Raises on an unknown or removed provider instead of defaulting to
-        # the claude parser. The execution boundary
-        # (_build_agent_config_from_phase) already rejected it, so reaching
-        # that raise means a new entry point skipped the gate.
-        runner: Runner = runner_for_provider(phase.agent_config.provider, phase_id=phase.phase_id)
 
-        collector = ObservabilityCollector(
-            writer=self._observability_writer,
-            session_id=session_id,
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workspace_id=getattr(launch.workspace, "workspace_id", None),
-            agent_model=phase.agent_config.model,
-        )
-        result = await self._get_agent_handler().handle(
+        # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
+        # line treats the result as final, and for every cause but one it is;
+        # `run_phase_agent` is what makes that true, by not returning until
+        # there is no further attempt to come. How many attempts that took, and
+        # which failures earn one, are settled in `agent_attempts` and are not
+        # facts this function has any use for.
+        result = await run_phase_agent(
+            handler=self._get_agent_handler(),
             todo=todo,
-            workspace=launch.workspace,
-            agent_env=launch.agent_env,
-            claude_cmd=launch.claude_cmd,
+            phase=phase,
+            launch=launch,
             session_id=session_id,
-            agent_model=phase.agent_config.model,
-            timeout_seconds=timeout,
-            collector=collector,
-            runner=runner,
-            on_launch=observer_for(launch.session_manager),
+            observability=self._observability_writer,
+            retry_policy=self._retry_policy,
         )
 
         self._runtime.remember_leader(
@@ -634,81 +635,32 @@ class WorkflowExecutionProcessor:
         # a raise added later cannot forget it, and it never raises itself, so
         # the reason the phase failed always reaches the caller intact.
         try:
-            # THE PHASE'S OWN REPORT, on the same footing as its exit status and
-            # checked before the aggregate is told the run completed (#1256). A
-            # phase that wrote `TASK_RESULT: {"success": false, ...}` said it did
-            # not do what it was asked; completing it anyway converts a DETECTED
-            # failure into a pass, which is the one direction that lets defects
-            # through every gate downstream. An unreadable report refuses for the
-            # same reason - see `AgentVerdict`.
-            verdict = result.stream_result.verdict
-            if verdict.refuses_completion:
-                refusal = verdict.refusal(phase_id=todo.phase_id)
-                logger.error(refusal)
-                raise PhaseReportedFailureError(phase_id=todo.phase_id, reason=refusal)
+            command = result.command
+            assert command is not None, "a non-cancelled run must carry its completion command"
+            # THE PHASE'S OWN REPORT, on the same footing as its exit status
+            # and checked before the aggregate is told the run completed
+            # (#1256). A phase that wrote `TASK_RESULT: {"success": false, ...}`
+            # said it did not do what it was asked; completing it anyway
+            # converts a DETECTED failure into a pass, which is the one
+            # direction that lets defects through every gate downstream.
+            #
+            # WHICH of those two channels ended the run, and what the failure
+            # is counted as, are `agent_run_outcome`'s to decide - they were
+            # the ORDER of two `if`s here, and the order was wrong: a refusal
+            # written by a run that a timeout then killed was recorded as the
+            # gate working (#1367).
+            failure = phase_failure(result, phase_id=todo.phase_id)
+            if failure is not None:
+                logger.error(str(failure))
+                raise failure
 
-            if result.command.exit_code != 0:
-                reason = result.stream_result.error_reason
-                base = (
-                    f"Agent failed: {reason} "
-                    f"(phase={todo.phase_id}, exit_code={result.command.exit_code})"
-                    if reason
-                    else f"Agent execution failed for phase {todo.phase_id} "
-                    f"(exit_code={result.command.exit_code})"
-                )
-                msg = f"{base} (tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
-                logger.error(msg)
-                raise RuntimeError(msg)
-
-            aggregate.agent_execution_completed(result.command)
+            aggregate.agent_execution_completed(command)
             await self._journal.append(aggregate)
         except Exception:
-            dispatch_ctx.kept_artifact_ids = await self._keep_unfinished_output(
+            dispatch_ctx.kept_artifact_ids = await self._workspaces.keep_unfinished_output(
                 todo, phase, workspace=launch.workspace, workflow_id=workflow_id
             )
             raise
-
-    async def _keep_unfinished_output(
-        self,
-        todo: TodoItem,
-        phase: ExecutablePhase,
-        *,
-        workspace: ManagedWorkspace,
-        workflow_id: str,
-    ) -> list[str]:
-        """Store what a phase wrote before the run that produced it is torn down.
-
-        Runs while the workspace is still alive, which is the only window there
-        is: `_fail_execution` abandons it a few frames up. Never raises and
-        never salvages from the transcript - the phase's outcome is already
-        decided and is reported where failures are reported; the question here
-        is only what survives it.
-        """
-        assert todo.phase_id is not None
-        collector = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query
-        )
-        kept = await collector.collect_from_unfinished_phase(
-            workspace=workspace,
-            workflow_id=workflow_id,
-            phase_id=todo.phase_id,
-            execution_id=todo.execution_id,
-            session_id=todo.session_id or "",
-            phase_name=phase.name,
-            output_artifact_types=phase.output_artifact_types,
-            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
-            outcome=UnfinishedPhase.FAILED,
-        )
-        if kept:
-            logger.warning(
-                "Phase %s (%s) failed; kept %d artifact(s) it had already written "
-                "under artifacts/output/ rather than discarding them with the "
-                "workspace (#1321)",
-                todo.phase_id,
-                phase.name,
-                len(kept),
-            )
-        return kept
 
     async def _handle_cancel_signal(
         self,
@@ -726,68 +678,10 @@ class WorkflowExecutionProcessor:
         aggregate.cancel_execution(cancel_cmd)
         await self._journal.append(aggregate)
 
-    async def _handle_collect_artifacts(
-        self,
-        todo: TodoItem,
-        phase: ExecutablePhase,
-        aggregate: WorkflowExecutionAggregate,
-        all_artifact_ids: list[str],
-        phase_outputs: PhaseOutputCache,
-    ) -> None:
-        """Dispatch COLLECT_ARTIFACTS."""
-        assert todo.phase_id is not None
-        workspace = self._runtime.workspace_for(todo.phase_id)
-        if workspace is None:
-            # Defense in depth: in-process this branch is unreachable
-            # (the runtime gives up a phase's workspace only after
-            # on_phase_completed locks the phase at rank 99, and
-            # get_pending filters stale items), but a lock-bypassing
-            # projection writer (e.g. a future out-of-process consumer on
-            # a shared Postgres store) could resurrect a stale todo.
-            # Skip it instead of crashing the workflow with KeyError.
-            logger.warning(
-                "Skipping stale COLLECT_ARTIFACTS for finalized phase %s "
-                "(execution %s): no active workspace",
-                todo.phase_id,
-                todo.execution_id,
-            )
-            return
-        artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query
-        )
-        collection_handler = ArtifactCollectionHandler(artifact_collector=artifacts)
-        result = await collection_handler.handle(
-            todo=todo,
-            workspace=workspace,
-            workflow_id=aggregate.workflow_id or "",
-            session_id=todo.session_id or "",
-            phase_name=phase.name,
-            output_artifact_types=phase.output_artifact_types,
-            # The provider is the phase's because we launched it; the model is
-            # the runtime's because only the agent's own stream said it (#1284).
-            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
-            # From the AGGREGATE, which rebuilt it from the event stream, and
-            # not from anything this process was holding: a restart between
-            # the agent finishing and this point is the commonest form of the
-            # "something went wrong" that the salvage exists for (#1300). This
-            # replaces `self._runtime.take_last_message(...)`, which read the
-            # same value out of process memory and lost it to exactly that
-            # restart.
-            last_agent_message=aggregate.last_agent_message_for(todo.phase_id),
-            # Asked only if the collector actually has to salvage. The reading
-            # costs a git inspection, and it has to happen HERE rather than on
-            # the failure path because a salvaged phase does not fail (#1300).
-            describe_work=partial(self._runtime.describe_work, todo.phase_id),
-        )
-        all_artifact_ids.extend(result.artifact_ids)
-        self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
-        phase_outputs.record(todo.phase_id, result.first_content, result.files)
-        aggregate.artifacts_collected(result.command)
-        await self._journal.append(aggregate)
-
     async def _handle_complete_phase(
         self,
         todo: TodoItem,
+        phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
@@ -799,14 +693,23 @@ class WorkflowExecutionProcessor:
         it succeeded, before that is persisted, and before the runtime tears
         the workspace down. Every one of those is a point of no return, and the
         guard is only a guard on the near side of all four.
+
+        `phase` is here for the guard, which cannot tell an authored edit from
+        a build tool's side effect without the phase's own declaration (#1308).
+        Every other handler already took it; this one dropped it, which is why
+        the declaration had nowhere to arrive.
         """
         assert todo.phase_id is not None
         # FIRST, and on the real path rather than inside a try: nothing has
         # been popped, the workspace is still alive and the aggregate has not
         # been told this phase succeeded, so the raise IS the outcome (#1184).
-        await refuse_to_complete_unsaved_phase(self._runtime.live_workspaces, todo)
+        await refuse_to_complete_unsaved_phase(
+            self._runtime.live_workspaces,
+            todo,
+            delivers_repo_changes=phase.delivers_repo_changes,
+        )
 
-        harvest = self._runtime.harvest(todo.phase_id)
+        harvest = self._runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",

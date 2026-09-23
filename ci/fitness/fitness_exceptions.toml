@@ -392,6 +392,12 @@ allowed_prefixes = [
 # is no narrower type to take. Narrowing it would be a lie about what
 # json can hand it.
 "packages/syn-adapters/src/syn_adapters/postgres_text.py:_json_default.param:obj" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
+# A `json.JSONDecoder(object_pairs_hook=...)` callback, not a projection handler,
+# for the same reason as the entry above: the stdlib hands it each decoded
+# object's members as (key, value) pairs, so `list[tuple[str, object]]` IS the
+# declared contract. It exists to see a duplicate `status` member before the
+# decoder's last-one-wins dict discards the failure written first (#1324).
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_verdict.py:_decode_payload.keep_the_member_list.param:members" = { annotation = "list[tuple[str, object]]", verdict = "undeclared", issue = "#1324" }
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore._deserialize.param:data" = { annotation = "str | dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:PostgresProjectionStore.query.param:filters" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:ManagedWorkspace.stream.param:environment" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
@@ -420,12 +426,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py:_parse_phase_definitions.param:raw_defs" = { annotation = "list[dict[str, Any]]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:PhaseStartingPoints.record.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_cached_remote_refs.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_checked.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_git.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:_repositories.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py:record_phase_starting_point.param:workspace" = { annotation = "GitWorkspace", verdict = "declares-no-fields", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
 
 [unknown_has_a_representation]

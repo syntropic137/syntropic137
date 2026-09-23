@@ -122,13 +122,23 @@ jobs:
       # reads the gitlink, so any bump invalidates the cache exactly.
       - name: Resolve APSS submodule commit
         id: apss-commit
-        run: echo "sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)" >> "$GITHUB_OUTPUT"
+        run: |
+          sha=$(git rev-parse HEAD:lib/agent-paradise-standards-system)
+          rust=$(rustc -vV | sha256sum | cut -d ' ' -f 1)
+          image=$(sha256sum /etc/os-release | cut -d ' ' -f 1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
+      # Cache the executable, not Cargo's target tree: fresh source mtimes can
+      # invalidate that tree and rebuild everything after a successful restore.
+      # No fallback keys. The helper also verifies the checkout is at this pin.
       - name: Cache APS CLI binary
+        id: aps-cache
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
-          path: lib/agent-paradise-standards-system/target/release
-          key: aps-cli-${{ runner.os }}-${{ steps.apss-commit.outputs.sha }}
+          path: lib/agent-paradise-standards-system/target/release/apss-dev
+          key: aps-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.apss-commit.outputs.image }}-${{ steps.apss-commit.outputs.rust }}-${{ steps.apss-commit.outputs.sha }}-${{ hashFiles('.github/workflows/ci.yml', 'scripts/build-aps.sh', '.cargo/config', '.cargo/config.toml') }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
@@ -168,6 +178,8 @@ jobs:
       # they could only fail after a push (#931). Add new gates to `preflight`
       # in the justfile, never here.
       - name: Preflight (every gate, same target the hook runs)
+        env:
+          SYN_APS_CACHE_HIT: ${{ steps.aps-cache.outputs.cache-hit }}
         run: just preflight
 
   #############################################################################
@@ -208,6 +220,7 @@ jobs:
             --cov=packages/syn-adapters/src \
             --cov=packages/syn-shared/src \
             --cov-report=term-missing \
+            --durations=20 \
             -x -q
 
   #############################################################################

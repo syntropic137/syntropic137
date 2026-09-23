@@ -66,7 +66,7 @@ async def get_session_tools(
     tool_execution_completed: str,
     subagent_tool_names: set[str],
     git_event_types: tuple[str, ...],
-) -> list[Any]:
+) -> list[Any] | None:
     """Get all tool operations for a session.
 
     Args:
@@ -79,12 +79,18 @@ async def get_session_tools(
         git_event_types: Tuple of git event type constants.
 
     Returns:
-        List of tool operations ordered by timestamp.
+        Tool operations ordered by timestamp, ``[]`` for a session that
+        recorded none, or ``None`` when the timeline could not be read at all -
+        no pool, or the query failed. Callers that only display rows may treat
+        the last two alike; callers that MEASURE a phase from them may not,
+        because "no operations recorded" is the reading that says a phase
+        stalled, and answering it out of an outage is how #1332 turned a
+        telemetry failure into "do not pay for this run again".
     """
     pool = get_pool(proj)
     if pool is None:
-        logger.debug("No pool available, returning empty list")
-        return []
+        logger.debug("No pool available, cannot read the timeline")
+        return None
 
     # Every row in agent_events was written with a sanitised session id
     # (AgentEvent's validator), so a lookup must ask for the same spelling -
@@ -137,4 +143,4 @@ async def get_session_tools(
             return rows_to_operations(rows, subagent_tool_names, git_event_types)
     except Exception as e:
         logger.error("Failed to query tool operations for %s: %s", session_id, e)
-        return []
+        return None

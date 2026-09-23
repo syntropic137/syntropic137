@@ -212,6 +212,7 @@ class StaleExecutionCleaner:
         # Only fail if still running
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutionStatus,
+            FailureClassification,
         )
 
         if aggregate.status != ExecutionStatus.RUNNING:
@@ -235,6 +236,10 @@ class StaleExecutionCleaner:
             failed_phase_id=None,  # Unknown which phase was running
             completed_phases=completed_phases,
             total_phases=total_phases,
+            # A run swept up for exceeding its wall-clock threshold: budget is
+            # the machinery, and nothing here is any agent's own report
+            # (#1357).
+            classification=FailureClassification.PLATFORM,
         )
         aggregate.fail_execution(fail_cmd)
         await self._executions.save(aggregate)

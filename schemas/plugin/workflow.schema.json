@@ -284,6 +284,11 @@
           "title": "Can Open Pr",
           "type": "boolean"
         },
+        "delivers_repo_changes": {
+          "default": true,
+          "title": "Delivers Repo Changes",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {
