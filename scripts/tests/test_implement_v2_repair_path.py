@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_WORKFLOW = _REPO_ROOT / "workflows" / "sdlc" / "implement-v2" / "workflow.yaml"
+_WORKFLOW = _REPO_ROOT / "workflows" / "sdlc" / "implement" / "workflow.yaml"
 
 
 @pytest.fixture(scope="module")

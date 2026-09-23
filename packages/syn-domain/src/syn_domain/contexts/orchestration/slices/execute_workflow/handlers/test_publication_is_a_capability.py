@@ -158,9 +158,7 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
         "fix",
         "reverify",
         "open_pr",
-    ], (
-        "the workflow's phase list changed; these assertions name phases by id"
-    )
+    ], "the workflow's phase list changed; these assertions name phases by id"
     return {p.phase_id: p for p in captured}
 
 
