@@ -2,6 +2,56 @@
 
 Checkpoint: 2026-09-22. Incomplete. Do not close issue 1398 or treat this as release-ready.
 
+## Full closeout audit, 2026-09-23
+
+This table supersedes optimistic completion claims. A passing component test does
+not mark its entire acceptance criterion complete. The exact scope remains the
+14 criteria in issue #1398. Personal/demo IDs and transcripts stay local.
+
+| # | Acceptance requirement | Current evidence | Work still required |
+| --- | --- | --- | --- |
+| 1 | Local operation with remote absent or unreachable, all clients | Real local parent/child demo passed; local SQL pipeline tests passed | Multi-phase and configured-unreachable full-stack checks, CLI agreement |
+| 2 | Cross-harness and native children through depth three | Real Codex child; real pinned Claude depth-three hooks with independent transcript comparison | Shim wiring, mixed depth-three launch matrix and expected coverage |
+| 3 | Concurrency and resume memberships across runs | Resolver resume tests exist; SQL namespace/pagination isolation passes | Exercise real resume segments and concurrent launch associations |
+| 4 | Durable intents and idempotent/conflicting lifecycle | Invocation aggregate tests and fenced spool cursors exist | Audit all controlled launch paths and crash-before-bind integration |
+| 5 | Failures, cancellation, background children, kill/restart/replay | 22 fresh PostgreSQL/pipeline/spool integration tests pass | Full lifecycle matrix and descendant settlement against pinned harnesses |
+| 6 | Independent SeshMagic query and interrupted replication | 2 fresh real exporter/server/SQL/MCP tests pass after rebuilding current binaries | Complete out-of-order delivery and offline-origin matrix |
+| 7 | Qualified identities, legacy aliases, immutable memberships | Namespace tests and immutable capture storage exist | Verified legacy alias migration and collision matrix |
+| 8 | Large bounded pagination under concurrent writes | Large native pipeline and SQL snapshot-pagination tests pass | Audit >1000-node and >500-observation thresholds, indexes and every client cursor contract |
+| 9 | API/CLI/UI parity and strict completeness | Routes and client tests exist; local UI demonstrated | Canonical detail/navigation/filtering and full client parity matrix |
+| 10 | Whole-object authorization and safe transcript access | Real archive/revocation/shared-byte tests pass | Full scope/raw-token/expired/redacted/secret-diagnostic matrix |
+| 11 | Retention, immutable revisions, deletion without resurrection | Immutable archives, revocation, retractions implemented | Physical expiry/deletion, durable cross-store tombstones and cleanup quotas; unchanged recovery polls currently grow evidence |
+| 12 | Resumable backfill and unchanged billing/platform totals | Qualified pricing read seam exists | Backfill acquisition, qualified producer/ledger/leader wiring and cumulative-resume regressions |
+| 13 | Deterministic centralized historical reconstruction | Native pipeline, late child and stale publication tests pass | Historical-source acquisition and complete replay/correction matrix |
+| 14 | Fake harness extension and dependency enforcement | Harness registry and topology checks exist | Run explicit contract and vendor-boundary tests on final changes |
+
+Release gates remain separate requirements: merge upstream dependencies in order,
+publish coordinated packages and signed images, update real pins, verify a clean
+checkout, run repository-required checks, and update existing draft PRs. Latest
+main preflight passed complexity checks but two upstream-default-branch
+reachability invariants still fail while AP and APSS are unmerged.
+
+Fresh baseline: `test_session_inventory_postgres.py`,
+`test_session_inventory_pipeline.py`, and `test_capture_spool_recovery.py`:
+22 passed using real disposable PostgreSQL. Log retained locally at
+`/private/tmp/1398-closeout-postgres.log`. No criterion is marked complete solely
+because this suite passed.
+
+Fresh native capture follow-up: Claude 2.1.250 now registers and binds native
+`Agent` children, including nested immediate parents. Its offline pinned-binary
+test verifies depth three, committed intent before each child request, and exact
+child identities against independent native transcript files. Codex 0.150.1
+native-child and hook-trust tests also pass against the updated shared handler.
+Workspace startup composes both harnesses' hooks and rejects disabled capture.
+The complete session-store package suite passes with the real exporter; native
+binary tests run separately with networking disabled. Agentic Primitives full
+`UV_NO_CONFIG=1 just qa` passes, with the real exporter enabled, at `ddd9362`.
+Its Claude implementation is in `8abf97a`, published in existing PR #418.
+An additional 87 Syntropic137 resolver, invocation, local transcript, child drain,
+recovery and API tests pass. Logs: `/private/tmp/1398-ap-final-qa.log` and
+`/private/tmp/1398-closeout-domain-api.log`. This does not close mixed
+harness launch, descendant settlement, or complete coverage requirements.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
