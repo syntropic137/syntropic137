@@ -37,7 +37,8 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
 3. Configure Trusted Publisher on npmjs.com:
    - Go to https://www.npmjs.com/package/@syntropic137/cli/access
    - Add Trusted Publisher: repo=`syntropic137/syntropic137`, workflow=`release-create.yml`, environment=`npm-publish-cli`
-   - **Important:** The workflow must be the **caller** (`release-create.yml`), not the callee (`release-cli.yaml`). GitHub mints the OIDC token with the caller's workflow name.
+   - Add a second Trusted Publisher: repo=`syntropic137/syntropic137`, workflow=`release-beta.yaml`, environment=`npm-publish-cli`
+   - **Important:** The workflow must be the **caller** (`release-create.yml` or `release-beta.yaml`), not the callee (`release-cli.yaml`). GitHub mints the OIDC token with the caller's workflow name.
 4. Create the `npm-publish-cli` GitHub environment: repo Settings > Environments > New > `npm-publish-cli`
 5. After Trusted Publishing is configured, the `CLI_PUBLISH_NPM_TOKEN` secret is no longer needed and can be deleted.
 
@@ -580,6 +581,11 @@ gh release create v0.20.0-beta.1 --prerelease --target main --notes "Beta: <desc
 This fires `release.published` directly, triggering containers + CLI publish with pre-release handling:
 - Docker images: tagged `v0.20.0-beta.1` only (no `latest`)
 - npm CLI: tagged `next` (not `latest`)
+
+The npm package must trust `release-beta.yaml` with environment
+`npm-publish-cli`. npm validates the caller when a reusable workflow publishes;
+trusting only `release-cli.yaml` or `release-create.yml` makes beta publishing
+fail with `ENEEDAUTH`.
 
 ## Hotfix Release
 
