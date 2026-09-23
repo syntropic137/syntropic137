@@ -60,6 +60,12 @@ class SessionInventorySettings(BaseSettings):
         description="Per-reconstruction journal batch quota. Exceeding it never publishes a truncated result.",
     )
 
+    local_body_retention_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional local body lifetime since first catalog acquisition. Disabled by default. Expiry permanently deletes exact shared bytes but retains discovery history; remote replicas have separate retention.",
+    )
+
     replication_enabled: bool = Field(
         default=False,
         description="Enable optional workflow inventory replication through the standard exporter.",

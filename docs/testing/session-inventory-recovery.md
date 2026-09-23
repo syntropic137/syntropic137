@@ -161,3 +161,27 @@ use bare IDs; their migration must preserve existing no-double-billing behavior.
 an arbitrary matching transcript. Qualified adapter tests alone do not prove
 pricing compatibility; end-to-end delegate import and resume-ledger regressions
 remain required before enabling qualified writes in a released deployment.
+
+
+## Optional local body expiry
+
+`SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS` enables permanent local
+body expiry; unset means no automatic expiry. Age starts at first durable catalog
+acquisition, not the last read or duplicate capture. The policy applies to exact
+shared bytes across all local memberships. Catalog and historical inventory rows
+remain discoverable. Remote replicas currently have separate retention; this
+setting does not delete their bodies or already queued exporter copies.
+
+Each live recovery signal discovers at most 100 eligible catalog rows and deletes
+at most one body. SQL records pending requests; filesystem tombstones prevent
+spool replay from restoring deleted bytes. Crashes after unlink but before SQL
+acknowledgement safely repeat deletion. Failures remain pending and do not block
+capture recovery or inventory scheduling. Preserve the tombstone files with the
+archive when migrating storage. Expiry does not reclaim retained workspace spool
+volumes, exporter outboxes, catalog rows, or tombstones.
+
+Tests: `test_body_retention.py` uses real PostgreSQL and temporary archives for
+bounded expiry, installation isolation, catalog preservation and interrupted
+acknowledgement. `test_body_retention_scheduling.py` checks disabled defaults and
+failure isolation. Cross-store deletion and user-visible expired availability
+remain separate integration work.

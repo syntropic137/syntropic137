@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,7 @@ from syn_domain.contexts.agent_sessions import (
     SchedulePendingInventoryHandler,
 )
 
+from .body_retention import LocalBodyRetention
 from .capture_catalog import PostgresCaptureCatalog
 from .child_journal import ChildJournalDrain
 from .clock import InventoryRecoveryClock
@@ -48,6 +50,9 @@ if TYPE_CHECKING:
     from .database import Pool
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class InventoryRuntime:
     source_instance_id: str
@@ -70,8 +75,14 @@ class _InventoryWork:
     scheduler: SchedulePendingInventoryHandler
     step: InventoryStepHandler
     recovery: CaptureRecoveryWorker | None = None
+    retention: LocalBodyRetention | None = None
 
     async def schedule(self) -> None:
+        if self.retention is not None:
+            try:
+                await self.retention.step()
+            except Exception:
+                logger.exception("Local body expiry failed; durable deletion remains pending")
         if self.recovery is not None:
             await self.recovery.step()
         await self.scheduler.handle()
@@ -114,6 +125,11 @@ async def create_inventory_runtime(
     )
     drain = LocalSpoolDrain(capture)
     work = _InventoryWork(
+        retention=LocalBodyRetention(
+            pool, archive, source_id, age_seconds=settings.local_body_retention_seconds
+        )
+        if settings.local_body_retention_seconds is not None
+        else None,
         recovery=CaptureRecoveryWorker(
             spools,
             DockerSpoolRecovery(recovery_image),

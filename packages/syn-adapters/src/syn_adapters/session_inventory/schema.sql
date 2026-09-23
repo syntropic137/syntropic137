@@ -188,3 +188,19 @@ CREATE INDEX IF NOT EXISTS session_evidence_acquisition_latest
         (payload->'evidence'->'acquisition_statuses'->0->>'stream_id'),
         ((payload->'evidence'->'acquisition_statuses'->0->>'sequence')::bigint) DESC
     ) WHERE jsonb_array_length(payload->'evidence'->'acquisition_statuses')=1;
+
+
+-- Bodies may expire; catalog and inventory revisions retain discoverability.
+CREATE TABLE IF NOT EXISTS session_body_deletions (
+    source_instance_id TEXT NOT NULL,
+    archive_sha256 TEXT NOT NULL,
+    archive JSONB NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ,
+    PRIMARY KEY(source_instance_id,archive_sha256)
+);
+CREATE INDEX IF NOT EXISTS session_body_deletions_pending
+    ON session_body_deletions(source_instance_id,requested_at,archive_sha256)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS session_capture_retention_age
+    ON session_capture_catalog(source_instance_id,created_at,producer_id,capture_id);

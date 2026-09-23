@@ -110,6 +110,21 @@ errors, with the same 16 existing warnings. Local log:
 expiry scheduling, inventory availability overlays, upstream tombstone delivery,
 replica retry fencing and cleanup quotas.
 
+## Local expiry scheduling
+
+Optional `SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS` now schedules
+local body expiry through durable deletion requests. It is disabled by default;
+age is measured from first catalog acquisition. Each recovery tick discovers at
+most 100 eligible rows and removes one body, with SQL acknowledgement after the
+filesystem tombstone and unlink. Failed expiry does not block other inventory
+work. Two real PostgreSQL tests verify bounds, source isolation, retained catalog,
+and crash after unlink; 14 scheduling/configuration tests pass. Log:
+`/private/tmp/1398-body-retention.log`.
+
+This closes local expiry scheduling only. Replica deletion, queued exporter
+copies, spool-volume cleanup, explicit expired availability and overall quotas
+remain unfinished. The new setting has not been enabled on the live demo stack.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
