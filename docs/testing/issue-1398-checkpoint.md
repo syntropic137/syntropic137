@@ -181,6 +181,24 @@ Clippy pass. Logs: `/private/tmp/1398-host-deletion-tests.log` and
 The full real exporter/server interruption matrix and physical exporter spool
 cleanup remain unfinished. Changes are local and not yet deployed to the demo.
 
+## Verified remote deletion and exporter cleanup
+
+The real host/exporter/SeshMagic/PostgreSQL test now covers expiry of three
+revisions, deletion queued during outage, restart, remote body absence, and a
+separate delayed upload receiving 410 without restoring content. Catalog rows
+remain discoverable. It also verifies physical absence of envelope files in
+both exporter outboxes. The exporter preserves a shared file while another
+qualified identity still requires delivery; legacy content hashes commit before
+unlink, and interrupted cleanup is idempotent. Full exporter tests and strict
+Clippy pass. Coverage is 97.04%, above the unchanged 97% floor. Logs:
+`/private/tmp/1398-deletion-full-cleanup.log` and
+`/private/tmp/1398-exporter-cleanup-coverage.log`.
+
+This proves the controlled deletion chain, not all retention requirements.
+Workspace source-volume cleanup, quotas, current availability overlays and the
+remaining acceptance criteria still require completion. Latest changes remain
+local until coordinated PR updates.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push

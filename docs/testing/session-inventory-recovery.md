@@ -201,3 +201,10 @@ through the exporter before advancing a destination-specific SQL checkpoint;
 interrupted enqueue repeats idempotently. A destination added later discovers
 retained deletion requests too. This now connects host expiry to remote deletion
 transport, but physical exporter spool cleanup is still pending.
+
+The current exporter removes deleted envelopes from its outbox spool during
+bounded drain steps. Shared bytes remain until other pending qualified identities
+no longer need delivery. The real remote replication test verifies physical
+outbox cleanup, remote absence, delayed-upload rejection and retained catalog
+metadata. Workspace source volumes are separate and are not reclaimed by this
+policy yet.

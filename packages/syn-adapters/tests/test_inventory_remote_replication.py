@@ -473,6 +473,80 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
             )
             assert raw.content == b"second\r\n"
 
+        from syn_adapters.session_inventory.body_retention import LocalBodyRetention
+        from syn_adapters.session_inventory.capture_deletion_worker import CaptureDeletionWorker
+
+        # Preserve a separately queued upload to deliver after remote deletion.
+        delayed = ExporterCaptureTransport(
+            ExporterConfig(
+                binary=binary,
+                outbox_dir=tmp_path / "delayed-outbox",
+                store_url=url,
+                token=SecretStr("capture-test"),
+            )
+        )
+        assert (await delayed.enqueue(identity, first)).inserted
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE session_capture_catalog SET created_at=now()-interval '2 days' WHERE source_instance_id=$1",
+                source,
+            )
+        retention = LocalBodyRetention(
+            db_pool, archive, source, age_seconds=86400, exporter_binary=binary
+        )
+        for _ in range(6):
+            assert await retention.step()
+        assert not await retention.step()
+        deletions = CaptureDeletionWorker(db_pool, transport, source, "capture-integration")
+        for _ in range(3):
+            assert await deletions.step()
+        assert not await CaptureDeletionWorker(
+            db_pool, transport, source, "capture-integration"
+        ).step()
+        offline = await transport.drain()
+        assert offline.failed == 1 and offline.remaining > 0
+        async with server(
+            Path(server_path), database, unused_tcp_port, source, tmp_path / "capture-deletion.log"
+        ) as client:
+            restarted_transport = ExporterCaptureTransport(config)
+            for _ in range(6):
+                if (await restarted_transport.drain()).remaining == 0:
+                    break
+            else:
+                pytest.fail("deletion outbox did not converge")
+            assert not list((root / "captures" / "objects").iterdir())
+            for version in [None, old.content_hash]:
+                selected = params if version is None else (*params, ("content_hash", version))
+                response = await client.get(
+                    "/v1/transcripts",
+                    params=selected,
+                    headers={"Authorization": "Bearer read-test"},
+                )
+                assert response.status_code == 404
+            # Remote 410 must cancel a delayed upload without manufacturing an
+            # acceptance receipt. Its follow-up tombstone is idempotent.
+            late = await delayed.drain()
+            assert late.acknowledged == 0 and late.remaining == 1
+            assert (await delayed.drain()).remaining == 0
+            assert await delayed.receipt(identity, first) is None
+            assert not list((tmp_path / "delayed-outbox" / "captures" / "objects").iterdir())
+            response = await client.get(
+                "/v1/transcripts", params=params, headers={"Authorization": "Bearer read-test"}
+            )
+            assert response.status_code == 404
+        async with db_pool.acquire() as conn:
+            assert (
+                await conn.fetchval(
+                    "SELECT count(*) FROM session_capture_catalog WHERE source_instance_id=$1",
+                    source,
+                )
+                == 3
+            )
+        for capture_id in ("first", "second", "third"):
+            retained = await catalog.get(run, "producer", capture_id)
+            assert retained is not None
+            assert await archive.get(retained.archive) is None
+
 
 async def test_outage_restart_historical_pages_and_revoked_grants(
     db_pool: asyncpg.Pool,
