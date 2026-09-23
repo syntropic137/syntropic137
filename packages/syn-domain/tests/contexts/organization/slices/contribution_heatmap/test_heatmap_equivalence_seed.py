@@ -54,8 +54,8 @@ def test_every_seeded_event_survives_the_write_path(batch_name: str) -> None:
     from syn_adapters.events.store_helpers import _build_copy_buffer
 
     events = _BATCHES[batch_name]()
-    buffer = _build_copy_buffer(list(events), None, None)
-    rows = buffer.getvalue().decode().splitlines()
+    payload = _build_copy_buffer(list(events), None, None)
+    rows = payload.buffer.getvalue().decode().splitlines()
 
     assert len(rows) == len(events), (
         f"the {batch_name} batch seeds {len(events)} events but only {len(rows)} "
