@@ -28,6 +28,56 @@ Run both: `just fitness`
 | 10 | Declaration Integrity | test_phase_schema_fields_apply_or_refuse | declared tables in the test | Enforced |
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
+| 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
+| 14 | Answer Honesty | test_unknown_has_a_representation | fitness_exceptions.toml `[unknown_has_a_representation]` | Enforced |
+
+### 14. Answer Honesty (#1341)
+
+A value that can be unknown needs a way to say so. #1341 was three defects
+from separate reviews with one cause: unknown was represented with a token
+that already means something real - `0`, `[]` - so "we could not find out"
+reached the reader as a measurement, and every collapse pointed the unsafe
+way. The sharpest: the telemetry query behind the stall detector returns `[]`
+when it raises, so the feature built to tell "busy" from "stuck" reports
+*stuck* whenever its own telemetry breaks - and "stuck" is the verdict that
+tells an operator not to spend money retrying.
+
+The gate reads ignorance from a broad `except` handler, then asks whether the
+value it returns is a real answer of that type. `list`, `dict`, `set`, `tuple`
+and the numbers spend their entire vocabulary on answers, so there is nothing
+left over to mean "I did not find out".
+
+**The question is asked of the returned value, not the signature.** Widening
+`list[Row]` to `list[Row] | None` and leaving `return []` in place changes the
+declaration and nothing else, so the half-fix stays flagged - that loophole
+was found by mutating the gate's own union handling and is pinned by
+`test_widening_the_type_but_still_returning_empty_is_not_a_fix`. A whole fix
+returns something the answer domain does not contain.
+
+**The gate is narrower than #1341's own wording, on measurements, and says
+so.** A rule with a bad false-positive rate gets an exception entry rather
+than a fix, so three wider shapes were counted against this repo and rejected,
+each with a test pinning that the gate does not see it:
+
+| Shape | Measured | Why it is out |
+|---|---|---|
+| `except ...: return False` | 10 sites, 1 genuine | Nine are a function reporting on its own attempt (`delete`, `health_check`), where the exception IS the answer |
+| `except ...: return ''` | 1 site, 0 genuine | Whether `''` is a real answer is a domain fact, not a type fact; the one site uses it as a documented sentinel |
+| `if <source> is None: return <zero>` | 91 sites | Mostly `if not ids: return []`, where empty in means empty out. Even narrowed to non-parameter subjects, 15 remain and a quarter are correct |
+
+That last exclusion has a cost worth stating: **the gate cannot see one of
+#1341's own three sites.** `AgentExecutionHandler._detect_exit_code` turns a
+`None` exit code into `0`, so an externally removed container reads as clean
+success - with no `except` block at all, by falling through past a nullable
+local. Catching it needs dataflow, not pattern matching. It is fixed on PR
+#1330 (#1319), and `test_the_gate_does_not_see_a_fallthrough_zero` pins that
+this gate is not what caught it. #1341's third site, the health endpoint's
+`lag`, was already fixed by #1172 before #1341 was filed.
+
+Seeded with the 11 sites live on `main` when it landed - three tracked to
+#1262 (PR #1332), eight found by the gate on its first run and tracked to
+#1341. The table is the whole budget: `test_no_stale_seeded_sites` requires
+the entry to go in the diff that fixes the site.
 
 ### 11. Typed Boundaries (#1268, ADR-063)
 
@@ -125,6 +175,55 @@ were verified by reintroducing the real defect: an earlier substring-based
 version PASSED with #1039 restored, because the command builder mentions
 `allowed_tools` whether or not the handler ever sets it. It now asserts the
 keyword is passed at the constructor call.
+
+### 13. Pointer Reachability (#1336)
+
+A submodule pointer recorded in this repo must already be merged into that
+submodule's own default branch.
+
+Nothing asked before. CI checks the submodule out by SHA, finds it, builds and
+goes green whether or not that SHA lives only on a feature branch of the
+submodule repo; `check-submodules` asks whether the submodule is initialized and
+at its recorded commit, which it is. Merging such a PR leaves main pointing into
+an unmerged branch, and every fresh clone breaks as soon as that branch is
+deleted or rebased. #1329 is the live instance: green, and unmergeable for
+exactly this reason.
+
+**This gate uses the network, and that is the decision, not an accident.** The
+property is "has the submodule change landed upstream", and only upstream knows.
+Every offline spelling of it interrogates the local clone, which was populated by
+the commit under test, so it would report green over precisely the state #1336
+describes. There is no honest offline version, only a reassuring one -- see the
+ADR-062 amendment.
+
+It is affordable because `fitness-invariants` runs inside `just preflight`, and
+preflight already pulls the pinned workspace image and queries the registry. In
+CI the owner is the `architectural-fitness` job, which checks out with
+`submodules: true` and runs `just preflight`.
+
+**There is deliberately no skip.** An unreachable remote is a FAILED test
+carrying git's own stderr. A gate that goes quiet exactly when it cannot see is
+the failure mode the issue was filed about, and it would be this one.
+
+The failure message is most of the value: it names the submodule, the SHA, and
+the branches that do contain it, so the reader learns "your submodule PR has not
+merged yet" rather than "something is wrong". Three shapes are distinguished --
+on another branch, on no branch at all (never pushed), and absent from the remote
+(rebased away and collected).
+
+**The fetch is not a detail (#1337).** The gate's first revision asked a plain
+`git fetch origin` and then for ancestry, and failed all four pointers on its own
+CI run while every one was merged. `actions/checkout` runs
+`git submodule update --depth=1`, which is shallow *and* single-branch, and takes
+the branch tip before the pointer -- so that fetch transfers nothing, the shallow
+boundary stands, and tip and pointer sit in two fragments with no path between
+them. Ancestry is then not false, it is unanswerable; and with only the default
+branch in the refspec, `branch -r --contains` had nothing to name, so the message
+degraded to "it has not been pushed" about a commit that was pushed. The fetch
+therefore names a full refspec and unshallows, and a guard reports a graph it
+could not repair as a gate bug rather than as a verdict. Condition 2 of the
+ADR-062 amendment, applied to the local graph: "cannot tell" must not reach a
+reader as "no".
 
 ### 12. Request Contract Honesty (#1313)
 

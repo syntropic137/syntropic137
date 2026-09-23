@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
@@ -33,11 +34,11 @@ from syn_shared.workspace_paths import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         ArtifactRepository,
@@ -139,6 +140,35 @@ def _primary_type(declared: tuple[str, ...]) -> str:
     possible (#1167).
     """
     return declared[0] if declared else _UNDECLARED_ARTIFACT_TYPE
+
+
+class UnfinishedPhase(Enum):
+    """Why a phase's output is being kept even though the phase will not complete.
+
+    THE TWO WAYS A PHASE ENDS WITHOUT COMPLETING, and they are not the same
+    incident. An operator scanning a listing has to be able to tell work that
+    an interrupt cut short from work that is whole and belongs to a run that
+    failed anyway - #1321 is a 1322-line research deliverable of the second
+    kind - and the title is the only field they see before opening anything.
+
+    The marker lives on the member rather than at the call site so that the two
+    descriptions cannot drift, and so that `collect_from_unfinished_phase` has
+    one shape rather than a branch per caller. Adding a third way a phase can
+    end means adding a member here and nothing else.
+    """
+
+    #: Stopped by an operator or a cancel signal, mid-work. What is on disk is
+    #: a fragment of something that was still being written.
+    INTERRUPTED = "(partial)"
+    #: The run failed - the phase refused its own completion with a `false` or
+    #: unreadable `TASK_RESULT` (#1256), or its agent exited non-zero. What is
+    #: on disk may be entirely finished; only the run it belongs to is not
+    #: (#1321).
+    FAILED = "(kept from a failed phase)"
+
+    def title(self, *, phase_name: str, source_path: str) -> str:
+        """How this artifact is named in a listing, marker included."""
+        return f"{phase_name} {self.value}: {source_path}"
 
 
 @dataclass(frozen=True)
@@ -690,7 +720,7 @@ class ArtifactCollector:
             deliverables.append(_Deliverable.of(recovered))
         return deliverables
 
-    async def collect_partial(
+    async def collect_from_unfinished_phase(
         self,
         workspace: ArtifactWorkspace,
         workflow_id: str,
@@ -700,20 +730,35 @@ class ArtifactCollector:
         phase_name: str,
         output_artifact_types: tuple[str, ...],
         agent: AgentIdentity,
+        outcome: UnfinishedPhase,
     ) -> list[str]:
-        """Collect whatever an interrupted phase managed to write. Never raises.
+        """Keep whatever a phase that will not complete managed to write. Never raises.
 
         Deliberately does NOT enforce the output contract that
-        `collect_from_workspace` enforces. An interrupted phase is already
-        failing or cancelled, and its outcome is decided by the interrupt; the
-        only question left here is how much of its work can be salvaged.
-        Raising on an empty salvage would replace a truthful "cancelled" with a
-        misleading "contract violated" and lose the real reason (#1167).
+        `collect_from_workspace` enforces, and deliberately does not salvage
+        from the transcript either. A phase reaching here already has its
+        outcome decided - by an interrupt, or by a run that failed - and the
+        only question left is how much of its work survives. Raising a contract
+        violation over an empty salvage would replace a truthful reason with a
+        misleading one and lose the real one (#1167); substituting the
+        transcript would invent a deliverable for a phase whose conclusion is
+        already recorded as the failure.
+
+        `outcome` says WHY the phase will not complete, and is the only thing
+        that differs between the two callers. It decides the artifact's title
+        and nothing else, which is what keeps "stopped by an operator" and
+        "failed on its own report" distinguishable in a listing without giving
+        this loop two shapes to have (#1321).
+
+        Returns the ids of what was kept, newest question first: an empty list
+        is the ordinary answer for a phase that wrote nothing, and is not an
+        error.
         """
         try:
-            # Same filter as the happy path: collect_partial is the interrupt
-            # route and shares the pattern, so fixing only the other site would
-            # leave every cancelled run still sweeping junk (issue #919).
+            # Same filter as the happy path: this is the route a phase takes
+            # when it will not complete, and it shares the pattern, so fixing
+            # only the other site would leave every such run sweeping junk
+            # (issue #919).
             partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
             partial_artifacts = [
                 (path, body) for path, body in partial_collected if _is_collectable(path)
@@ -746,15 +791,21 @@ class ArtifactCollector:
                     session_id=session_id,
                     artifact_type=artifact_type,
                     content=content_str,
-                    title=f"{phase_name} (partial): {artifact_path}",
+                    title=outcome.title(phase_name=phase_name, source_path=artifact_path),
                     source_path=artifact_path,
+                    # Only the first, for the reason the happy path gives: the
+                    # flat `<phase-id>.md` alias resolves through this flag, and
+                    # a phase that wrote four files used to declare four
+                    # primaries and leave the alias to a tiebreak.
+                    is_primary_deliverable=not artifact_ids,
                     agent=agent,
                 )
                 artifact_ids.append(artifact_id)
             return artifact_ids
         except Exception as err:
             logger.warning(
-                "Failed to collect partial artifacts for %s: %s",
+                "Failed to keep the output of unfinished phase %s (%s): %s",
+                phase_id,
                 session_id,
                 err,
             )
@@ -788,12 +839,28 @@ class ArtifactCollector:
         """
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
+            ArtifactStorageError,
             CreateArtifactCommand,
         )
 
         artifact_type_enum = map_artifact_type(artifact_type)
 
-        # Upload content to object storage if configured (ADR-012)
+        # Upload content to object storage if configured (ADR-012).
+        #
+        # The event below carries this storage_uri, and a consumer that reacts
+        # to it fetches the bytes straight away - so a read of the object has
+        # to return them before we get here (#700). That is the port's
+        # contract rather than a step in this method: the domain should not
+        # know how a backend establishes readability, only that a returned URI
+        # can be read. A backend that cannot confirm it raises
+        # ArtifactStorageError, and we leave storage_uri None - the artifact is
+        # still whole, because the event embeds the content either way.
+        #
+        # ONLY that exception. A bare `except Exception` here would swallow our
+        # own bugs - a bad keyword argument to upload() would read as a backend
+        # outage and silently downgrade every artifact to event-store-only,
+        # forever, with a warning nobody reads. Degrading is a response to
+        # storage being unavailable, not to this method being wrong.
         storage_uri: str | None = None
         if self._content_storage is not None:
             try:
@@ -819,10 +886,10 @@ class ArtifactCollector:
                         "size_bytes": result.size_bytes,
                     },
                 )
-            except Exception as e:
+            except ArtifactStorageError as e:
                 logger.warning(
-                    "Failed to upload artifact to object storage, "
-                    "content will be stored in event store only",
+                    "Artifact content is not readable from object storage, "
+                    "content will be stored in the event store only",
                     extra={"artifact_id": artifact_id, "error": str(e)},
                 )
 

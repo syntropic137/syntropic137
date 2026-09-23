@@ -25,12 +25,18 @@ export async function listExecutions(
   return response.runs ?? []
 }
 
-export async function getExecution(executionId: string): Promise<ExecutionDetailResponse> {
-  return fetchJSON<ExecutionDetailResponse>(`${API_BASE}/executions/${executionId}`)
+export async function getExecution(
+  executionId: string,
+  signal?: AbortSignal
+): Promise<ExecutionDetailResponse> {
+  return fetchJSON<ExecutionDetailResponse>(`${API_BASE}/executions/${executionId}`, { signal })
 }
 
-export async function listAllExecutions(query: ListQuery): Promise<ExecutionListResponse> {
-  return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`)
+export async function listAllExecutions(
+  query: ListQuery,
+  signal?: AbortSignal
+): Promise<ExecutionListResponse> {
+  return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`, { signal })
 }
 
 export async function pauseExecution(

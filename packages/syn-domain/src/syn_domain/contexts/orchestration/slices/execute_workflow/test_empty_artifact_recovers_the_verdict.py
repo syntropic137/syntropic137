@@ -43,6 +43,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+    UnfinishedPhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
@@ -485,16 +486,20 @@ class TestTheVerdictSurvivesEveryHop:
         from syn_domain.contexts.orchestration.slices.execute_workflow.test_workflow_execution_processor import (
             _make_processor,
         )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+            _DispatchContext,
+        )
 
         processor = _make_processor()
         processor._journal.append = AsyncMock()
         workspace = MagicMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-0bac0e1ed2b2").attach_workspace(
             "verify",
             workspace=workspace,
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -522,6 +527,10 @@ class TestTheVerdictSurvivesEveryHop:
         # attribute of a MagicMock is truthy.
         agent_result.stream_result.verdict = AgentVerdict.from_agent_text(SAID)
         agent_result.command.exit_code = 0
+        # The status the processor actually reads, which is the run's own rather
+        # than the completion's since #1341. On a MagicMock this would otherwise
+        # be a truthy mock and read as a non-zero exit.
+        agent_result.exit_code = 0
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)
         processor._agent_handler = agent_handler
@@ -562,13 +571,13 @@ class TestTheVerdictSurvivesEveryHop:
             ".WorkflowExecutionProcessor.record_phase_conversation",
             new=AsyncMock(),
         ):
-            await processor._handle_run_agent(run_todo, phase, aggregate)
+            await processor._handle_run_agent(run_todo, phase, aggregate, _DispatchContext())
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
-            await processor._handle_collect_artifacts(
+            await processor._workspaces_for("exec-0bac0e1ed2b2", {}).collect(
                 collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 
@@ -606,12 +615,12 @@ class TestTheVerdictSurvivesEveryHop:
 
 
 class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
-    """The same empty-file shape on `collect_partial`, which has its own rules.
+    """The same empty-file shape on the keep-what-it-wrote path, which has its own rules.
 
     Not recovery: an interrupted phase's outcome is already decided by the
     interrupt, and substituting a transcript there would invent a deliverable
     for a run nobody reads as one. What is fixed is that the store's refusal
-    used to escape into `collect_partial`'s blanket `except` and abandon every
+    used to escape into that path's blanket `except` and abandon every
     REMAINING file, so one empty file cost the whole salvage.
     """
 
@@ -620,7 +629,7 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
         repo = _Repo()
         collector = ArtifactCollector(repo, None, None)
 
-        ids = await collector.collect_partial(
+        ids = await collector.collect_from_unfinished_phase(
             workspace=_Workspace(  # type: ignore[arg-type]
                 collected_files=[
                     ("artifacts/output/empty.md", b""),
@@ -634,6 +643,7 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
             phase_name="Verify",
             output_artifact_types=("markdown",),
             agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
 
         assert len(ids) == 1, "the file after the empty one must still be salvaged"

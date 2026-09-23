@@ -1,4 +1,3 @@
-# ruff: noqa: ARG002  — Protocol implementation; unused params are required by the interface.
 """Sync-safe test double for AgentExecutionHandler.
 
 The module-level type assertion at the bottom of this file ensures pyright verifies
@@ -25,6 +24,7 @@ from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
     AgentVerdict,
+    PhaseUsage,
     StreamResult,
     SubagentTracker,
     TokenAccumulator,
@@ -70,11 +70,23 @@ class FakeAgentExecutionHandler:
         launches: bool = True,
         produces: Sequence[tuple[str, bytes]] = (),
         says: str | None = None,
+        spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
+        uses_tools: Sequence[str] = (),
+        attempts: Sequence[FakeAgentExecutionHandler] = (),
     ) -> None:
         self._interrupt = interrupt
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
+        #: What went wrong with the STREAM, as both real stream processors
+        #: report it: an ``is_error`` result line from claude, a malformed or
+        #: unterminated stream from codex. Independent of ``exit_code``,
+        #: because in production the two come apart in both directions - and
+        #: the combination that has no other way to be expressed is the one
+        #: #1367 is about: a readable refusal whose telemetry is broken is not
+        #: evidence the quality gate worked.
+        self._stream_error = stream_error
         #: The last thing this agent said on its stream, as the real stream
         #: processors would have captured it. Independent of ``produces``
         #: because in production the two come apart: #1300 is agents that
@@ -88,6 +100,19 @@ class FakeAgentExecutionHandler:
         #: is what lets a test drive the collection step for real instead of
         #: mocking out the very hop under test.
         self._produces = tuple(produces)
+        #: What this agent burned before it returned. Zeros by default, and
+        #: settable for the same reason ``produces`` is: a FAILING agent is not
+        #: an agent that did nothing. A phase killed at its timeout has spent
+        #: real tokens, and until this double could say so the only failures any
+        #: test could drive were free ones - the single case where losing the
+        #: counts costs nothing to notice (#1262).
+        #:
+        #: Put on the COMMAND as well as the accumulator, because the command is
+        #: what production reads: the real handler resolves the two through
+        #: ``FinalUsage`` and writes the answer there, and the failure path reads
+        #: it back off the runtime. A double that set only the accumulator would
+        #: leave the hop under test reading a zero.
+        self._spent = spent or PhaseUsage()
         #: The last thing this double's agent SAYS, verbatim - including its
         #: ``TASK_RESULT`` block if it writes one. Passed through the REAL
         #: `AgentVerdict.from_agent_text` below rather than setting a verdict
@@ -95,6 +120,20 @@ class FakeAgentExecutionHandler:
         #: production reader of that report and not a fixture's idea of it
         #: (#1256).
         self._says = says
+        #: Tools this agent CALLS, by name, announcing each on the collector
+        #: exactly as the real stream processors do. None by default, which is
+        #: the honest default: an agent that called nothing.
+        #:
+        #: Here because "did this attempt get anywhere" is answered from those
+        #: announcements (#1303), and a failure that called a tool first is a
+        #: different fact from one that never started - the first cannot be
+        #: re-run against the workspace it already changed. A double that could
+        #: not express a tool call could not tell the two apart, so every test
+        #: of that rule would have been driving the same case twice.
+        self._uses_tools = tuple(uses_tools)
+        #: What this agent does on each successive attempt, when that changes
+        #: between them. See ``scripted``.
+        self._attempts = tuple(attempts)
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
 
@@ -117,6 +156,23 @@ class FakeAgentExecutionHandler:
     ) -> AgentExecutionResult:
         self.calls.append(todo)
         self.runners.append(runner)
+        if self._attempts:
+            # The script decides this attempt; the outer double stays the one
+            # the test inspects, so `call_count` counts attempts across all of
+            # them rather than per entry.
+            attempt = self._attempts[min(len(self.calls) - 1, len(self._attempts) - 1)]
+            return await attempt.handle(
+                todo,
+                workspace,
+                agent_env,
+                claude_cmd,
+                session_id,
+                agent_model,
+                timeout_seconds,
+                collector,
+                runner,
+                on_launch,
+            )
         if self._produces:
             await workspace.inject_files(list(self._produces))
         # Every factory below except ``never_launched`` describes a run whose
@@ -125,18 +181,37 @@ class FakeAgentExecutionHandler:
         # looking like one that never started (#1047, #1065).
         if self._launches and on_launch is not None:
             await on_launch()
+        for index, tool_name in enumerate(self._uses_tools):
+            if collector is not None:
+                await collector.record_tool_started(
+                    tool_name=tool_name,
+                    tool_use_id=f"{session_id}-{len(self.calls)}-{index}",
+                    input_preview="",
+                )
+        tokens = TokenAccumulator()
+        tokens.record(
+            self._spent.input_tokens,
+            self._spent.output_tokens,
+            self._spent.cache_creation_tokens,
+            self._spent.cache_read_tokens,
+        )
         stream_result = StreamResult(
             line_count=0,
             interrupt_requested=self._interrupt,
             interrupt_reason=self._interrupt_reason if self._interrupt else None,
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
+            error_reason=self._stream_error,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id or "",
             session_id=session_id,
             exit_code=self._exit_code,
+            input_tokens=self._spent.input_tokens,
+            output_tokens=self._spent.output_tokens,
+            cache_creation_tokens=self._spent.cache_creation_tokens,
+            cache_read_tokens=self._spent.cache_read_tokens,
             # The real handler puts it here as well as on the stream result,
             # because the command is what reaches the event store and the
             # event store is what a restart reads (#1195, #1300). A double
@@ -146,7 +221,7 @@ class FakeAgentExecutionHandler:
         )
         return AgentExecutionResult(
             stream_result=stream_result,
-            tokens=TokenAccumulator(),
+            tokens=tokens,
             subagents=SubagentTracker(),
             command=command,
         )
@@ -178,7 +253,11 @@ class FakeAgentExecutionHandler:
 
     @classmethod
     def success(
-        cls, produces: Sequence[tuple[str, bytes]] = (), says: str | None = None
+        cls,
+        produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
+        spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
     ) -> FakeAgentExecutionHandler:
         """Simulates a clean agent completion (exit code 0).
 
@@ -196,13 +275,87 @@ class FakeAgentExecutionHandler:
         something is the exact shape of #1300 - three implement phases that had
         pushed their branch and only missed the report - and a double that
         could not express it left that combination untestable end to end.
+
+        ``spent`` is what it burned. Exit code 0, a ``says`` reporting
+        ``success: false`` and a non-zero ``spent`` is a phase that did real
+        work and then refused itself; it leaves through the same door a timeout
+        does and lost its counts the same way (#1262).
+
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, with exit code 0 regardless. That pairing is not a
+        contradiction either: the process ended fine and its telemetry did
+        not, which is what stops a refusal beside it counting as a correct
+        one (#1367).
         """
-        return cls(interrupt=False, exit_code=0, produces=produces, says=says)
+        return cls(
+            interrupt=False,
+            exit_code=0,
+            produces=produces,
+            says=says,
+            spent=spent,
+            stream_error=stream_error,
+        )
 
     @classmethod
-    def failed(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
-        """Simulates an agent failure with the given non-zero exit code."""
-        return cls(interrupt=False, exit_code=exit_code)
+    def failed(
+        cls,
+        exit_code: int = 1,
+        produces: Sequence[tuple[str, bytes]] = (),
+        says: str | None = None,
+        spent: PhaseUsage | None = None,
+        stream_error: str | None = None,
+        uses_tools: Sequence[str] = (),
+    ) -> FakeAgentExecutionHandler:
+        """Simulates an agent failure with the given non-zero exit code.
+
+        ``produces`` and ``says`` mean what they mean on ``success`` above, and
+        are here because a failing agent is not an agent that did nothing. A
+        phase whose process died after writing its deliverable leaves the file
+        on disk exactly as a successful one does; until this double could
+        express that, the only failures any test could drive were empty ones,
+        and an empty workspace is the case where losing the output costs
+        nothing (#1321).
+
+        ``spent`` is what it burned getting there. ``exit_code=124`` with a
+        non-zero ``spent`` is the timeout this exists for: those counts are the
+        only thing separating a phase killed mid-work from one that stalled
+        (#1262).
+
+        ``stream_error`` is what the stream processor found wrong with the
+        stream, as ``StreamResult.error_reason`` carries it. The processor
+        decides what a failure MEANS from that string, which is how a busy
+        upstream is told apart from a real one (#1303).
+
+        ``uses_tools`` are the tools it called before failing. A busy upstream
+        that arrives after one of them is not retried, because the rerun would
+        start from a workspace the first attempt had already changed (#1303).
+        """
+        return cls(
+            interrupt=False,
+            exit_code=exit_code,
+            produces=produces,
+            says=says,
+            spent=spent,
+            stream_error=stream_error,
+            uses_tools=uses_tools,
+        )
+
+    @classmethod
+    def scripted(cls, *attempts: FakeAgentExecutionHandler) -> FakeAgentExecutionHandler:
+        """An agent whose behaviour CHANGES between attempts at the same phase.
+
+        Each positional argument is one attempt, in order; the last repeats for
+        any attempt beyond it. So ``scripted(failed(...), success(...))`` is an
+        agent that fails once and then succeeds, and ``scripted(failed(...))``
+        is one that fails every time it is asked.
+
+        A phase used to get exactly one attempt, so a double with one fixed
+        outcome could say everything there was to say. Retrying a busy upstream
+        (#1303) makes "what happened the SECOND time" a real question, and a
+        test that cannot vary the answer cannot tell a retry that recovered
+        from one that never happened.
+        """
+        return cls(attempts=attempts)
 
     @classmethod
     def never_launched(cls, exit_code: int = 1) -> FakeAgentExecutionHandler:
