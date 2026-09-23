@@ -29,6 +29,7 @@ class EvidenceBatch(InventoryModel):
             for records in (
                 source.nodes,
                 source.invocation_contexts,
+                source.invocation_lifecycle,
                 source.memberships,
                 source.edges,
                 source.bindings,

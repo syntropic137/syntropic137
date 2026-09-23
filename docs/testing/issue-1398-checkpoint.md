@@ -486,3 +486,29 @@ fix (79% aggregate coverage); these resolver changes have the focused checks
 above. Logs remain local under `/private/tmp/1398-child-coverage*` and
 `/private/tmp/1398-current-unit-ci.log`. No acceptance row is marked complete by
 these checks.
+
+## Child lifecycle ingestion follow-up
+
+Resolver version 6 retains typed, producer-sequenced child process observations:
+launched, launch failed, completed, failed and cancelled, with validated exit
+codes. Host recovery writes these through a separate idempotent producer so
+replaying old child identity batches does not change their immutable payloads.
+A lifecycle write failure prevents acknowledgement. Journal assembly, explicit
+corrections, source validation and record quotas include the new observations.
+
+Resolution exposes process outcomes through distinct inventory gap reasons.
+Out-of-order delivery cannot restore an older running state; conflicting terminal
+outcomes or impossible post-terminal launches remain visible. Running/conflicting
+children reopen an existing seal. Process completion never creates a seal.
+This is not native descendant termination or final capture settlement; those
+remain open, along with host launch-outcome integration and no-launch coverage
+accounting.
+
+228 domain/adapter tests and six PostgreSQL pipeline tests pass. Additional
+same-sequence and independent-producer conflict tests pass. PostgreSQL proof
+includes restart, duplicate delivery and failed-launch distinction without a
+fabricated native binding. Architecture fitness thresholds and Ruff pass without
+budget changes. Pyright has zero errors (16 existing
+warnings). Logs: `/private/tmp/1398-lifecycle-domain.log`,
+`/private/tmp/1398-lifecycle-sql.log`, `/private/tmp/1398-lifecycle-conflicts.log`
+and `/private/tmp/1398-lifecycle-pyright.log`.

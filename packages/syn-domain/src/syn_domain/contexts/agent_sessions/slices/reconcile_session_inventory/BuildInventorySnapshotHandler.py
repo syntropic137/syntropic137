@@ -42,6 +42,7 @@ def _record_count(stored: StoredEvidenceBatch) -> int:
         for items in (
             evidence.nodes,
             evidence.invocation_contexts,
+            evidence.invocation_lifecycle,
             evidence.memberships,
             evidence.edges,
             evidence.bindings,

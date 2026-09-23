@@ -18,6 +18,7 @@ from syn_domain.contexts.agent_sessions import (
     IdentityBindingEvidence,
     InventoryNodeRef,
     InvocationContextEvidence,
+    InvocationLifecycleEvidence,
     LineageEvidence,
     NodeEvidence,
     RunIdentity,
@@ -106,6 +107,39 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
     )
 
 
+def child_lifecycle_evidence(
+    change: ChildChange, run: RunIdentity, spool_id: str
+) -> EvidenceBatch | None:
+    """Separate producer preserves immutable pre-lifecycle journal batches on replay."""
+    if change.intent.status is None:
+        return None
+    original = child_evidence(change, run, spool_id)
+    producer = original.producer_id.replace("child-journal:", "child-lifecycle:", 1)
+    reference = original.evidence.nodes[0].evidence.model_copy(
+        update={
+            "producer_id": producer,
+            "evidence_id": f"{producer}:{change.sequence}",
+            "extractor_version": "agentic-child-lifecycle/1",
+        }
+    )
+    return EvidenceBatch(
+        batch_id=str(change.sequence),
+        producer_id=producer,
+        evidence=SessionEvidence(
+            run=run,
+            invocation_lifecycle=(
+                InvocationLifecycleEvidence(
+                    node=original.evidence.nodes[0].node,
+                    sequence=change.sequence,
+                    status=change.intent.status,
+                    exit_code=change.intent.exit_code,
+                    evidence=reference,
+                ),
+            ),
+        ),
+    )
+
+
 def child_read_status(
     run: RunIdentity, spool_id: str, sequence: int, *, failed: bool
 ) -> EvidenceBatch:
@@ -169,5 +203,8 @@ class ChildJournalDrain:
             raise
         for change in page.changes:
             await self._evidence.append(child_evidence(change, run, spool_id))
+            lifecycle = child_lifecycle_evidence(change, run, spool_id)
+            if lifecycle is not None:
+                await self._evidence.append(lifecycle)
         await self._evidence.observe_acquisition(success)
         return ChildDrainProgress(page.watermark, page.next_after, len(page.changes))

@@ -11,6 +11,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
     CoverageContract,
     IdentityBindingEvidence,
     InvocationContextEvidence,
+    InvocationLifecycleEvidence,
     LineageEvidence,
     MembershipEvidence,
     NativeTranscriptObservation,
@@ -37,6 +38,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
     """
     nodes: list[NodeEvidence] = []
     invocation_contexts: list[InvocationContextEvidence] = []
+    invocation_lifecycle: list[InvocationLifecycleEvidence] = []
     acquisition_gaps: list[AcquisitionGapEvidence] = []
     acquisition_statuses: list[AcquisitionStatusEvidence] = []
     native_transcripts: list[NativeTranscriptObservation] = []
@@ -58,6 +60,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
             raise ValueError("evidence journal crossed run scope")
         nodes.extend(evidence.nodes)
         invocation_contexts.extend(evidence.invocation_contexts)
+        invocation_lifecycle.extend(evidence.invocation_lifecycle)
         acquisition_gaps.extend(evidence.acquisition_gaps)
         acquisition_statuses.extend(evidence.acquisition_statuses)
         native_transcripts.extend(evidence.native_transcripts)
@@ -84,6 +87,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         run=run,
         nodes=tuple(nodes),
         invocation_contexts=tuple(invocation_contexts),
+        invocation_lifecycle=tuple(invocation_lifecycle),
         acquisition_gaps=tuple(acquisition_gaps),
         acquisition_statuses=tuple(acquisition_statuses),
         native_transcripts=tuple(native_transcripts),

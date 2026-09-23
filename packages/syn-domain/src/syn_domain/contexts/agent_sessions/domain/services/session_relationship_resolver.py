@@ -47,9 +47,10 @@ if TYPE_CHECKING:
 
 from .inventory_corrections import active_evidence
 from .invocation_contexts import context_coverage, context_memberships
+from .invocation_lifecycle import lifecycle_gaps
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/5"
+RESOLVER_VERSION = "syn-session-relationships/6"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -60,6 +61,7 @@ def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
         *evidence.memberships,
         *evidence.captures,
         *evidence.native_transcripts,
+        *evidence.invocation_lifecycle,
     ):
         refs[claim.node.key] = claim.node
         origins[claim.node.key].append(claim.evidence)
@@ -159,11 +161,17 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         }
     )
     child_memberships, context_gaps = context_memberships(evidence)
+    process_gaps = lifecycle_gaps(evidence.invocation_lifecycle)
+    unsettled = tuple(
+        gap
+        for gap in process_gaps
+        if gap.reason in {"invocation_running", "conflicting_invocation_lifecycle"}
+    )
     evidence = evidence.model_copy(
         update={
             "memberships": (*evidence.memberships, *child_memberships),
             "coverage_contract": context_coverage(
-                evidence.coverage_contract, child_memberships, context_gaps
+                evidence.coverage_contract, child_memberships, (*context_gaps, *unsettled)
             ),
         }
     )
@@ -173,6 +181,7 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     bindings, binding_gaps = resolve_bindings(evidence.bindings)
     gaps = [
         *context_gaps,
+        *process_gaps,
         *conflict_gaps,
         *binding_gaps,
         *(item.gap for item in evidence.acquisition_gaps),

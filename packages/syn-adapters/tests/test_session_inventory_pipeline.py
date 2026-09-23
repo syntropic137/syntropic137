@@ -495,3 +495,53 @@ async def test_persisted_child_intent_reopens_older_seal_without_native_capture(
     old = await inventory.page(run, first.snapshot_id, "node")
     assert old.snapshot.coverage.expected_count == 1
     assert old.snapshot.coverage.state is CoverageState.MISSING
+
+
+async def test_child_process_outcome_survives_real_journal_restart(db_pool: asyncpg.Pool) -> None:
+    from unittest.mock import AsyncMock
+
+    from agentic_isolation.child_journal import ChildCall, ChildChange, ChildIntent, ChildPage
+
+    from syn_adapters.session_inventory.child_journal import ChildJournalDrain
+    from syn_domain.contexts.agent_sessions.domain.services.evidence_assembly import (
+        assemble_evidence,
+    )
+    from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
+        resolve_relationships,
+    )
+
+    run = RunIdentity(source_instance_id=f"process-{uuid4()}", execution_id="run")
+    writer = PostgresSessionEvidence(db_pool)
+    await writer.ensure_ready()
+    change = ChildChange(
+        sequence=1,
+        intent=ChildIntent(
+            sequence=1,
+            child_invocation_id="child",
+            child_native_id=None,
+            status="launch_failed",
+            call=ChildCall(
+                invocation_id="root",
+                attempt_id="attempt",
+                harness="codex",
+                parent_native_id="parent",
+                tool_call_id="call",
+            ),
+        ),
+    )
+    reader = AsyncMock()
+    reader.page.return_value = ChildPage(watermark=1, changes=(change,), next_after=None)
+    drain = ChildJournalDrain(writer)
+    await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
+    first = await writer.watermark(run)
+    await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
+    assert await writer.watermark(run) == first
+    restarted = PostgresSessionEvidence(db_pool)
+    persisted = await restarted.read(run, first)
+    normalized = assemble_evidence(run, persisted.items)
+    assert len(normalized.invocation_lifecycle) == 1
+    assert normalized.invocation_lifecycle[0].status == "launch_failed"
+    result = resolve_relationships(normalized)
+    assert result.bindings == ()
+    assert result.coverage.state is CoverageState.UNKNOWN
+    assert "invocation_launch_failed" in {gap.reason for gap in result.gaps}

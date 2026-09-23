@@ -34,6 +34,7 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
         for group in (
             evidence.nodes,
             evidence.invocation_contexts,
+            evidence.invocation_lifecycle,
             evidence.memberships,
             evidence.edges,
             evidence.bindings,
@@ -56,6 +57,7 @@ def active_evidence(evidence: SessionEvidence) -> SessionEvidence:
         retractions=evidence.retractions,
         nodes=_retain(evidence.nodes, revoked),
         invocation_contexts=_retain(evidence.invocation_contexts, revoked),
+        invocation_lifecycle=_retain(evidence.invocation_lifecycle, revoked),
         memberships=_retain(evidence.memberships, revoked),
         edges=_retain(evidence.edges, revoked),
         bindings=_retain(evidence.bindings, revoked),

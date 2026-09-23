@@ -52,6 +52,31 @@ class AcquisitionStatusEvidence(InventoryModel):
     evidence: EvidenceReference
 
 
+class InvocationLifecycleEvidence(InventoryModel):
+    """Producer-sequenced process observations, independent of capture settlement."""
+
+    node: InventoryNodeRef
+    sequence: int = Field(ge=1)
+    status: Literal["launched", "launch_failed", "completed", "failed", "cancelled"]
+    exit_code: int | None = Field(default=None, ge=-255, le=255)
+    evidence: EvidenceReference
+
+    @model_validator(mode="after")
+    def _outcome(self) -> InvocationLifecycleEvidence:
+        if self.node.kind != "invocation":
+            raise ValueError("lifecycle observation requires an invocation")
+        expected = {
+            "launched": self.exit_code is None,
+            "launch_failed": self.exit_code is None,
+            "completed": self.exit_code == 0,
+            "failed": self.exit_code is not None and self.exit_code > 0,
+            "cancelled": self.exit_code is not None and self.exit_code < 0,
+        }
+        if not expected[self.status]:
+            raise ValueError("lifecycle status and exit code disagree")
+        return self
+
+
 class NodeEvidence(InventoryModel):
     node: InventoryNodeRef
     evidence: EvidenceReference
@@ -131,6 +156,7 @@ class SessionEvidence(InventoryModel):
     run: RunIdentity
     nodes: tuple[NodeEvidence, ...] = ()
     invocation_contexts: tuple[InvocationContextEvidence, ...] = ()
+    invocation_lifecycle: tuple[InvocationLifecycleEvidence, ...] = ()
     memberships: tuple[MembershipEvidence, ...] = ()
     edges: tuple[LineageEvidence, ...] = ()
     bindings: tuple[IdentityBindingEvidence, ...] = ()
@@ -149,6 +175,7 @@ class SessionEvidence(InventoryModel):
         refs = [claim.node for claim in self.nodes]
         refs.extend(claim.node for claim in self.memberships)
         refs.extend(claim.node for claim in self.captures)
+        refs.extend(claim.node for claim in self.invocation_lifecycle)
         refs.extend(claim.node for claim in self.native_transcripts)
         for context in self.invocation_contexts:
             refs.extend((context.controller, context.child))

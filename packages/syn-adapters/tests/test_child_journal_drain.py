@@ -208,3 +208,31 @@ def test_legacy_evidence_hash_unchanged_by_optional_delegation_fields() -> None:
         original, RunIdentity(source_instance_id="source", execution_id="run"), "spool"
     )
     assert batch.evidence.nodes[0].evidence.source_revision == digest
+
+
+async def test_lifecycle_ack_requires_both_immutable_facts_and_outcome() -> None:
+    from syn_adapters.session_inventory.child_journal import child_lifecycle_evidence
+
+    run = RunIdentity(source_instance_id="source", execution_id="run")
+    original = change(3)
+    failed = original.model_copy(
+        update={"intent": original.intent.model_copy(update={"status": "launch_failed"})}
+    )
+    reader, writer = AsyncMock(), AsyncMock()
+    reader.page.return_value = ChildPage(watermark=3, changes=(failed,), next_after=None)
+    writer.append.side_effect = [1, ConnectionError("lifecycle write interrupted")]
+    drain = ChildJournalDrain(writer)
+    with pytest.raises(ConnectionError):
+        await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
+    writer.observe_acquisition.assert_not_awaited()
+    batches = [call.args[0] for call in writer.append.await_args_list]
+    assert batches[0] == child_evidence(failed, run, "spool")
+    lifecycle = child_lifecycle_evidence(failed, run, "spool")
+    assert batches[1] == lifecycle
+    assert lifecycle is not None
+    assert lifecycle.producer_id != batches[0].producer_id
+    assert lifecycle.evidence.invocation_lifecycle[0].status == "launch_failed"
+    writer.append.reset_mock(side_effect=True)
+    await drain.page(reader, run=run, spool_id="spool", observation_sequence=1)
+    assert [call.args[0] for call in writer.append.await_args_list] == batches
+    writer.observe_acquisition.assert_awaited_once()
