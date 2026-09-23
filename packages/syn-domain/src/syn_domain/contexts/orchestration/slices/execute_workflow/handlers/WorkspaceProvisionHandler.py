@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -558,7 +561,9 @@ class WorkspaceProvisionHandler:
             detail = f"exit code {format_exit_code(setup_result.exit_code)}"
             detail += f": {stderr}" if stderr else " (no stderr output)"
             msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
-            raise RuntimeError(msg)
+            # Same defect as the agent's own exit, one handler over (#1319):
+            # the status was known here and went only into `detail`.
+            raise NonZeroExitError(msg, exit_code=setup_result.exit_code)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)

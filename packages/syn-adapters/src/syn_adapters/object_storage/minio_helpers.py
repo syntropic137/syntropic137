@@ -8,21 +8,180 @@ List operations are in minio_queries.py.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from syn_adapters.object_storage.protocol import (
     DownloadError,
     ObjectNotFoundError,
     StorageObject,
+    UploadError,
 )
 
 if TYPE_CHECKING:
     from minio import Minio
 
 logger = logging.getLogger(__name__)
+
+
+def _discover_backend_failures() -> tuple[type[Exception], ...]:
+    """Which exception types mean the backend failed rather than we did.
+
+    Imported defensively because `minio` is an optional extra: without it a
+    client can never be built, so the types can never be raised either, and a
+    missing package is reported by `_get_client` rather than here.
+    """
+    failures: list[type[Exception]] = [OSError]
+    try:
+        from minio.error import MinioException
+    except ImportError:  # pragma: no cover - only without the optional extra
+        pass
+    else:
+        failures.append(MinioException)
+    try:
+        from urllib3.exceptions import HTTPError
+    except ImportError:  # pragma: no cover - installed alongside minio
+        pass
+    else:
+        failures.append(HTTPError)
+    return tuple(failures)
+
+
+#: Everything a MinIO call raises when the STORAGE is what went wrong.
+#:
+#: The list exists so the converters below can catch this instead of
+#: `Exception`. That difference is the whole point: a converter that catches
+#: `Exception` re-raises our own `TypeError` as a storage error, and the
+#: callers of this adapter are built to treat a storage error as "the backend
+#: is unavailable, keep the content inline and carry on" (#700). A bug that
+#: arrives wearing that costume is answered by degrading instead of by
+#: failing: the artifact is written with `storage_uri=None`, the phase
+#: completes, and nothing ever reports that the code is broken.
+#:
+#: So the members here are the ones the backend genuinely owns - `minio`'s own
+#: hierarchy for anything the server said, `urllib3`'s for anything the
+#: transport did, and `OSError` for the socket beneath both. Everything else,
+#: `TypeError` and `ValueError` (which is also what `minio` raises for an
+#: argument WE built wrongly) included, propagates untouched.
+BACKEND_FAILURES: tuple[type[Exception], ...] = _discover_backend_failures()
+
+#: How long a write may take to become readable before we call the upload failed.
+#: MinIO itself is read-after-write consistent, so in practice the first read
+#: answers; the budget is here for S3-compatible backends that are not, and for
+#: a bucket that is briefly serving a previous value at the key.
+READABLE_TIMEOUT_SECONDS = 10.0
+
+_POLL_INITIAL_SECONDS = 0.05
+_POLL_MAX_SECONDS = 1.0
+
+#: Enough of a digest to identify it in a log line without printing all 64.
+_DIGEST_PREFIX = 12
+
+
+class _Served(NamedTuple):
+    """What a read of a key actually returned, summarised for comparison."""
+
+    sha256: str
+    size_bytes: int
+
+
+async def _read_served(client: Minio, bucket_name: str, key: str) -> _Served | None:
+    """Summarise the bytes the backend serves for `key`, or None if it serves none.
+
+    This downloads. A `stat_object` would be cheaper and would answer a
+    different question - see `await_readable_content` for why the cheaper
+    question is the wrong one.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        payload = await loop.run_in_executor(
+            None,
+            partial(do_download, client, bucket_name, key),
+        )
+    except ObjectNotFoundError:
+        return None
+    except DownloadError as exc:
+        # `do_download` below declares exactly these two, so this catches its
+        # contract rather than every way it could be wrong.
+        raise UploadError(f"Failed to confirm upload of {key}: {exc}", key=key) from exc
+    return _Served(sha256=hashlib.sha256(payload).hexdigest(), size_bytes=len(payload))
+
+
+def _describe(served: _Served | None) -> str:
+    """How to name what a read saw, in the error a caller will have to act on."""
+    if served is None:
+        return "missing"
+    return f"{served.size_bytes} bytes hashing sha256:{served.sha256[:_DIGEST_PREFIX]}"
+
+
+async def await_readable_content(
+    client: Minio,
+    bucket_name: str,
+    key: str,
+    expected_sha256: str,
+) -> None:
+    """Block until a GET of `key` returns bytes hashing to `expected_sha256`.
+
+    THE GUARANTEE IS READABILITY, NOT DURABILITY. Returning means a read issued
+    now got exactly the bytes that were written. It says nothing about
+    surviving the loss of a disk, a node or a site: that is a property of how
+    the backend is deployed, not something any client call can establish.
+    MinIO in distributed mode commits a write to erasure-coding write quorum
+    before `put_object` returns, and a single-node single-drive MinIO - what
+    `just dev` runs - has no redundancy at all and never will, whatever this
+    function returns. So do not read "durable" into a successful upload, and do
+    not write it in a docstring above one.
+
+    Readability is nonetheless exactly the fact #700 needs. `put_object`
+    returning means the backend accepted the write; `ArtifactCreatedEvent` then
+    publishes a `storage_uri`, and a consumer that reacts to the event and
+    fetches immediately was getting a 404 or a short object.
+
+    IT READS THE OBJECT, AND THAT IS THE POINT. This check used to be a
+    `stat_object` compared against the written length. A HEAD establishes that
+    some metadata record of that size exists, which is a weaker claim than it
+    looks and is passed by all three things that actually go wrong here: a HEAD
+    answered from an index while the GET still 404s, a truncated object whose
+    HEAD reports the full written length anyway, and a PREVIOUS object of the
+    same size still being served at the key. One digest over the bytes a reader
+    would receive rules out all three at once, so none of them needs a case of
+    its own.
+
+    The cost is one extra GET per upload. Artifacts are markdown deliverables,
+    and the alternative is publishing a URI the platform cannot stand behind.
+
+    Args:
+        client: Minio client instance.
+        bucket_name: Storage bucket name.
+        key: Object key that was just written.
+        expected_sha256: Hex SHA-256 of the bytes that were written.
+
+    Raises:
+        UploadError: If `key` does not serve those bytes within
+            `READABLE_TIMEOUT_SECONDS`, or if the read fails outright.
+    """
+    loop = asyncio.get_event_loop()
+    # Read at call time so the budget is one knob, tunable in one place.
+    timeout_seconds = READABLE_TIMEOUT_SECONDS
+    deadline = loop.time() + timeout_seconds
+    delay = _POLL_INITIAL_SECONDS
+
+    while True:
+        served = await _read_served(client, bucket_name, key)
+        if served is not None and served.sha256 == expected_sha256:
+            return
+        if loop.time() + delay > deadline:
+            raise UploadError(
+                f"Upload of {key} was accepted but a read still returns "
+                f"{_describe(served)} after {timeout_seconds}s "
+                f"(expected sha256:{expected_sha256[:_DIGEST_PREFIX]})",
+                key=key,
+            )
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, _POLL_MAX_SECONDS)
 
 
 async def get_object_info(
@@ -72,8 +231,9 @@ def do_download(
 ) -> bytes:
     """Synchronous download body for MinIO (run in executor).
 
-    Converts nosuchkey/not-found errors to ObjectNotFoundError and wraps
-    other failures in DownloadError so the async caller needs no try/except.
+    Converts nosuchkey/not-found errors to ObjectNotFoundError and wraps other
+    BACKEND_FAILURES in DownloadError so the async caller needs no try/except.
+    Anything else is a bug in this process and is left alone to say so.
 
     Args:
         client: Minio client instance.
@@ -94,9 +254,7 @@ def do_download(
         finally:
             response.close()
             response.release_conn()
-    except (ObjectNotFoundError, DownloadError):
-        raise
-    except Exception as exc:
+    except BACKEND_FAILURES as exc:
         error_msg = str(exc).lower()
         if "nosuchkey" in error_msg or "not found" in error_msg:
             raise ObjectNotFoundError(key) from exc

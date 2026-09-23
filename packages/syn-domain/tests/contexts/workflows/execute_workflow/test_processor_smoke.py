@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
+        UpstreamRetryPolicy,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -112,12 +115,18 @@ def _make_processor(
     agent_handler: FakeAgentExecutionHandler,
     session_capture: object | None = None,
     artifact_repository: object | None = None,
+    retry_policy: UpstreamRetryPolicy | None = None,
 ) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
 
     ``artifact_repository`` is overridable so a test can assert on what was
     STORED rather than only on what the run returned. The default discards
     everything, which is all most of these tests need.
+
+    ``retry_policy`` is overridable so a test of the retry (#1303) can set the
+    backoff to zero. The DEFAULT IS PRODUCTION'S - a test that does not pass
+    one runs against the real bound and the real schedule, which is what keeps
+    "a phase gets one attempt unless the upstream was busy" true here.
     """
     todo_store = InMemoryProjectionStore()
     todo_projection = ExecutionTodoProjection(store=todo_store)
@@ -137,6 +146,7 @@ def _make_processor(
         todo_projection=todo_projection,
         agent_handler=agent_handler,
         session_capture=session_capture,  # type: ignore[arg-type]
+        retry_policy=retry_policy,
     )
 
 
@@ -147,6 +157,12 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
     step with an agent double that produces no files, so declaring an output
     type here would (correctly, since #1167) fail every one of them for a
     reason none of them is about.
+
+    The timeout is a realistic phase budget rather than the 30 seconds it used
+    to be, because a phase's timeout now bounds its retries too (#1303): 30
+    seconds cannot fund a second attempt, so every retry case driven through
+    this workflow would have been decided by the fixture's clock instead of by
+    the rule it is about. Nothing here waits on it - the doubles return at once.
     """
     return [
         ExecutablePhase(
@@ -157,7 +173,7 @@ def _one_phase_workflow() -> list[ExecutablePhase]:
             agent_config=AgentConfiguration(),
             prompt_template="do the thing",
             output_artifact_types=(),
-            timeout_seconds=30,
+            timeout_seconds=1800,
         )
     ]
 
