@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
     describe_observed_branches,
     describe_saved_work,
+    exit_code_of,
     failure_account,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
@@ -139,6 +140,9 @@ class PhaseFailure:
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
     about rather than one the caller names again alongside it."""
+    exit_code: int | None = None
+    """What the process behind this failure exited with, or None when no
+    completed process status was observed (#1319)."""
     usage: PhaseUsage = field(default_factory=PhaseUsage)
     """What the failing phase had spent when it died (#1262).
 
@@ -190,6 +194,7 @@ class PhaseFailure:
             total_phases=total_phases,
             failed_phase_duration_seconds=self.duration_seconds,
             observed_branches=self.observed_branches,
+            exit_code=self.exit_code,
             failed_phase_artifact_ids=self.artifact_ids,
             failed_phase_usage=self.usage,
             classification=self.classification,
@@ -289,6 +294,7 @@ def failed_phase_outcome(
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
     reason = describe_exception(error)
+    exit_code = exit_code_of(error)
     if saved is not None and saved.is_worth_reporting:
         reason = f"{reason}\n\n{describe_saved_work(saved)}"
     if observed is not None:
@@ -308,6 +314,7 @@ def failed_phase_outcome(
         reported_failure_reason=account.reported_reason,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
+        exit_code=exit_code,
         artifact_ids=kept,
         usage=spent,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
@@ -317,6 +324,7 @@ def failed_phase_outcome(
             session_id_by_phase.get(phase_id or "", ""),
             reason,
             ended_at=ended_at,
+            exit_code=exit_code,
             artifact_ids=kept,
             usage=spent,
         ),
@@ -329,6 +337,7 @@ def failed_phase_result(
     session_id: str,
     error_message: str,
     ended_at: DateTime,
+    exit_code: int | None = None,
     artifact_ids: tuple[str, ...] = (),
     usage: PhaseUsage | None = None,
 ) -> PhaseResult | None:
@@ -359,6 +368,7 @@ def failed_phase_result(
         session_id=session_id,
         error_message=error_message,
         completed_at=ended_at,
+        exit_code=exit_code,
         artifact_id=artifact_ids[0] if artifact_ids else None,
         usage=usage,
     )

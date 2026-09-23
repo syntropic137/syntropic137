@@ -116,6 +116,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
     AttemptClock,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
@@ -191,6 +192,7 @@ __all__ = [
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    "CredentialRenewalFailedError",
     # Errors
     "DuplicateExecutionError",
     # Value objects - execution

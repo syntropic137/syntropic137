@@ -39,8 +39,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
     PhaseReportedFailureError,
 )
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -59,8 +61,12 @@ def phase_failure(result: AgentExecutionResult, *, phase_id: str) -> Exception |
     point. It used to: the ordering of two `if`s in the middle of a 200-line
     dispatch WAS this policy, and the ordering was wrong.
     """
+    command = result.command
+    if command is None:
+        return RuntimeError(f"Agent run for phase {phase_id} had no completion command")
+    exit_code = command.exit_code
     verdict = result.stream_result.verdict
-    if _ran_cleanly(result):
+    if _ran_cleanly(result, exit_code=exit_code):
         # The only construction of `PhaseReportedFailureError` in production,
         # and therefore the only path to `CORRECT_REFUSAL`. An UNREADABLE
         # report reaches it too and is classified `PLATFORM` by the verdict
@@ -69,16 +75,17 @@ def phase_failure(result: AgentExecutionResult, *, phase_id: str) -> Exception |
             return PhaseReportedFailureError(phase_id=phase_id, verdict=verdict)
         return None
 
-    if result.command.exit_code == 0 and not verdict.refuses_completion:
+    if exit_code == 0 and not verdict.refuses_completion:
         # Something was wrong with the stream and nothing else was. Completing
         # is what this has always done and what #1111 requires it to keep
         # doing.
         return None
 
-    return RuntimeError(_platform_reason(result, phase_id=phase_id))
+    reason = _platform_reason(result, phase_id=phase_id, exit_code=exit_code)
+    return NonZeroExitError(reason, exit_code=exit_code)
 
 
-def _ran_cleanly(result: AgentExecutionResult) -> bool:
+def _ran_cleanly(result: AgentExecutionResult, *, exit_code: int) -> bool:
     """Did the platform deliver this run intact, whatever the run then said?
 
     All three terms are the platform's own account of itself, and none of them
@@ -89,13 +96,13 @@ def _ran_cleanly(result: AgentExecutionResult) -> bool:
     is edited.
     """
     return (
-        result.command.exit_code == 0
+        exit_code == 0
         and result.stream_result.error_reason is None
         and not result.stream_result.interrupt_requested
     )
 
 
-def _platform_reason(result: AgentExecutionResult, *, phase_id: str) -> str:
+def _platform_reason(result: AgentExecutionResult, *, phase_id: str, exit_code: int) -> str:
     """What an operator reads when the platform, not the phase, ended the run.
 
     The token counts are NOT restated here. They are real fields on the
@@ -111,11 +118,11 @@ def _platform_reason(result: AgentExecutionResult, *, phase_id: str) -> str:
     think one of them is a bug.
     """
     reason = result.stream_result.error_reason
-    exit_code = result.command.exit_code
+    rendered_exit = format_exit_code(exit_code)
     base = (
-        f"Agent failed: {reason} (phase={phase_id}, exit_code={exit_code})"
+        f"Agent failed: {reason} (phase={phase_id}, exit_code={rendered_exit})"
         if reason
-        else f"Agent execution failed for phase {phase_id} (exit_code={exit_code})"
+        else f"Agent execution failed for phase {phase_id} (exit_code={rendered_exit})"
     )
     verdict = result.stream_result.verdict
     if not verdict.refuses_completion:

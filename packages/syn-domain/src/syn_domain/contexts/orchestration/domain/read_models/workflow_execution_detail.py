@@ -107,6 +107,16 @@ class PhaseExecutionDetail:
     flattening the empties would merge them again.
     """
 
+    exit_code: int | None = None
+    """What this phase's process exited with, or None if nothing observed one.
+
+    Same three-valued discipline as the field above, and the same reason for
+    it (#1319): 0 is a measured clean exit, None is the absence of any
+    measurement, and the responses they call for are opposite. Every hop
+    between the event and the HTTP response has to pass it; this is one of
+    them.
+    """
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -141,6 +151,7 @@ class PhaseExecutionDetail:
                 if self.observed_branches is None
                 else [w.model_dump() for w in self.observed_branches]
             ),
+            "exit_code": self.exit_code,
         }
 
     @classmethod
@@ -171,6 +182,7 @@ class PhaseExecutionDetail:
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             observed_branches=_observed_branches(data.get("observed_branches")),
+            exit_code=_exit_code(data.get("exit_code")),
         )
 
 
@@ -337,6 +349,20 @@ class WorkflowExecutionDetail:
             ),
             "repos": list(self.repos),
         }
+
+
+def _exit_code(stored: object) -> int | None:
+    """Read back a stored exit status, keeping "nothing observed one" as None.
+
+    The store round-trips projection records as plain data, so a status that
+    was never written arrives as a missing key and a status of 0 arrives as
+    0 - and this is the hop that has to keep telling them apart (#1319).
+    Anything that is not an int is absent: a malformed row observed nothing
+    either. `bool` is excluded because `isinstance(True, int)` is True.
+    """
+    if isinstance(stored, bool) or not isinstance(stored, int):
+        return None
+    return stored
 
 
 def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:

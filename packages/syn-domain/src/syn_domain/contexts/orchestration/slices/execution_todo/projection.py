@@ -48,6 +48,9 @@ from event_sourcing import AutoDispatchProjection
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
+from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
+    PhaseRetryScheduledEvent,
+)
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
     TodoAction,
     TodoItem,
@@ -276,6 +279,43 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 session_id=event_data.get("session_id"),
             ),
         )
+
+    async def on_phase_retry_scheduled(self, event_data: PhaseRetryScheduledEvent) -> None:
+        """Phase attempt abandoned → queue PROVISION_WORKSPACE for it again (#1335).
+
+        THE ONE HANDLER THAT MOVES A PHASE BACKWARDS, and the only one that is
+        allowed to. Every other writer merges `phase_progress` monotonically
+        because a lower rank arriving out of order is a stale writer; here the
+        lower rank IS the decision - the aggregate has said this phase runs
+        again from the top - so the phase's mark is SET rather than merged.
+        Merging it would leave the mark at whatever the dead attempt reached,
+        `get_pending` would filter the new item out as stale, and the retry
+        would go missing with nothing anywhere saying so.
+
+        Other phases' marks are left exactly as they are: the retried phase is
+        the only thing being reconsidered, and the phases already completed
+        keep their results and their cost - that is the whole point.
+        """
+        event = PhaseRetryScheduledEvent.model_validate(event_data)
+        execution_id = event.execution_id
+        if not execution_id:
+            return
+        phase_id = event.phase_id
+        if not phase_id:
+            return
+
+        async with self._lock_for(execution_id):
+            current, progress = await self._read_state(execution_id)
+            remaining = [t for t in current if t.phase_id != phase_id]
+            remaining.append(
+                TodoItem(
+                    execution_id=execution_id,
+                    action=TodoAction.PROVISION_WORKSPACE,
+                    phase_id=phase_id,
+                )
+            )
+            progress[phase_id] = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
+            await self._save_state(execution_id, remaining, progress)
 
     async def on_phase_completed(self, event_data: dict) -> None:
         """Phase completed → remove COMPLETE_PHASE to-do for this phase only.

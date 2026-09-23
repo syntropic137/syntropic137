@@ -427,3 +427,49 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
+
+[unknown_has_a_representation]
+# Branches that return a real-looking answer after catching an exception (#1341).
+# Key format: "<file>:<qualname>". Gate:
+# ci/fitness/code_quality/test_unknown_has_a_representation.py
+#
+# RATCHET, ONE DIRECTION. The table is the whole budget - there is no number to
+# raise. An entry means a caller cannot tell "I looked, and there are none"
+# from "I could not find out", and reviewers should refuse a new one.
+# test_no_stale_seeded_sites REQUIRES the entry to go in the diff that fixes
+# the site, so a fix cannot leave standing permission to break again.
+#
+# Seeded ahead of the fixes, deliberately: the rule lands first so the fixes
+# land against a gate that already names them. The three sites #1341 was
+# written from are on PR #1332 (#1262) and PR #1330 (#1319). Only the first is
+# in this table - see the gate's docstring for why a fall-through `return 0`
+# with no except block is outside what this rule can see, and #1318's health
+# lag was already fixed by #1172 before #1341 was filed.
+#
+# The other eight were found by the gate itself when it first ran. They are
+# the same defect, with no fix PR yet, so they are tracked against #1341.
+
+# --- #1262, fix on PR #1332: telemetry outage reads as a stalled phase -------
+"packages/syn-adapters/src/syn_adapters/projections/session_tools_queries.py:query_session_tools" = { issue = "#1262" }
+
+# --- #1341, found by this gate on its first run, no fix PR yet ---------------
+# A cost or token total that reads 0 because the enrichment query raised, and a
+# tool count that reads 0 because agent_events was unreachable. Both render as
+# a real number on the executions page.
+"apps/syn-api/src/syn_api/routes/executions/queries.py:_load_execution_enrichment" = { issue = "#1341" }
+"apps/syn-api/src/syn_api/routes/executions/queries.py:_fetch_tool_counts" = { issue = "#1341" }
+"apps/syn-api/src/syn_api/routes/sessions.py:_load_session_costs" = { issue = "#1341" }
+# The same defect as _load_phase_operations above, duplicated: sessions.py has
+# its own copy of the tool-operations loader, so #1332 fixing one leaves this
+# one behind. Whoever fixes either should fix both.
+"apps/syn-api/src/syn_api/routes/sessions.py:_load_tool_operations" = { issue = "#1341" }
+# An unreadable capture-observation query makes every phase report no agent
+# session, which the detail page renders as "no session was captured".
+# A GitHub API failure makes an installation report zero accessible repos,
+# which is also what an installation scoped to nothing looks like.
+"apps/syn-api/src/syn_api/routes/github.py:_repos_for_installation" = { issue = "#1341" }
+# The phase-metrics build failing makes a workflow report zero phases.
+"apps/syn-api/src/syn_api/routes/metrics.py:_build_phase_metrics" = { issue = "#1341" }
+# A collection failure makes an unfinished phase report zero artifacts kept,
+# which is also what a phase that wrote nothing reports.
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py:ArtifactCollector.collect_from_unfinished_phase" = { issue = "#1341" }

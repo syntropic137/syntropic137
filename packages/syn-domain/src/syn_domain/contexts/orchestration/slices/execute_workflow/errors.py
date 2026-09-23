@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
     )
+    from syn_shared.diagnostics import SignalDeath
 
 
 def describe_exception(error: BaseException) -> str:
@@ -37,6 +39,93 @@ def describe_exception(error: BaseException) -> str:
     branch on which they got; that is the point.
     """
     return str(error).strip() or f"{type(error).__name__} (no message)"
+
+
+def exit_code_of(error: BaseException) -> int | None:
+    """The exit status of the process behind `error`, or None if nothing saw one.
+
+    THE ONE PLACE THAT DECIDES IT, for the reason `describe_exception` above is
+    the one place that decides a failure's description: the exit status reaches
+    four sinks, and a second reader of it is a second answer waiting to happen.
+
+    None is not 0. A phase that ran and exited cleanly and a phase nobody was
+    left alive to observe are opposite situations - the first needs no action
+    and the second needs a retry - and #1319 is what it costs to report them as
+    the same thing. So an exception that carries no status reports None, and
+    None is stored as absent the whole way to the API.
+
+    It reads an ATTRIBUTE rather than matching exception classes, and that is
+    deliberate: the exceptions that know a status do not and should not share a
+    base. `SkillInstallFailed` belongs to the skills hierarchy in `_shared`,
+    which slices may import but which may not import a slice back. An attribute
+    is the one contract both sides can honour without one of them depending on
+    the other, and it is opt-in - storing `self.exit_code` is the whole of it.
+
+    A `bool` is rejected because `isinstance(True, int)` is True and `exit_code
+    = True` is a mistake, not a status of 1.
+    """
+    code: object = getattr(error, "exit_code", None)
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
+
+
+class NonZeroExitError(RuntimeError):
+    """A process a phase depended on exited non-zero, and this CARRIES the code.
+
+    THE FAILURE THIS EXISTS TO STOP (#1319). The exit status was known at the
+    moment of the raise and spent entirely on a message string - `RuntimeError(
+    f"... exit_code={code}")` - so the number reached an operator only as prose
+    inside a failure whose read model might never be queryable. Two containers
+    died during the read-model outage in #1318 and neither status was
+    recoverable afterwards, because the platform that destroyed them had
+    written the number nowhere durable.
+
+    0, 124 and -11 demand OPPOSITE responses - the run finished, the run hit
+    its budget and should continue, the run was killed and should be retried -
+    so "the status is unavailable" is the single answer that serves none of
+    them. Carrying it as an int is what lets `exit_code_of` put it on the
+    durable failure event rather than leaving it to be grepped out of a
+    sentence.
+
+    Subclasses `RuntimeError` because it replaces bare `RuntimeError`s at every
+    site that already knew a status; callers that catch the general failure
+    keep catching this one.
+    """
+
+    def __init__(self, message: str, *, exit_code: int) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class ExitStatusUnavailableError(RuntimeError):
+    """The agent's process ended and NOTHING observed what it exited with.
+
+    THE LIE THIS REPLACES (#1319). The status was read off the workspace, and
+    the workspace reports None when no stream ever completed - a container
+    removed out from under us, a stream that never started, a backend that lost
+    the process. Every one of those fell through to `return 0`, so the case
+    where we know LEAST became indistinguishable from a clean exit. An operator
+    reading 0 concludes the phase finished and moves on; that is a lie they act
+    on, and it is worse than an error.
+
+    Deliberately carries NO `exit_code` attribute, which is not an omission but
+    the mechanism: `exit_code_of` reads that attribute and reports None without
+    it, so the durable failure event records the status as ABSENT. A durable
+    None is honest - it says "retry, nobody was watching" - and it is the one
+    answer that does not send someone the wrong way.
+
+    Subclasses `RuntimeError` alongside `NonZeroExitError` so every caller that
+    already catches a phase's failure catches this one too.
+    """
+
+    def __init__(self, phase_id: str, *, lines_seen: int) -> None:
+        super().__init__(
+            f"Agent exit status unavailable for phase {phase_id}: no completed stream "
+            f"reported one (lines={lines_seen}). The container may have been removed "
+            f"externally; the status is recorded as unknown rather than as a clean exit."
+        )
+        self.phase_id = phase_id
 
 
 class WorkflowNotFoundError(Exception):
@@ -357,6 +446,12 @@ class FailedWorkspaceCommand:
     stderr: str
     timed_out: bool = False
 
+    #: What the backend saw at the moment it reaped a command that was KILLED,
+    #: including the kernel's account of the fault if it was reachable. Carried
+    #: here rather than looked up on demand because by the time this record is
+    #: rendered the workspace is usually gone (#1295).
+    signal_death: SignalDeath | None = None
+
 
 @dataclass(frozen=True)
 class QuarantinedWork:
@@ -455,8 +550,68 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
         lines.append(f"    quarantined at {work.pushed_ref}")
         lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
     else:
-        lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+        lines.append(f"    NOT RECOVERABLE: {work.push_error}")
     return lines
+
+
+class CredentialRenewalFailedError(Exception):
+    """This workspace's git credential is not known to be usable (#1393).
+
+    Raised by the adapter that mints and installs the credential, and caught
+    by both of its callers - neither of whom lets it end a phase on its own
+    (#1396). The startup rehearsal retries it a bounded number of times and
+    then keeps the credential the setup phase installed, because a mint that
+    failed is a statement about GitHub's availability, not about the token
+    minutes old in this container. The quarantine path logs it and pushes
+    anyway, because that token may still have minutes left and a push that
+    might work beats one that was never attempted.
+
+    It says nothing about whether the OLD credential still works. Nothing can:
+    the only way to find out is to spend it on a push, which is what both
+    callers go on to do - and at phase start, that push's own refusal is the
+    only thing that refuses the phase.
+    """
+
+
+class QuarantinePathUnusableError(Exception):
+    """This phase has no credential that reaches origin, so it is given no work (#1393).
+
+    THE HALF OF THE NET THAT CAN BE TESTED BEFORE THE FALL. The unpushed-work
+    guard's quarantine push runs exactly once per phase, at teardown, on a
+    phase that has already failed - so a workspace that cannot be given a
+    credential, or cannot reach ``origin`` at all, is invisible until the
+    moment the work is riding on it, and `exec-db6f687e991a` is what that
+    costs: a commit and nine modified files, correctly detected, correctly
+    pushed at, and refused.
+
+    So the same push is rehearsed at phase start with ``--dry-run``: same
+    remote, same ``refs/syn/lost`` namespace, same credential, no objects sent
+    and no ref created. Failing here ends the phase before its agent runs,
+    when the entire cost is the minute of provisioning already spent. That is
+    a deliberately worse trade than it first looks - a phase whose quarantine
+    push would have worked and whose dry run failed for some unrelated reason
+    is refused for nothing - and it is still the right one, because the
+    alternative is handing an hour of agent time to a workspace that has just
+    demonstrated it cannot give the work back.
+
+    WHAT IT DOES NOT MEAN (#1396): that the remote would ACCEPT the push. A
+    dry run stops before ``git-receive-pack``'s update phase, so no
+    ``pre-receive`` hook and no ruleset is consulted, and a remote that
+    declines ``refs/syn/lost`` declines it for the first time at teardown.
+    This error is therefore raised for a credential or a connection, never for
+    a policy - see `rehearse_quarantine_credential`, which is named for what
+    it can prove.
+    """
+
+    def __init__(self, *, phase_id: str, detail: str) -> None:
+        super().__init__(
+            f"Phase {phase_id!r} will not be run: the quarantine path it would "
+            f"depend on to hand work back cannot be used, so anything this phase "
+            f"then failed to push would be unrecoverable rather than merely "
+            f"unpushed. {detail}"
+        )
+        self.phase_id = phase_id
+        self.detail = detail
 
 
 class WorkspaceInspectionFailedError(Exception):
@@ -571,7 +726,11 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    return (
+        "timed out, so it did not finish"
+        if failure.timed_out
+        else f"exited {format_exit_code(failure.exit_code)}"
+    )
 
 
 def _render_inspection_failure(
@@ -591,6 +750,11 @@ def _render_inspection_failure(
     ]
     if stderr:
         lines.append(f"  stderr: {stderr}")
+    # A killed command has no stderr worth reading - it never got to write one
+    # - so the diagnostic IS the explanation and goes where an operator reads
+    # first, not at the end behind the quarantine inventory (#1295).
+    if failure.signal_death is not None:
+        lines.append(failure.signal_death.describe())
     saved, lost = _by_durability(quarantined)
     lines.append(
         _INSPECTION_HEADLINE[bool(saved), bool(lost)].format(

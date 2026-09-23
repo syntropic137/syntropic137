@@ -201,10 +201,10 @@ async def _fail_after(start: PhaseStartingPoints | None) -> WorkflowFailedEvent:
     # keep the events inspectable
     processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     if start is not None:
-        processor._runtime._starting_points = start  # pyright: ignore[reportPrivateUsage]
+        processor._runtimes.of(_EXECUTION_ID)._starting_points = start  # pyright: ignore[reportPrivateUsage]
 
     started_at = datetime.now(UTC) - timedelta(seconds=1671.8)
-    processor._runtime._started_at[_PHASE_ID] = started_at  # pyright: ignore[reportPrivateUsage]
+    processor._runtimes.of(_EXECUTION_ID)._started_at[_PHASE_ID] = started_at  # pyright: ignore[reportPrivateUsage]
     aggregate = _running_aggregate()
 
     await processor._fail_execution(
@@ -941,7 +941,11 @@ async def test_every_phase_records_where_it_started_before_its_agent_runs(
         "each phase must record its starting point once, before its own agent "
         f"runs and after the previous one finished; got {agent_runs_before}"
     )
-    assert not processor._runtime._starting_points._by_phase, (  # pyright: ignore[reportPrivateUsage]
-        "starting points outlived their phases - a later failure would compare "
-        "against a workspace that no longer exists"
+    assert processor._runtimes.is_idle, (  # pyright: ignore[reportPrivateUsage]
+        "the processor still holds state for a run that ended - a later failure "
+        "would compare against a workspace that no longer exists. Asked of the "
+        "registry rather than of one runtime's `_by_phase` since #1311 made the "
+        "runtime itself per-run: `finalize` forgetting the starting point is "
+        "pinned in test_phase_starting_points.py, and this asks the stronger "
+        "question of whether anything at all outlived the run."
     )

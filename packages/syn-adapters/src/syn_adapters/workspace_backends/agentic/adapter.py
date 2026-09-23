@@ -20,6 +20,7 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 
+from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
     copy_files_from_workspace,
@@ -407,6 +408,20 @@ class AgenticIsolationAdapter:
             env=environment,
         )
 
+        # THE MOMENT OF DEATH, and the only one there is. Every short command
+        # the platform runs in a workspace arrives here - the unpushed-work
+        # gate's `git rev-parse`, the `find` over /workspace/repos, the
+        # secret-injection setup script - and all three have been lost to a
+        # bare `-11` (#1295). Captured HERE rather than by any caller because
+        # the reap removes the container moments later and no caller runs
+        # before it (#1319).
+        signal_death = await capture_signal_death(command, result.exit_code)
+        if signal_death is not None:
+            logger.error(
+                "Command in workspace %s died on a signal:\n%s",
+                handle.isolation_id,
+                signal_death.describe(),
+            )
         return ExecutionResult(
             exit_code=result.exit_code,
             success=result.success,
@@ -414,6 +429,7 @@ class AgenticIsolationAdapter:
             stdout=result.stdout,
             stderr=result.stderr,
             timed_out=result.timed_out,
+            signal_death=signal_death,
         )
 
     async def health_check(self, handle: IsolationHandle) -> bool:

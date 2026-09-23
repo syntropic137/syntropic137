@@ -9476,6 +9476,17 @@
             ],
             "title": "Agent Session Ids"
           },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
           "observed_branches": {
             "anyOf": [
               {

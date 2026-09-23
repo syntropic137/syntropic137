@@ -114,7 +114,7 @@ async def _run_fail_execution_and_serialize(processor: WorkflowExecutionProcesso
     processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
     fixed_started_at = datetime.now(UTC) - timedelta(seconds=FIXTURE_DURATION_SECONDS)
-    processor._runtime._started_at["p-1"] = fixed_started_at  # pyright: ignore[reportPrivateUsage]
+    processor._runtimes.of("exec-1")._started_at["p-1"] = fixed_started_at  # pyright: ignore[reportPrivateUsage]
 
     phases = [ExecutablePhase(phase_id="p-1", name="Phase 1", order=1)]
 
