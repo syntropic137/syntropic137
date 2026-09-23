@@ -622,3 +622,24 @@ Function/region gaps remain. Evidence stays in the local coverage log above.
 Agentic Primitives PR #418 now has every hosted check green, including all image
 builds and the Integration Gate. This removes its pending CI check, but does not
 establish release completion or full issue #1398 acceptance.
+
+## Atomic legacy reads
+
+SeshMagic `16a6732` resolves a legacy alias and fetches its row in the same SQL
+statement. Previously a replacement between identity lookup and body lookup
+could substitute newer content. The selected legacy row now shares one MVCC
+snapshot; qualified reads retain their immutable version pin. Collision checks
+still examine at most two candidates. The real PostgreSQL regression confirms
+replacement/deletion cannot alter the selected content. All 160 PostgreSQL
+adapter tests pass, including collision and blob-offload suites; the full
+workspace tests and strict Clippy also pass.
+
+MCP tests additionally verify connection-failure diagnostics suppress token/URL
+details and reject malformed URL configurations. Transport fixtures read complete
+request headers independently of socket chunking. Final-source full coverage
+still fails the unchanged 100% gate: 99.72% aggregate lines and 48 merged-region
+gaps. This is not full acceptance or release readiness. Local evidence:
+`/private/tmp/1398-legacy-atomic-read.log`,
+`/private/tmp/1398-sesh-atomic-clippy.log`,
+`/private/tmp/1398-sesh-atomic-coverage.log`, and
+`/private/tmp/1398-sesh-regions.log`.
