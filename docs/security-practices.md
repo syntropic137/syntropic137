@@ -32,7 +32,7 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 - `uv.lock` — Python workspace
 - `pnpm-lock.yaml` — Node.js workspace (root, shared across all pnpm apps)
 
-**Rollout:** OSV runs in warn mode (`continue-on-error: true`) until a clean baseline is established, then switches to blocking. See `TODO(#259)` in `ci.yml`.
+**Enforcement:** OSV is a blocking CI job. A reported vulnerability fails the pull request gate.
 
 ### npm/pnpm install hygiene
 
@@ -187,7 +187,7 @@ Everything else (images, volumes, secrets, swarm, system, plugins) is blocked by
 - [ ] Pre-commit secret gate (`gitleaks`) — ISS-259
 - [x] `dependency-review-action` — added; warn-only until repo goes public (requires GitHub Advanced Security, free for public repos)
 - [ ] Dependabot for Actions + npm — ISS-259
-- [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
+- [x] OSV Scanner switched to blocking mode
 - [ ] CodeQL SAST — post-launch
 - [ ] Container scanning (Docker Scout) — post-launch
 - [ ] gitleaks CI secret scanning — ISS-259

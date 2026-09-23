@@ -191,4 +191,4 @@ async def list_workflows():
 
 - [Vertical Slice Architecture](https://jimmybogard.com/vertical-slice-architecture/)
 - [CQRS Pattern](https://martinfowler.com/bliki/CQRS.html)
-- [Event Sourcing Platform ADRs](../lib/event-sourcing-platform/docs/adrs/)
+- [Event Sourcing Platform ADRs](../../lib/event-sourcing-platform/docs/adrs/)
