@@ -30,9 +30,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    CredentialRenewalFailedError,
-)
+from syn_domain.contexts.orchestration import CredentialRenewalFailedError
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
