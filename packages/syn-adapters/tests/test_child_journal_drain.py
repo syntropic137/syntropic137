@@ -173,3 +173,34 @@ async def test_success_status_must_be_durable_before_page_acknowledgement() -> N
             observation_sequence=1,
         )
     assert not evidence.append.await_args.args[0].evidence.acquisition_statuses[0].failed
+
+
+def test_cross_harness_binding_preserves_both_namespaces() -> None:
+    original = change(2, "same-native-id")
+    call = original.intent.call.model_copy(update={"target_harness": "claude"})
+    cross = original.model_copy(
+        update={"intent": original.intent.model_copy(update={"call": call})}
+    )
+    evidence = child_evidence(
+        cross, RunIdentity(source_instance_id="source", execution_id="run"), "spool"
+    ).evidence
+    assert evidence.edges[0].parent.harness == "codex"
+    assert evidence.bindings[0].transcript.harness == "claude"
+
+
+def test_legacy_evidence_hash_unchanged_by_optional_delegation_fields() -> None:
+    import hashlib
+    import json
+
+    original = change(2, "child")
+    legacy = original.model_dump()
+    legacy["intent"].pop("status")
+    legacy["intent"].pop("exit_code")
+    legacy["intent"]["call"].pop("target_harness")
+    digest = hashlib.sha256(
+        json.dumps(legacy, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    batch = child_evidence(
+        original, RunIdentity(source_instance_id="source", execution_id="run"), "spool"
+    )
+    assert batch.evidence.nodes[0].evidence.source_revision == digest

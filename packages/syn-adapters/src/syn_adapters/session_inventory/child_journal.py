@@ -37,7 +37,9 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
     reference = EvidenceReference(
         producer_id=producer,
         evidence_id=f"{producer}:{change.sequence}",
-        source_revision=hashlib.sha256(change.model_dump_json().encode()).hexdigest(),
+        source_revision=hashlib.sha256(
+            change.model_dump_json(exclude_defaults=True).encode()
+        ).hexdigest(),
         locator=f"child_changes/{change.sequence}",
         extractor_version="agentic-child-journal/1",
     )
@@ -61,7 +63,7 @@ def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> Evid
                 transcript=InventoryNodeRef(
                     kind="transcript",
                     source_instance_id=run.source_instance_id,
-                    harness=intent.call.harness,
+                    harness=intent.call.target_harness or intent.call.harness,
                     local_id=intent.child_native_id,
                 ),
                 confidence=EvidenceClass.CORROBORATED,

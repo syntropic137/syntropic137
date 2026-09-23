@@ -11,7 +11,7 @@ not mark its entire acceptance criterion complete. The exact scope remains the
 | # | Acceptance requirement | Current evidence | Work still required |
 | --- | --- | --- | --- |
 | 1 | Local operation with remote absent or unreachable, all clients | Real local parent/child demo passed; local SQL pipeline tests passed | Multi-phase and configured-unreachable full-stack checks, CLI agreement |
-| 2 | Cross-harness and native children through depth three | Real Codex child; real pinned Claude depth-three hooks with independent transcript comparison | Shim wiring, mixed depth-three launch matrix and expected coverage |
+| 2 | Cross-harness and native children through depth three | Real native children and pinned Claude -> Codex -> Claude chain, independently checked against native files | Full-stack mixed/native combinations, resume/fork matrix and expected coverage |
 | 3 | Concurrency and resume memberships across runs | Resolver resume tests exist; SQL namespace/pagination isolation passes | Exercise real resume segments and concurrent launch associations |
 | 4 | Durable intents and idempotent/conflicting lifecycle | Invocation aggregate tests and fenced spool cursors exist | Audit all controlled launch paths and crash-before-bind integration |
 | 5 | Failures, cancellation, background children, kill/restart/replay | 22 fresh PostgreSQL/pipeline/spool integration tests pass | Full lifecycle matrix and descendant settlement against pinned harnesses |
@@ -51,6 +51,23 @@ An additional 87 Syntropic137 resolver, invocation, local transcript, child drai
 recovery and API tests pass. Logs: `/private/tmp/1398-ap-final-qa.log` and
 `/private/tmp/1398-closeout-domain-api.log`. This does not close mixed
 harness launch, descendant settlement, or complete coverage requirements.
+
+Structured delegation follow-up (`agentic-primitives@aaa1da1`, PR #418):
+`UV_NO_CONFIG=1 just qa` passes with the real exporter enabled.
+`syn-delegate` now persists intent before
+launch, records the actual process outcome, and binds exact native identity from
+that process's machine stream. Parent and child harness namespaces stay distinct.
+The pinned Claude -> Codex -> Claude offline test passes with independent native
+files and pre-launch expectations. Cancellation, timeout, failed OS launch and
+shell-masked failure have subprocess tests. Original journal records and source
+hashes survive the additive schema upgrade. Syntropic137 ingestion/attribution
+checks pass (20 tests); v1/v2 exporter-to-host transport passes (9 tests).
+
+Codex uses its native shell `CODEX_THREAD_ID`; no permission-granting or command
+rewrite hook was added. Claude supplies quoted parent context through its shell
+hook. The image exposes the shim outside the virtualenv so login-shell PATH
+changes do not hide it. Image rebuild and full-stack mixed-harness proof remain
+pending, as do descendant settlement and run-wide coverage closure.
 
 ## Follow-up after draft PR creation
 
