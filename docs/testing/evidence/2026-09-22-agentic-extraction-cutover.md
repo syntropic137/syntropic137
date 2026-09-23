@@ -11,7 +11,7 @@ digest and private-repository CI gates listed below must still pass.
 - Agentic Skills tag `v0.1.0` resolves to commit
   `33091b9da32da80cff402e08dff7e674383aa83e`.
 - The Agentic Workspace submodule candidate resolves to merged commit
-  `1914f46a91533387b591de4068c8e6783726f3e1`.
+  `6862f9846d4c511237c02c9691217955cbd9bda4`.
 - That commit directly pins APSS `EXP-V1-0006` through merged APSS commit
   `18d55b231e7d06b509386b2599f925195b63ba0c` and delegates semantic launch
   manifest validation to the standard crate.
@@ -34,7 +34,9 @@ tests, compose overlays, and execution of the currently pinned multi-harness
 image all passed. The final image provenance gate correctly refused the old
 Agentic Primitives digests because their source revision
 `276eec0ac2315d32b83fb86fc4997cbaf1d87a52` does not equal the staged Agentic
-Workspace gitlink `1914f46a91533387b591de4068c8e6783726f3e1`.
+Workspace gitlink `6862f9846d4c511237c02c9691217955cbd9bda4`. This
+revision pins Vercel Skills CLI `1.7.0` across all three provider images and
+guards that pin in CI.
 
 The cutover also repaired two pre-commit gates so they validate the stage-zero
 index rather than stale `HEAD`, and made generated environment validation
