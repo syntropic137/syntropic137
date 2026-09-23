@@ -1223,10 +1223,10 @@ class _PhaseRun:
         )
 
         self.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
-        # `_workspaces` builds a new seam per access (it reads collaborators
+        # `_workspaces_for` builds a new seam per access (it reads collaborators
         # that are replaceable on the processor), so the stub has to go on the
         # instance this call actually uses.
-        workspaces = self.processor._workspaces
+        workspaces = self.processor._workspaces_for(_EXECUTION_ID, {})
         workspaces.provision = AsyncMock(  # type: ignore[method-assign]
             return_value=ProvisionResult(
                 workspace=self.workspace,  # type: ignore[arg-type]
