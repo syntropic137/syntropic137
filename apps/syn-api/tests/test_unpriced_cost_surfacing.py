@@ -28,6 +28,9 @@ from decimal import Decimal
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+    SessionSummary as DomainSessionSummary,
+)
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.display import format_cost
 
@@ -48,6 +51,23 @@ def _unpriced_session_cost() -> SessionCost:
     cost.unpriced_observation_count = 12
     cost.duration_ms = 36_000
     return cost
+
+
+def _lane1_row(session_id: str = "sess-890", **tokens: int) -> DomainSessionSummary:
+    """A Lane 1 session row - what ``_load_cost_data`` falls back to."""
+    return DomainSessionSummary(
+        id=session_id,
+        workflow_id="wf-890",
+        agent_type="claude",
+        status="completed",
+        started_at=None,
+        completed_at=None,
+        total_tokens=tokens.get("total_tokens", 0),
+        input_tokens=tokens.get("input_tokens", 0),
+        output_tokens=tokens.get("output_tokens", 0),
+        cache_creation_tokens=tokens.get("cache_creation_tokens", 0),
+        cache_read_tokens=tokens.get("cache_read_tokens", 0),
+    )
 
 
 @dataclass
@@ -84,7 +104,7 @@ class TestSessionDetailSurfacesUnpriced:
 
         _patch_session_cost_query(monkeypatch, _unpriced_session_cost())
 
-        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+        data = await _load_cost_data(_lane1_row())
 
         assert data.unpriced_observation_count == 12
 
@@ -97,7 +117,7 @@ class TestSessionDetailSurfacesUnpriced:
         from syn_api.types import SessionDetail
 
         _patch_session_cost_query(monkeypatch, _unpriced_session_cost())
-        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+        data = await _load_cost_data(_lane1_row())
 
         detail = SessionDetail(
             id="sess-890",
@@ -125,10 +145,42 @@ class TestSessionDetailSurfacesUnpriced:
         cost.unpriced_observation_count = 0
         _patch_session_cost_query(monkeypatch, cost)
 
-        data = await _load_cost_data("sess-890", fallback_tokens=0, fallback_cost=Decimal("0"))
+        data = await _load_cost_data(_lane1_row())
 
         assert data.unpriced_observation_count == 0
         assert format_cost(data.total_cost_usd, data.unpriced_observation_count) == "$1.25"
+
+    @pytest.mark.asyncio
+    async def test_no_cost_row_falls_back_to_the_whole_lane1_breakdown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A session with no Lane 2 cost row must not report a split that
+        contradicts its own total.
+
+        The fallback carried ``total_tokens`` alone, so session detail rendered
+        4321 total against 0 in / 0 out - three counts silently dropped one hop
+        after OperationRecorded accumulated them (#1034). These values are the
+        ones a real completion writes, and none of them is a default.
+        """
+        from syn_api.routes.sessions import _load_cost_data
+
+        _patch_session_cost_query(monkeypatch, None)
+
+        data = await _load_cost_data(
+            _lane1_row(
+                total_tokens=4321,
+                input_tokens=4000,
+                output_tokens=321,
+                cache_creation_tokens=17,
+                cache_read_tokens=29,
+            )
+        )
+
+        assert data.total_tokens == 4321
+        assert data.input_tokens == 4000
+        assert data.output_tokens == 321
+        assert data.cache_creation_tokens == 17
+        assert data.cache_read_tokens == 29
 
 
 @pytest.mark.unit

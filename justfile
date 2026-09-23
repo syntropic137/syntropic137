@@ -559,8 +559,17 @@ dashboard-build:
 dashboard-lint:
     cd apps/syn-dashboard-ui && pnpm run lint
 
-# Mirrors ci.yml dashboard-ui, which installs deps before linting. Use this,
-# not dashboard-qa, when the question is "will CI pass".
+# Run dashboard frontend tests (#1288)
+dashboard-test:
+    cd apps/syn-dashboard-ui && NO_COLOR=1 pnpm run test
+
+# Follows ci.yml dashboard-ui, which installs deps before linting. It is no
+# longer a strict mirror: dashboard-qa now runs the suite and that job does not
+# (#1288). The 257 tests here were in the same position as openclaw-plugin's -
+# declared, green, and gating nothing - so the local half is closed first and
+# this recipe deliberately runs MORE than CI until `- run: pnpm run test` is
+# added to ci.yml's dashboard-ui job. Erring that way means a failure shows up
+# here rather than nowhere.
 dashboard-ci:
     # CI=true because GitHub Actions sets it, and pnpm refuses to remove a stale
     # modules directory without it. This matches ci.yml's dashboard-ui COMMAND
@@ -570,8 +579,9 @@ dashboard-ci:
     cd apps/syn-dashboard-ui && CI=true pnpm install --frozen-lockfile --ignore-scripts
     just dashboard-qa
 
-# Full dashboard QA (lint + build)
-dashboard-qa: dashboard-lint dashboard-build
+# Full dashboard QA (lint + test + build). Adds ~140s; a "full QA" that skipped
+# 257 tests is what #1288 is about.
+dashboard-qa: dashboard-lint dashboard-test dashboard-build
     @echo "✅ Dashboard UI checks passed!"
 
 # --- Pulse UI ---
@@ -1111,7 +1121,7 @@ check-ci-parity:
 #   osv-scan, pip-audit  - query remote vulnerability databases
 #   dependency-review    - a GitHub API action with no local equivalent
 #   python-integration-tests - skipped on PR branches in CI too (needs services)
-qa-ci: preflight test-unit-ci cli-node-ci dashboard-ci docs-site-ci
+qa-ci: preflight test-unit-ci cli-node-ci openclaw-plugin-ci dashboard-ci docs-site-ci
     @echo ""
     @echo "✅ qa-ci: every PR-gating CI JOB with a local equivalent passed."
     @echo "   This is job-level coverage, not proof of equivalence: CI runs on"
@@ -1137,6 +1147,7 @@ test-unit-ci:
         --cov=packages/syn-adapters/src \
         --cov=packages/syn-shared/src \
         --cov-report=term-missing \
+        --durations=20 \
         -x -q
 
 # Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
@@ -1148,6 +1159,26 @@ cli-node-ci:
     cd apps/syn-cli-node && pnpm run build
     cd apps/syn-cli-node && pnpm run check:api-drift
     cd apps/syn-cli-node && pnpm run check:untyped-api
+
+# The openclaw-plugin equivalent of cli-node-ci (#1288). Unlike its siblings
+# this one does NOT yet mirror a ci.yml job, because there is no such job: the
+# package's suite ran under no gate at all, locally or in CI, which is how it
+# came to sit red for three tests against a response shape the API stopped
+# returning at c467de3b (#1204). This recipe closes the local half. The CI half
+# needs one job added to .github/workflows/ci.yml, and when it lands it must
+# arrive with `"ci.yml:openclaw-plugin": "openclaw-plugin-ci"` in
+# scripts/check_ci_parity.py's LOCAL_EQUIVALENT - that map rejects a job with no
+# target AND a target for a job that does not exist, so the two cannot be split
+# across commits.
+#
+# No `pnpm run build` step: here `build` is `tsc` and `typecheck` is
+# `tsc --noEmit` over the same inputs, so building would re-run the check just
+# performed and differ only in emitting. cli-node runs both because its build is
+# tsup, a different toolchain.
+openclaw-plugin-ci:
+    cd packages/openclaw-plugin && pnpm install --frozen-lockfile --ignore-scripts
+    cd packages/openclaw-plugin && pnpm run typecheck
+    cd packages/openclaw-plugin && NO_COLOR=1 pnpm run test
 
 # Mirrors ci.yml docs-site. Note this is NOT docs-site-build, which first runs
 # codegen; CI builds the committed tree as-is.
@@ -1275,12 +1306,10 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
-# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
-# happily reuses a binary compiled from a different submodule revision.
+# Build APS CLI. Local freshness belongs to Cargo. CI can reuse an executable
+# only after an exact source/toolchain/platform cache hit and checkout validation.
 aps-build:
-    @echo "🔨 Building APS CLI..."
-    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+    bash scripts/build-aps.sh
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
@@ -2387,6 +2416,21 @@ release-local version:
 #
 # Callable on its own, including from CI:
 #   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+# Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
+# Codifies docs/deployment/test-deploy.md (direct path). Not a release.
+#   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
+#   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
+#   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
+#   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
+pit-stop version *flags:
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
+
 verify-image-capabilities image ref:
     #!/usr/bin/env bash
     set -euo pipefail

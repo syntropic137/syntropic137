@@ -23,6 +23,7 @@ from syn_adapters.projections.manager_event_map import (
     Projection as Projection,
 )
 from syn_adapters.projections.manager_registry import build_projection_registry
+from syn_adapters.projections.session_timeline_memory import reset_in_memory_session_timeline
 from syn_adapters.projections.session_tools import SessionToolsProjection
 from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
@@ -274,5 +275,11 @@ def get_projection_manager() -> ProjectionManager:
 
 
 def reset_projection_manager() -> None:
-    """Reset the projection manager singleton (for testing)."""
+    """Reset the projection manager singleton (for testing).
+
+    The in-memory session timeline goes with it. It is reached through the
+    manager and nowhere else, so leaving it behind would carry one test's
+    recorded operations into the next.
+    """
     get_projection_manager.cache_clear()
+    reset_in_memory_session_timeline()

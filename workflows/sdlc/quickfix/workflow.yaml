@@ -55,6 +55,17 @@ phases:
     output_artifacts:
       - markdown
 
+    # PUBLISHES ITS OWN WORK, DELIBERATELY (#1197). This workflow has no
+    # separate verifier by design - it opens a PR that declares it was not
+    # independently verified. So unlike `sdlc-implement-v1`, the phase making
+    # the change is the phase entitled to publish it, and it needs the
+    # `pull_requests: write` that every non-publishing phase now gives up.
+    #
+    # Its prompt's own refusal ("if a gate fails, do not open a PR") stays a
+    # prompt-level decision, and that is the right level for it: this phase
+    # legitimately HOLDS publication and is choosing when to exercise it.
+    can_open_pr: true
+
     # BUDGET, DERIVED - and it is a scope signal, not just a limit.
     #
     # WHAT THIS NUMBER BOUNDS. Agent work only. Provisioning - the clone and

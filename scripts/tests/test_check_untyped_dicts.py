@@ -34,17 +34,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_untyped_dicts import (
+    MAPPING_NAMES,
+    UNCONSTRAINED_VALUES,
     Occurrence,
-    contains_untyped_mapping,
-    find_untyped_mappings,
+    contains_dict_shaped_state,
+    find_dict_shaped_state,
     main,
+    module_shapes,
     scan_package,
 )
 
 
 def count(source: str) -> int:
     """Occurrences in a dedented snippet, so tests can be written indented."""
-    return len(find_untyped_mappings(textwrap.dedent(source)))
+    return len(find_dict_shaped_state(textwrap.dedent(source)))
 
 
 @pytest.mark.unit
@@ -138,7 +141,7 @@ class TestProseIsNotCode:
     def test_the_module_docstring_of_the_gate_itself_counts_zero(self) -> None:
         """The regex counted its own explanation. This one must not."""
         gate = Path(__file__).resolve().parents[1] / "check_untyped_dicts.py"
-        occurrences = find_untyped_mappings(gate.read_text())
+        occurrences = find_dict_shaped_state(gate.read_text())
         assert occurrences == [], f"gate counts itself: {occurrences}"
 
 
@@ -191,7 +194,7 @@ class TestAliases:
             def one(a: D) -> D: ...
             """
         )
-        (occurrence,) = find_untyped_mappings(source)
+        (occurrence,) = find_dict_shaped_state(source)
         assert occurrence == Occurrence(line=2, text="dict[str, Any]")
 
 
@@ -215,7 +218,7 @@ class TestUnparseableFilesAreLoud:
 
     def test_the_parser_refuses_to_guess(self) -> None:
         with pytest.raises(SyntaxError):
-            find_untyped_mappings("def f(:\n")
+            find_dict_shaped_state("def f(:\n")
 
     def test_a_broken_file_is_named_in_the_scan(self, tmp_path: Path) -> None:
         scan = scan_package("pkg", self._package(tmp_path, broken=True), allowed=99, issue="#1188")
@@ -273,7 +276,7 @@ class TestPackageScanning:
 
 @pytest.mark.unit
 class TestTheNodeLevelEntry:
-    """``contains_untyped_mapping`` is what ADR-063's boundary gate consumes.
+    """``contains_dict_shaped_state`` is what ADR-063's boundary gate consumes.
 
     That gate used to run its own regex over annotation source text and so
     shared the defect this change fixes: renaming a Protocol parameter from
@@ -291,10 +294,10 @@ class TestTheNodeLevelEntry:
         ["x: dict[str, Any]\n", "x: Mapping[str, object]\n", "x: list[dict[str, Any]]\n"],
     )
     def test_finds_erased_mappings_by_default(self, source: str) -> None:
-        assert contains_untyped_mapping(self._annotation(source))
+        assert contains_dict_shaped_state(self._annotation(source))
 
     def test_a_typed_mapping_is_not_flagged(self) -> None:
-        assert not contains_untyped_mapping(self._annotation("x: Mapping[str, int]\n"))
+        assert not contains_dict_shaped_state(self._annotation("x: Mapping[str, int]\n"))
 
     def test_str_values_are_opaque_only_when_the_caller_says_so(self) -> None:
         """ADR-063 counts ``dict[str, str]``; the ratchet does not.
@@ -303,13 +306,896 @@ class TestTheNodeLevelEntry:
         by the caller rather than duplicated in a second regex.
         """
         annotation = self._annotation("x: dict[str, str]\n")
-        assert not contains_untyped_mapping(annotation)
-        assert contains_untyped_mapping(annotation, values=frozenset({"str", "Any", "object"}))
+        assert not contains_dict_shaped_state(annotation)
+        assert contains_dict_shaped_state(annotation, values=frozenset({"str", "Any", "object"}))
 
     def test_the_boundary_gate_can_no_longer_be_dodged_by_renaming(self) -> None:
         """The PR #1186 evasion, applied to a Protocol signature."""
         opaque = frozenset({"str", "Any", "object"})
         for spelling in ("dict[str, object]", "Mapping[str, object]", "Dict[str, Any]"):
-            assert contains_untyped_mapping(self._annotation(f"x: {spelling}\n"), values=opaque), (
-                spelling
-            )
+            assert contains_dict_shaped_state(
+                self._annotation(f"x: {spelling}\n"), values=opaque
+            ), spelling
+
+
+@pytest.mark.unit
+class TestTypedDictIsDictShapedState:
+    """(f) ``TypedDict`` is a dict that the ratchet used to be blind to.
+
+    The reproduction is #1248's, which is PR #1246's. A change failed
+    ``check-untyped-dicts`` with a ``dict[str, Any]``, replaced it with a
+    ``TypedDict`` carrying the same string keys, and the gate went green.
+    Independent review refused the head anyway::
+
+        A TypedDict is still dictionary-shaped structured state and is consumed
+        through json["permissions"]. Passing the AST ratchet does not satisfy
+        that requirement; it only shows the ratchet does not count this
+        spelling.
+
+    Unlike the mapping shapes, a ``TypedDict`` counts regardless of its value
+    types: ``contents: str`` constrains the value perfectly and still fails the
+    rule, because the rule is about string-keyed access to structured state,
+    not about erasure. So there is no "typed enough" ``TypedDict`` and no case
+    below that should score zero.
+    """
+
+    def test_the_issue_reproduction_is_reported(self) -> None:
+        """#1248 verbatim. Against the pre-fix gate this returns ``[]``."""
+        source = """
+        from typing import TypedDict
+
+        class Permissions(TypedDict):
+            contents: str
+            pull_requests: str
+
+        def read(p: Permissions) -> str:
+            return p["contents"]
+        """
+        (occurrence,) = find_dict_shaped_state(textwrap.dedent(source))
+        assert occurrence.text == "class Permissions(TypedDict)"
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("bare base", "class P(TypedDict):\n    a: int\n"),
+            ("dotted base", "class P(typing.TypedDict):\n    a: int\n"),
+            (
+                "typing_extensions, the runtime-features spelling",
+                "class P(typing_extensions.TypedDict):\n    a: int\n",
+            ),
+            ("total=False", "class P(TypedDict, total=False):\n    a: int\n"),
+            ("functional syntax", 'P = TypedDict("P", {"a": int})\n'),
+            ("dotted functional syntax", 'P = typing.TypedDict("P", {"a": int})\n'),
+        ],
+    )
+    def test_every_declaration_form_counts_once(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_declaration_counts_and_its_usages_do_not(self) -> None:
+        """Same rule as an alias: the fix happens once, at the declaration.
+
+        Replacing the declaration with a dataclass repairs every reference to
+        it, so counting the references would measure popularity rather than
+        debt.
+        """
+        source = """
+        class P(TypedDict):
+            a: int
+
+        def one(p: P) -> P: ...
+        def two(p: P) -> None: ...
+        """
+        assert count(source) == 1
+
+    def test_a_docstring_about_typeddict_counts_zero(self) -> None:
+        """Prose is prose for the new shape too, not only for ``dict``."""
+        source = '''
+        def f(rows):
+            """Normalise rows.
+
+            The upstream payload is a TypedDict, so class P(TypedDict) applies.
+            """
+            return rows
+        '''
+        assert count(source) == 0
+
+    def test_a_plain_class_is_not_a_typed_dict(self) -> None:
+        source = """
+        @dataclass(frozen=True)
+        class P:
+            a: int
+        """
+        assert count(source) == 0
+
+
+@pytest.mark.unit
+class TestImportAliasesDoNotHide:
+    """(g) A shape renamed on the way in is the same shape.
+
+    ``_trailing_name`` answers what a type expression is *called*, which is why
+    the dotted spellings resolve. It cannot see a rename that happened in the
+    import statement: ``from typing import Dict as D`` makes ``D[str, Any]``
+    the same annotation under a name that appears in no constant here. That is
+    the same seam #1188 closed for formatting, left open for imports - and the
+    cheapest possible dodge once ``TypedDict`` is counted.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("aliased typing.Dict", "from typing import Dict as D\nx: D[str, Any]\n"),
+            (
+                "aliased collections.abc.Mapping",
+                "from collections.abc import Mapping as M\nx: M[str, object]\n",
+            ),
+            (
+                "aliased MutableMapping",
+                "from collections.abc import MutableMapping as MM\nx: MM[str, Any]\n",
+            ),
+            ("aliased builtin dict", "from builtins import dict as d\nx: d[str, Any]\n"),
+            ("aliased value type", "from typing import Any as A\nx: dict[str, A]\n"),
+            (
+                "aliased TypedDict base",
+                "from typing import TypedDict as TD\nclass P(TD):\n    a: int\n",
+            ),
+            (
+                "aliased TypedDict, functional",
+                'from typing import TypedDict as TD\nP = TD("P", {"a": int})\n',
+            ),
+            (
+                "aliased inside a forward reference",
+                'from typing import Dict as D\nx: "D[str, Any]"\n',
+            ),
+        ],
+    )
+    def test_the_alias_is_resolved(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_an_unrelated_alias_is_not_invented(self) -> None:
+        """Resolution must not turn every short name into a mapping."""
+        source = """
+        from decimal import Decimal as D
+        x: D
+        y: dict[str, D]
+        """
+        assert count(source) == 0
+
+    def test_a_module_alias_still_resolves_by_attribute(self) -> None:
+        """``import typing as t`` already worked; it must keep working."""
+        assert count("import typing as t\nx: t.Dict[str, Any]\n") == 1
+
+
+@pytest.mark.unit
+class TestSimpleNamespaceIsErasureWithDotSyntax:
+    """(h) ``SimpleNamespace`` is ``dict[str, Any]`` wearing attribute access.
+
+    It declares no fields at all, so a type checker knows less about it than
+    about the ``dict[str, Any]`` the gate already counts, and
+    ``SimpleNamespace(**payload)`` is a one-line way to turn a counted
+    annotation into an uncounted one. Every place the name is written is a
+    place the erasure has to be repaired, so each is counted - there is no
+    single declaration site to attribute it to the way there is for an alias or
+    a ``TypedDict``.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("construction", "obj = SimpleNamespace(a=1, b=2)\n"),
+            ("dotted construction", "obj = types.SimpleNamespace(a=1)\n"),
+            ("parameter annotation", "def f(o: SimpleNamespace) -> None: ...\n"),
+            ("return annotation", "def f() -> SimpleNamespace: ...\n"),
+            ("aliased import", "from types import SimpleNamespace as NS\nobj = NS(a=1)\n"),
+        ],
+    )
+    def test_counted_once(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_import_alone_is_not_a_use(self) -> None:
+        assert count("from types import SimpleNamespace\n") == 0
+
+
+@pytest.mark.unit
+class TestNamedTupleIsDeliberatelyNotCounted:
+    """(i) The judgement call #1248 asked for, pinned so it stays a decision.
+
+    A ``NamedTuple`` names and types every field and is read by attribute, so
+    it satisfies both halves of the rule this gate enforces: it is not a
+    dictionary, and there is no string-keyed lookup to replace. ``EventInfo``
+    in ``syn-domain`` is the shape the rule wants people to move *toward*;
+    charging budget for it would push them back to the thing it replaced.
+
+    Its real weaknesses - positional unpacking, index access, comparing equal
+    to a bare tuple - are a different concern from the one measured here, and
+    counting them would quietly widen the gate from "not dict-shaped" to "must
+    be a Pydantic model", which is not the rule AGENTS.md states. If that
+    becomes the rule, it should arrive as its own gate with its own budgets,
+    not smuggled in under this one.
+    """
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "class P(NamedTuple):\n    a: int\n",
+            "class P(typing.NamedTuple):\n    a: int\n",
+            'P = NamedTuple("P", [("a", int)])\n',
+        ],
+    )
+    def test_counts_zero(self, source: str) -> None:
+        assert count(source) == 0, f"should not count: {source!r}"
+
+    def test_but_an_erased_field_inside_one_still_counts(self) -> None:
+        """Excluding the container does not excuse what it holds."""
+        assert count("class P(NamedTuple):\n    a: dict[str, Any]\n") == 1
+
+
+@pytest.mark.unit
+class TestAssignmentRenamesDoNotHide:
+    """(j) A rename is a rename, whichever statement performs it.
+
+    ``TestImportAliasesDoNotHide`` closed the rename that happens on the import
+    line. It left open the cheaper one: ``D = dict`` needs no import at all, is
+    one line, and every constructor this gate knows about could be spelled
+    through it without spending a byte of budget. Closing a spelling and
+    leaving that open recreates #1188 one level up - a number that stays still
+    for a shape nobody listed - which is the defect this gate exists to stop.
+
+    A rename writes no type. ``D = dict`` erases nothing on its own; the
+    erasure arrives later at ``D[str, Any]`` and is counted there, exactly as
+    it is for ``from typing import Dict as D``. That is what separates it from
+    ``D = dict[str, Any]`` in ``TestAliases``, which is a complete type
+    expression and is counted where it is written.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            ("renamed builtin dict", "D = dict\nx: D[str, Any]\n"),
+            ("renamed typing.Dict", "from typing import Dict\nD = Dict\nx: D[str, Any]\n"),
+            (
+                "renamed Mapping",
+                "from collections.abc import Mapping\nM = Mapping\nx: M[str, object]\n",
+            ),
+            (
+                "renamed MutableMapping",
+                "from collections.abc import MutableMapping\nMM = MutableMapping\nx: MM[str, Any]\n",
+            ),
+            ("renamed by attribute", "import typing\nD = typing.Dict\nx: D[str, Any]\n"),
+            (
+                "renamed TypedDict base",
+                "from typing import TypedDict\nTD = TypedDict\nclass P(TD):\n    a: int\n",
+            ),
+            (
+                "renamed TypedDict, functional",
+                'from typing import TypedDict\nTD = TypedDict\nP = TD("P", {"a": int})\n',
+            ),
+            ("renamed value type", "from typing import Any\nA = Any\nx: dict[str, A]\n"),
+            ("renamed key type", "S = str\nx: dict[S, Any]\n"),
+            ("renamed inside a forward reference", 'D = dict\nx: "D[str, Any]"\n'),
+            (
+                "renamed under an annotation",
+                "from typing import TypeAlias\nD: TypeAlias = dict\nx: D[str, Any]\n",
+            ),
+            ("renamed by a type statement", "type D = dict\nx: D[str, Any]\n"),
+            ("renamed twice", "D = dict\nE = D\nx: E[str, Any]\n"),
+            (
+                "renamed from an import rename",
+                "from typing import Dict as D\nE = D\nx: E[str, Any]\n",
+            ),
+        ],
+    )
+    def test_the_rename_is_resolved(self, label: str, source: str) -> None:
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_the_rename_itself_writes_no_type(self) -> None:
+        """``D = dict`` is not an erased mapping until someone parameterises it."""
+        assert count("D = dict\nE = Mapping\n") == 0
+
+    @pytest.mark.parametrize(
+        ("label", "source"),
+        [
+            (
+                "quoted under a TypeAlias annotation",
+                'from typing import TypeAlias\nD: TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted under a dotted TypeAlias annotation",
+                'import typing\nD: typing.TypeAlias = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted by a type statement",
+                'type D = "dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename of a dotted constructor",
+                'type D = "typing.Dict"\nx: D[str, Any]\n',
+            ),
+            (
+                "quoted rename, chained onwards",
+                'type D = "dict"\nE = D\nx: E[str, Any]\n',
+            ),
+        ],
+    )
+    def test_an_alias_may_write_the_renamed_name_in_quotes(self, label: str, source: str) -> None:
+        """A quoted identifier renames exactly as the unquoted one does (#1268).
+
+        ``D: TypeAlias = "dict"`` is a forward reference to a constructor, and
+        the erasure still arrives at ``D[str, Any]``. Reading only the unquoted
+        spelling leaves the table not knowing ``D``, so the use below it counts
+        nothing at all - the number stays still for a spelling nobody listed.
+        """
+        assert count(source) == 1, f"{label} should count once: {source!r}"
+
+    def test_a_quoted_alias_of_a_whole_type_is_not_a_rename(self) -> None:
+        """``D: TypeAlias = "dict[str, Any]"`` writes a type, so it is not a rename.
+
+        The unquoted rule already separates ``D = dict`` from ``D = dict[str,
+        Any]``; quoting must not collapse that distinction. The alias is a
+        complete type expression and is counted once where it stands, not
+        again at every use.
+        """
+        source = 'from typing import TypeAlias\nD: TypeAlias = "dict[str, Any]"\nx: D\ny: D\n'
+
+        assert count(source) == 1
+
+    def test_a_plain_string_assignment_is_not_an_alias(self) -> None:
+        """``D = "dict"`` binds a string at runtime, and must stay unrecognised.
+
+        This is the boundary that keeps the quoted form honest. Reading every
+        string assignment as a rename would enrol ``NAME = "dict"`` in a
+        settings module and invent mappings out of ordinary data.
+        """
+        assert count('D = "dict"\nx: D[str, Any]\n') == 0
+
+    def test_an_unrelated_rename_is_not_invented(self) -> None:
+        """Resolution must not turn every assigned name into a mapping."""
+        source = """
+        from decimal import Decimal
+        D = Decimal
+        x: D
+        y: dict[str, D]
+        """
+        assert count(source) == 0
+
+    def test_a_rename_cycle_terminates(self) -> None:
+        """``a = b`` and ``b = a`` name nothing and must not hang the walk."""
+        assert count("a = b\nb = a\nx: a[str, Any]\n") == 0
+
+    def test_the_erased_use_is_reported_at_its_own_line(self) -> None:
+        """The budget is spent where the type is written, not where it is named."""
+        source = textwrap.dedent(
+            """
+            D = dict
+
+            def one(a: D[str, Any]) -> None: ...
+            """
+        )
+        (occurrence,) = find_dict_shaped_state(source)
+        assert occurrence == Occurrence(line=4, text="D[str, Any]")
+
+    def test_every_use_of_a_renamed_namespace_counts(self) -> None:
+        """``SimpleNamespace`` is counted per use, so a rename must not pool them.
+
+        Two constructions behind a renamed constructor are two ad-hoc shapes,
+        the same as two written out in full. Before renames were resolved this
+        source counted one - the name on the rename line - however many objects
+        it went on to build.
+
+        Three and not two: the rename line writes ``SimpleNamespace`` itself,
+        and the rule for this shape is that every written mention is a place
+        the erasure has to be repaired. Deleting the rename is one of the ways
+        to repair it, so it is a fair place to charge for.
+        """
+        source = """
+        from types import SimpleNamespace
+        NS = SimpleNamespace
+        first = NS(a=1)
+        second = NS(b=2)
+        """
+        assert count(source) == 3
+
+    def test_a_name_being_bound_is_not_a_use(self) -> None:
+        """Resolving the rename must not make the rename line count twice."""
+        assert count("from types import SimpleNamespace\nNS = SimpleNamespace\n") == 1
+
+    def test_rebinding_a_matched_name_does_not_switch_counting_off(self) -> None:
+        """The hole that resolving renames opens if it is allowed both ways.
+
+        Python cannot tell ``D = dict`` (a type rename) from ``object =
+        object.func`` (a local rebinding) - and the second is real code, in
+        ``_pytest/doctest.py``, where it sits in the same file as a
+        ``dict[str, object]`` the gate must go on counting. Resolving it would
+        make three words anywhere in a file switch off counting for every
+        erased mapping in that file: a wider dodge than any this gate closes,
+        and a silent one, because the annotation at the point of use is
+        unchanged and still reads as erased.
+        """
+        source = """
+        def f(x: dict[str, object]) -> None:
+            object = object.func
+        """
+        assert count(source) == 1
+
+    def test_a_rename_cannot_redefine_the_value_types(self) -> None:
+        """``Any = str`` must not talk the gate out of a hit either."""
+        assert count("Any = str\nx: dict[str, Any]\n") == 1
+
+    def test_an_import_cannot_redefine_a_matched_name_either(self) -> None:
+        """One rule for both statements, or the hole just moves back.
+
+        ``from x import y as object`` is the import spelling of the rebinding
+        above, and would silence the file the same way. Guarding assignments
+        and not imports would leave the cheaper half of the pair open, which is
+        the mistake this whole class of fix keeps being about.
+        """
+        source = """
+        from decimal import Decimal as object
+        x: dict[str, object]
+        """
+        assert count(source) == 1
+
+
+@pytest.mark.unit
+class TestASecondBindingDoesNotUnbindTheFirst:
+    """(k) Two bindings of one name are two bindings, not the later one.
+
+    Resolving renames was first written as one map from name to name, which
+    can only hold one binding per name, so the last one written won. That is a
+    guess about scope made by a pass that reads no scopes, and it guessed
+    wrong in the ordinary direction: an unrelated rebinding of a short alias -
+    inside a function, where it cannot possibly affect a module-level
+    annotation - deleted the import that made the alias a mapping, and every
+    use of it below stopped counting.
+
+    The bug arrived *with* the fix for assignment renames and regressed import
+    renames, which had worked. Nothing caught it, because the tests for each
+    rename form used that form alone: a module with one binding per name is
+    the one module where last-one-wins is always right. So these cases all
+    combine two bindings of the same name, which is the smallest module that
+    can tell the two implementations apart.
+    """
+
+    def test_a_nested_rebinding_does_not_cancel_an_import_rename(self) -> None:
+        """The reported regression, in the fewest lines that show it."""
+        source = """
+        from typing import Dict as D
+
+        def unrelated():
+            D = SomeClass
+            return D
+
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_nested_rebinding_does_not_cancel_an_assignment_rename(self) -> None:
+        """The same module with the rename spelled the other way.
+
+        Both spellings feed one map, so both were exposed; fixing only the
+        import half would leave the cheaper half of the pair open, which is
+        the mistake this class of fix keeps being about.
+        """
+        source = """
+        D = dict
+
+        def unrelated():
+            D = SomeClass
+            return D
+
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_module_level_rebinding_does_not_cancel_it_either(self) -> None:
+        """Nesting is not what makes it wrong - having two bindings is."""
+        source = """
+        from typing import Dict as D
+        x: D[str, Any]
+        D = SomeClass
+        """
+        assert count(source) == 1
+
+    def test_the_order_of_the_two_bindings_does_not_decide_it(self) -> None:
+        """Whichever came first, the mapping binding still counts.
+
+        Pinned in both orders because "last one wins" and "first one wins" are
+        equally arbitrary: the walk order is the AST's, not the reader's, and
+        an answer that depends on it is an answer nobody can predict from the
+        source.
+        """
+        source = """
+        D = SomeClass
+        from typing import Dict as D
+        y: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_two_mapping_bindings_still_count_their_uses_once(self) -> None:
+        """Unioning bindings must not double-count the annotation below."""
+        source = """
+        from typing import Dict as D
+        D = Mapping
+        x: D[str, Any]
+        """
+        assert count(source) == 1
+
+    def test_a_use_is_counted_when_any_binding_makes_it_a_mapping(self) -> None:
+        """The deliberate over-report, pinned so it stays a decision.
+
+        Reading only ``unrelated``'s own ``D``, this annotation names a class
+        and is not a mapping - and it is counted anyway, because some binding
+        of ``D`` in this module is ``dict``. Telling those apart needs a symbol
+        table, which is more than an AST ratchet earns.
+
+        The direction is the point. Over-reporting costs someone an argument
+        in review, where a human decides; under-reporting is a shape that
+        walks past the gate with nobody present to notice. A ratchet may only
+        be wrong the first way.
+        """
+        source = """
+        D = dict
+
+        def unrelated():
+            D = SomeClass
+            y: D[str, Any] = D()
+        """
+        assert count(source) == 1
+
+    def test_a_second_binding_still_cannot_switch_a_matched_name_off(self) -> None:
+        """Unioning must not reopen the hole the one-way rule closes.
+
+        ``object`` is matched on directly, so it is never recorded as a rename
+        target at all - not once, not twice. Keeping every binding of a name
+        would be a way to smuggle that back in if the guard were applied to
+        the map instead of to the write.
+        """
+        source = """
+        from decimal import Decimal as object
+
+        def f(x: dict[str, object]) -> None:
+            object = object.func
+        """
+        assert count(source) == 1
+
+
+@pytest.mark.unit
+class TestModuleAwareShapes:
+    """A shape question answered WITH the module that made the renames (#1268).
+
+    The free ``contains_dict_shaped_state`` builds its collector with an empty
+    rename table and says so: a rename cannot be undone without the module that
+    made it. So ``D = dict`` followed by ``event_data: D`` is invisible to it.
+
+    A gate that parses whole files already holds the module, so that limit is
+    gratuitous for it. ``module_shapes`` carries the rename table forward.
+    """
+
+    @staticmethod
+    def _annotation(source: str) -> tuple[ast.Module, ast.expr]:
+        """Parse a module and hand back its last annotation."""
+        tree = ast.parse(source)
+        annotations = [
+            node.annotation
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign | ast.arg) and node.annotation is not None
+        ]
+        return tree, annotations[-1]
+
+    def test_a_renamed_bare_dict_is_seen_through_the_module(self) -> None:
+        """The case the expression-only entry point cannot answer.
+
+        This is the whole reason the API is module-aware. Centralising a type
+        behind an alias is good practice, and a gate that cannot follow the
+        alias would reward exactly the codebases that did it.
+        """
+        tree, annotation = self._annotation("D = dict\ndef f(event_data: D) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_the_free_function_still_cannot_and_that_is_documented(self) -> None:
+        """Not a regression: the free entry point has no module to consult.
+
+        Pinned so the two answers stay deliberately different rather than
+        drifting into one that silently loses rename resolution.
+        """
+        _tree, annotation = self._annotation("D = dict\ndef f(event_data: D) -> None: ...")
+
+        assert not contains_dict_shaped_state(annotation)
+
+    def test_a_bare_dict_is_only_counted_when_asked_for(self) -> None:
+        """The default must not move the ratchet's number.
+
+        An unparameterised ``dict`` is a different fault from ``dict[str, Any]``
+        - it declares nothing rather than erasing its values - and the ratchet
+        counts only the second. Counting bare dicts by default would change
+        every budget in fitness-exceptions.toml at once.
+        """
+        tree, annotation = self._annotation("def f(event_data: dict) -> None: ...")
+        shapes = module_shapes(tree)
+
+        assert not shapes.contains_dict_shaped_state(annotation)
+        assert shapes.contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_the_erasing_shape_is_still_seen_by_default(self) -> None:
+        """Turning the new axis off must not turn the old answer off too."""
+        tree, annotation = self._annotation("def f(d: dict[str, Any]) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation)
+
+    @pytest.mark.parametrize("spelling", ["dict", "Dict", "Mapping", "MutableMapping"])
+    def test_every_mapping_spelling_counts_as_bare(self, spelling: str) -> None:
+        """A vocabulary that knows one spelling is a vocabulary with a hole."""
+        tree, annotation = self._annotation(f"def f(d: {spelling}) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    def test_a_typed_name_is_not_a_bare_mapping(self) -> None:
+        """The false-positive direction: a real type must not be reported."""
+        tree, annotation = self._annotation("def f(e: SessionCompletedEvent) -> None: ...")
+
+        assert not module_shapes(tree).contains_dict_shaped_state(annotation, bare_mapping=True)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ["dict[str, Event]", "Mapping[str, Event]", "list[dict[str, Event]]", "d.Dict[str, Event]"],
+    )
+    def test_a_parameterised_mapping_is_not_a_bare_one(self, annotation: str) -> None:
+        """The constructor of a parameterised type is not an unparameterised one.
+
+        `dict` in `dict[str, Event]` is reached by the recursive descent, and
+        without suppression it reports every properly typed mapping in the
+        codebase. That is not a cosmetic false positive: a gate built on this
+        would fire on correct code, which is how a gate gets turned off.
+        """
+        tree, node = self._annotation(f"import d\ndef f(x: {annotation}) -> None: ...")
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    @pytest.mark.parametrize("annotation", ['"dict"', '"D"'])
+    def test_a_quoted_bare_mapping_is_still_a_bare_mapping(self, annotation: str) -> None:
+        """A quoted type is still a type, and the root can be the quote.
+
+        The collector descends into strings found in type POSITIONS, but the
+        whole annotation is not one of those until asked - so `x: "dict"`
+        answered False while `x: dict` answered True. A spelling the checker
+        cannot read is the defect this module exists to prevent.
+        """
+        tree, node = self._annotation(f"D = dict\ndef f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_quoted_parameterised_mapping_is_still_not_bare(self) -> None:
+        """Both fixes at once: the quote is followed, and what is inside is typed."""
+        tree, node = self._annotation('def f(x: "dict[str, Event]") -> None: ...')
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_quoted_erased_mapping_is_still_seen_by_default(self) -> None:
+        """Following the quote must not depend on the new axis being on."""
+        tree, node = self._annotation('def f(x: "dict[str, Any]") -> None: ...')
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_the_free_function_follows_a_root_quote_as_documented(self) -> None:
+        """Its docstring promises quoted spellings are followed. They were not.
+
+        A whole annotation that IS a forward reference handed the function a
+        string, and every visitor skipped it - so `x: "dict[str, Any]"`
+        answered False. ADR-063's boundary gate calls this function directly,
+        which meant a quoted erased mapping crossing a context boundary was
+        invisible to that gate.
+
+        Pre-existing, not introduced here; fixed because the free function is
+        the seam a production gate already depends on.
+        """
+        quoted = ast.parse('"dict[str, Any]"', mode="eval").body
+
+        assert contains_dict_shaped_state(quoted)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ['Literal["dict"]', 'Literal["Mapping"]', 'Annotated[str, "dict"]'],
+    )
+    def test_a_string_that_is_a_value_is_not_a_declaration(self, annotation: str) -> None:
+        """`Literal` holds values; `Annotated` holds metadata after its first argument.
+
+        Descending into those strings reads a value as a type. It counted
+        `Literal["dict[str, Any]"]` as erased state on main, and once
+        `bare_mapping` existed it counted `Literal["dict"]` as a bare mapping -
+        a false positive this API introduced.
+
+        It was nearly deferred on the argument that fixing it would lower the
+        ratchet counts. That argument was asserted rather than measured, and it
+        is false: none of these forms occur in the budgeted packages, so the
+        counts are unchanged.
+        """
+        tree, node = self._annotation(
+            f"from typing import Annotated, Literal\ndef f(x: {annotation}) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_annotated_still_reads_its_first_argument(self) -> None:
+        """Only the METADATA is exempt. The first argument is a real type."""
+        tree, node = self._annotation(
+            'from typing import Annotated\ndef f(x: Annotated["dict[str, Any]", "meta"]) -> None: ...'
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_quoted_type_elsewhere_is_still_followed(self) -> None:
+        """The exemption is two constructs, not a retreat from following quotes."""
+        tree, node = self._annotation('def f(x: list["dict[str, Any]"]) -> None: ...')
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    @pytest.mark.parametrize(
+        "annotation",
+        ["Literal[Choice.Mapping]", "Annotated[str, Mapping]", "Annotated[str, dict]"],
+    )
+    def test_a_non_type_position_is_exempt_structurally_not_just_textually(
+        self, annotation: str
+    ) -> None:
+        """The exemption must hold for the WALK, not only for string parsing.
+
+        The first attempt suppressed only `_descend_into_string`, while
+        `generic_visit` still walked every argument - so a quoted mapping was
+        exempt and an unquoted one, in the same position, was not. That is a
+        rule stated and half implemented, which is worse than not stating it:
+        it reads as covered.
+        """
+        tree, node = self._annotation(
+            "from typing import Annotated, Literal, Mapping\n"
+            "import Choice\n"
+            f"def f(x: {annotation}) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+    def test_a_mapping_in_annotated_metadata_is_not_erased_state(self) -> None:
+        """Metadata is not a type position for the default question either."""
+        tree, node = self._annotation(
+            "from typing import Annotated, Any\n"
+            "def f(x: Annotated[str, dict[str, Any]]) -> None: ..."
+        )
+
+        assert not module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_the_type_argument_of_annotated_is_still_read(self) -> None:
+        """Unquoted this time, so the structural path is the one under test."""
+        tree, node = self._annotation(
+            "from typing import Annotated, Any\n"
+            'def f(x: Annotated[dict[str, Any], "meta"]) -> None: ...'
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_subscript_whose_constructor_is_itself_a_subscript_is_read(self) -> None:
+        """`self.visit(node.value)` exists for this, and was otherwise untested.
+
+        Replacing `generic_visit` with a selective walk meant naming every
+        branch that still had to be taken. The constructor is one: when it is
+        itself a subscript, the shape lives inside it and nothing else visits
+        it. Mutation showed the line was inert against this repository, so the
+        case is pinned here rather than left as an unexercised branch.
+        """
+        tree, node = self._annotation(
+            "from typing import Any, Mapping\nimport Alias\n"
+            "def f(x: Alias[dict[str, Any]][int]) -> None: ..."
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node)
+
+    def test_a_bare_mapping_in_a_nested_constructor_is_read(self) -> None:
+        """Same branch, for the axis this API added."""
+        tree, node = self._annotation(
+            "from typing import Mapping\nimport Outer\ndef f(x: Outer[Mapping][int]) -> None: ..."
+        )
+
+        assert module_shapes(tree).contains_dict_shaped_state(node, bare_mapping=True)
+
+
+@pytest.mark.unit
+class TestAskingForACategoryRatherThanAList:
+    """``names_any_of``: whether a type expression writes any of some names.
+
+    ``contains_dict_shaped_state`` answers for one fixed shape parameterised by
+    a set of VALUE types, which is exactly what a caller cannot use when the
+    thing it needs to reject is a category. "Any mapping, whatever its values"
+    is not a set of value types, and neither is "names ``Any`` or ``object``
+    anywhere". The projection-handler gate needed both, and until it had them
+    it was reduced to listing the spellings it happened to know - which let
+    ``dict[str, str]``, ``object`` and a ``TypedDict`` straight through (#1281).
+
+    The point of putting it here rather than in the gate is that it inherits
+    rename resolution and quoted spellings, so a gate built on it cannot be
+    spelled around in the ways #1188 and #1248 documented.
+    """
+
+    @staticmethod
+    def _annotation(source: str) -> tuple[ast.Module, ast.expr]:
+        tree = ast.parse(source)
+        annotations = [
+            node.annotation
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign | ast.arg) and node.annotation is not None
+        ]
+        return tree, annotations[-1]
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            "dict",
+            "dict[str, str]",
+            "dict[str, Any]",
+            "Mapping[str, Row]",
+            "list[dict[str, int]]",
+            '"dict[str, str]"',
+            "dict[str, str] | None",
+        ],
+    )
+    def test_every_mapping_answers_regardless_of_its_parameters(self, annotation: str) -> None:
+        """The value type is not part of the question.
+
+        ``dict[str, Row]`` constrains its values perfectly and is still read as
+        ``value["key"]``. A caller that objects to the string-keyed access has
+        no value-type list to write, so it must be able to ask without one.
+        """
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    @pytest.mark.parametrize("annotation", ["Row", "int", "list[str]", "Envelope[Event]"])
+    def test_a_type_that_names_no_mapping_does_not_answer(self, annotation: str) -> None:
+        """The other direction, or the question above is answered by "yes"."""
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    @pytest.mark.parametrize("annotation", ["object", "Any", "Any | None", "typing.Any"])
+    def test_the_erasures_are_reachable_as_a_category_too(self, annotation: str) -> None:
+        """``object`` erases as much as ``Any``; neither is a mapping.
+
+        Both are invisible to ``contains_dict_shaped_state``, which only ever
+        looks for a mapping to put them inside. A parameter annotated plain
+        ``object`` is the gap that closed (#1281).
+        """
+        tree, node = self._annotation(f"def f(x: {annotation}) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, UNCONSTRAINED_VALUES)
+
+    def test_a_rename_is_undone_before_the_name_is_matched(self) -> None:
+        """One line, no import, nothing at the point of use to notice.
+
+        The #1248 lesson: when you close a spelling, close the class it belongs
+        to. A category question that could be evaded by ``D = dict`` would be
+        the same defect in a new API.
+        """
+        tree, node = self._annotation("D = dict\ndef f(x: D[str, str]) -> None: ...")
+
+        assert module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_a_literal_argument_is_a_value_and_is_not_read(self) -> None:
+        """``Literal["dict"]`` holds a string, not a declaration.
+
+        Pinned because reading it would make the string ``"dict"`` - a status
+        value, a namespace name - answer as a mapping, which is the false
+        positive that makes a gate built on this unusable.
+        """
+        tree, node = self._annotation('def f(x: Literal["dict"]) -> None: ...')
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_annotated_metadata_after_the_first_argument_is_not_read(self) -> None:
+        """Same rule, the other construct whose arguments are not all types."""
+        tree, node = self._annotation('def f(x: Annotated[str, "dict"]) -> None: ...')
+
+        assert not module_shapes(tree).names_any_of(node, MAPPING_NAMES)
+
+    def test_a_dotted_spelling_answers_on_its_trailing_name(self) -> None:
+        """``t.Mapping`` is ``Mapping``, and ``t`` is a module, not a type."""
+        tree, node = self._annotation("def f(x: t.Mapping[str, str]) -> None: ...")
+        shapes = module_shapes(tree)
+
+        assert shapes.names_any_of(node, MAPPING_NAMES)
+        assert not shapes.names_any_of(node, {"t"})

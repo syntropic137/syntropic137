@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Protocol
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts import AgentIdentity, ArtifactType, PhaseOutputFile
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
+    RECOVERED_SOURCE_PATH,
+    DescribeWork,
+    RecoveredArtifact,
     is_storable,
-    recover_empty_artifact,
+    recover_deliverable,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
@@ -30,11 +34,11 @@ from syn_shared.workspace_paths import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
-        ArtifactContentStoragePort,
-    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.artifacts.ports import (
+        ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         ArtifactRepository,
@@ -103,6 +107,24 @@ def map_artifact_type(type_str: str) -> ArtifactType:
     return _ARTIFACT_TYPE_MAP.get(type_str.lower(), ArtifactType.OTHER)
 
 
+async def _where_the_work_is(describe_work: DescribeWork | None) -> str | None:
+    """Ask where this phase's work stands, tolerating an inspection that fails.
+
+    A salvage runs on a phase that has already gone wrong once. An inspection
+    that raised here would turn a recoverable incident into an unrecoverable
+    one - the conclusion was in hand and would be discarded by the very code
+    trying to save it - so a failed reading becomes no reading, which is what
+    `None` already means to the caller.
+    """
+    if describe_work is None:
+        return None
+    try:
+        return await describe_work()
+    except Exception:
+        logger.warning("Could not read where the phase's work stands", exc_info=True)
+        return None
+
+
 #: What an artifact is tagged as when its phase declared no type at all.
 _UNDECLARED_ARTIFACT_TYPE: Final[str] = "text"
 
@@ -120,6 +142,35 @@ def _primary_type(declared: tuple[str, ...]) -> str:
     return declared[0] if declared else _UNDECLARED_ARTIFACT_TYPE
 
 
+class UnfinishedPhase(Enum):
+    """Why a phase's output is being kept even though the phase will not complete.
+
+    THE TWO WAYS A PHASE ENDS WITHOUT COMPLETING, and they are not the same
+    incident. An operator scanning a listing has to be able to tell work that
+    an interrupt cut short from work that is whole and belongs to a run that
+    failed anyway - #1321 is a 1322-line research deliverable of the second
+    kind - and the title is the only field they see before opening anything.
+
+    The marker lives on the member rather than at the call site so that the two
+    descriptions cannot drift, and so that `collect_from_unfinished_phase` has
+    one shape rather than a branch per caller. Adding a third way a phase can
+    end means adding a member here and nothing else.
+    """
+
+    #: Stopped by an operator or a cancel signal, mid-work. What is on disk is
+    #: a fragment of something that was still being written.
+    INTERRUPTED = "(partial)"
+    #: The run failed - the phase refused its own completion with a `false` or
+    #: unreadable `TASK_RESULT` (#1256), or its agent exited non-zero. What is
+    #: on disk may be entirely finished; only the run it belongs to is not
+    #: (#1321).
+    FAILED = "(kept from a failed phase)"
+
+    def title(self, *, phase_name: str, source_path: str) -> str:
+        """How this artifact is named in a listing, marker included."""
+        return f"{phase_name} {self.value}: {source_path}"
+
+
 @dataclass(frozen=True)
 class CollectedArtifacts:
     """Result of collecting artifacts from a workspace.
@@ -134,6 +185,40 @@ class CollectedArtifacts:
     artifact_ids: list[str]
     first_content: str | None
     files: list[PhaseOutputFile] = field(default_factory=list)
+    #: True when any of what was stored came from the agent's transcript
+    #: instead of from disk. The title marker and the banner tell a HUMAN
+    #: reading the artifact; this tells the execution record (#1195, #1300),
+    #: which is what anyone counting salvages across many runs reads.
+    deliverable_recovered: bool = False
+
+
+@dataclass(frozen=True)
+class _Deliverable:
+    """One thing a phase delivered, ready to store, whatever route it came by.
+
+    Exists so the storage loop cannot tell a written file from a recovered one
+    and therefore cannot treat them differently by accident. Every field it
+    needs is decided before the loop begins.
+    """
+
+    source_path: str
+    content: str
+    title: str
+    #: How this one arrived. The storage loop still cannot treat a recovered
+    #: deliverable differently - it never reads this - but the caller has to
+    #: report the fact, and the alternative was re-deriving it from the title
+    #: marker, which would make a display string load-bearing.
+    recovered: bool = False
+
+    @classmethod
+    def of(cls, recovered: RecoveredArtifact) -> _Deliverable:
+        """The recovered artifact as something to store, with nothing reworded."""
+        return cls(
+            source_path=recovered.source_path,
+            content=recovered.content,
+            title=recovered.title,
+            recovered=True,
+        )
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -219,8 +304,10 @@ class ArtifactCollector:
         Args:
             workspace: The workspace being provisioned for the NEXT phase.
             completed_phase_ids: Every phase already finished, not just the last.
-            phase_outputs: phase_id -> primary deliverable content. Feeds the
-                flat ``artifacts/input/<phase-id>.md`` alias.
+            phase_outputs: phase_id -> primary deliverable content, the
+                pre-#988 cache shape. Used only for a phase whose output tree
+                is unknown, and then it IS that phase's tree - a single file
+                whose path was never recorded.
             execution_id: Used to re-query the projection after a restart.
             phase_files: phase_id -> that phase's whole output tree (#988).
                 Omitted or missing a phase means "resolve it from the
@@ -230,24 +317,37 @@ class ArtifactCollector:
             return
 
         resolved = await self._resolve_phase_outputs(
-            completed_phase_ids, phase_outputs, execution_id
+            completed_phase_ids, phase_files or {}, phase_outputs, execution_id
         )
-        resolved_files = await self._resolve_phase_files(
-            completed_phase_ids, phase_files or {}, execution_id
-        )
-        await self._inject_and_log(workspace, resolved, resolved_files, completed_phase_ids)
+        await self._inject_and_log(workspace, resolved, completed_phase_ids)
 
-    async def _resolve_phase_files(
+    async def _resolve_phase_outputs(
         self,
         completed_phase_ids: list[str],
         phase_files: dict[str, list[PhaseOutputFile]],
+        phase_outputs: dict[str, str],
         execution_id: str,
     ) -> dict[str, list[PhaseOutputFile]]:
-        """Resolve phase output trees from cache, falling back to the projection.
+        """What each completed phase produced. The single authority (#1149).
 
-        Mirrors ``_resolve_phase_outputs``. The fallback matters because the
-        in-process cache dies with the processor; without it a restart would
-        hand the next phase the flat alias only and quietly lose the tree.
+        Every shape the next workspace receives is derived from this one
+        answer. There used to be a second resolution, for the flat alias
+        alone, with its own cache-then-projection fallback; nothing forced
+        the two to agree and they did not have to fail together, so a phase
+        could resolve as files and not as an output string and arrive with a
+        tree and no alias.
+
+        Sources in order of how much they know, first hit wins per phase:
+        the caller's file cache, the projection, then the caller's pre-#988
+        primary string. The last is a tree of one file with no recorded path
+        - the same shape a pre-v5 artifact has, and it reaches the next phase
+        the same way, through the alias only.
+
+        The projection is not asked for the alias separately because it
+        cannot answer differently: ``get_files_for_phase_injection`` applies
+        the same filter and the same ``_injection_rank`` as
+        ``get_for_phase_injection`` and returns the latter's answer as its
+        first entry.
         """
         resolved = {pid: phase_files[pid] for pid in completed_phase_ids if pid in phase_files}
         missing = [pid for pid in completed_phase_ids if pid not in resolved]
@@ -258,55 +358,69 @@ class ArtifactCollector:
                     completed_phase_ids=missing,
                 )
             )
-        return resolved
-
-    async def _resolve_phase_outputs(
-        self,
-        completed_phase_ids: list[str],
-        phase_outputs: dict[str, str],
-        execution_id: str,
-    ) -> dict[str, str]:
-        """Resolve phase outputs from cache, falling back to projection query."""
-        resolved = {pid: phase_outputs[pid] for pid in completed_phase_ids if pid in phase_outputs}
-        missing = [pid for pid in completed_phase_ids if pid not in resolved]
-        if missing and self._query_service:
-            projection_outputs = await self._query_service.get_for_phase_injection(
-                execution_id=execution_id,
-                completed_phase_ids=missing,
-            )
-            resolved.update(projection_outputs)
+        for phase_id in completed_phase_ids:
+            if phase_id not in resolved and phase_id in phase_outputs:
+                resolved[phase_id] = [
+                    PhaseOutputFile(source_path=None, content=phase_outputs[phase_id])
+                ]
         return resolved
 
     @classmethod
-    def _tree_files(
+    def _injectable(
         cls,
-        resolved_files: dict[str, list[PhaseOutputFile]],
+        phase_id: str,
+        produced: list[PhaseOutputFile],
         seen: set[str],
     ) -> list[tuple[str, bytes]]:
-        """Every produced file that may safely be injected, as (path, bytes).
+        """Everything one completed phase contributes, as (path, bytes).
 
-        Extracted from `_inject_and_log` rather than inlined: with the
-        containment refusal added, that method crossed the cognitive-complexity
-        threshold. Splitting on "which files are eligible" versus "write them"
-        is the natural seam anyway - the eligibility rules are what carry the
-        security argument and deserve to be readable on their own.
+        BOTH shapes come from the one list, which is the whole point of
+        #1149: the tree is every file whose path was recorded, and the flat
+        alias is the head of the same list. Deriving them together is what
+        makes "the tree exists but the alias does not" unrepresentable rather
+        than merely unlikely.
 
-        Mutates `seen` so the flat alias emitted afterwards can skip a path this
-        already claimed.
+        A file whose ``source_path`` is None predates ArtifactCreated v5, or
+        arrived as a bare pre-#988 primary string. Its path was never
+        recorded, so it reaches the next phase through the alias only;
+        inventing a path the author never chose is worse.
+
+        Mutates ``seen``: the first write to a path wins, across phases.
         """
         out: list[tuple[str, bytes]] = []
-        for phase_id, produced_files in resolved_files.items():
-            for produced in produced_files:
-                if produced.source_path is None:
-                    continue  # pre-v5 artifact: no path, alias only
-                path = cls._tree_path(phase_id, produced.source_path)
-                if path is None:
-                    continue  # refused: would escape the workspace
-                if path in seen:
-                    continue
-                seen.add(path)
-                out.append((path, produced.content.encode()))
+        for produced_file in produced:
+            if produced_file.source_path is None:
+                continue  # path unknown: this one travels as the alias
+            path = cls._tree_path(phase_id, produced_file.source_path)
+            if path is None:
+                continue  # refused: would escape the workspace
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append((path, produced_file.content.encode()))
+
+        primary = cls._primary_deliverable(produced)
+        alias = cls._flat_alias_path(phase_id)
+        if primary is not None and alias not in seen:
+            seen.add(alias)
+            out.append((alias, primary.encode()))
         return out
+
+    @staticmethod
+    def _primary_deliverable(produced: list[PhaseOutputFile]) -> str | None:
+        """The one file that stands for the phase, or None if it produced none.
+
+        The head of the list, because both sources put the primary
+        deliverable there: the projection sorts by ``_injection_rank``, which
+        ranks the explicitly-flagged primary first (#997), and the live path
+        collects in the order it flagged. Choosing here by any other rule
+        would recreate the disagreement #1149 removed, one layer down.
+
+        Empty content is not a deliverable - `CreateArtifactCommand` rejects
+        it and every other reader skips it, so a legacy or corrupt row cannot
+        become the alias.
+        """
+        return next((f.content for f in produced if f.content), None)
 
     @staticmethod
     def _tree_path(phase_id: str, source_path: str) -> str | None:
@@ -375,8 +489,7 @@ class ArtifactCollector:
     async def _inject_and_log(
         cls,
         workspace: ArtifactWorkspace,
-        resolved_outputs: dict[str, str],
-        resolved_files: dict[str, list[PhaseOutputFile]],
+        resolved: dict[str, list[PhaseOutputFile]],
         completed_phase_ids: list[str],
     ) -> None:
         """Inject every earlier phase's output tree, plus the flat alias.
@@ -388,29 +501,21 @@ class ArtifactCollector:
         * ``artifacts/input/<phase-id>.md`` - the primary deliverable under the
           pre-#988 name, so existing workflows keep reading.
 
-        A file whose ``source_path`` is None predates ArtifactCreated v5. Its
-        original path was never recorded, so it gets the flat alias only; the
-        alternative would be inventing a path the author never chose.
+        Both are derived from ``resolved``, per phase, so a phase that
+        contributes one contributes the other.
         """
         files_to_inject: list[tuple[str, bytes]] = []
         seen: set[str] = set()
 
-        for path, content in cls._tree_files(resolved_files, seen):
-            files_to_inject.append((path, content))
-
-        for phase_id, content in resolved_outputs.items():
-            alias = cls._flat_alias_path(phase_id)
-            if alias in seen:
-                continue
-            seen.add(alias)
-            files_to_inject.append((alias, content.encode()))
+        for phase_id, produced in resolved.items():
+            files_to_inject.extend(cls._injectable(phase_id, produced, seen))
 
         if files_to_inject:
             await workspace.inject_files(files_to_inject)
             logger.info(
                 "Injected %d file(s) from previous phases: %s",
                 len(files_to_inject),
-                sorted(set(resolved_outputs) | set(resolved_files)),
+                sorted(resolved),
             )
         elif completed_phase_ids:
             logger.warning(
@@ -427,7 +532,9 @@ class ArtifactCollector:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
         last_agent_message: str | None = None,
+        describe_work: DescribeWork | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
 
@@ -435,11 +542,27 @@ class ArtifactCollector:
         aggregates. `output_artifact_types` is what the phase's workflow
         definition PROMISED it would produce.
 
-        A phase that promised output and delivered none does not return - it
-        raises. Before #1167 it returned empty here and the execution advanced
-        as though the phase had succeeded, so a `verify` phase could drop out
-        of a run while every surface still reported completed. The signal was
-        already present and simply nothing consumed it.
+        A phase that promised output and delivered none does not advance on
+        silence. Before #1167 it returned empty here and the execution carried
+        on as though the phase had succeeded, so a `verify` phase could drop
+        out of a run while every surface still reported completed.
+
+        But "delivered none" is about the deliverable, not about the file.
+        `last_agent_message` is the last thing the phase's agent said on its
+        own stream, and it is consulted whenever the deliverable is not
+        readable from disk - the file was empty (#1195) or no collectable file
+        was written at all (#1300). Both salvage the same way and both say so
+        in the stored artifact's title and first line. Only when BOTH routes
+        are empty does the phase fail, and then it fails naming which route was
+        missing.
+
+        `describe_work` says where the phase's branches stand and is asked ONLY
+        when salvaging, because a salvaged phase does not fail and so never
+        reaches the failure path that otherwise reports this (#1200). Its
+        answer goes into the artifact, which is then the only record of where
+        the surviving work is.
+        `agent` is who ran the phase, recorded on every artifact so a later
+        phase can show that a DIFFERENT model checked the work (#1284).
 
         A phase that wrote a file and left it EMPTY is a different incident and
         gets a different answer (#1195). `last_agent_message` is the last thing
@@ -451,7 +574,8 @@ class ArtifactCollector:
 
         Raises:
             PhaseProducedNoDeclaredOutputError: the phase declared output
-                artifact types and produced none of them.
+                artifact types, produced none of them, and said nothing on its
+                stream to recover either.
             EmptyPhaseArtifactError: the phase wrote a file with no content and
                 nothing could be recovered from its transcript either.
 
@@ -463,33 +587,22 @@ class ArtifactCollector:
         )
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
-        # Judged on COLLECTABLE files, not on what the glob returned: a phase
-        # whose entire output tree was build junk produced no deliverable, and
-        # that is the same failure as writing nothing at all.
-        if output_artifact_types and not artifacts:
-            raise PhaseProducedNoDeclaredOutputError(
-                phase_id=phase_id,
-                phase_name=phase_name,
-                declared=output_artifact_types,
-            )
+        deliverables = await self._deliverables(
+            artifacts=artifacts,
+            output_artifact_types=output_artifact_types,
+            phase_id=phase_id,
+            phase_name=phase_name,
+            last_agent_message=last_agent_message,
+            describe_work=describe_work,
+        )
 
         artifact_type = _primary_type(output_artifact_types)
         artifact_ids: list[str] = []
         files: list[PhaseOutputFile] = []
         first_content: str | None = None
 
-        for index, (artifact_path, artifact_content) in enumerate(artifacts):
+        for index, deliverable in enumerate(deliverables):
             artifact_id = str(uuid4())
-            content_str = artifact_content.decode("utf-8", errors="replace")
-            title = f"{phase_name}: {artifact_path}"
-            if not is_storable(content_str):
-                content_str, title = self._recover_or_fail(
-                    last_agent_message=last_agent_message,
-                    phase_id=phase_id,
-                    phase_name=phase_name,
-                    artifact_path=artifact_path,
-                    title=title,
-                )
             await self.create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=workflow_id,
@@ -497,61 +610,117 @@ class ArtifactCollector:
                 execution_id=execution_id,
                 session_id=session_id,
                 artifact_type=artifact_type,
-                content=content_str,
-                title=title,
-                source_path=artifact_path,
+                content=deliverable.content,
+                title=deliverable.title,
+                source_path=deliverable.source_path,
+                agent=agent,
                 # The flat `<phase-id>.md` alias reads this after a restart,
                 # so it must name the file the live path injects (#997).
                 is_primary_deliverable=index == 0,
             )
             artifact_ids.append(artifact_id)
-            files.append(PhaseOutputFile(source_path=artifact_path, content=content_str))
+            files.append(
+                PhaseOutputFile(
+                    source_path=deliverable.source_path,
+                    content=deliverable.content,
+                )
+            )
             if first_content is None:
-                first_content = content_str
+                first_content = deliverable.content
 
         return CollectedArtifacts(
             artifact_ids=artifact_ids,
             first_content=first_content,
             files=files,
+            deliverable_recovered=any(d.recovered for d in deliverables),
         )
 
     @staticmethod
-    def _recover_or_fail(
+    async def _deliverables(
         *,
-        last_agent_message: str | None,
+        artifacts: list[tuple[str, bytes]],
+        output_artifact_types: tuple[str, ...],
         phase_id: str,
         phase_name: str,
-        artifact_path: str,
-        title: str,
-    ) -> tuple[str, str]:
-        """The content and title to store for a file that came back empty (#1195).
+        last_agent_message: str | None,
+        describe_work: DescribeWork | None,
+    ) -> list[_Deliverable]:
+        """What this phase actually delivered, whatever route it arrived by.
 
-        Deliberately raises rather than skipping the file. Skipping would put
-        the execution back where #1167 found it - advancing past a phase whose
-        declared output never materialised - and the whole value of failing
-        here is that it is now a NAMED incident rather than a schema complaint.
+        The single place that decides between the three states a phase can be
+        in; the caller above only stores what comes back. Splitting the
+        decision across the storage loop is what let #1300 exist: the empty
+        file was salvaged inside the loop and "no file" was refused before the
+        loop was ever reached, so the two incidents were answered by different
+        code that had no reason to agree.
+
+        Whichever route the content came by, a recovered deliverable is stored
+        marked - `recover_deliverable` owns the title, the banner and the path,
+        so there is one description of "recovered" and not two.
         """
-        recovered = recover_empty_artifact(
-            last_agent_message=last_agent_message,
-            source_path=artifact_path,
-            title=title,
-        )
-        if recovered is None:
-            raise EmptyPhaseArtifactError(
-                phase_id=phase_id,
-                phase_name=phase_name,
-                source_path=artifact_path,
+        # Judged on COLLECTABLE files, not on what the glob returned: a phase
+        # whose entire output tree was build junk produced no deliverable, and
+        # that is the same incident as writing nothing at all.
+        if output_artifact_types and not artifacts:
+            recovered = recover_deliverable(
+                last_agent_message=last_agent_message,
+                wrote=None,
+                title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
+                work=await _where_the_work_is(describe_work),
             )
-        logger.warning(
-            "Phase %s (%s) wrote an empty %s; recovered its content from the "
-            "session transcript instead of failing the execution (#1195)",
-            phase_id,
-            phase_name,
-            artifact_path,
-        )
-        return recovered.content, recovered.title
+            if recovered is None:
+                raise PhaseProducedNoDeclaredOutputError(
+                    phase_id=phase_id,
+                    phase_name=phase_name,
+                    declared=output_artifact_types,
+                )
+            logger.warning(
+                "Phase %s (%s) declared %s and wrote no collectable file; recovered "
+                "its conclusion from the session transcript instead of discarding "
+                "the execution (#1300)",
+                phase_id,
+                phase_name,
+                ", ".join(output_artifact_types),
+            )
+            return [_Deliverable.of(recovered)]
 
-    async def collect_partial(
+        deliverables: list[_Deliverable] = []
+        for artifact_path, artifact_content in artifacts:
+            content_str = artifact_content.decode("utf-8", errors="replace")
+            title = f"{phase_name}: {artifact_path}"
+            if is_storable(content_str):
+                deliverables.append(
+                    _Deliverable(source_path=artifact_path, content=content_str, title=title)
+                )
+                continue
+            recovered = recover_deliverable(
+                last_agent_message=last_agent_message,
+                wrote=artifact_path,
+                title=title,
+                work=await _where_the_work_is(describe_work),
+            )
+            # Deliberately raises rather than skipping the file. Skipping would
+            # put the execution back where #1167 found it - advancing past a
+            # phase whose declared output never materialised - and the whole
+            # value of failing here is that it is now a NAMED incident rather
+            # than a schema complaint.
+            if recovered is None:
+                raise EmptyPhaseArtifactError(
+                    phase_id=phase_id,
+                    phase_name=phase_name,
+                    source_path=artifact_path,
+                )
+            logger.warning(
+                "Phase %s (%s) wrote an empty %s; recovered its content from the "
+                "session transcript instead of failing the execution (#1195)",
+                phase_id,
+                phase_name,
+                artifact_path,
+            )
+            deliverables.append(_Deliverable.of(recovered))
+        return deliverables
+
+    async def collect_from_unfinished_phase(
         self,
         workspace: ArtifactWorkspace,
         workflow_id: str,
@@ -560,20 +729,36 @@ class ArtifactCollector:
         session_id: str,
         phase_name: str,
         output_artifact_types: tuple[str, ...],
+        agent: AgentIdentity,
+        outcome: UnfinishedPhase,
     ) -> list[str]:
-        """Collect whatever an interrupted phase managed to write. Never raises.
+        """Keep whatever a phase that will not complete managed to write. Never raises.
 
         Deliberately does NOT enforce the output contract that
-        `collect_from_workspace` enforces. An interrupted phase is already
-        failing or cancelled, and its outcome is decided by the interrupt; the
-        only question left here is how much of its work can be salvaged.
-        Raising on an empty salvage would replace a truthful "cancelled" with a
-        misleading "contract violated" and lose the real reason (#1167).
+        `collect_from_workspace` enforces, and deliberately does not salvage
+        from the transcript either. A phase reaching here already has its
+        outcome decided - by an interrupt, or by a run that failed - and the
+        only question left is how much of its work survives. Raising a contract
+        violation over an empty salvage would replace a truthful reason with a
+        misleading one and lose the real one (#1167); substituting the
+        transcript would invent a deliverable for a phase whose conclusion is
+        already recorded as the failure.
+
+        `outcome` says WHY the phase will not complete, and is the only thing
+        that differs between the two callers. It decides the artifact's title
+        and nothing else, which is what keeps "stopped by an operator" and
+        "failed on its own report" distinguishable in a listing without giving
+        this loop two shapes to have (#1321).
+
+        Returns the ids of what was kept, newest question first: an empty list
+        is the ordinary answer for a phase that wrote nothing, and is not an
+        error.
         """
         try:
-            # Same filter as the happy path: collect_partial is the interrupt
-            # route and shares the pattern, so fixing only the other site would
-            # leave every cancelled run still sweeping junk (issue #919).
+            # Same filter as the happy path: this is the route a phase takes
+            # when it will not complete, and it shares the pattern, so fixing
+            # only the other site would leave every such run sweeping junk
+            # (issue #919).
             partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
             partial_artifacts = [
                 (path, body) for path, body in partial_collected if _is_collectable(path)
@@ -606,14 +791,21 @@ class ArtifactCollector:
                     session_id=session_id,
                     artifact_type=artifact_type,
                     content=content_str,
-                    title=f"{phase_name} (partial): {artifact_path}",
+                    title=outcome.title(phase_name=phase_name, source_path=artifact_path),
                     source_path=artifact_path,
+                    # Only the first, for the reason the happy path gives: the
+                    # flat `<phase-id>.md` alias resolves through this flag, and
+                    # a phase that wrote four files used to declare four
+                    # primaries and leave the alias to a tiebreak.
+                    is_primary_deliverable=not artifact_ids,
+                    agent=agent,
                 )
                 artifact_ids.append(artifact_id)
             return artifact_ids
         except Exception as err:
             logger.warning(
-                "Failed to collect partial artifacts for %s: %s",
+                "Failed to keep the output of unfinished phase %s (%s): %s",
+                phase_id,
                 session_id,
                 err,
             )
@@ -629,6 +821,7 @@ class ArtifactCollector:
         artifact_type: str,
         content: str,
         title: str,
+        agent: AgentIdentity,
         source_path: str | None = None,
         is_primary_deliverable: bool = True,
     ) -> None:
@@ -637,15 +830,37 @@ class ArtifactCollector:
         ``source_path`` is where the file sat under ``artifacts/output/``. It is
         recorded as a field rather than left implicit in ``title`` so the
         handoff can rebuild the tree without parsing a display string (#988).
+
+        ``agent`` is who produced it - the harness the platform launched and the
+        model that harness announced (#1284). Required rather than defaulted,
+        because a caller that forgets it would write an artifact whose producer
+        is unprovable, and the whole point of the field is that it cannot be
+        silently absent. Pass ``UNREPORTED_AGENT`` when no phase ran.
         """
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
+            ArtifactStorageError,
             CreateArtifactCommand,
         )
 
         artifact_type_enum = map_artifact_type(artifact_type)
 
-        # Upload content to object storage if configured (ADR-012)
+        # Upload content to object storage if configured (ADR-012).
+        #
+        # The event below carries this storage_uri, and a consumer that reacts
+        # to it fetches the bytes straight away - so a read of the object has
+        # to return them before we get here (#700). That is the port's
+        # contract rather than a step in this method: the domain should not
+        # know how a backend establishes readability, only that a returned URI
+        # can be read. A backend that cannot confirm it raises
+        # ArtifactStorageError, and we leave storage_uri None - the artifact is
+        # still whole, because the event embeds the content either way.
+        #
+        # ONLY that exception. A bare `except Exception` here would swallow our
+        # own bugs - a bad keyword argument to upload() would read as a backend
+        # outage and silently downgrade every artifact to event-store-only,
+        # forever, with a warning nobody reads. Degrading is a response to
+        # storage being unavailable, not to this method being wrong.
         storage_uri: str | None = None
         if self._content_storage is not None:
             try:
@@ -671,10 +886,10 @@ class ArtifactCollector:
                         "size_bytes": result.size_bytes,
                     },
                 )
-            except Exception as e:
+            except ArtifactStorageError as e:
                 logger.warning(
-                    "Failed to upload artifact to object storage, "
-                    "content will be stored in event store only",
+                    "Artifact content is not readable from object storage, "
+                    "content will be stored in the event store only",
                     extra={"artifact_id": artifact_id, "error": str(e)},
                 )
 
@@ -689,6 +904,8 @@ class ArtifactCollector:
             content=content,
             title=title,
             source_path=source_path,
+            agent_provider=agent.provider,
+            agent_model=agent.model,
             storage_uri=storage_uri,
             is_primary_deliverable=is_primary_deliverable,
         )

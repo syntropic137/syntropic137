@@ -178,7 +178,7 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
 
 
 async def _build_agent_env(
-    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str]
+    workspace: ManagedWorkspace, session_id: str, repos: Sequence[str], *, can_open_pr: bool
 ) -> dict[str, str]:
     """Build agent environment for workspace execution.
 
@@ -246,7 +246,7 @@ async def _build_agent_env(
     #   {"total_count": 2,  "repos": ["AgentParadise/..."]}
     #   $ GH_TOKEN=<hosts.yml> gh api /installation/repositories
     #   {"total_count": 6,  "repos": ["syntropic137/syntropic137", ...]}
-    gh_token = await _resolve_github_app_token(repos)
+    gh_token = await _resolve_github_app_token(repos, can_open_pr=can_open_pr)
     if gh_token:
         env[ENV_GITHUB_TOKEN] = gh_token
 
@@ -304,8 +304,15 @@ def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
     return {ENV_GH_REPO: primary[0]} if primary else {}
 
 
-async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
+async def _resolve_github_app_token(repos: Sequence[str], *, can_open_pr: bool) -> str | None:
     """Mint an installation token for the repo under work.
+
+    SCOPED TO WHAT THE PHASE MAY DO (#1197). `gh` prefers $GITHUB_TOKEN over
+    the hosts.yml credential the setup phase writes, so a full-permission
+    token here would hand publication back to a phase whose hosts.yml entry
+    had just been scoped to prevent it. The two credential paths have to
+    agree, which is the same lesson #1129 drew about which installation they
+    resolve.
 
     ASKS GITHUB WHICH INSTALLATION OWNS THE REPO, rather than listing every
     installation and matching account logins. `GET /repos/{owner}/{repo}/
@@ -334,7 +341,6 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
             get_installation_for_repo,
             list_installations,
         )
-        from syn_adapters.github.client_token import get_installation_token
         from syn_shared.settings.github import GitHubAppSettings
 
         github_settings = GitHubAppSettings()
@@ -352,7 +358,9 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
                     "No repo to route the GitHub token on (repo-less workflow); "
                     "using the first installation"
                 )
-                return await get_installation_token(client, str(installations[0]["id"]))
+                return await client.mint_agent_token(
+                    str(installations[0]["id"]), can_open_pr=can_open_pr
+                )
 
             for name in repo_names:
                 try:
@@ -360,7 +368,7 @@ async def _resolve_github_app_token(repos: Sequence[str]) -> str | None:
                 except Exception:
                     logger.debug("No GitHub App installation owns %s", name, exc_info=True)
                     continue
-                return await get_installation_token(client, installation_id)
+                return await client.mint_agent_token(installation_id, can_open_pr=can_open_pr)
 
             logger.warning(
                 "No GitHub App installation owns any of %s; leaving GITHUB_TOKEN unset "
@@ -481,12 +489,15 @@ class WorkspaceProvisionHandler:
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
+                phase_name=phase.name,
                 clone_repos=phase.clone_repos,
+                can_open_pr=phase.can_open_pr,
                 include_codex_auth=include_codex_auth,
             )
             await self._materialize_claude_plugins(workspace, phase)
             await self._materialize_and_install_skills(workspace, phase)
             await self._install_baked_delegation_skill(workspace, phase)
+            await self._install_attribution_hook(workspace)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], outputs, todo
             )
@@ -510,10 +521,17 @@ class WorkspaceProvisionHandler:
         workspace: ManagedWorkspace,
         effective_repos: list[str],
         *,
+        phase_name: str,
         clone_repos: bool,
+        can_open_pr: bool,
         include_codex_auth: bool,
     ) -> None:
-        """Run setup phase and inject synthetic context files (ADR-058).
+        """Run the secret-injection setup and inject synthetic context files (ADR-058).
+
+        ``phase_name`` is here for the failure message alone. The ADR-024 setup
+        step runs INSIDE every phase, so "setup failed" on its own points an
+        operator at the workflow phase usually called "Prepare the workspace" -
+        which is a different thing and, in #1236, had completed.
 
         ``clone_repos=False`` (#1187) still hands the full repo list to
         ``SetupPhaseSecrets``, so the phase keeps its per-repo git credentials
@@ -526,15 +544,16 @@ class WorkspaceProvisionHandler:
         secrets = await SetupPhaseSecrets.create(
             repositories=effective_repos,
             clone_repos=clone_repos,
+            can_open_pr=can_open_pr,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
             detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
-            msg = f"Setup phase failed: {detail}"
+            msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
             raise RuntimeError(msg)
-        logger.info("Setup phase completed, secrets cleared")
+        logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
         # Both files are identical: direct @-imports of each repo's AGENTS.md and
@@ -703,7 +722,9 @@ class WorkspaceProvisionHandler:
             phase.agent_config.allow_delegation,
         )
         agent_env = (
-            await _build_agent_env(workspace, session_id, effective_repos)
+            await _build_agent_env(
+                workspace, session_id, effective_repos, can_open_pr=phase.can_open_pr
+            )
             if needs_claude_env
             else {}
         )
@@ -739,6 +760,80 @@ class WorkspaceProvisionHandler:
             "https://github.com/org/repo-b/"   → "repo-b"
         """
         return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+    @staticmethod
+    async def _install_attribution_hook(workspace: ManagedWorkspace) -> None:
+        """Put the operator co-authorship hook where the image's own git config looks.
+
+        The image is meant to carry this. The ``claude-cli`` provider does; the
+        ``omni-agent`` provider does not, and its entrypoint skips a missing hook
+        source in silence, so on those images every agent commit is authored by
+        the bot alone with nothing anywhere saying attribution is off
+        (AgentParadise/agentic-primitives#401).
+
+        Installing at provision time makes attribution work on EVERY image,
+        including ones built before the hook existed - which is what actually
+        makes the feature real, rather than real-once-the-next-image-ships.
+
+        No-op when attribution is not configured. The hook is itself a no-op in
+        that case, but writing a file nobody asked for into every workspace is
+        worse than not writing it, and the check is one settings read.
+
+        Failures are logged, never raised. A missing trailer is a lost credit; a
+        raise here would cost the whole phase. That trade only holds because the
+        install is verified - see below - so a silent failure cannot be mistaken
+        for success.
+        """
+        from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_hooks import (
+            HOOK_FILENAME,
+            WORKSPACE_HOOKS_DIR,
+            attribution_hook_source,
+        )
+        from syn_shared.settings.git_identity import OperatorSettings
+
+        if not OperatorSettings().is_configured:
+            return
+
+        target = WORKSPACE_HOOKS_DIR / HOOK_FILENAME
+        # inject_files' base_path never reaches the container: copy_to_workspace
+        # writes relative to the workspace root and takes no base_path at all
+        # (adapter_copy.py:118-133). Passing one is accepted and discarded, which
+        # put the hook at /workspace/prepare-commit-msg and left chmod reporting
+        # "No such file or directory". So stage inside the workspace, then MOVE
+        # it into place with a shell that can create the directory.
+        #
+        # The staging name is dotted and the move is a `mv`, so nothing is left
+        # behind for an agent to notice or accidentally commit.
+        staged = ".syn-attribution-hook"
+        try:
+            await workspace.inject_files([(staged, attribution_hook_source())])
+            install = await workspace.execute(
+                [
+                    "sh",
+                    "-c",
+                    f"mkdir -p {WORKSPACE_HOOKS_DIR} "
+                    f"&& mv /workspace/{staged} {target} "
+                    f"&& chmod +x {target}",
+                ],
+                timeout_seconds=30,
+            )
+            if install.exit_code != 0:
+                logger.warning(
+                    "attribution hook could not be installed at %s: %s",
+                    target,
+                    install.stderr,
+                )
+                return
+            # Assert the effect, not the call. Writing a file and reporting
+            # success is how this feature stayed broken for four months, and a
+            # hook git cannot execute is ignored in silence.
+            check = await workspace.execute(["test", "-x", str(target)], timeout_seconds=30)
+            if check.exit_code != 0:
+                logger.warning("attribution hook is not present after install at %s", target)
+            else:
+                logger.info("attribution hook installed at %s", target)
+        except Exception as exc:
+            logger.warning("attribution hook install failed at %s: %s", target, exc)
 
     @staticmethod
     async def _install_baked_delegation_skill(

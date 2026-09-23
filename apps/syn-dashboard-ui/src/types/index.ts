@@ -261,7 +261,42 @@ export interface WorkflowExecutionSummary {
   total_phases: number
   total_tokens: number
   total_cost_usd: number
+  /**
+   * Why a `failed` run failed, as `ExecutionRunSummary` now carries it (#1367).
+   *
+   * Absent until this change, so Workflow Runs had nothing to pass its badge
+   * and every correct refusal on that page read as a plain red failure - the
+   * one surface a prop could not fix, because the server was not sending it.
+   *
+   * Optional, unlike on `ExecutionListItem`: this interface is hand-written
+   * rather than aliased to the generated schema, and a required field here
+   * would be a claim about the wire that only the generated type can make.
+   */
+  failure_classification?: FailureClassification
 }
+
+/**
+ * Why a `failed` run failed: the machinery broke, or the work was refused (#1357).
+ *
+ * Aliased to the generated enum rather than restated, so a member added on the
+ * server is a compile error here instead of a string this UI silently renders
+ * as an unhandled default.
+ */
+export type FailureClassification = components['schemas']['FailureClassification']
+
+/**
+ * What a failing phase SAID caused it, in its own word (#1392).
+ *
+ * A REPORT and not a measurement, which is why it is a separate type from
+ * `FailureClassification` rather than more members on it: the only thing
+ * corroborating anything here is that the process exited cleanly. Rendered as
+ * attribution - see `reportedFailureNote` - and never used to pick a colour.
+ *
+ * Aliased to the generated enum for the same reason the type above is: a word
+ * added on the server is a compile error here rather than a string this UI
+ * silently renders as an unhandled default.
+ */
+export type ReportedFailureReason = components['schemas']['ReportedFailureReason']
 
 /** Item in the global execution list (includes workflow_name + display fields) */
 export interface ExecutionListItem {
@@ -281,6 +316,16 @@ export interface ExecutionListItem {
   duration_seconds: number | null
   duration_display: string
   tool_call_count: number
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
@@ -339,6 +384,17 @@ export interface ExecutionDetailResponse {
   started_at: string | null
   completed_at: string | null
   phases: PhaseExecutionDetail[]
+  /**
+   * Phases this run set out to do.
+   *
+   * NOT `phases.length`, which counts the phases that started: a three-phase
+   * run that died in phase one carries one phase and a total of 3, and the
+   * gap is the two phases that never ran (#1147). 0 means the count is
+   * unknown, which is a projection that has not rebuilt, not a run with no
+   * phases.
+   */
+  total_phases: number
+  completed_phases: number
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number
@@ -353,6 +409,26 @@ export interface ExecutionDetailResponse {
   unpriced_observation_count: number
   artifact_ids: string[]
   error_message: string | null
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
+  /**
+   * What the failing phase SAID caused it, in its own word (#1392).
+   *
+   * Optional and nullable because most runs have nothing here: a phase that
+   * named no cause, and every report written before the field existed, both
+   * arrive as absent. Shown as attribution beside the classification above -
+   * see `reportedFailureNote` - and never used to decide a colour, because
+   * the agent chose this word and nothing corroborates it.
+   */
+  reported_failure_reason?: ReportedFailureReason | null
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   // Workspace info (ADR-021)

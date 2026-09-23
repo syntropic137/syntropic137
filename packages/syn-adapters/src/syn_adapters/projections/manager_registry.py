@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
 from syn_adapters.projections.session_tools import SessionToolsProjection
 from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
@@ -52,6 +53,7 @@ from syn_domain.contexts.organization.slices.repo_correlation import (
 )
 from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
 from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores import ProjectionStoreProtocol
@@ -60,14 +62,21 @@ logger = logging.getLogger(__name__)
 
 
 def create_session_tools_projection() -> SessionToolsProjection:
-    """Create SessionToolsProjection with TimescaleDB access.
+    """Create the session timeline for this environment.
 
-    This projection queries TimescaleDB for tool operations.
-    See ADR-029: Simplified Event System
+    Production queries TimescaleDB for tool operations (ADR-029). The pool is
+    not passed here because the store may not be initialized yet; the
+    projection gets it lazily.
 
-    Note: We don't pass the pool here because the store may not be
-    initialized yet. The projection will get the pool lazily.
+    Test and offline runs have no hypertable, so the SQL-backed projection can
+    only ever answer empty there - and an empty answer that means "no database"
+    is indistinguishable from one that means "nothing was recorded", which is
+    precisely the confusion #1034 lived in. They get the in-memory timeline
+    instead, which the write path records into, so an operation recorded in a
+    test is readable in that test.
     """
+    if get_settings().uses_in_memory_stores:
+        return get_in_memory_session_timeline()
     return SessionToolsProjection(pool=None)
 
 

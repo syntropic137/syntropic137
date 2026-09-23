@@ -29,6 +29,18 @@ class PhaseCompletedEvent(DomainEvent):
     artifact_id: str | None = None
     session_id: str | None = None
 
+    #: True when this phase's deliverable was recovered from the session
+    #: transcript instead of being written to `artifacts/output/`.
+    #:
+    #: A salvaged phase COMPLETES - discarding a finished run over a missing
+    #: report is the cost #1300 measured - but a phase that completed while
+    #: its declared contract was broken must not be indistinguishable from one
+    #: that honoured it. Without this field it was: a salvaged phase's
+    #: PhaseCompleted was byte-for-byte a clean phase's, so neither an
+    #: operator reading one execution nor anyone counting across many could
+    #: tell how often the salvage was firing or which runs stood on it.
+    deliverable_recovered: bool = False
+
     # Metrics (tokens only — cost lives in Lane 2)
     input_tokens: int = 0
     output_tokens: int = 0

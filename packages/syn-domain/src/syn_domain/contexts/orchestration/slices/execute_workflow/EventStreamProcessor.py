@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
@@ -27,6 +28,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScan
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
+    VerdictReader,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.delegation import (
     DELEGATION_TARGET_BY_PRIMARY,
@@ -36,7 +41,7 @@ from syn_shared.delegation import (
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
@@ -261,7 +266,13 @@ class StreamResult:
     line_count: int
     interrupt_requested: bool
     interrupt_reason: str | None
-    agent_task_result: dict[str, Any] | None
+    #: What the phase said about its own outcome, read off the last thing its
+    #: agent said. Never None: a phase that made no claim reports
+    #: `NOT_REPORTED`, which is a fact about the run and not a missing value
+    #: (#1256). The dispatcher refuses to complete a phase whose verdict
+    #: refuses completion, so this field is READ, unlike the raw dict it
+    #: replaced - which nothing downstream ever consumed.
+    verdict: AgentVerdict = field(default_factory=AgentVerdict.not_reported)
     conversation_lines: list[str] = field(default_factory=list)
     # Authoritative totals from the CLI result event (ISS-217).
     #
@@ -304,6 +315,54 @@ class StreamResult:
     #: different fact from "it said something empty" and the artifact path
     #: needs to be able to tell them apart.
     last_agent_message: str | None = None
+    #: The model the HARNESS announced for this run, read off its own stream
+    #: (#1284). Not the model the phase requested, and not derived from it:
+    #: those two diverge in practice, and a requested value reported as the one
+    #: that ran would be worse than no value at all, because a reader would
+    #: take it as evidence.
+    #:
+    #: FIRST announcement wins, the same rule and the same reason as
+    #: ``leader_native_session_id``: a delegate or subagent line arriving late
+    #: must not rebind the leader's identity at the end of the run.
+    #:
+    #: None means the harness announced none. That is the codex case today -
+    #: its stream carries no model, which is why its cost goes unpriced rather
+    #: than guessed (#788) - and it is also what a stream cut off before its
+    #: first announcement leaves behind.
+    announced_model: str | None = None
+
+
+def announced_model_from(*candidates: object) -> str | None:
+    """The model this line says is running, or None if it does not say (#1284).
+
+    Shared by both stream processors, because the RULE is harness-neutral even
+    though the places to look are not: the first candidate that is a non-blank
+    string wins. ``CodexStreamProcessor`` imports it rather than restating it,
+    so "" and a late rebind are rejected identically on both streams.
+
+    Claude states it in two places and both are the harness speaking about
+    itself: the ``system``/``init`` line carries it at the top level, and every
+    ``assistant`` line repeats it under ``message``. Both are offered here
+    rather than picking one, so a recording that begins mid-stream still yields
+    an answer instead of none.
+
+    The candidates are passed as values rather than the line itself: the
+    parameter would otherwise be one more ``Mapping[str, Any]``, which spends
+    ratchet budget to say nothing (#673).
+
+    Returns None for a line that carries no model at all, which is most of
+    them, and for a blank one - "" is not an identity and must not displace the
+    real value that a later line may carry.
+    """
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    return None
+
+
+def _model_under_message(message: object) -> object:
+    """``model`` as an assistant line carries it, under ``message``."""
+    return message.get("model") if isinstance(message, Mapping) else None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -328,7 +387,6 @@ class _LineOutcome:
     #: still a cancel (#918).
     interrupt_requested: bool = False
     interrupt_reason: str | None = None
-    task_result: dict[str, Any] | None = None
 
 
 class EventStreamProcessor:
@@ -369,6 +427,14 @@ class EventStreamProcessor:
         self._result_num_turns: int | None = None
         self._error_reason: str | None = None
         self._last_agent_message: str | None = None
+        # Two different questions about the same words, so two fields. The
+        # message above is the agent's LAST words, which is what the artifact
+        # fallback wants (#1195). The verdict is what the agent CLAIMED, and
+        # that is read as each message arrives rather than off whatever text
+        # survived to the end - a claim already read cannot then be erased by
+        # a later "done" (#1256).
+        self._verdict_reader = VerdictReader()
+        self._announced_model: str | None = None
 
         # #894: A claude phase delegates to `codex exec`. Track the tool_use_ids
         # of those invocations so the tool_result can tell "tried and failed"
@@ -433,19 +499,25 @@ class EventStreamProcessor:
         line_count = 0
         interrupt_requested = False
         interrupt_reason: str | None = None
-        agent_task_result: dict[str, Any] | None = None
 
         async for line in stream:
             line_count += 1
             outcome = await self._process_line(line, line_count, workspace)
             if line.strip():
                 conversation_lines.append(line)
-            if outcome.task_result is not None:
-                agent_task_result = outcome.task_result
             if outcome.action is _LineAction.BREAK:
                 interrupt_requested = outcome.interrupt_requested
                 interrupt_reason = outcome.interrupt_reason
                 break
+
+        # Read from what the agent SAID, not only from the terminal `result`
+        # line: a phase that was killed or timed out after stating its verdict
+        # is exactly the phase whose verdict matters, and the terminal line is
+        # the thing it is missing (#1195, #1256). Already decided by now - the
+        # reader was fed each message as it arrived, so nothing here depends on
+        # which message happened to be last.
+        verdict = self._verdict_reader.verdict
+        logger.info("Agent verdict: %s %s", verdict.status.name, verdict.comments[:100])
 
         logger.info(
             "Agent runner streaming complete: %d lines, cost=$%s, harness totals: %s",
@@ -460,7 +532,7 @@ class EventStreamProcessor:
             line_count=line_count,
             interrupt_requested=interrupt_requested,
             interrupt_reason=interrupt_reason,
-            agent_task_result=agent_task_result,
+            verdict=verdict,
             conversation_lines=conversation_lines,
             total_cost_usd=self._result_cost_usd,
             reported_usage=self._reported_usage,
@@ -471,6 +543,7 @@ class EventStreamProcessor:
             delegation_successes=self._delegation_successes,
             leader_native_session_id=self._leader_native_session_id,
             last_agent_message=self._last_agent_message,
+            announced_model=self._announced_model,
         )
 
     async def _process_line(
@@ -497,8 +570,8 @@ class EventStreamProcessor:
                 await self._process_hook_event(hook_event)
             return _LineOutcome(action=_LineAction.CONTINUE)
 
-        task_result = await self._process_cli_event(line)
-        return _LineOutcome(action=_LineAction.CONTINUE, task_result=task_result)
+        await self._process_cli_event(line)
+        return _LineOutcome(action=_LineAction.CONTINUE)
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
@@ -566,13 +639,13 @@ class EventStreamProcessor:
                 tools_used=stopped_event.tools_used,
             )
 
-    async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
-        """Process a Claude CLI native event. Returns task result if found."""
+    async def _process_cli_event(self, line: str) -> None:
+        """Process a Claude CLI native event."""
         try:
             cli_event = json.loads(line)
         except json.JSONDecodeError:
             logger.debug("Non-JSON line: %s", line[:50])
-            return None
+            return
 
         cli_type = cli_event.get("type", "")
         logger.debug("CLI event type: %s", cli_type)
@@ -587,10 +660,13 @@ class EventStreamProcessor:
             if isinstance(announced, str) and announced.strip():
                 self._leader_native_session_id = announced
 
-        task_result: dict[str, Any] | None = None
+        if self._announced_model is None:
+            self._announced_model = announced_model_from(
+                cli_event.get("model"), _model_under_message(cli_event.get("message"))
+            )
 
         if cli_type == "result":
-            task_result = await self._handle_result_event(cli_event)
+            await self._handle_result_event(cli_event)
 
         if cli_type == "assistant":
             await self._handle_assistant_event(cli_event)
@@ -600,24 +676,6 @@ class EventStreamProcessor:
 
         if cli_type == "system":
             logger.debug("CLI message: %s", cli_type)
-
-        return task_result
-
-    @staticmethod
-    def _parse_task_result(result_text: str) -> dict[str, Any] | None:
-        """Extract the structured TASK_RESULT JSON block from a result string."""
-        if "TASK_RESULT:" not in result_text:
-            return None
-        try:
-            marker = "TASK_RESULT:"
-            raw = result_text[result_text.rfind(marker) + len(marker) :].strip()
-            brace_end = raw.find("}")
-            if brace_end >= 0:
-                raw = raw[: brace_end + 1]
-            return json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            logger.debug("Could not parse TASK_RESULT block")
-            return None
 
     def _capture_result_tokens(self, cli_event: ClaudeResultLine) -> None:
         """Store authoritative cumulative token counts from a result event.
@@ -641,27 +699,25 @@ class EventStreamProcessor:
             self._reported_usage.cache_creation,
         )
 
-    async def _handle_result_event(self, cli_event: ClaudeResultLine) -> dict[str, Any] | None:
-        """Handle a result event — extract task result and token usage."""
+    async def _handle_result_event(self, cli_event: ClaudeResultLine) -> None:
+        """Handle a result event — remember the agent's last word and its totals."""
         result_text = cli_event.get("result", "")
-        task_result = self._parse_task_result(result_text) if result_text else None
-        if task_result:
-            logger.info(
-                "Agent task result: success=%s comments=%s",
-                task_result.get("success"),
-                str(task_result.get("comments", ""))[:100],
-            )
         if cli_event.get("is_error") and result_text:
             self._error_reason = _extract_error_reason(result_text)
         elif result_text.strip():
             # The terminal, most-complete statement the agent made, so it wins
-            # over anything remembered mid-stream. Skipped when `is_error`,
+            # over any earlier message remembered mid-stream - the MESSAGE,
+            # that is. The verdict below is settled by `VerdictReader` and is
+            # not the last speaker's to overwrite. Skipped when `is_error`,
             # where `result` holds the harness's own failure text rather than
             # the agent's - recovering THAT into an artifact would file a stack
             # trace as a verdict (#1195).
             self._last_agent_message = result_text
+            # Inside the same branch, for the same reason: `is_error` text is
+            # the HARNESS's, and harness prose that mentions the marker would
+            # otherwise be read as the agent having botched a report.
+            self._verdict_reader.read(result_text)
         self._capture_result_tokens(cli_event)
-        return task_result
 
     async def _handle_assistant_event(self, cli_event: dict[str, Any]) -> None:
         """Handle assistant event — extract per-turn tokens and tool_use.
@@ -678,7 +734,19 @@ class EventStreamProcessor:
 
         await self._record_turn_usage_once(message)
 
-        for item in message.get("content", []):
+        content = message.get("content") or []
+        if content:
+            # ANY content, before a single block is looked at. The loop below
+            # knows two block types and the model emits more than two:
+            # `thinking` spends real tokens and settles what the agent is about
+            # to do, and a type shipped after this parser was written is read
+            # here as nothing at all. Both used to leave the attempt indexed as
+            # "never started" and eligible to be run again from the top, so
+            # what is claimed here is only what is certain - the model produced
+            # a turn - and recognising the turn is left to the loop (#1303).
+            self._collector.note_agent_activity()
+
+        for item in content:
             if not isinstance(item, dict):
                 continue
             if item.get("type") == "tool_use":
@@ -692,6 +760,12 @@ class EventStreamProcessor:
                 said = str(item.get("text", ""))
                 if said.strip():
                     self._last_agent_message = said
+                    # Parsed HERE, in the turn that said it. This assignment
+                    # is last-one-wins by design and always was; feeding the
+                    # reader on the same line is what stops the verdict
+                    # inheriting that, which is how a terminated failure
+                    # report followed by "done" used to complete (#1256).
+                    self._verdict_reader.read(said)
 
     async def _record_turn_usage_once(self, message: Mapping[str, Any]) -> None:
         """Record per-turn token usage, deduped by message.id (#695)."""

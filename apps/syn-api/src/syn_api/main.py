@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from agentic_logging import get_logger, setup_logging
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from syn_api.config import get_api_config
@@ -21,6 +21,7 @@ from syn_api.routes import (
     executions_router,
     github_router,
     insights_router,
+    maintenance_router,
     metrics_router,
     observability_router,
     organizations_router,
@@ -33,6 +34,7 @@ from syn_api.routes import (
     webhooks_router,
     workflows_router,
 )
+from syn_api.strict_query import reject_unknown_query_params
 from syn_api.types import Err, Ok
 
 if TYPE_CHECKING:
@@ -93,6 +95,11 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        # Refuse a query parameter no route declares, everywhere, once (#1313).
+        # A global dependency is the only registration point that also covers
+        # routes added later - see syn_api.strict_query for why neither
+        # middleware nor a route_class can be applied in one place here.
+        dependencies=[Depends(reject_unknown_query_params)],
     )
 
     # Add CORS middleware for frontend dev server
@@ -143,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(systems_router)
     app.include_router(repos_router)
     app.include_router(insights_router)
+    app.include_router(maintenance_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:

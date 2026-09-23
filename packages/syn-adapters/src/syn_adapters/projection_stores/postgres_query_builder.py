@@ -6,19 +6,53 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 import re
 from typing import Any
 
-# Type alias for filter values that can be serialized for JSONB queries
-_FilterValue = str | int | bool | float
+from syn_adapters.postgres_text import pg_safe
 
 
-def _serialize_filter_value(value: _FilterValue) -> str:
-    """Serialize a Python value to match PostgreSQL's JSONB ->> text extraction.
+def _serialize_filter_value(value: object) -> str:
+    """Render ``value`` the way the stored document renders the same thing.
 
-    JSONB ->> extracts booleans as 'true'/'false' (lowercase JSON literals),
-    but Python's str(False) produces 'False'. This helper ensures values match.
+    A filter is compared against ``data->>'key'``, and ``data`` was written
+    through :func:`pg_json`, so this function's whole job is to land on the
+    text the writer produced. Two things it did not previously do that for:
+
+    JSONB ``->>`` extracts booleans as 'true'/'false' (lowercase JSON
+    literals), but Python's ``str(False)`` produces 'False'.
+
+    And the writer strips the codepoints Postgres cannot hold, so a filter
+    value carrying one asks for text that was never stored under that name -
+    the row is there, spelled without it, and the query returns nothing and
+    says nothing (#1241). Every filter value gets the sanitiser, not just the
+    ones on identity fields: the write applied it to the whole document, so
+    any field a caller filters on is stored in its sanitised form.
+
+    ``object`` rather than a union of the types a filter "should" carry. The
+    union this replaced (`str | int | bool | float`) never described the
+    callers: `_condition` takes ``object`` and passed it straight through, and
+    the members of a collection filter are ``object`` too, which is the
+    pyright error the collection support introduced. It did not even describe
+    the tests, one of which pins ``None``. A name that has to be worked around
+    at every call site is not documenting a restriction, only asserting one -
+    and the body imposes none, because every object has a ``str()``.
     """
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value)
+    return pg_safe(str(value))
+
+
+def _condition(key: str, value: object, idx: int) -> tuple[str, object]:
+    """One filter, as SQL and its bound parameter.
+
+    A filter value may be one value or several, and several means ANY of them.
+    Without that, a caller asking "which executions belong to these twelve
+    repos" has only two moves: twelve round trips, or load the table and filter
+    in Python - and the second is what every caller actually did (#1253). The
+    predicate stays a single indexable comparison on ``data->>'key'`` either
+    way, so one expression index serves both shapes.
+    """
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return f"data->>'{key}' = ANY(${idx})", [_serialize_filter_value(v) for v in value]
+    return f"data->>'{key}' = ${idx}", _serialize_filter_value(value)
 
 
 def _build_where_clause(
@@ -29,8 +63,9 @@ def _build_where_clause(
     conditions: list[str] = []
     params: list[Any] = []
     for idx, (key, value) in enumerate(filters.items(), start=start_idx):
-        conditions.append(f"data->>'{key}' = ${idx}")
-        params.append(_serialize_filter_value(value))
+        condition, param = _condition(key, value, idx)
+        conditions.append(condition)
+        params.append(param)
     return " WHERE " + " AND ".join(conditions), params
 
 
