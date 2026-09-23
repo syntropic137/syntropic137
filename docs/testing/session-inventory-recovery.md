@@ -185,3 +185,9 @@ bounded expiry, installation isolation, catalog preservation and interrupted
 acknowledgement. `test_body_retention_scheduling.py` checks disabled defaults and
 failure isolation. Cross-store deletion and user-visible expired availability
 remain separate integration work.
+
+Expiry cancels host capture-delivery jobs for the exact body across destinations.
+Delivery and receipt leases reject completion after cancellation, and discovery
+for a new destination excludes durable deletion requests. This stops host retry
+churn; already queued exporter operations and remote copies still require
+separate tombstone delivery.

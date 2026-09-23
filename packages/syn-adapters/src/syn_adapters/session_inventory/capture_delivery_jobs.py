@@ -41,7 +41,11 @@ class PostgresCaptureDeliveryJobs:
                 (destination_id,source_instance_id,producer_id,capture_id)
                 SELECT $1,c.source_instance_id,c.producer_id,c.capture_id FROM session_capture_catalog c
                 WHERE c.source_instance_id=$2 AND c.payload->>'content_format'='envelope'
-                AND c.payload->>'native_id' IS NOT NULL AND NOT EXISTS (
+                AND c.payload->>'native_id' IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM session_body_deletions d
+                    WHERE d.source_instance_id=c.source_instance_id
+                    AND d.archive_sha256=c.payload->'archive'->>'sha256')
+                AND NOT EXISTS (
                     SELECT 1 FROM session_capture_delivery_jobs j WHERE j.destination_id=$1
                     AND j.source_instance_id=c.source_instance_id AND j.producer_id=c.producer_id AND j.capture_id=c.capture_id)
                 ORDER BY c.created_at,c.producer_id,c.capture_id LIMIT $3 ON CONFLICT DO NOTHING""",
@@ -57,7 +61,7 @@ class PostgresCaptureDeliveryJobs:
             raw = await conn.fetchval(
                 """WITH candidate AS (
                 SELECT destination_id,source_instance_id,producer_id,capture_id FROM session_capture_delivery_jobs
-                WHERE destination_id=$1 AND source_instance_id=$2 AND NOT queued
+                WHERE destination_id=$1 AND source_instance_id=$2 AND NOT cancelled AND NOT queued
                 AND leased_until<=now() AND retry_at<=now() ORDER BY retry_at,producer_id,capture_id
                 FOR UPDATE SKIP LOCKED LIMIT 1
             ), claimed AS (
@@ -89,7 +93,7 @@ class PostgresCaptureDeliveryJobs:
                 """UPDATE session_capture_delivery_jobs
                 SET leased_until=now()+$6::double precision*interval '1 second'
                 WHERE destination_id=$1 AND source_instance_id=$2 AND producer_id=$3 AND capture_id=$4
-                AND lease_token=$5 AND leased_until>now() AND NOT queued RETURNING capture_id""",
+                AND lease_token=$5 AND leased_until>now() AND NOT cancelled AND NOT queued RETURNING capture_id""",
                 self._destination,
                 self._source,
                 lease.capture.producer_id,
@@ -111,7 +115,7 @@ class PostgresCaptureDeliveryJobs:
                 """UPDATE session_capture_delivery_jobs SET queued=$6,
                 leased_until='-infinity',retry_at=now()+$7::double precision*interval '1 second'
                 WHERE destination_id=$1 AND source_instance_id=$2 AND producer_id=$3 AND capture_id=$4
-                AND lease_token=$5 AND leased_until>now() AND NOT queued RETURNING capture_id""",
+                AND lease_token=$5 AND leased_until>now() AND NOT cancelled AND NOT queued RETURNING capture_id""",
                 self._destination,
                 self._source,
                 lease.capture.producer_id,
@@ -132,7 +136,7 @@ class PostgresCaptureDeliveryJobs:
                     SELECT destination_id,source_instance_id,producer_id,capture_id
                     FROM session_capture_delivery_jobs
                     WHERE destination_id=$1 AND source_instance_id=$2
-                    AND queued AND NOT receipt_recorded AND receipt_poll_at<=now()
+                    AND NOT cancelled AND queued AND NOT receipt_recorded AND receipt_poll_at<=now()
                     ORDER BY receipt_poll_at,producer_id,capture_id
                     FOR UPDATE SKIP LOCKED LIMIT 1
                 ), claimed AS (
@@ -162,7 +166,7 @@ class PostgresCaptureDeliveryJobs:
                 """UPDATE session_capture_delivery_jobs SET receipt_recorded=$6,
                     receipt_poll_at=now()+$7::double precision*interval '1 second'
                 WHERE destination_id=$1 AND source_instance_id=$2 AND producer_id=$3 AND capture_id=$4
-                AND receipt_lease_token=$5 AND receipt_poll_at>now() AND queued
+                AND receipt_lease_token=$5 AND receipt_poll_at>now() AND NOT cancelled AND queued
                 AND NOT receipt_recorded RETURNING capture_id""",
                 self._destination,
                 self._source,

@@ -56,6 +56,15 @@ class LocalBodyRetention:
             # process death the next worker repeats this idempotent operation.
             await self._archive.delete(archive)
             await conn.execute(
+                """UPDATE session_capture_delivery_jobs j SET cancelled=TRUE
+                FROM session_capture_catalog c
+                WHERE j.source_instance_id=c.source_instance_id
+                AND j.producer_id=c.producer_id AND j.capture_id=c.capture_id
+                AND c.source_instance_id=$1 AND c.payload->'archive'->>'sha256'=$2""",
+                self._source,
+                archive.sha256,
+            )
+            await conn.execute(
                 """UPDATE session_body_deletions SET deleted_at=now()
                 WHERE source_instance_id=$1 AND archive_sha256=$2""",
                 self._source,

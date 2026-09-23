@@ -204,3 +204,6 @@ CREATE INDEX IF NOT EXISTS session_body_deletions_pending
     WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS session_capture_retention_age
     ON session_capture_catalog(source_instance_id,created_at,producer_id,capture_id);
+
+ALTER TABLE session_capture_delivery_jobs
+    ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE;

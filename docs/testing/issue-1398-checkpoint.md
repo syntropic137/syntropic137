@@ -125,6 +125,16 @@ This closes local expiry scheduling only. Replica deletion, queued exporter
 copies, spool-volume cleanup, explicit expired availability and overall quotas
 remain unfinished. The new setting has not been enabled on the live demo stack.
 
+## Expiry and host delivery fencing
+
+Local expiry now cancels host capture-delivery jobs across destinations. Both
+active delivery leases and queued receipt leases reject stale acknowledgements;
+a new destination cannot rediscover a body with a durable deletion request.
+Four real PostgreSQL retention tests and seven delivery-worker tests pass. This
+prevents endless host retry work but does not remove already queued exporter
+copies or remote bodies. Those remain required cross-store work. Test log:
+`/private/tmp/1398-expiry-delivery.log`.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
