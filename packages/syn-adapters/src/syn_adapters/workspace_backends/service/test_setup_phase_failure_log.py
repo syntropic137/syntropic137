@@ -62,7 +62,6 @@ async def test_failure_log_names_the_secret_injection_setup(
     assert "Secret-injection setup failed" in message
     assert "Setup phase failed" not in message
     assert "ws-1236" in message
-    # Reworded by #1295: `exit=%d` could not render a signal death, and the
-    # secret-injection step has died on one before any agent ran.
-    assert "exited 1" in message
+    # This adapter log retains its explicit key/value status for operators.
+    assert "exit=1" in message
     assert "could not read Username" in message
