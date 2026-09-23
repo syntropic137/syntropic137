@@ -542,3 +542,28 @@ pass without budget changes. All 74 domain events validate. Logs:
 `/private/tmp/1398-host-lifecycle-pyright.log`. Native descendant settlement,
 no-launch coverage accounting, final capture sealing and release gates remain
 unfinished.
+
+## Dependency PR publication and hosted checks
+
+Published exporter `c3a8611` to existing PR #24. Its current hosted tests,
+coverage, lint, dependency boundary and all five cross-build checks pass.
+Published SeshMagic capture deletion `05cd9b2` and HTTP error-path regressions
+`59544bb` to existing PR #55. SeshMagic's unchanged 100% coverage gate is still
+unmet; a current full local run passes tests but reports uncovered behavior.
+Inventory read regressions now exercise both head and revision-pinned error
+paths, checking status codes and suppressing backend details in HTTP responses.
+Focused tests and workspace Clippy pass.
+
+Agentic Primitives PR #418 had one hosted failure: pinned Ruff required a blank
+line before a nested function in the memory contract. Formatting fix `4157aa2`
+is published; package tests pass, and fresh hosted Python Memory and QA Success
+checks pass. Image integration was still running at the latest observation.
+The Syntropic submodule now records that verified fix. APSS PR #139 checks are
+green at `d8924a5`. None of these PRs has been merged or released by this update.
+No gate has been disabled or lowered.
+
+Failure logs and coverage evidence stay local:
+`/private/tmp/1398-ap-hosted-failure.log`,
+`/private/tmp/1398-sesh-hosted-failure.log`,
+`/private/tmp/1398-sesh-current-coverage.log` and
+`/private/tmp/1398-sesh-missing-lines.log`.
