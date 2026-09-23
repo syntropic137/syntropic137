@@ -450,8 +450,6 @@ allowed_prefixes = [
 # the same defect, with no fix PR yet, so they are tracked against #1341.
 
 # --- #1262, fix on PR #1332: telemetry outage reads as a stalled phase -------
-"apps/syn-api/src/syn_api/routes/executions/queries.py:_load_phase_operations" = { issue = "#1262" }
-"packages/syn-adapters/src/syn_adapters/projections/session_tools_helpers.py:get_session_tools" = { issue = "#1262" }
 "packages/syn-adapters/src/syn_adapters/projections/session_tools_queries.py:query_session_tools" = { issue = "#1262" }
 
 # --- #1341, found by this gate on its first run, no fix PR yet ---------------
@@ -467,7 +465,6 @@ allowed_prefixes = [
 "apps/syn-api/src/syn_api/routes/sessions.py:_load_tool_operations" = { issue = "#1341" }
 # An unreadable capture-observation query makes every phase report no agent
 # session, which the detail page renders as "no session was captured".
-"apps/syn-api/src/syn_api/routes/executions/queries.py:_load_agent_session_ids" = { issue = "#1341" }
 # A GitHub API failure makes an installation report zero accessible repos,
 # which is also what an installation scoped to nothing looks like.
 "apps/syn-api/src/syn_api/routes/github.py:_repos_for_installation" = { issue = "#1341" }

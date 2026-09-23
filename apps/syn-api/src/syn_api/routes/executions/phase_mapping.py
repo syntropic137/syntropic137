@@ -131,7 +131,7 @@ async def _load_session_cost(
     return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
 
 
-async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None]:
+async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None] | None:
     """Which agent-native session ids each of this execution's phases produced.
 
     Keyed by the phase's ``session_id`` - the uuid4 the HOST assigns per phase
@@ -171,7 +171,7 @@ async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | No
         )
     except Exception:
         logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
-        return {}
+        return None
 
     by_session: dict[str, list[str] | None] = {}
     for row in rows:
@@ -188,7 +188,7 @@ async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | No
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
-    agent_sessions: dict[str, list[str] | None],
+    agent_sessions: dict[str, list[str] | None] | None,
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution.
 
@@ -235,7 +235,11 @@ async def _map_phase_detail(
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
-        agent_session_ids=agent_sessions.get(phase.session_id) if phase.session_id else None,
+        agent_session_ids=(
+            agent_sessions.get(phase.session_id)
+            if agent_sessions is not None and phase.session_id
+            else None
+        ),
         # None stays None for the same reason it does above: it means nothing
         # read this phase's workspace, which is not the same statement as an
         # empty list's "read it, and no branch had moved" (#1200).
