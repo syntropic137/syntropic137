@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
-from syn_shared.diagnostics import SignalDeath
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
     )
+    from syn_shared.diagnostics import SignalDeath
 
 
 def describe_exception(error: BaseException) -> str:

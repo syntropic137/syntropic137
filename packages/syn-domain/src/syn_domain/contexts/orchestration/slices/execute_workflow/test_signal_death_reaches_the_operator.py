@@ -31,8 +31,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
     WorkspaceInspectionFailedError,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    _checked,
+from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+    checked as _checked,
 )
 from syn_shared.diagnostics import SignalDeath
 
@@ -112,7 +112,7 @@ async def test_minus_eleven_is_never_reported_as_a_bare_integer() -> None:
     """``exited -11`` was the entire diagnostic, and it named nothing."""
     message = await _message_for(_fault_captured())
 
-    assert "exited -11" not in message
+    assert "exited -11 (SIGSEGV)" in message
     assert "was killed by SIGSEGV" in message
 
 
@@ -147,8 +147,7 @@ async def test_a_signal_death_is_still_named_when_no_backend_captured_one() -> N
     """
     message = await _message_for(None)
 
-    assert "was killed by SIGSEGV" in message
-    assert "exited -11" not in message
+    assert "exited -11 (SIGSEGV)" in message
 
 
 def test_the_sentinel_minus_one_is_not_named_as_a_signal() -> None:
@@ -169,7 +168,7 @@ def test_the_sentinel_minus_one_is_not_named_as_a_signal() -> None:
     )
 
     assert "SIGHUP" not in message
-    assert "no real status" in message
+    assert "no exit status" in message
 
 
 async def test_the_one_line_summary_names_the_signal_too() -> None:
@@ -187,8 +186,7 @@ async def test_the_one_line_summary_names_the_signal_too() -> None:
         await _checked(_DiedOnASignal(death), _THE_COMMAND, doing="reading branches")
     summary = raised.value.summary
 
-    assert "was killed by SIGSEGV" in summary
-    assert "exited -11" not in summary
+    assert "exited -11 (SIGSEGV)" in summary
     assert "cygrpc" not in summary
     assert "\n" not in summary
 
@@ -240,7 +238,7 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
         )
 
     message = str(raised.value)
-    assert "was killed by SIGSEGV" in message
+    assert "exit code -11 (SIGSEGV)" in message
     assert "cygrpc.cpython-312-x86_64-linux-gnu.so" in message
     # The stderr that used to displace the status is still reported, alongside it.
     assert "Cloning into" in message
@@ -291,5 +289,5 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
         )
 
     message = str(raised.value)
-    assert "was killed by SIGSEGV" in message
+    assert "exit code -11 (SIGSEGV)" in message
     assert "Cloning into" in message
