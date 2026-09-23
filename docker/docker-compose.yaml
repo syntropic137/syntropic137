@@ -96,6 +96,25 @@ services:
   # Override files add: container_name, restart policy, resource limits.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
+    # Upstream policy plus GET-only metadata for retained capture volumes.
+    # Inline so the standalone published compose needs no extra host asset.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+        template=/usr/local/etc/haproxy/haproxy.cfg.template
+        [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
+        awk '
+        /^[[:space:]]*http-request deny$$/ {
+            print "    http-request allow if { method GET } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
+        }
+        { print }
+        ' "$$template" > /tmp/capture-haproxy.template
+        cat /tmp/capture-haproxy.template > "$$template"
+        exec /docker-entrypoint.sh "$$@"
+      - capture-policy
+    command: ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
     environment:
       CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
       ALLOW_START: 1    # docker start -> POST /containers/{id}/start

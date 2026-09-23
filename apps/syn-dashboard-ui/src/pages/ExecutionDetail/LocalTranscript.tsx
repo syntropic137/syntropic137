@@ -1,3 +1,4 @@
+import { transcriptPreview } from './transcriptPreview'
 import { useEffect, useState } from 'react'
 import { getLocalTranscript, type LocalTranscript as TranscriptResponse } from '../../api/sessionInventory'
 
@@ -27,13 +28,6 @@ async function verifiedArchive(props: Props, signal: AbortSignal): Promise<Uint8
   return bytes
 }
 
-function previewText(bytes: Uint8Array): string {
-  let text: string
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.slice(0, 32768), { stream: bytes.length > 32768 }) }
-  catch { text = 'Binary transcript. Download the verified archive to inspect it.' }
-  if (bytes.length > 32768) text += '\n[Preview limited to 32 KiB. Download contains the complete archive.]'
-  return text
-}
 
 function startPreview(props: Props, updates: PreviewUpdates): () => void {
   const controller = new AbortController()
@@ -41,7 +35,7 @@ function startPreview(props: Props, updates: PreviewUpdates): () => void {
   void verifiedArchive(props, controller.signal).then(bytes => {
     if (controller.signal.aborted) return
     url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
-    updates.ready({ text: previewText(bytes), url, size: bytes.length })
+    updates.ready({ text: transcriptPreview(bytes), url, size: bytes.length })
   }).catch(reason => {
     if (controller.signal.aborted) return
     updates.failed(reason instanceof Error ? reason.message : 'Unable to load transcript')

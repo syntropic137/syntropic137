@@ -177,6 +177,26 @@ services:
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
+    entrypoint:
+    - /bin/sh
+    - -ec
+    - |
+      set -eu
+      template=/usr/local/etc/haproxy/haproxy.cfg.template
+      [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
+      awk '
+      /^[[:space:]]*http-request deny$$/ {
+          print "    http-request allow if { method GET } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
+      }
+      { print }
+      ' "$$template" > /tmp/capture-haproxy.template
+      cat /tmp/capture-haproxy.template > "$$template"
+      exec /docker-entrypoint.sh "$$@"
+    - capture-policy
+    command:
+    - haproxy
+    - -f
+    - /usr/local/etc/haproxy/haproxy.cfg
     environment:
       CONTAINERS: "1"
       ALLOW_START: "1"
