@@ -1194,6 +1194,37 @@ class TestARenameMustNotLeaveANameBehind:
             f"the prefix `premise` is the bug itself: {joined}"
         )
 
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            "artifacts/input/notes.md/out.md",
+            "artifacts/input/notes.md.md",
+        ],
+    )
+    def test_dot_md_inside_a_phase_id_is_not_an_alias_suffix(
+        self, tmp_path: Path, reference: str
+    ) -> None:
+        path = _write(
+            tmp_path,
+            self._workflow(f"The report is at `{reference}`.", first_id="notes.md"),
+        )
+
+        assert stale_phase_references(path) == [], (
+            f"{reference} names the valid phase `notes.md`; the directory form "
+            "must preserve its literal id and the flat alias must remove one suffix"
+        )
+
+    def test_directory_form_does_not_fall_back_to_a_dot_md_prefix(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path,
+            self._workflow("The report is at `artifacts/input/notes.md/out.md`.", first_id="notes"),
+        )
+
+        violations = stale_phase_references(path)
+
+        assert violations, "a reference to missing `notes.md` was truncated to existing `notes`"
+        assert "notes.md" in " ".join(violations)
+
     def test_a_sentence_period_after_a_reference_is_not_part_of_the_id(
         self, tmp_path: Path
     ) -> None:

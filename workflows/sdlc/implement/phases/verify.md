@@ -228,6 +228,12 @@ unit-test output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
 
+**Name the branch and the full commit SHA you verified**, together with the
+`git rev-parse HEAD` output above. The `fix` phase starts in a fresh clone of
+the default branch and has only your report to learn the branch from; without
+the name it cannot fetch what you reviewed, and without the full SHA it cannot
+tell whether what it fetched is still it.
+
 ## Judge the design, not only the correctness
 
 A change can be correct and still be the wrong change. Review for what it costs
@@ -271,3 +277,57 @@ So verify the claim against the artifact, not the prose:
 
 A right conclusion resting on invented evidence is more dangerous than an
 honest gap, because it looks finished.
+
+## A defect you find is repaired, not fatal
+
+A `fix` phase runs after you, reads this report, and repairs what you name. Then
+a second verification pass checks the repair. So finding a defect no longer ends
+the run and discards the work - it starts the repair.
+
+This changes how to write the finding, not how hard to look. **Write each
+blocking defect as an instruction a fix phase can act on**, not as a verdict:
+
+- name the file and line
+- state what is wrong in one sentence
+- state what would close it
+
+"The tests are insufficient" strands the work. "`test_cancel_isolation` builds
+one execution, so it cannot fail for the reason #1311 exists; it needs a second
+concurrent execution and an assertion that its runtime state is untouched" gets
+fixed in one edit.
+
+Two things not to do with this:
+
+- **Do not lower the bar** because a repair is available. A defect you wave
+  through is one the second pass inherits with less budget to catch it.
+- **Do not widen it either.** The fix phase is scoped to exactly what you name,
+  and the run has already spent most of its budget reaching you. Findings that
+  are genuinely optional belong under a heading that says so, clearly separated
+  from what blocks delivery.
+
+Mark plainly which findings block and which do not. The fix phase will treat
+everything you call blocking as required work.
+
+## Report completion to the workflow
+
+Your task in this phase is to deliver an honest verification report, not to
+make the candidate pass. If you can identify the candidate and write
+`artifacts/output/verify.md`, end with `TASK_RESULT success=true` even when the
+candidate is BLOCKED.
+
+This includes a normal code, test, or design defect; a failing gate; and an
+environment limitation that prevents only part of verification, such as an
+unavailable database. Put each such item under a `BLOCKING` heading with the
+file and line or affected command, the root cause, the exact action required,
+and what would prove it closed. `success=true` means the verification report
+was delivered so the `fix` phase can run; it does not mean the candidate was
+certified.
+
+Use `TASK_RESULT success=false` only when verification itself could not run at
+all: for example, the implementation artifact is missing or unreadable, the
+exact branch and SHA cannot be fetched or checked out, or no verification
+artifact can be written. Do not use `success=false` merely because the
+candidate failed or because one requested check could not run.
+
+Do not open or attempt to open a pull request. Only the `open_pr` phase may do
+that.

@@ -734,7 +734,19 @@ class EventStreamProcessor:
 
         await self._record_turn_usage_once(message)
 
-        for item in message.get("content", []):
+        content = message.get("content") or []
+        if content:
+            # ANY content, before a single block is looked at. The loop below
+            # knows two block types and the model emits more than two:
+            # `thinking` spends real tokens and settles what the agent is about
+            # to do, and a type shipped after this parser was written is read
+            # here as nothing at all. Both used to leave the attempt indexed as
+            # "never started" and eligible to be run again from the top, so
+            # what is claimed here is only what is certain - the model produced
+            # a turn - and recognising the turn is left to the loop (#1303).
+            self._collector.note_agent_activity()
+
+        for item in content:
             if not isinstance(item, dict):
                 continue
             if item.get("type") == "tool_use":

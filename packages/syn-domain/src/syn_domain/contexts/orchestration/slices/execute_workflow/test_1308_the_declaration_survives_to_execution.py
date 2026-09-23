@@ -99,8 +99,9 @@ async def _executable_phases(
             inputs: dict[str, str],
             execution_id: str,
             repos: list[RepositoryRef],
+            admitted: object = None,
         ) -> WorkflowExecutionResult:
-            del workflow_name, inputs, repos
+            del workflow_name, inputs, repos, admitted
             captured.extend(phases)
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,

@@ -36,9 +36,9 @@ class MemoryArtifactAdapter(InMemoryAdapter):
     async def collect(
         self,
         handle: IsolationHandle,
-        _patterns: list[str],
+        patterns: list[str],
         *,
-        _destination: str | None = None,
+        destination: str | None = None,
     ) -> ArtifactCollectionResult:
         """Simulate artifact collection.
 
@@ -50,6 +50,7 @@ class MemoryArtifactAdapter(InMemoryAdapter):
         Returns:
             ArtifactCollectionResult with pre-configured artifacts
         """
+        del patterns, destination  # named for the port; unused here
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             ArtifactCollectionResult,
         )
@@ -65,7 +66,7 @@ class MemoryArtifactAdapter(InMemoryAdapter):
     async def list_artifacts(
         self,
         handle: IsolationHandle,
-        _path: str = "/workspace",
+        path: str = "/workspace",
     ) -> list[Artifact]:
         """List mock artifacts.
 
@@ -76,6 +77,7 @@ class MemoryArtifactAdapter(InMemoryAdapter):
         Returns:
             Pre-configured artifact list
         """
+        del path  # named for the port; unused here
         return self._artifacts.get(handle.isolation_id, [])
 
     def add_artifact(self, handle: IsolationHandle, artifact: Artifact) -> None:

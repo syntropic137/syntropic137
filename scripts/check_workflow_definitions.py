@@ -377,7 +377,8 @@ def _referenced_phase(tail: str) -> str | None:
     a path that is not an id at all - names no phase, and saying so is the
     whole job: the caller must never be handed a prefix of what it passed in.
     """
-    head = tail.split("/", 1)[0].removesuffix(".md")
+    segment, separator, _ = tail.partition("/")
+    head = segment if separator else segment.removesuffix(".md")
     return head if is_phase_id(head) else None
 
 

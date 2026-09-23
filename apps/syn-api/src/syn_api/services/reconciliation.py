@@ -9,12 +9,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
-    from syn_adapters.storage.repositories import RepositoryAdapter
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
+    )
+    from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
+        WorkflowExecutionRepositoryPort,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
@@ -248,14 +250,7 @@ class _ReconcileOutcome:
 async def _reconcile_one(
     summary: WorkflowExecutionSummary,
     *,
-    # The concrete adapter, NOT `WorkflowExecutionRepositoryPort`, which is
-    # what this ought to depend on. The adapter does not satisfy that
-    # Protocol: it names the parameter `aggregate_id` where the port says
-    # `execution_id`, and a Protocol match compares parameter NAMES. So the
-    # port is unsatisfied by its only implementation and nothing noticed,
-    # because until this function had an annotation nobody asked. Filed
-    # separately rather than renamed inside a conflict resolution (#1305).
-    repository: RepositoryAdapter[WorkflowExecutionAggregate],
+    repository: WorkflowExecutionRepositoryPort,
 ) -> _ReconcileOutcome:
     """Salvage and then terminalise one stranded execution.
 
@@ -268,7 +263,7 @@ async def _reconcile_one(
     others - this runs at startup, and the alternative is a single unreadable
     aggregate stranding every other execution behind it.
     """
-    from syn_domain.contexts.orchestration import FailExecutionCommand
+    from syn_domain.contexts.orchestration import FailExecutionCommand, FailureClassification
 
     execution_id = summary.workflow_execution_id
     # Declared before the `try` so the guarded exception below can still report
@@ -311,6 +306,11 @@ async def _reconcile_one(
                 failed_phase_id=aggregate.running_phase_id,
                 completed_phases=summary.completed_phases,
                 total_phases=summary.total_phases,
+                # A restart orphaned this run: the machinery lost it, and no
+                # agent ever reported anything about it (#1357). Stated rather
+                # than defaulted so that a reader of this call site can see it
+                # is not a refusal being counted as one.
+                classification=FailureClassification.PLATFORM,
             )
         )
         await repository.save(aggregate)

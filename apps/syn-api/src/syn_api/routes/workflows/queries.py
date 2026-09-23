@@ -24,6 +24,9 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import is_phase_id
 
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
         InputDeclarationDetail,
@@ -117,6 +120,25 @@ class ExecutionRunSummary(BaseModel):
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`, and here for
+    the reason that one is: this is the model behind Workflow Runs, which
+    renders the same rows the executions list does. Without it that page had
+    nothing to pass its badge, so every correct refusal on it read as a plain
+    red failure however classification-aware the badge became (#1367).
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `ExecutionSummaryResponse`: what the AGENT
+    SAID, beside the classification the platform measured and never folded
+    into it. Here for the same reason the field above is - this page renders
+    the same rows the executions list does, and a row that carries the
+    measurement without the report is the half that reads as more certain than
+    it is.
+    """
 
 
 class ExecutionRunListResponse(BaseModel):
@@ -795,6 +817,8 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 error_message=e.error_message,
+                failure_classification=e.failure_classification,
+                reported_failure_reason=e.reported_failure_reason,
             )
             for e in exec_result.value
         ],

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_SESSION_USAGE_CTE,
+    CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
 )
 from syn_domain.storable_text import pg_safe
@@ -28,15 +29,23 @@ from syn_domain.storable_text import pg_safe
 # Mirrors the heatmap's scoping so both read the same rows for the same
 # filter. Callers that pass no filter get all-time totals, which is what the
 # dashboard metric card wants.
-_SCOPED_EVENTS = """
+#
+# Narrowed to the two event types canonical usage reads (#1253). Three CTEs
+# read `scoped_events`, so PostgreSQL cannot inline it and materialises it
+# into a work table; unnarrowed, that work table was every agent_event ever
+# recorded, JSONB `data` blob included, to total the two types that carry
+# tokens. The session COUNT below is the only thing here that needs the other
+# types, and it reads them directly.
+_SCOPED_EVENTS = f"""
 scoped_events AS (
-    SELECT session_id, execution_id, event_type, data, time
+    SELECT session_id, event_type, data, time
     FROM agent_events
-    {execution_filter}
+    WHERE {CANONICAL_USAGE_EVENT_FILTER}
+      {{execution_filter}}
 )
 """
 
-_EXECUTION_FILTER = "WHERE execution_id = ANY($1)"
+_EXECUTION_FILTER = "AND execution_id = ANY($1)"
 
 # Grouped by model AND cost-nullness for the same reason every other canonical
 # query is: a group mixing priced and unpriced rows prices some of its tokens
@@ -62,7 +71,7 @@ GROUP BY model, (vendor_cost_usd IS NULL)
 _SESSION_COUNT_QUERY = """
 SELECT COUNT(DISTINCT session_id) AS sessions
 FROM agent_events
-{execution_filter}
+WHERE TRUE {execution_filter}
 """
 
 
