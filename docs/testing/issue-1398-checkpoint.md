@@ -199,6 +199,20 @@ Workspace source-volume cleanup, quotas, current availability overlays and the
 remaining acceptance criteria still require completion. Latest changes remain
 local until coordinated PR updates.
 
+## Current transcript-read availability
+
+Authorized local transcript reads now distinguish durable expiry/deletion from
+unexpected missing bytes. The API returns `expired` for a tombstoned body; the
+dashboard explains that session history remains and does not offer a download.
+Generated API, CLI and dashboard contracts include the status. Seventeen domain
+and archive tests, five preview tests and the API route suite pass. Full codegen
+completed; Pyright has zero errors (16 existing warnings). Logs:
+`/private/tmp/1398-expired-ui.log` and `/private/tmp/1398-expired-api.log`.
+
+This updates transcript detail reads. Immutable historical capture receipts still
+need an explicit current-availability overlay in inventory pages and equivalent
+replica/client treatment. The full acceptance criterion is not yet complete.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push

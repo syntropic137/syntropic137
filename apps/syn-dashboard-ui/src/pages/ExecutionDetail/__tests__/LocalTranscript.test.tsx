@@ -59,3 +59,12 @@ it('does not expose a response arriving after the preview was closed', async () 
   await waitFor(() => expect(screen.queryByRole('link')).toBeNull())
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })
+
+it('explains expired bodies without offering a download', async () => {
+  vi.mocked(getLocalTranscript).mockResolvedValue({ status: 'expired', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: null })
+  render(<LocalTranscript {...props} />)
+  fireEvent.click(screen.getByText('Open local transcript'))
+  expect((await screen.findByRole('alert')).textContent).toContain('Session history remains available')
+  expect(screen.queryByRole('link')).toBeNull()
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+})

@@ -32,3 +32,7 @@ class SessionTranscriptArchivePort(Protocol):
     async def get(self, reference: ArchivedTranscript) -> bytes | None:
         """None means absent. Unavailable/corrupt storage raises, never looks absent."""
         ...
+
+    async def is_deleted(self, reference: ArchivedTranscript) -> bool:
+        """Whether a durable tombstone forbids restoration of these exact bytes."""
+        ...

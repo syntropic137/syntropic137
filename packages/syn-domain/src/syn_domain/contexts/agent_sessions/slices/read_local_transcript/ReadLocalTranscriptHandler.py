@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class LocalTranscriptRead:
-    status: Literal["present", "not_captured", "missing", "too_large"]
+    status: Literal["present", "not_captured", "missing", "expired", "too_large"]
     capture: CataloguedCapture | None = None
     body: bytes | None = field(default=None, repr=False)
 
@@ -56,6 +56,7 @@ class ReadLocalTranscriptHandler:
             return LocalTranscriptRead(status="too_large", capture=capture)
         # Integrity and storage errors propagate; neither means confirmed absence.
         body = await self._archive.get(capture.archive)
-        return LocalTranscriptRead(
-            status="missing" if body is None else "present", capture=capture, body=body
-        )
+        if body is None:
+            deleted = await self._archive.is_deleted(capture.archive)
+            return LocalTranscriptRead(status="expired" if deleted else "missing", capture=capture)
+        return LocalTranscriptRead(status="present", capture=capture, body=body)

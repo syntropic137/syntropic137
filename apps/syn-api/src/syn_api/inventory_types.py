@@ -49,7 +49,7 @@ class LocalTranscriptResponse(BaseModel):
     """Exact archive bytes, base64 encoded without parsing provider content."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    status: Literal["present", "not_captured", "missing", "too_large"]
+    status: Literal["present", "not_captured", "missing", "expired", "too_large"]
     archive_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     content_format: Literal["native", "envelope"] | None = None
     size: int | None = Field(default=None, ge=0)

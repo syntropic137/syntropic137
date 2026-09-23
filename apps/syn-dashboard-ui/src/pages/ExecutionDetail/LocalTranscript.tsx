@@ -10,6 +10,7 @@ interface PreviewUpdates {
 }
 
 function decodeArchive(result: TranscriptResponse, revision: string): Uint8Array<ArrayBuffer> {
+  if (result.status === 'expired') throw new Error('Transcript expired or was deleted. Session history remains available.')
   if (result.status !== 'present') throw new Error(`Transcript unavailable: ${result.status}`)
   if (result.archive_sha256 !== revision || typeof result.content_base64 !== 'string' || result.content_base64.length > 22369624) {
     throw new Error('Invalid transcript revision')

@@ -3606,7 +3606,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "present" | "not_captured" | "missing" | "too_large";
+            status: "present" | "not_captured" | "missing" | "expired" | "too_large";
             /** Archive Sha256 */
             archive_sha256: string;
             /** Content Format */

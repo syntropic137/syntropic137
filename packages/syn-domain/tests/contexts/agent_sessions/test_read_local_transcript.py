@@ -16,7 +16,8 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(
-    "outcome", ["present", "missing", "not_captured", "denied", "too_large", "unavailable"]
+    "outcome",
+    ["present", "missing", "expired", "not_captured", "denied", "too_large", "unavailable"],
 )
 async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
     run = RunIdentity(source_instance_id="source", execution_id="run")
@@ -34,7 +35,8 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
     )
     catalog, archive, access = AsyncMock(), AsyncMock(), AsyncMock()
     catalog.get_revision.return_value = None if outcome == "not_captured" else capture
-    archive.get.return_value = None if outcome == "missing" else b"exact"
+    archive.get.return_value = None if outcome in ("missing", "expired") else b"exact"
+    archive.is_deleted.return_value = outcome == "expired"
     order: list[str] = []
 
     async def authorize(value: CataloguedCapture) -> None:
@@ -49,7 +51,7 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
         order.append("read")
         if outcome == "unavailable":
             raise OSError("archive unavailable")
-        return None if outcome == "missing" else b"exact"
+        return None if outcome in ("missing", "expired") else b"exact"
 
     access.require_read.side_effect = authorize
     archive.get.side_effect = read
@@ -67,5 +69,6 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
     catalog.get_revision.assert_awaited_once_with(run, identity, "a" * 64)
     if outcome in ("denied", "not_captured", "too_large"):
         archive.get.assert_not_awaited()
+        archive.is_deleted.assert_not_awaited()
     if outcome == "not_captured":
         access.require_read.assert_not_awaited()

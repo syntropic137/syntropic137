@@ -9445,6 +9445,7 @@
               "present",
               "not_captured",
               "missing",
+              "expired",
               "too_large"
             ],
             "title": "Status"

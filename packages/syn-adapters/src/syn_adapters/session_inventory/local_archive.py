@@ -137,3 +137,6 @@ class LocalSessionTranscriptArchive:
 
     async def get(self, reference: ArchivedTranscript) -> bytes | None:
         return await asyncio.to_thread(self._get, reference)
+
+    async def is_deleted(self, reference: ArchivedTranscript) -> bool:
+        return await asyncio.to_thread(self._deleted, reference.sha256)
