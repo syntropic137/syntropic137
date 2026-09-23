@@ -27,7 +27,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_domain.contexts.orchestration._shared.workflow_definition import PHASE_ID_PATTERN
+from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
 
 if TYPE_CHECKING:
