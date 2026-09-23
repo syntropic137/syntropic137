@@ -240,6 +240,8 @@ export interface paths {
         /**
          * Execute Workflow Endpoint
          * @description Start workflow execution in background.
+         *
+         *     Returns 409 while maintenance mode is active; no execution is started.
          */
         post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
         delete?: never;
@@ -1757,6 +1759,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new executions are being admitted.
+         *
+         *     Read through to the durable store, never from process memory, so this
+         *     answers for the system rather than for this container.
+         */
+        get: operations["get_maintenance_mode_maintenance_get"];
+        /**
+         * Set Maintenance Mode
+         * @description Pause or resume execution admission.
+         *
+         *     Returns only once the state is durably stored AND every admission already
+         *     part-way through deciding has finished deciding. That ordering is the whole
+         *     point: a caller holding this response knows not only that the flag is set
+         *     but that nothing is still on its way through the old answer, so there is no
+         *     window on the setting side either.
+         *
+         *     Set through the gate rather than the port, because the port can only store
+         *     the flag - it cannot hold the door while it does so.
+         *
+         *     Clearing is only done when the work the deploy paused has been woken, so a
+         *     failed announcement answers 503 and not 200 (#1387). Admission IS open by
+         *     then - the 503 body says so - but the triggers parked during the deploy are
+         *     still asleep and nothing else will re-offer them, so reporting success here
+         *     would close the deploy over work that never runs. Repeating the clear
+         *     re-announces, which is why this is a retryable status and not a 500.
+         */
+        put: operations["set_maintenance_mode_maintenance_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -2698,6 +2743,9 @@ export interface components {
             artifact_ids?: string[];
             /** Error Message */
             error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
         };
@@ -2790,6 +2838,9 @@ export interface components {
             total_cost_usd: string;
             /** Error Message */
             error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
         };
         /**
          * ExecutionStatusResponse
@@ -2898,6 +2949,9 @@ export interface components {
             tool_call_count: number;
             /** Error Message */
             error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -2925,6 +2979,64 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * FailureClassification
+         * @description Why a failed execution ended: the machinery, the request, or the work.
+         *
+         *     THE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`
+         *     and nothing else, so a phase that did three phases of real work, found a
+         *     genuine defect and correctly declined to ship it sat in the same bucket as
+         *     a segfault. Of 221 recorded failures an unknown fraction were the platform
+         *     working exactly as designed, which made every failure rate and every
+         *     lost-spend figure computed from `failed` an upper bound of unknown
+         *     tightness - and made the product look broken to the operator least able to
+         *     check.
+         *
+         *     THE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a
+         *     phase that ends on its own agent's `TASK_RESULT success=false` report is a
+         *     different fact from one that ends on an exit status, a timeout or a parse
+         *     failure, and `AgentVerdict` already knows which happened at the moment the
+         *     run is failed. This is where that fact is written down.
+         *
+         *     THE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,
+         *     which is what analysts already sort failures into by hand.
+         *
+         *     WHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).
+         *     classify.md's third class - "the request was wrong, too big for a phase, or
+         *     impossible" - is a judgement about the REQUEST, and the stored record did
+         *     not support it: the same exit code, the same error text and the same refusal
+         *     arise from a bad request and from a good one the platform mishandled.
+         *     Deriving it from any of those would be a guess, so the member was left out
+         *     with the note that whoever added it had to bring the evidence with them.
+         *
+         *     The evidence was asked for - `TASK_RESULT` carries a typed `failure_reason`
+         *     beside `success`, and the prompt every phase is sent says which word to
+         *     write - AND ASKING WAS NOT ENOUGH (#1392). The answer is the run's own
+         *     word about itself, and the only thing standing behind it is that the
+         *     process exited cleanly, which is evidence about the harness. So a phase
+         *     that had given up could write `task`, be believed, and leave the platform's
+         *     failure count by saying so. Nothing now reaches this member from a report:
+         *     the agent's word is recorded as `ReportedFailureReason`, beside the
+         *     classification and never as it, and this member waits for a source of
+         *     evidence that is not the run being measured.
+         *
+         *     THE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep
+         *     when changing anything here: every member but `PLATFORM` is a POSITIVE
+         *     claim, made only where the agent's own readable report is what ended the
+         *     run and only from the field that states it. Everything else - including a
+         *     report nobody could read - is `PLATFORM`. So a path that forgets to
+         *     classify itself lands on the answer the system already gave, the failure
+         *     tally stays the upper bound it has always been, and no omission can ever
+         *     manufacture evidence that the system was working.
+         *
+         *     OMISSION IS NOT A SIGNAL. A phase that reports failure and names no reason
+         *     classifies exactly as it did before the field existed - `CORRECT_REFUSAL`
+         *     - because that is the answer the system already gave, a silent agent has
+         *     said nothing new to move it, and every report already in the store was
+         *     written by an agent that had no key to omit.
+         * @enum {string}
+         */
+        FailureClassification: "platform" | "task" | "correct_refusal" | "unclassified";
         /**
          * FailurePatternResponse
          * @description A recurring failure pattern within a system.
@@ -3221,6 +3333,39 @@ export interface components {
             required: boolean;
             /** Default */
             default?: string | null;
+        };
+        /**
+         * MaintenanceModeResponse
+         * @description Whether new workflow executions are being admitted (#1387).
+         *
+         *     ``active`` is the gate: while it is true every admission path refuses and
+         *     the deploy script may swap containers knowing nothing new can start.
+         *     Executions already running are unaffected.
+         */
+        MaintenanceModeResponse: {
+            /**
+             * Active
+             * @description True when new execution admission is refused.
+             * @default false
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Operator-supplied reason for the pause.
+             * @default
+             */
+            reason: string;
+            /**
+             * Since
+             * @description When admission was paused. Null while admission is open.
+             */
+            since?: string | null;
+            /**
+             * Actor
+             * @description Who set the current state.
+             * @default
+             */
+            actor: string;
         };
         /**
          * MetricsResponse
@@ -4176,6 +4321,52 @@ export interface components {
             created_at?: string | null;
         };
         /**
+         * ReportedFailureReason
+         * @description What a phase says CAUSED the failure it is reporting (#1372).
+         *
+         *     THE QUESTION THIS ANSWERS, and why it had to be asked rather than worked
+         *     out. A readable ``success=false`` says THAT a phase failed and nothing
+         *     more, so every reported failure was recorded as a correct refusal - the
+         *     system working - including the one whose agent had just written "GH_TOKEN
+         *     is not set", which is the system not working, and the one that said the
+         *     task was impossible, which is neither. Those three take opposite responses:
+         *     retry, fix the platform, rewrite the brief. An operator re-dispatching off
+         *     a record that cannot tell them apart spends a whole run to find out.
+         *
+         *     THE SPELLINGS ARE classify.md's, which is the vocabulary analysts already
+         *     sort failures into by hand and the one `FailureClassification` was built
+         *     from. Three words, closed, written here and nowhere else - a closed set in
+         *     one place is what separates a contract from the habit of adding one more
+         *     string every time a run is lost, and it is the definition the negative
+         *     tests are written against.
+         *
+         *     IT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,
+         *     an exception message or an exit status to reach a member of this; the only
+         *     way into one is a phase that wrote it.
+         *
+         *     AND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A
+         *     MEASUREMENT (#1392). This is the whole of what the type means, and the
+         *     reason it is spelled `reported_failure_reason` everywhere it is carried:
+         *     the platform's only corroboration of anything written here is that the
+         *     process exited cleanly and its stream arrived intact, which is evidence
+         *     about the HARNESS and not about whether the task was possible. A run that
+         *     named itself ``task`` established nothing about the request; it said
+         *     something about it. So the word travels the whole way to the operator - who
+         *     wants to know what the agent said - and `FailureClassification`, which is
+         *     what failure NUMBERS are computed from, is never decided by it. The one
+         *     thing a phase can do to that record is WITHDRAW a claim; see
+         *     `_corroborated_classification`, which holds the whole rule.
+         *
+         *     AND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when
+         *     editing anything here. This decides a LABEL on a failure already decided by
+         *     ``success``. A word nobody recognises, a sentence, a number, or no key at
+         *     all all read as "no reason given" and leave the verdict exactly as it was.
+         *     Making a misspelling fatal would let a tally field refuse a finished run,
+         *     which is #1324's defect bought back in exchange for nothing.
+         * @enum {string}
+         */
+        ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
+        /**
          * SSEHealthResponse
          * @description Health status of the SSE subsystem.
          */
@@ -4591,6 +4782,32 @@ export interface components {
              * @default 0
              */
             cache_read_tokens: number;
+        };
+        /**
+         * SetMaintenanceModeRequest
+         * @description Set or clear maintenance mode (#1387).
+         *
+         *     The response is not sent until the state is durably persisted, so a caller
+         *     that has seen a 200 knows no further execution can be admitted.
+         */
+        SetMaintenanceModeRequest: {
+            /**
+             * Active
+             * @description True to refuse new executions, false to resume admitting.
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Why admission is paused; echoed back to every refused caller.
+             * @default
+             */
+            reason: string;
+            /**
+             * Actor
+             * @description Who is pausing. Free text - the deploy script sends its own name.
+             * @default
+             */
+            actor: string;
         };
         /**
          * SkillDetailResponse
@@ -8857,6 +9074,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContributionHeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maintenance_mode_maintenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+        };
+    };
+    set_maintenance_mode_maintenance_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
                 };
             };
             /** @description Validation Error */

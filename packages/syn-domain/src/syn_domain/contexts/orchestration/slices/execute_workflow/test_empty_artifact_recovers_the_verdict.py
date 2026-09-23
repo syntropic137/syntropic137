@@ -499,6 +499,7 @@ class TestTheVerdictSurvivesEveryHop:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -573,10 +574,10 @@ class TestTheVerdictSurvivesEveryHop:
             await processor._handle_run_agent(run_todo, phase, aggregate, _DispatchContext())
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
-            await processor._handle_collect_artifacts(
+            await processor._workspaces.collect(
                 collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 

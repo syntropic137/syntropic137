@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+    ReportedFailureReason,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -395,6 +399,12 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # The ONE read of this event's failed-phase fields. Everything below
         # asks the record, so nothing here names a key or a default (#1262).
         failed = FailedPhaseRecord.from_event(event_data)
+        classification = FailureClassification.from_stored(event_data.get("failure_classification"))
+        # Beside the classification at every hop, because the two answer to
+        # different evidence and a row that fused them would let a run's own
+        # word be summed as a measurement (#1392).
+        reported = ReportedFailureReason.from_stored(event_data.get("reported_failure_reason"))
+        reported_value = None if reported is None else reported.value
 
         existing = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not existing:
@@ -412,6 +422,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
                 "total_duration_seconds": 0.0,
                 "artifact_ids": [],
                 "error_message": event_data.get("error_message"),
+                "failure_classification": classification.value,
+                "reported_failure_reason": reported_value,
                 "completed_phases": event_data.get("completed_phases", 0),
                 "total_phases": event_data.get("total_phases", 0),
             }
@@ -419,6 +431,13 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["status"] = "failed"
             existing["completed_at"] = event_data.get("failed_at")
             existing["error_message"] = event_data.get("error_message")
+            # Beside status, because `failed` alone cannot tell a crash from a
+            # phase that found a real defect and correctly declined to ship it
+            # (#1357). Read through `from_stored`, so an event written before
+            # the field existed replays as `unclassified` rather than raising
+            # and stranding the whole read model.
+            existing["failure_classification"] = classification.value
+            existing["reported_failure_reason"] = reported_value
             existing["completed_phases"] = self._completed_phases_after(
                 event_data, existing.get("completed_phases", 0)
             )

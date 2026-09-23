@@ -22,7 +22,9 @@ const STATUS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   label: 'Status',
   align: 'left',
   sortKey: 'status',
-  render: (e) => <StatusBadge status={e.status} size="sm" />,
+  render: (e) => (
+    <StatusBadge status={e.status} failureClassification={e.failure_classification} size="sm" />
+  ),
 }
 
 const WORKFLOW: ColumnDef<ExecutionListItem, ExecutionSortKey> = {

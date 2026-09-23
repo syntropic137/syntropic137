@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
+    FailureClassification,
     PhaseResult,
+    ReportedFailureReason,
 )
 from syn_domain.repository import Repository
 from syn_shared.agents import AgentRunner
@@ -147,3 +149,20 @@ class WorkflowExecutionResult:
     artifact_ids: list[str] = field(default_factory=list)
     metrics: ExecutionMetrics = field(default_factory=ExecutionMetrics)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, for a run that failed (#1357).
+
+    Here because this is the OTHER way an execution reaches a caller: the
+    synchronous dispatch response is built from this object, not from the
+    read model the projections write, so a classification that stopped at the
+    event would be absent from exactly the response that reports a run the
+    caller just asked for. `UNCLASSIFIED` on the completed and cancelled
+    paths, where there is no failure to classify and `status` says so.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What the failing phase SAID caused it (#1372), None when it said nothing.
+
+    The report, beside the measurement above and never folded into it (#1392).
+    A caller dispatching a run synchronously is exactly the reader who wants
+    both: what the platform recorded, and what its agent said about it.
+    """

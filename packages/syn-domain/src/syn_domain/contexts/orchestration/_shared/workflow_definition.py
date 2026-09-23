@@ -336,6 +336,29 @@ class PhaseYamlDefinition(BaseModel):
     `pull_requests: read`, so a phase can still read and check out the PR it
     is reworking; it just cannot open one."""
 
+    delivers_repo_changes: bool = True
+    """Whether a change to the repositories is part of what this phase delivers (#1308).
+
+    Read by the unpushed-work gate, and the ONLY thing that tells an authored
+    edit apart from a build tool's side effect. `git status` reports both
+    identically - a rewritten `Cargo.lock` and a half-finished feature look the
+    same - so the gate cannot derive this, and any rule it invented from
+    filenames would be a guess that mis-fires in both directions.
+
+    DEFAULTS TO TRUE BECAUSE THE STRICT ANSWER IS THE SAFE ONE. A phase that
+    forgets to declare keeps today's behaviour: everything it holds is treated
+    as a deliverable and an unpushed one fails it (#1184). Defaulting the other
+    way would silently switch the gate off for every phase anyone ever writes -
+    including the implement phase, which is the one the gate exists for.
+
+    FALSE IS A STATEMENT ABOUT THE PHASE, NOT ABOUT THE FILES. It says nothing
+    there was ever going to be delivered, so nothing there can be lost; it does
+    not exempt any path, and it does not exempt COMMITS. A phase that declares
+    False and commits anyway still fails, because committing is an authoring
+    act that no build tool performs. Declare it on a bootstrap, premise, review
+    or verify phase - one whose deliverable is a report - and leave it alone
+    anywhere a branch is the point."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -519,6 +542,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             can_open_pr=self.can_open_pr,
+            delivers_repo_changes=self.delivers_repo_changes,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

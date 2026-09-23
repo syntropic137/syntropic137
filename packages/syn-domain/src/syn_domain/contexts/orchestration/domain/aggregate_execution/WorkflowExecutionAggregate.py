@@ -33,8 +33,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
+    FailureClassification,
     FinishedAgentRun,
     PhaseDefinition,
+    ReportedFailureReason,
     StrandedDeliverable,
 )
 
@@ -134,6 +136,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
+        #: What kind of failure ended this run (#1357), for a run that has
+        #: ended in one. `UNCLASSIFIED` until a `WorkflowFailed` event says
+        #: otherwise, which is also what every such event written before the
+        #: field existed replays as.
+        self._failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+        self._reported_failure_reason: ReportedFailureReason | None = None
         self._cancel_reason: str | None = None
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
@@ -229,6 +237,29 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    @property
+    def failure_classification(self) -> FailureClassification:
+        """What kind of failure ended this run, for a run that failed (#1357).
+
+        Beside `status` rather than folded into it: `failed` is what happened
+        and stays true for every value here, and this says what KIND. A run
+        that has not failed reads `UNCLASSIFIED`, which is also what a failure
+        recorded before the field existed reads - the aggregate cannot
+        distinguish those two and does not pretend to, because `status` already
+        does it exactly.
+        """
+        return self._failure_classification
+
+    @property
+    def reported_failure_reason(self) -> ReportedFailureReason | None:
+        """What the failing phase SAID caused it (#1372), None when it did not.
+
+        Apart from `failure_classification` deliberately and permanently: that
+        one is what the platform measured and is what failure numbers are
+        computed from, this one is a claim the run made about itself (#1392).
+        """
+        return self._reported_failure_reason
 
     @property
     def cancel_reason(self) -> str | None:
@@ -346,6 +377,17 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             failed_phase_output_tokens=command.failed_phase_usage.output_tokens,
             failed_phase_cache_creation_tokens=command.failed_phase_usage.cache_creation_tokens,
             failed_phase_cache_read_tokens=command.failed_phase_usage.cache_read_tokens,
+            # Straight from the command, never re-derived here (#1357). The
+            # only frame that could tell a correct refusal from a crash was the
+            # one holding the phase's own verdict, several hops upstream; an
+            # aggregate looking at `error_type` or at the message text would be
+            # guessing, and guessing is what put the distinction in prose.
+            failure_classification=command.classification,
+            # Beside it, never instead of it (#1392). The classification is
+            # what the platform measured; this is what the phase SAID, and the
+            # event is where the two stop being one frame's local variables and
+            # start being the record every read model is built from.
+            reported_failure_reason=command.reported_failure_reason,
         )
         self._apply(event)
 
@@ -612,6 +654,20 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = _evt(event, "failed_at")
         self._error = _evt(event, "error_message")
         self._status = ExecutionStatus.FAILED
+        # Coerced rather than read, because this applier replays events older
+        # than the field: `from_stored` turns a missing key - and a member some
+        # newer writer knows and this reader does not - into `UNCLASSIFIED`
+        # instead of a `ValueError` that would stop the whole stream rehydrating
+        # (#1357).
+        self._failure_classification = FailureClassification.from_stored(
+            _evt(event, "failure_classification")
+        )
+        # Same coercion, same reason, one field over: a reason written by a
+        # newer version is a word this reader does not know, and reads as "no
+        # reason given" rather than stopping the stream (#1372).
+        self._reported_failure_reason = ReportedFailureReason.from_stored(
+            _evt(event, "reported_failure_reason")
+        )
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:

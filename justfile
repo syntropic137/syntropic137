@@ -1147,6 +1147,7 @@ test-unit-ci:
         --cov=packages/syn-adapters/src \
         --cov=packages/syn-shared/src \
         --cov-report=term-missing \
+        --durations=20 \
         -x -q
 
 # Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
@@ -1305,12 +1306,10 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
-# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
-# happily reuses a binary compiled from a different submodule revision.
+# Build APS CLI. Local freshness belongs to Cargo. CI can reuse an executable
+# only after an exact source/toolchain/platform cache hit and checkout validation.
 aps-build:
-    @echo "🔨 Building APS CLI..."
-    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+    bash scripts/build-aps.sh
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
@@ -1492,7 +1491,22 @@ _selfhost-preflight:
     fi
     echo ""
 
+# Exit 0 = clear, 1 = executions running, 2 = could not tell (never an all-clear).
+# Pass --force to deploy anyway. Also runnable on a host with no repo checkout:
+#   python3 infra/scripts/predeploy_check.py
+# Report what a deploy would orphan; non-zero if executions are in flight (#1179)
+predeploy-check *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
+
 # Start self-hosted Syn137 stack (no Cloudflare)
+#
+# NOT gated by predeploy-check: its normal precondition is a stopped stack, so
+# the API is unreachable and the check would fail closed on every legitimate
+# start. An operator forced to pass --force routinely stops reading it, which
+# would disarm the gate on the recipes that do need it.
 selfhost-up: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1530,10 +1544,11 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     echo "   Update: Zero Trust → Networks → Connectors → Create a tunnel → Select Cloudflared"
 
 # Stop self-host stack (auto-detects Cloudflare Tunnel)
-selfhost-down:
+selfhost-down *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "Stopping Syn137 self-host stack..."
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
@@ -1571,9 +1586,16 @@ selfhost-logs *service:
     fi
 
 # Restart specific self-host service
-selfhost-restart service:
-    @echo "Restarting {{service}}..."
-    @{{compose_selfhost}} restart {{service}}
+selfhost-restart service *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    # Every service here can orphan an execution: api and gateway directly,
+    # timescaledb/redis/event-store by dropping the connections the API is
+    # mid-execution on. Gating only some would be a carve-out to remember.
+    uv run python infra/scripts/predeploy_check.py {{args}}
+    echo "Restarting {{service}}..."
+    {{compose_selfhost}} restart {{service}}
 
 # Seed workflows and triggers into selfhost stack
 # Runs seed scripts in a temporary API container (DB ports not exposed to host)
@@ -1596,10 +1618,13 @@ selfhost-seed:
     echo "✅ Seeding complete"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
-selfhost-update:
+selfhost-update *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    # Refuse to orphan running executions (#1179). Runs before the pull so an
+    # abort leaves the checkout untouched rather than half-updated.
+    uv run python infra/scripts/predeploy_check.py {{args}}
     # Detect Cloudflare tunnel
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         COMPOSE="{{compose_selfhost_cf}}"
@@ -1629,10 +1654,11 @@ selfhost-update:
     echo "✅ Update complete!"
 
 # Full self-host reset (removes volumes - DATA LOSS!)
-selfhost-reset:
+selfhost-reset *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "⚠️  WARNING: This will delete ALL data including the database!"
     echo "Press Ctrl+C within 5 seconds to cancel..."
     sleep 5
@@ -2390,6 +2416,21 @@ release-local version:
 #
 # Callable on its own, including from CI:
 #   just verify-image-capabilities syn-api ghcr.io/syntropic137/syn-api:v0.28.0
+# Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
+# Codifies docs/deployment/test-deploy.md (direct path). Not a release.
+#   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
+#   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
+#   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
+#   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+[positional-arguments]
+pit-stop version *flags:
+    #!/usr/bin/env bash
+    # Positional parameters, not just-level interpolation: interpolating puts
+    # the arguments through the recipe shell before the script can validate
+    # them, so a --ref carrying a space arrives as two arguments.
+    set -euo pipefail
+    exec ./scripts/pit_stop.sh "$@"
+
 verify-image-capabilities image ref:
     #!/usr/bin/env bash
     set -euo pipefail
