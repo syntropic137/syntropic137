@@ -3,7 +3,7 @@
 `.env.example` is generated from the Settings classes, so every setting appears
 there and looks available. The compose `environment:` block was written by hand,
 and only what it names reaches the process. Nothing checked that the two agreed,
-and they did not: 76 of 103 documented settings were inert. An operator set
+and they did not: 87 of 103 documented settings were inert. An operator set
 `SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true` on a selfhost, restarted, and got the
 old behaviour -- no error, no warning, and a confusing signature failure from the
 very switch that appeared to be on.

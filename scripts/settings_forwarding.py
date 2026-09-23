@@ -6,7 +6,7 @@ setting appears there and looks available. But a container only sees what the
 compose file forwards, and that list was maintained by hand. The two drifted:
 `SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES` was set on a selfhost, the API was
 restarted, and nothing happened -- no error, no warning, just the old behaviour
-(#1101). Seventy-six of the 103 documented settings were inert the same way.
+(#1101). Eighty-seven of the 103 documented settings were inert the same way.
 
 This module owns the decision "does setting X reach the API process?" so that
 it is made once, in code, instead of twice by hand:
