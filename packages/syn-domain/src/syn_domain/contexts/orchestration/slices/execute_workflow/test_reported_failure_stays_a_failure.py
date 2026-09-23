@@ -76,12 +76,16 @@ which drives `processor.run()`; this file pins the two hops underneath it.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     AgentExecutionCompletedCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+    ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
@@ -503,6 +507,23 @@ def _result_fences(prompt: str) -> list[str]:
     ]
 
 
+def _the_fence_that_says(prompt: str, key_and_value: str) -> str:
+    """The one result fence of ``prompt`` whose JSON contains ``key_and_value``.
+
+    Since #1372 there is a fence per OUTCOME rather than per polarity, so the
+    tests below have to name which one they mean. They name it by the JSON the
+    prompt would have to stop handing out for the test to be about something
+    else - ``"success": true``, or the reason word - rather than by position,
+    which would silently re-point at a neighbour the next time a fence is added.
+
+    Raises if that is not exactly one fence: two would mean the prompt hands out
+    the same outcome twice, and none that the fence this test governs is gone.
+    """
+    matching = [fence for fence in _result_fences(prompt) if key_and_value in fence]
+    assert len(matching) == 1, f"expected one fence carrying {key_and_value!r}, got {matching}"
+    return matching[0]
+
+
 def _with_the_comments_replaced(fence: str, said: str) -> str:
     """One fence edited the way the prompt says to edit it.
 
@@ -734,7 +755,58 @@ WHAT_THE_AGENT_DID = "gave the result block one fence that carries its own termi
 #: this rework replaces, the same copy decoded to nothing and `comments` held an
 #: excerpt of unreadable text instead.
 THE_SUCCESS_FENCE_SAYS = "Brief summary of what was accomplished"
-THE_FAILURE_FENCE_SAYS = "Specific reason why — what was missing or what failed"
+
+
+class _FenceMeans(NamedTuple):
+    """The whole of what one failure fence must produce, once it has been read.
+
+    Three facts about the same bytes, in one row, because they are only worth
+    anything together (#1392). `says` proves the JSON came out of the prompt's
+    own fence rather than a default; `reports` is the word the agent wrote;
+    `classifies_as` is what the PLATFORM records having heard it. Splitting
+    them across tables is what let the second and third be confused for each
+    other in the first place.
+    """
+
+    says: str
+    reports: ReportedFailureReason
+    classifies_as: FailureClassification
+
+
+#: One row per failure fence the prompt hands out. The `says` sentences are
+#: distinct, so a verdict carrying one can only have come from parsing THAT
+#: fence - the property `THE_SUCCESS_FENCE_SAYS` has, extended to the fences
+#: #1372 added.
+#:
+#: THE TWO RIGHT-HAND COLUMNS ARE THE CONTRACT #1392 REWROTE, and the shape of
+#: this table is the argument. `reports` differs for all four words; three of
+#: the four `classifies_as` are the same value. That is the fix, drawn: a word
+#: the agent CHOSE separates the runs in the record of what was SAID and moves
+#: the measurement only when it withdraws a claim. A change that let `task` or
+#: `platform` back into the third column would read as an improvement here -
+#: more answers, more distinctions - and would be the defect returning.
+THE_FAILURE_FENCES: dict[str, _FenceMeans] = {
+    "task": _FenceMeans(
+        says="Specific reason why — what about the request could not be done",
+        reports=ReportedFailureReason.TASK,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "platform": _FenceMeans(
+        says="Specific reason why — what was missing or what failed",
+        reports=ReportedFailureReason.PLATFORM,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "refused": _FenceMeans(
+        says="Specific reason why — what you found and why you stopped",
+        reports=ReportedFailureReason.REFUSED,
+        classifies_as=FailureClassification.CORRECT_REFUSAL,
+    ),
+    "unknown": _FenceMeans(
+        says="Specific reason why — what happened, and what you could not establish about it",
+        reports=ReportedFailureReason.UNKNOWN,
+        classifies_as=FailureClassification.UNCLASSIFIED,
+    ),
+}
 
 
 class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
@@ -795,8 +867,8 @@ class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
         verdict carrying them can only have come from parsing the fence that was
         extracted - not from a default, and not from a block this test wrote.
         """
-        success_fence, _failure_fence = _result_fences(
-            render_workspace_prompt(clone_repos=clone_repos)
+        success_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos), '"success": true'
         )
 
         verdict = AgentVerdict.from_agent_text(success_fence)
@@ -809,28 +881,73 @@ class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
         assert not verdict.refuses_completion
 
     @pytest.mark.parametrize("clone_repos", [True, False])
-    def test_the_failure_fence_copied_verbatim_is_a_readable_failure(
-        self, clone_repos: bool
+    @pytest.mark.parametrize("reason", sorted(THE_FAILURE_FENCES))
+    def test_each_failure_fence_copied_verbatim_is_a_readable_failure(
+        self, reason: str, clone_repos: bool
     ) -> None:
-        """And the fence that has to work even when nothing else did.
+        """And the fences that have to work even when nothing else did.
 
-        The failure fence is the one with teeth: a success that reads as
+        A failure fence is the one with teeth: a success that reads as
         UNREADABLE costs a rerun, whereas a phase that reports failure in a
         block nobody can read is the defect `phase_verdict` exists to stop,
-        arriving because the prompt taught an unreadable shape.
+        arriving because the prompt taught an unreadable shape. #1372 made that
+        three fences instead of one, and every one of them carries the teeth.
         """
-        _success_fence, failure_fence = _result_fences(
-            render_workspace_prompt(clone_repos=clone_repos)
+        failure_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos),
+            f'"failure_reason": "{reason}"',
         )
 
         verdict = AgentVerdict.from_agent_text(failure_fence)
 
         assert verdict.status is VerdictStatus.FAILURE, (
-            "the failure fence the prompt hands out is not a verdict as it "
-            "stands, so a phase that reports failure with it is not refused"
+            f"the {reason} fence the prompt hands out is not a verdict as it "
+            f"stands, so a phase that reports failure with it is not refused"
         )
-        assert verdict.comments == THE_FAILURE_FENCE_SAYS
+        assert verdict.comments == THE_FAILURE_FENCES[reason].says
         assert verdict.refuses_completion
+
+    @pytest.mark.parametrize("clone_repos", [True, False])
+    @pytest.mark.parametrize("reason", sorted(THE_FAILURE_FENCES))
+    def test_each_failure_fence_copied_verbatim_carries_the_class_it_names(
+        self, reason: str, clone_repos: bool
+    ) -> None:
+        """THE ACCEPTANCE CRITERION OF #1372 AND #1392, from the rendered bytes outward.
+
+        The polarity above was already true before the reason key existed; what
+        this adds is that the fence an agent copies decides what the run is
+        RECORDED AS HAVING SAID, and - for the one word that withdraws a claim -
+        what it is recorded as. Both halves have to be asserted from the same
+        bytes, because the way this fails is not a fence that stops parsing - it
+        is a prompt that offers a word `ReportedFailureReason` does not read,
+        which leaves a perfectly readable failure carrying no reason at all and
+        looks exactly like working code.
+
+        THE TWO ASSERTIONS ARE NOT REDUNDANT, and #1392 is why. The reported
+        word is checked first because it is the one that differs per fence; the
+        classification is checked second because three of the four fences share
+        it, so that assertion alone would pass for a prompt whose `task` fence
+        had rotted into a word nobody reads. Together they say: the agent's word
+        survives, and it did not become a measurement on the way.
+        """
+        expected = THE_FAILURE_FENCES[reason]
+        failure_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos),
+            f'"failure_reason": "{reason}"',
+        )
+
+        verdict = AgentVerdict.from_agent_text(failure_fence)
+
+        assert verdict.reported_failure_reason is expected.reports, (
+            f"the {reason} fence is read as reporting "
+            f"{verdict.reported_failure_reason!r}, so a phase that copied it "
+            f"exactly has its word dropped on the way to the operator (#1372)"
+        )
+        assert verdict.failure_classification is expected.classifies_as, (
+            f"the {reason} fence reads as "
+            f"{verdict.failure_classification.value!r}, so a phase that copied "
+            f"it exactly is recorded as a failure of the wrong kind (#1392)"
+        )
 
     @pytest.mark.parametrize("clone_repos", [True, False])
     def test_a_fence_edited_the_way_the_prompt_says_keeps_its_outcome(
@@ -844,8 +961,8 @@ class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
         prompt asks for, must leave a verdict of the same polarity carrying the
         agent's own words.
         """
-        success_fence, _failure_fence = _result_fences(
-            render_workspace_prompt(clone_repos=clone_repos)
+        success_fence = _the_fence_that_says(
+            render_workspace_prompt(clone_repos=clone_repos), '"success": true'
         )
 
         verdict = AgentVerdict.from_agent_text(
@@ -858,15 +975,28 @@ class TestTheFenceTheAgentIsHandedIsOneItCanWrite:
 
     @pytest.mark.parametrize("clone_repos", [True, False])
     def test_there_is_exactly_one_fence_per_outcome(self, clone_repos: bool) -> None:
-        """Two outcomes, two fences, and nothing to assemble from elsewhere.
+        """One fence per OUTCOME, and nothing to assemble from elsewhere.
 
-        A third fence carrying the marker would mean the block is once again
-        split across places an agent has to combine, which is the defect
-        itself; one would mean an outcome has no copyable form.
+        The invariant was never the number two - it was that an agent finds its
+        whole block in one place. #1372 made the outcomes four, because a
+        failure now names its cause and the causes go to different people, and
+        #1392 made them five by adding the word for "I could not tell"; the
+        count follows the outcomes rather than the other way round.
+
+        An EXTRA fence carrying the marker would mean the block is once again
+        split across places an agent has to combine, which is the defect itself;
+        a missing one would leave an outcome with no copyable form, which is how
+        the reason key would end up written by nobody.
         """
-        fences = _result_fences(render_workspace_prompt(clone_repos=clone_repos))
+        prompt = render_workspace_prompt(clone_repos=clone_repos)
+        fences = _result_fences(prompt)
 
-        assert len(fences) == 2, f"expected one fence per outcome, found {len(fences)}: {fences}"
+        assert len(fences) == 1 + len(THE_FAILURE_FENCES), (
+            f"expected one fence per outcome, found {len(fences)}: {fences}"
+        )
+        _the_fence_that_says(prompt, '"success": true')
+        for reason in THE_FAILURE_FENCES:
+            _the_fence_that_says(prompt, f'"failure_reason": "{reason}"')
         for fence in fences:
             assert fence.endswith(TASK_RESULT_TERMINATOR), (
                 f"this fence does not carry its own terminator, so copying it "

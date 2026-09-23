@@ -47,6 +47,11 @@ if TYPE_CHECKING:
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.maintenance import (
+        InMemoryMaintenanceAdapter,
+        PostgresMaintenanceAdapter,
+        RedisMaintenanceAdapter,
+    )
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
@@ -97,6 +102,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
     )
+    from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
@@ -280,3 +286,13 @@ if TYPE_CHECKING:
         _memory_signals: SignalQueuePort = memory_signals
         _postgres_pending: PendingSHAStore = postgres_pending
         _memory_pending: PendingSHAStore = memory_pending
+
+    def _maintenance(
+        postgres: PostgresMaintenanceAdapter,
+        redis: RedisMaintenanceAdapter,
+        memory: InMemoryMaintenanceAdapter,
+    ) -> None:
+        """Every durable fallback and the test double satisfy the shared gate."""
+        _postgres: MaintenancePort = postgres
+        _redis: MaintenancePort = redis
+        _memory: MaintenancePort = memory

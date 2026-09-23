@@ -30,6 +30,28 @@ one that touches the running host.
 
 ---
 
+## 0. The fast path: `just pit-stop`
+
+`scripts/pit_stop.sh` runs every step below for the direct path (3a), with a
+hard gate at each one, and aborts loudly on the first that fails:
+
+```bash
+just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint: safe while runs are in flight
+just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
+just pit-stop 0.29.1-beta.5                # both, in one go
+just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
+```
+
+**Stage early, swap late.** Everything except the swap is safe while executions
+run, so stage as soon as the content is merged; the swap is one `compose up`
+once the drain clears. The drain is the speed limit, because recreating the API
+destroys in-flight work (#1381). It needs `SYN_API_PASSWORD`; the host and API
+default to the selfhost VPS and can be overridden with `SYN_PIT_HOST` /
+`SYN_PIT_API`. It does not dispatch the final real-run check (section 5, step 5.3):
+do that yourself, and watch a PHASE reach `running`.
+
+The sections below remain the reference for what each stage does and why.
+
 ## 1. Drain check - first, last, and unskippable
 
 **Never recreate containers while executions are in flight.** Doing it on an

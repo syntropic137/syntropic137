@@ -177,6 +177,9 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_fail_execution_emits_event(self) -> None:
         """REGRESSION: FailExecutionCommand must emit WorkflowFailedEvent."""
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            FailureClassification,
+        )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
@@ -207,6 +210,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
             failed_phase_id="phase-2",
             completed_phases=1,
             total_phases=5,
+            classification=FailureClassification.PLATFORM,
         )
         aggregate._handle_command(fail_cmd)
 

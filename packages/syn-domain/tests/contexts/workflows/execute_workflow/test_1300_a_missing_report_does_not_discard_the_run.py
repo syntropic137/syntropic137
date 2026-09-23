@@ -41,14 +41,13 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery
     RECOVERED_SOURCE_PATH,
     RECOVERED_TITLE_MARKER,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
+    PhaseStartingPoints,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_work_guard import (
     _BRANCH,
     _Clone,
     _clone_repository,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    GitWorkspace,
-    PhaseStartingPoints,
 )
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 
@@ -73,6 +72,9 @@ if TYPE_CHECKING:
         ObservabilityCollector,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
+    )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 

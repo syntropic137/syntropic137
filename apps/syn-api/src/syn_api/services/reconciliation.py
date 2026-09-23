@@ -263,7 +263,7 @@ async def _reconcile_one(
     others - this runs at startup, and the alternative is a single unreadable
     aggregate stranding every other execution behind it.
     """
-    from syn_domain.contexts.orchestration import FailExecutionCommand
+    from syn_domain.contexts.orchestration import FailExecutionCommand, FailureClassification
 
     execution_id = summary.workflow_execution_id
     # Declared before the `try` so the guarded exception below can still report
@@ -306,6 +306,11 @@ async def _reconcile_one(
                 failed_phase_id=aggregate.running_phase_id,
                 completed_phases=summary.completed_phases,
                 total_phases=summary.total_phases,
+                # A restart orphaned this run: the machinery lost it, and no
+                # agent ever reported anything about it (#1357). Stated rather
+                # than defaulted so that a reader of this call site can see it
+                # is not a refusal being counted as one.
+                classification=FailureClassification.PLATFORM,
             )
         )
         await repository.save(aggregate)
