@@ -456,3 +456,12 @@ passed at bca76ba. Full coordinated integration remains unfinished. Each recover
 poll currently retains an outcome, including unchanged success; status retention
 and polling volume need addressing before final acceptance. Real pinned harness
 capture and the broader issue acceptance matrix remain open.
+
+## Full Python gate follow-up
+
+The full unit gate reached 98% before an allocation test assumed slot 2 was free
+while the isolated demo stack occupied it. Allocation/rollback unit tests now
+stub host port availability; dedicated preflight tests still verify occupied
+ports. All 50 environment-manager tests and Ruff pass. The complete unit gate
+is running again; its result remains pending. This does not change acceptance
+coverage or the two known upstream reachability failures.

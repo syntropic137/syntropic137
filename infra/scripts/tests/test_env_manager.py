@@ -326,6 +326,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env = em._allocate("feat/cool-feature")
 
@@ -347,6 +348,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env1 = em._allocate("feat/cool-feature")
             _, env2 = em._allocate("feat/cool-feature")
@@ -361,6 +363,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env1 = em._allocate("feat/first")
             _, env2 = em._allocate("feat/second")
@@ -383,6 +386,7 @@ class TestRollback:
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
             patch.object(em, "_compose_run", return_value=0),
         ):
             _, env = em._allocate("feat/doomed")
@@ -408,6 +412,7 @@ class TestRollback:
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
             patch.object(em, "_compose_run", return_value=0),
         ):
             em._allocate("feat/keeper")
