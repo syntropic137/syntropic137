@@ -44,8 +44,9 @@ syn execution sessions <execution-id> [options]
 | `--refresh` | `boolean` | --- | Schedule durable local reconstruction and report its job |
 | `--idempotency-key` | `text` | --- | Reuse a refresh request key when retrying |
 | `--json` | `boolean` | --- | Print metadata and revision-pinned pages as JSON |
-| `--all` | `boolean` | --- | Read every node page from one revision |
-| `--limit` | `text` | `100` | Nodes per page (1 to 500) |
+| `--kind` | `text` | --- | Inventory section: node, membership, edge, capture, gap, binding, retraction (default node) |
+| `--all` | `boolean` | --- | Read every page of the selected section from one revision |
+| `--limit` | `text` | `100` | Items per page (1 to 500) |
 | `--cursor` | `text` | --- | Continue a previously returned inventory cursor |
 | `--require-complete` | `boolean` | --- | Fail unless coverage is reconciled and current |
 

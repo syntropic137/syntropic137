@@ -18,9 +18,9 @@ not mark its entire acceptance criterion complete. The exact scope remains the
 | 6 | Independent SeshMagic query and interrupted replication | 2 fresh real exporter/server/SQL/MCP tests pass after rebuilding current binaries | Complete out-of-order delivery and offline-origin matrix |
 | 7 | Qualified identities, legacy aliases, immutable memberships | Namespace tests and immutable capture storage exist | Verified legacy alias migration and collision matrix |
 | 8 | Large bounded pagination under concurrent writes | Large native pipeline and SQL snapshot-pagination tests pass | Audit >1000-node and >500-observation thresholds, indexes and every client cursor contract |
-| 9 | API/CLI/UI parity and strict completeness | Routes and client tests exist; local UI demonstrated | Canonical detail/navigation/filtering and full client parity matrix |
+| 9 | API/CLI/UI parity and strict completeness | CLI supports every section with section-bound cursors; API/UI expose current body restrictions; all 523 CLI tests pass | Canonical detail/navigation/filtering, replica presentation and full client parity matrix |
 | 10 | Whole-object authorization and safe transcript access | Real archive/revocation/shared-byte tests pass | Full scope/raw-token/expired/redacted/secret-diagnostic matrix |
-| 11 | Retention, immutable revisions, deletion without resurrection | Immutable archives, revocation, retractions implemented | Physical expiry/deletion, durable cross-store tombstones and cleanup quotas |
+| 11 | Retention, immutable revisions, deletion without resurrection | Real host/exporter/store deletion, late-upload rejection and physical exporter cleanup pass; historical receipts stay immutable | Workspace source cleanup, retention quotas and replica availability presentation |
 | 12 | Resumable backfill and unchanged billing/platform totals | Qualified pricing read seam exists | Backfill acquisition, qualified producer/ledger/leader wiring and cumulative-resume regressions |
 | 13 | Deterministic centralized historical reconstruction | Native pipeline, late child and stale publication tests pass | Historical-source acquisition and complete replay/correction matrix |
 | 14 | Fake harness extension and dependency enforcement | Harness registry and topology checks exist | Run explicit contract and vendor-boundary tests on final changes |
@@ -227,6 +227,15 @@ UI tests, dashboard type check and regenerated contracts pass. Logs:
 Replica availability presentation, CLI capture-page navigation and the remaining
 acceptance matrix remain unfinished. These changes have not been deployed to the
 live demo stack or pushed to the draft PR yet.
+
+## CLI section navigation
+
+`execution sessions --kind` now selects nodes, memberships, edges, captures,
+gaps, bindings or corrections. `--all` pages the selected section; cursors bind
+its kind and preserve legacy node cursors. JSON retains API body restrictions;
+text separates recorded capture availability from current restrictions. Wrong
+section/run responses are rejected. All 523 CLI tests, type checking and codegen
+pass. Log: `/private/tmp/1398-cli-sections-full.log`.
 
 ## Follow-up after draft PR creation
 

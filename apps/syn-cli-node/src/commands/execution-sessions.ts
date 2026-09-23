@@ -7,9 +7,11 @@ import type { CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { print } from "../output/console.js";
 
+const kindSchema = z.enum(["node", "membership", "edge", "capture", "gap", "binding", "retraction"]);
+
 const cursorSchema = z.object({
   execution: z.string(), source: z.string(), snapshot: z.string().uuid(),
-  after: z.number().int().nonnegative(),
+  after: z.number().int().nonnegative(), kind: kindSchema.default("node"),
 }).strict();
 
 export const executionSessionsCommand: CommandDef = {
@@ -20,8 +22,9 @@ export const executionSessionsCommand: CommandDef = {
     refresh: { type: "boolean", description: "Schedule durable local reconstruction and report its job" },
     "idempotency-key": { type: "string", description: "Reuse a refresh request key when retrying" },
     json: { type: "boolean", description: "Print metadata and revision-pinned pages as JSON" },
-    all: { type: "boolean", description: "Read every node page from one revision" },
-    limit: { type: "string", default: "100", description: "Nodes per page (1 to 500)" },
+    kind: { type: "string", description: "Inventory section: node, membership, edge, capture, gap, binding, retraction (default node)" },
+    all: { type: "boolean", description: "Read every page of the selected section from one revision" },
+    limit: { type: "string", default: "100", description: "Items per page (1 to 500)" },
     cursor: { type: "string", description: "Continue a previously returned inventory cursor" },
     "require-complete": { type: "boolean", description: "Fail unless coverage is reconciled and current" },
   },
@@ -38,6 +41,10 @@ export const executionSessionsCommand: CommandDef = {
         cursor = cursorSchema.parse(JSON.parse(Buffer.from(String(values["cursor"]), "base64url").toString("utf8")));
       } catch { throw new CLIError("Invalid inventory cursor"); }
     }
+    const selected = kindSchema.safeParse(values["kind"] ?? cursor?.kind ?? "node");
+    if (!selected.success) throw new CLIError("Invalid inventory kind");
+    const kind = selected.data;
+    if (cursor && cursor.kind !== kind) throw new CLIError("Inventory cursor belongs to another section");
     let refresh: components["schemas"]["SessionInventoryJobResponse"] | null = null;
     if (values["idempotency-key"] && values["refresh"] !== true) throw new CLIError("idempotency-key requires --refresh");
     if (values["refresh"] === true) {
@@ -68,8 +75,10 @@ export const executionSessionsCommand: CommandDef = {
     if (snapshotId) {
       do {
         const page: components["schemas"]["SessionInventoryPageResponse"] = unwrap(await api.GET("/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}", {
-          params: { path: { execution_id: status.run.execution_id, snapshot_id: snapshotId, kind: "node" }, query: { after, limit } },
+          params: { path: { execution_id: status.run.execution_id, snapshot_id: snapshotId, kind }, query: { after, limit } },
         }), "Failed to read inventory page");
+        if (page.kind !== kind) throw new CLIError("Inventory response belongs to another section");
+        if (page.snapshot.run.source_instance_id !== status.run.source_instance_id || page.snapshot.run.execution_id !== status.run.execution_id) throw new CLIError("Inventory response belongs to another run or installation");
         if (page.snapshot.snapshot_id !== snapshotId) throw new CLIError("Inventory revision changed during pagination");
         complete = page.snapshot.coverage.state === "reconciled"
           && status.reconstruction_status === "current"
@@ -77,17 +86,14 @@ export const executionSessionsCommand: CommandDef = {
         if (json) process.stdout.write(`${first ? "" : ","}${JSON.stringify(page)}`);
         else {
           if (first) print(`Revision: ${page.snapshot.revision}; coverage: ${page.snapshot.coverage.state}; nodes: ${page.snapshot.counts.node}; gaps: ${page.snapshot.counts.gap}`);
-          for (const item of page.items) {
-            if (!("ref" in item)) throw new CLIError("Invalid node inventory page");
-            print(`${item.ref.kind}\t${item.ref.harness ?? ""}\t${item.ref.local_id}`);
-          }
+          printInventoryItems(page);
         }
         first = false;
         const next = page.next_after;
         if (next == null) { nextCursor = null; break; }
         if (next <= after) throw new CLIError("Inventory cursor did not advance");
         after = next;
-        nextCursor = Buffer.from(JSON.stringify({ execution: status.run.execution_id, source: status.run.source_instance_id, snapshot: snapshotId, after })).toString("base64url");
+        nextCursor = Buffer.from(JSON.stringify({ execution: status.run.execution_id, source: status.run.source_instance_id, snapshot: snapshotId, after, kind })).toString("base64url");
       } while (values["all"] === true);
     }
     if (json) process.stdout.write(`],"next_cursor":${JSON.stringify(nextCursor)}}\n`);
@@ -97,3 +103,22 @@ export const executionSessionsCommand: CommandDef = {
     }
   },
 };
+
+
+function printInventoryItems(page: components["schemas"]["SessionInventoryPageResponse"]): void {
+  for (const item of page.items) {
+    if (page.kind === "node") {
+      if (!("ref" in item)) throw new CLIError("Invalid node inventory page");
+      print(`${item.ref.kind}\t${item.ref.harness ?? ""}\t${item.ref.local_id}`);
+    } else if (page.kind === "capture") {
+      if (!("availability" in item)) throw new CLIError("Invalid capture inventory page");
+      const current = item.destination === "local"
+        ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
+        : undefined;
+      print(`${item.node.harness ?? ""}\t${item.node.local_id}\t${item.destination}: recorded=${item.availability}; current=${current ?? "unchecked"}`);
+      if (item.archived_byte_hash) print(`Archive: ${item.archived_byte_hash}`);
+    } else {
+      print(JSON.stringify(item));
+    }
+  }
+}

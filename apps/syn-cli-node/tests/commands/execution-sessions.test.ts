@@ -77,3 +77,53 @@ it("refresh schedules management work with the caller key and reports its durabl
   expect(JSON.parse(output()).refresh.job_id).toBe(job.job_id);
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });
+
+it("preserves capture restrictions and binds continuation cursors to the section", async () => {
+  const capturePage = { snapshot, kind: "capture", items: [], next_after: 0,
+    body_overrides: [{ archive_sha256: "a".repeat(64), status: "expired" }] };
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(capturePage));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "capture", json: true } });
+  const result = JSON.parse(output());
+  expect(result.pages[0].body_overrides).toEqual(capturePage.body_overrides);
+  const cursor = result.next_cursor;
+  expect(JSON.parse(Buffer.from(cursor, "base64url").toString()).kind).toBe("capture");
+  fetchMock.mockReset();
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, kind: "node" } })).rejects.toThrow("another section");
+  expect(fetchMock).not.toHaveBeenCalled();
+  vi.mocked(process.stdout.write).mockClear();
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({ ...capturePage, next_after: null }));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
+  expect(new URL((fetchMock.mock.calls[1]![0] as Request).url).pathname).toMatch(/\/capture$/);
+});
+
+it("prints historical capture availability separately from current expiry", async () => {
+  const hash = "a".repeat(64);
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({
+    snapshot, kind: "capture", next_after: null,
+    items: [{ node: { harness: "codex", local_id: "native" }, destination: "local", availability: "present", archived_byte_hash: hash }],
+    body_overrides: [{ archive_sha256: hash, status: "expired" }],
+  }));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "capture" } });
+  expect(output()).toContain("recorded=present; current=expired");
+  expect(output()).toContain(hash);
+});
+
+it("rejects unsupported sections before network access", async () => {
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "invalid" } })).rejects.toThrow("Invalid inventory kind");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("rejects a response with a mismatched section", async () => {
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("native", null)));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "edge" } })).rejects.toThrow("another section");
+});
+
+it("continues legacy node cursors without requiring a new section field", async () => {
+  const cursor = Buffer.from(JSON.stringify({ source: "installation", execution: "execution", snapshot: snapshot.snapshot_id, after: 0 })).toString("base64url");
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("legacy-next", null)));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
+  expect(JSON.parse(output()).pages[0].items[0].ref.local_id).toBe("legacy-next");
+  const url = new URL((fetchMock.mock.calls[1]![0] as Request).url);
+  expect(url.pathname).toMatch(/\/node$/);
+  expect(url.searchParams.get("after")).toBe("0");
+});
