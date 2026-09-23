@@ -6,7 +6,7 @@ Location: orchestration/domain/aggregate_workflow_template/ (per ADR-020)
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 from event_sourcing import (
@@ -92,15 +92,19 @@ def _parse_enum(value: str | StrEnum, enum_type: type[StrEnum]) -> StrEnum:
     return enum_type(value) if isinstance(value, str) else value
 
 
-_PHASE_UPDATE_FIELDS = [
-    "workflow_id",
-    "phase_id",
+#: Which phase this event is about. Selects a phase; never updates one.
+_PHASE_IDENTITY_FIELDS: Final = ("workflow_id", "phase_id")
+
+#: Every field a WorkflowPhaseUpdated event is able to change, and the whole
+#: list of them. A field is updatable when it is here and nowhere else - see
+#: _apply_phase_update for why that is the only list there is.
+_PHASE_UPDATE_FIELDS: Final = (
     "prompt_template",
     "model",
     "provider",
     "timeout_seconds",
     "allowed_tools",
-]
+)
 
 
 def _normalize_phase_update_data(event: DomainEvent) -> dict[str, Any]:
@@ -109,43 +113,30 @@ def _normalize_phase_update_data(event: DomainEvent) -> dict[str, Any]:
     Handles both Pydantic-style events and dict-like events from gRPC.
     """
     data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-    for field in _PHASE_UPDATE_FIELDS:
+    for field in (*_PHASE_IDENTITY_FIELDS, *_PHASE_UPDATE_FIELDS):
         data.setdefault(field, None)
     return data
 
 
-def _coalesce[T](new: T | None, existing: T) -> T:
-    """Return new if not None, else existing."""
-    return new if new is not None else existing
-
-
 def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDefinition:
-    """Create a new PhaseDefinition with updated fields from event data."""
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-        PhaseDefinition,
-    )
+    """The phase as this event leaves it: what it carried changed, the rest untouched.
 
-    updated_provider = _coalesce(data["provider"], phase.provider)
-    return PhaseDefinition(
-        phase_id=phase.phase_id,
-        name=phase.name,
-        order=phase.order,
-        execution_type=phase.execution_type,
-        description=phase.description,
-        input_artifact_types=phase.input_artifact_types,
-        output_artifact_types=phase.output_artifact_types,
-        prompt_template=data["prompt_template"],
-        max_tokens=phase.max_tokens,
-        timeout_seconds=_coalesce(data["timeout_seconds"], phase.timeout_seconds),
-        allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
-        argument_hint=phase.argument_hint,
-        model=_coalesce(data["model"], phase.model),
-        provider=updated_provider,
-        allow_delegation=phase.allow_delegation,
-        sandbox=phase.sandbox,
-        skills=phase.skills,
-        claude_plugins=phase.claude_plugins,
-    )
+    A copy, NOT a field-by-field rebuild, and that distinction is the whole
+    function (#1308). A rebuild has to name every field it means to KEEP, so
+    the day a field is added to PhaseDefinition and not added here, every
+    prompt edit silently resets it to the model default - a phase that
+    declared ``delivers_repo_changes: false`` came back True and re-opened
+    #1308, and before that a codex phase reverted to claude. Both were the one
+    defect, and ``clone_repos`` and ``can_open_pr`` were sitting in it too.
+    Copying inverts the default from "reset unless listed" to "keep unless
+    listed", so a field added later is right without being mentioned, and
+    making one updatable is a line in _PHASE_UPDATE_FIELDS.
+
+    None means "unchanged" on every updatable field, uniformly: an event that
+    did not carry a value cannot be an instruction to erase one.
+    """
+    changed = {field: data[field] for field in _PHASE_UPDATE_FIELDS if data[field] is not None}
+    return phase.model_copy(update=changed)
 
 
 def _parse_typed_list(raw: list, type_name: str) -> list:

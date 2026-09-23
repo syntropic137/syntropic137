@@ -48,6 +48,24 @@ if TYPE_CHECKING:
     )
 
 
+class EventsNotRecordedError(RuntimeError):
+    """The event store refused the write, so the events are NOT durable.
+
+    THE ONE THING A CALLER ON A TEARDOWN PATH HAS TO KNOW (#1319). `append` is
+    two steps - the store, then this run's local to-do list - and they fail for
+    opposite reasons. A store that rejected the write means the events do not
+    exist and nothing downstream will ever see them; a projection that blew up
+    afterwards means they DO exist and only the read model is behind.
+
+    A failing phase must be reaped either way, because a container nobody
+    removes is a leaked one - but only the first case has lost the account of
+    why the phase died, and only the first is worth waking someone for. The
+    caller cannot tell them apart from a bare exception, and should not have to
+    know that there are two steps to tell them apart at all, so the distinction
+    is made here and named.
+    """
+
+
 class ExecutionJournal:
     """The execution's event stream, and the to-do list derived from it locally."""
 
@@ -69,9 +87,24 @@ class ExecutionJournal:
         await self._project(uncommitted)
 
     async def append(self, aggregate: WorkflowExecutionAggregate) -> None:
-        """Record whatever the aggregate has decided since it was last saved."""
+        """Record whatever the aggregate has decided since it was last saved.
+
+        Raises:
+            EventsNotRecordedError: the store rejected the write and the events
+                are not durable. ANY OTHER exception means they are - the
+                projection is the only thing that failed.
+
+        `open` deliberately does not wrap: its `StreamAlreadyExistsError` is a
+        domain answer ("this run already started") that callers act on, not a
+        report that the write was lost.
+        """
         uncommitted = self._pending(aggregate)
-        await self._repository.save(aggregate)
+        try:
+            await self._repository.save(aggregate)
+        except Exception as err:
+            raise EventsNotRecordedError(
+                f"event store rejected the write for execution {aggregate.id}: {err}"
+            ) from err
         await self._project(uncommitted)
 
     @staticmethod

@@ -20,7 +20,7 @@ going up. Growing an excepted file is how an exception becomes permanent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -30,10 +30,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionMetrics,
+    FailureClassification,
+    PhaseUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     describe_exception,
     describe_observed_branches,
+    describe_saved_work,
+    exit_code_of,
+    failure_account,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     WorkflowExecutionResult,
@@ -51,8 +56,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
         PhaseResult,
+        ReportedFailureReason,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+        ObservedBranches,
+        SavedWork,
+    )
 
 
 def failed_phase_elapsed_seconds(
@@ -101,6 +110,27 @@ class PhaseFailure:
     error_type: str
     duration_seconds: float | None
     result: PhaseResult | None
+    classification: FailureClassification = FailureClassification.PLATFORM
+    """Whether the platform failed or the work was correctly judged not
+    deliverable (#1357). A SEVENTH SINK in the making, and here for the reason
+    the six above are: the failure event and the read models an operator reads
+    the failure rate off all have to carry it, and `error_type` - an exception
+    CLASS NAME, which reads `PhaseReportedFailureError` for a correct refusal
+    and for an unreadable report alike - was never going to tell them apart.
+
+    Defaults to `PLATFORM` rather than being required, which is the same
+    direction of doubt the enum documents: a sink that forgets to set it
+    reports what the system already reported, and no omission can invent a
+    correct refusal."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What the phase itself SAID caused the failure (#1372), `None` when it
+    said nothing this reader knows.
+
+    Beside the field above rather than folded into it, which is the whole of
+    #1392: that one is a measurement and this is a claim, they answer to
+    different evidence, and a record that fuses them lets a run choose the
+    number it lands in. Both travel to every sink, so the operator reads the
+    agent's own word and the tally never counts it."""
     observed_branches: tuple[BranchObservation, ...] | None = None
     """Branches read from git at failure time, `()` for "read, and none of them
     differs from how the phase found it", and None for "nothing could tell us".
@@ -110,6 +140,25 @@ class PhaseFailure:
     """Which phase this describes, None when the execution died before one
     started. Carried so the command below names the phase this failure is
     about rather than one the caller names again alongside it."""
+    exit_code: int | None = None
+    """What the process behind this failure exited with, or None when no
+    completed process status was observed (#1319)."""
+    usage: PhaseUsage = field(default_factory=PhaseUsage)
+    """What the failing phase had spent when it died (#1262).
+
+    A SIXTH SINK, and the one the other five made the case for. The phase's
+    `PhaseResult`, the `FailExecutionCommand`, and from there the failure event
+    and the read model an operator actually opens all have to carry these
+    counts, and until they did the only place the numbers survived was inside
+    `error_message`, as the prose `(tokens=190+545)` - readable by a human and
+    by nothing else. A phase killed at its timeout having spent 735 tokens was
+    not working; one killed having spent 300k needed a bigger budget. Both
+    reported exit 124 and zeros.
+
+    Defaults to zeros rather than None for the reason `PhaseUsage` gives: an
+    execution that died before any phase ran spent nothing, and that is a
+    measurement, not an absence."""
+
     artifact_ids: tuple[str, ...] = ()
     """What was kept out of the failing phase's workspace before it was torn
     down (#1321), `()` when it wrote nothing collectable.
@@ -145,7 +194,11 @@ class PhaseFailure:
             total_phases=total_phases,
             failed_phase_duration_seconds=self.duration_seconds,
             observed_branches=self.observed_branches,
+            exit_code=self.exit_code,
             failed_phase_artifact_ids=self.artifact_ids,
+            failed_phase_usage=self.usage,
+            classification=self.classification,
+            reported_failure_reason=self.reported_failure_reason,
         )
 
     def execution_result(
@@ -176,6 +229,13 @@ class PhaseFailure:
             artifact_ids=artifact_ids,
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=self.reason,
+            # The fourth sink gets it too. A caller that dispatched this run
+            # synchronously reads its outcome here and nowhere else, so
+            # stopping at the event would leave the one response that reports
+            # the failure unable to say what kind it was (#1357) - or what its
+            # phase said about it (#1372).
+            failure_classification=self.classification,
+            reported_failure_reason=self.reported_failure_reason,
         )
 
 
@@ -187,6 +247,8 @@ def failed_phase_outcome(
     now: DateTime | None = None,
     observed: ObservedBranches | None = None,
     kept_artifact_ids: Sequence[str] = (),
+    usage: PhaseUsage | None = None,
+    saved: SavedWork | None = None,
 ) -> PhaseFailure:
     """What a failed run reports, derived from the exception that ended it.
 
@@ -205,26 +267,56 @@ def failed_phase_outcome(
     branches stand follows it as a separate paragraph (#1200). None - nothing
     could be read - reads the same as it did before this existed.
 
+    `saved` is what was pushed out of the workspace before teardown, and it
+    goes BETWEEN the two, for the reason it is written at all: an operator who
+    has just read why the phase died needs the recovery ref before the branch
+    report, which refers back to it ("the quarantine report above"). Reversing
+    them would leave that sentence pointing at nothing. It is appended on the
+    same terms as `observed` - never replacing the failure's own reason, so a
+    timeout that saved its work is still a timeout, and silent when there was
+    nothing to save (#1231).
+
     `kept_artifact_ids` is what survived the phase - the files it had already
     written, taken out of the workspace before this path abandoned it (#1321).
     It is an argument rather than something this function looks up because only
     the caller knows the collection happened; what this function decides is
     that every sink reports the same list.
+
+    `usage` is what the phase had spent (#1262), and it is an argument for the
+    same reason: the counts live on the runtime the caller holds, and only the
+    caller is at the one point in its teardown where they are still readable.
+    What this function decides is that the phase's own result and the command
+    the aggregate stores report the same figures - the split that let the
+    result report zeros while the message reported the truth.
     """
     started_at = started_at_by_phase.get(phase_id) if phase_id else None
     # ONE clock reading. The duration and the result's completed_at describe the
     # same instant, so reading twice made them disagree.
     ended_at = now or datetime.now(UTC)
     reason = describe_exception(error)
+    exit_code = exit_code_of(error)
+    if saved is not None and saved.is_worth_reporting:
+        reason = f"{reason}\n\n{describe_saved_work(saved)}"
     if observed is not None:
         reason = f"{reason}\n\n{describe_observed_branches(observed)}"
     kept = tuple(kept_artifact_ids)
+    spent = usage or PhaseUsage()
+    account = failure_account(error)
     return PhaseFailure(
         reason=reason,
         error_type=type(error).__name__,
+        # Asked of the exception, once, exactly where `error_type` and `reason`
+        # are (#1357). `error_type` is the class name and cannot answer this:
+        # one class covers both a readable `success=false` report and a report
+        # nobody could read, and those are opposite answers. The pair arrives
+        # together so no sink can hold one without the other (#1392).
+        classification=account.classification,
+        reported_failure_reason=account.reported_reason,
         observed_branches=observed.recorded if observed is not None else None,
         phase_id=phase_id,
+        exit_code=exit_code,
         artifact_ids=kept,
+        usage=spent,
         duration_seconds=failed_phase_elapsed_seconds(started_at, now=ended_at),
         result=failed_phase_result(
             phase_id,
@@ -232,7 +324,9 @@ def failed_phase_outcome(
             session_id_by_phase.get(phase_id or "", ""),
             reason,
             ended_at=ended_at,
+            exit_code=exit_code,
             artifact_ids=kept,
+            usage=spent,
         ),
     )
 
@@ -243,7 +337,9 @@ def failed_phase_result(
     session_id: str,
     error_message: str,
     ended_at: DateTime,
+    exit_code: int | None = None,
     artifact_ids: tuple[str, ...] = (),
+    usage: PhaseUsage | None = None,
 ) -> PhaseResult | None:
     """The `PhaseResult` for a phase that failed, or None if it never started.
 
@@ -254,6 +350,10 @@ def failed_phase_result(
     artifact, so the first is the one it names - the same convention the
     success path uses, and for the same reason: the primary deliverable is
     stored first.
+
+    `usage` is what it spent before it died (#1262), and it reaches the result
+    whole rather than as five counts, so this hop cannot pass four of them and
+    forget the total.
     """
     if phase_id is None or started_at is None:
         return None
@@ -268,7 +368,9 @@ def failed_phase_result(
         session_id=session_id,
         error_message=error_message,
         completed_at=ended_at,
+        exit_code=exit_code,
         artifact_id=artifact_ids[0] if artifact_ids else None,
+        usage=usage,
     )
 
 
@@ -486,11 +588,24 @@ class CancelledExecution:
 
 
 def cancelled_execution(
-    reason: str | None, phase_results: list[PhaseResult], artifact_ids: list[str]
+    reason: str | None,
+    phase_results: list[PhaseResult],
+    artifact_ids: list[str],
+    saved: SavedWork | None = None,
 ) -> CancelledExecution:
-    """Name what was cancelled and why, before anything is torn down."""
+    """Name what was cancelled and why, before anything is torn down.
+
+    `saved` is what the cancelled phase's workspace was holding that no remote
+    had, pushed out before teardown. A cancellation destroys unpushed commits
+    exactly as a timeout does - the user asked for the run to STOP, not for the
+    work to be deleted - so the recovery ref is appended here the same way, and
+    the user's own reason stays first and unchanged (#1231).
+    """
+    said = reason or "Cancelled by user"
+    if saved is not None and saved.is_worth_reporting:
+        said = f"{said}\n\n{describe_saved_work(saved)}"
     return CancelledExecution(
-        reason=reason or "Cancelled by user",
+        reason=said,
         phase_results=phase_results,
         artifact_ids=artifact_ids,
     )

@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -35,6 +38,7 @@ from syn_shared.env_constants import (
     ENV_GH_REPO,
     ENV_GITHUB_TOKEN,
 )
+from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -165,14 +169,10 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
     for skill in skills:
         prior_sha = seen_sha_by_name.get(skill.skill_name)
         if prior_sha is not None and prior_sha != skill.resolved_sha:
-            raise SkillInstallFailed(
+            raise SkillInstallFailed.not_attempted(
                 skill.skill_name,
-                "n/a",
-                exit_code=-1,
-                stderr=(
-                    f"conflicting versions of skill {skill.skill_name!r}: "
-                    f"{prior_sha!r} vs {skill.resolved_sha!r}"
-                ),
+                f"conflicting versions of skill {skill.skill_name!r}: "
+                f"{prior_sha!r} vs {skill.resolved_sha!r}",
             )
         seen_sha_by_name[skill.skill_name] = skill.resolved_sha
 
@@ -550,9 +550,15 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            detail = setup_result.stderr or f"exit code {setup_result.exit_code} (no stderr output)"
-            msg = f"Secret-injection setup failed for phase '{phase_name}': {detail}"
-            raise RuntimeError(msg)
+            detail = describe_process_failure(
+                f"Secret-injection setup for phase '{phase_name}'",
+                exit_code=setup_result.exit_code,
+                output=setup_result.stderr,
+                timed_out=setup_result.timed_out,
+            )
+            if setup_result.signal_death is not None:
+                detail = f"{detail}\n{setup_result.signal_death.describe()}"
+            raise NonZeroExitError(detail, exit_code=setup_result.exit_code)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
@@ -634,11 +640,9 @@ class WorkspaceProvisionHandler:
         agent_selector = phase.agent_config.provider
         agent_key = _SKILLS_CLI_AGENT_KEYS.get(agent_selector)
         if agent_key is None:
-            raise SkillInstallFailed(
+            raise SkillInstallFailed.not_attempted(
                 phase.skills[0].skill_name,
-                agent_selector,
-                exit_code=-1,
-                stderr=f"no skills-cli agent key for agent {agent_selector!r}",
+                f"no skills-cli agent key for agent {agent_selector!r}",
             )
         skill_files = await self._skill_materializer.fetch_for_workspace(phase.skills)
         if skill_files:
@@ -657,11 +661,12 @@ class WorkspaceProvisionHandler:
                 working_directory="/workspace",
             )
             if result.exit_code != 0:
-                raise SkillInstallFailed(
+                raise SkillInstallFailed.after_exit(
                     skill.skill_name,
                     agent_key,
-                    result.exit_code,
-                    result.stderr or result.stdout or "",
+                    exit_code=result.exit_code,
+                    output=result.stderr or result.stdout or "",
+                    timed_out=result.timed_out,
                 )
         logger.info(
             "Installed %d skill(s) for agent %s in %s",
@@ -870,8 +875,12 @@ class WorkspaceProvisionHandler:
             working_directory="/workspace",
         )
         if result.exit_code != 0:
-            raise SkillInstallFailed(
-                skill_name, agent_key, result.exit_code, result.stderr or result.stdout or ""
+            raise SkillInstallFailed.after_exit(
+                skill_name,
+                agent_key,
+                exit_code=result.exit_code,
+                output=result.stderr or result.stdout or "",
+                timed_out=result.timed_out,
             )
         logger.info(
             "Installed baked delegation skill %s for agent %s in %s",

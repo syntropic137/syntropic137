@@ -108,6 +108,7 @@ def _runtime(capture: object, workspace: object, cm: object) -> PhaseRuntime:
         workspace_cm=cast("AbstractAsyncContextManager[ManagedWorkspace]", cm),
         agent_env={},
         claude_cmd=[],
+        delivers_repo_changes=True,
     )
     runtime._session_ids[PHASE] = "s-1"  # pyright: ignore[reportPrivateUsage]
     return runtime
@@ -195,7 +196,7 @@ class TestTheRealConstructorSetsWhatFinalizeReads:
     @pytest.mark.unit
     def test_capture_state_is_initialised(self) -> None:
         p = _make_processor(FakeAgentExecutionHandler())
-        runtime = p._runtime  # pyright: ignore[reportPrivateUsage]
+        runtime = p._runtimes.of("exec-capture")  # pyright: ignore[reportPrivateUsage]
 
         # Defaults to off: a processor built without a capture service must
         # still finalize phases rather than raise.
@@ -207,7 +208,7 @@ class TestTheRealConstructorSetsWhatFinalizeReads:
         capture = _Capture([])
         p = _make_processor(FakeAgentExecutionHandler(), session_capture=capture)
 
-        assert p._runtime._capture_port is capture  # pyright: ignore[reportPrivateUsage]
+        assert p._runtimes.of("exec-capture")._capture_port is capture  # pyright: ignore[reportPrivateUsage]
 
 
 class TestCaptureCannotFailAPhase:

@@ -4,14 +4,9 @@ This port provides read-only access to artifact projections for multi-phase
 workflows. Artifacts from previous phases are injected into subsequent phase prompts.
 """
 
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
-from syn_domain.contexts.artifacts import PhaseOutputFile
-
-if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration._shared.ArtifactValueObjects import (
-        ArtifactSummary,
-    )
+from syn_domain.contexts.artifacts import ArtifactSummary, PhaseOutputFile
 
 
 class ArtifactQueryServicePort(Protocol):
@@ -97,7 +92,7 @@ class ArtifactQueryServicePort(Protocol):
     async def get_by_execution(
         self,
         execution_id: str,
-    ) -> list["ArtifactSummary"]:
+    ) -> list[ArtifactSummary]:
         """Get all artifacts for an execution.
 
         Args:

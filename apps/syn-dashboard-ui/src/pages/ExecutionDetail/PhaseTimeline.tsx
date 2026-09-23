@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
+import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
@@ -43,7 +44,21 @@ const statusIconColors: Record<string, string> = {
   completed: 'text-emerald-400',
   running: 'text-blue-400',
   failed: 'text-red-400',
+  [REFUSED]: 'text-amber-400',
   pending: 'text-slate-400',
+}
+
+/**
+ * How this phase is drawn, given what the RUN was classified as.
+ *
+ * The classification is a property of the execution, not of the phase - the
+ * server records it once, from the verdict of the phase that refused - so the
+ * timeline reads it from the execution and applies it to the failed phase,
+ * which is that phase. Every other phase on a refused run completed, so
+ * `outcomeTone` returns their status untouched and nothing else moves.
+ */
+function phaseTone(phase: Phase, execution: ExecutionDetailResponse): string {
+  return outcomeTone(phase.status, execution.failure_classification)
 }
 
 function PhaseTokenSegment({ label, total, rows, accentColor }: {
@@ -68,8 +83,8 @@ function PhaseTokenSegment({ label, total, rows, accentColor }: {
   )
 }
 
-function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
-  const Icon = phaseStatusIcons[phase.status] ?? Clock
+function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
+  const Icon = phaseStatusIcons[tone] ?? Clock
   const tokens = phaseTokenTotals(phase)
   // `duration_seconds` is nullable: the server returns null for a genuinely
   // unknown duration rather than a 0.0 that looks like a real measurement.
@@ -86,7 +101,7 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   return (
     <>
       <div className="flex items-center gap-2">
-        <Icon className={clsx('h-4 w-4', statusIconColors[phase.status] ?? 'text-slate-400')} />
+        <Icon className={clsx('h-4 w-4', statusIconColors[tone] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
       </div>
       {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
@@ -140,10 +155,10 @@ function PhaseCardBody({ phase, now }: { phase: Phase; now: number }) {
   )
 }
 
-function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
+function PhaseCard({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
   const baseClasses = clsx(
     'flex min-w-[200px] flex-1 flex-col rounded-lg border p-4 transition-all',
-    phaseStatusColors[phase.status] ?? phaseStatusColors.pending,
+    phaseStatusColors[tone] ?? phaseStatusColors.pending,
   )
   if (phase.session_id) {
     return (
@@ -155,13 +170,13 @@ function PhaseCard({ phase, now }: { phase: Phase; now: number }) {
         )}
         aria-label={`Open session for phase ${phase.name}`}
       >
-        <PhaseCardBody phase={phase} now={now} />
+        <PhaseCardBody phase={phase} tone={tone} now={now} />
       </Link>
     )
   }
   return (
     <div className={baseClasses}>
-      <PhaseCardBody phase={phase} now={now} />
+      <PhaseCardBody phase={phase} tone={tone} now={now} />
     </div>
   )
 }
@@ -243,7 +258,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
         <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
           {phases.map((phase, idx) => (
             <div key={phase.workflow_phase_id} className="flex items-stretch">
-              <PhaseCard phase={phase} now={now} />
+              <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
               {idx < phases.length - 1 && (
                 <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
               )}

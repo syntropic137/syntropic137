@@ -147,7 +147,11 @@ class SessionCostQueryService:
         """Get cost data for many sessions in a fixed number of round-trips.
 
         Same answers as calling ``get`` per id - it is the same code path - but
-        four queries for the whole set instead of four per session (#1114).
+        three or four queries per BATCH instead of four per session (#1114).
+        Three when every id was answered from session summaries, four when the
+        token-usage fallback is needed; and one batch per
+        ``MAX_SESSIONS_PER_QUERY`` ids rather than one for the whole set, which
+        is what bounds a single acquisition (#1338).
         Sessions with no cost data are absent from the mapping.
         """
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
