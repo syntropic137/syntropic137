@@ -89,19 +89,20 @@ async def run_sidecar_container(docker_cmd: list[str]) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
-    # communicate() returns only once the process has exited, so the status is set.
     exit_code = proc.returncode
-    assert exit_code is not None
 
     if exit_code != 0:
-        # Same discard as #1158: stderr alone cannot tell a docker that refused
-        # from a docker that was killed, and only the status can.
-        raise RuntimeError(
-            describe_process_failure(
-                "Starting the sidecar container",
+        output = stderr.decode().strip() or stdout.decode().strip()
+        if exit_code is None:
+            detail = "The local `docker run` client has no exit status and printed nothing."
+            if output:
+                detail = f"The local `docker run` client has no exit status: {output}"
+        else:
+            detail = describe_process_failure(
+                "The local `docker run` client",
                 exit_code=exit_code,
-                output=stderr.decode(),
+                output=output,
             )
-        )
+        raise RuntimeError(f"Failed to start sidecar: {detail}")
 
     return stdout.decode().strip()
