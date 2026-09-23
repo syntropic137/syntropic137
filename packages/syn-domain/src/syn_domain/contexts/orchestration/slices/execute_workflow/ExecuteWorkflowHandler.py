@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from event_sourcing import StreamAlreadyExistsError
 
+from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -34,6 +35,7 @@ from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket, MaintenancePort
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
@@ -312,6 +314,7 @@ class ExecuteWorkflowHandler:
         workflow_repository: WorkflowRepository,
         phase_plugin_resolver: PhasePluginResolver | None = None,
         phase_skill_resolver: PhaseSkillResolver | None = None,
+        maintenance: MaintenancePort | None = None,
     ) -> None:
         self._processor = processor
         self._workflow_repo = workflow_repository
@@ -323,22 +326,54 @@ class ExecuteWorkflowHandler:
         # WHY optional (issue #772): mirrors phase_plugin_resolver. When None,
         # ``ExecutablePhase.skills`` stays at its empty default.
         self._phase_skill_resolver = phase_skill_resolver
+        # WHY optional (#1387): the fixtures that build a handler directly are
+        # not admitting anything, so requiring the port there would only add
+        # ceremony. Production MUST pass it, and the composition root is
+        # checked for exactly that by
+        # ci/fitness/code_quality/test_execution_admission_names_the_gate.py - an
+        # optional dependency nobody verifies is how a gate loses an entrance.
+        self._maintenance = maintenance
 
     async def handle(
         self,
         command: ExecuteWorkflowCommand,
+        *,
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
         """Handle ExecuteWorkflow command.
 
         Args:
             command: ExecuteWorkflowCommand with workflow ID and inputs
+            admitted: The ticket the gate issued for this execution (#1387).
+                Present means admission was already decided, under the lock,
+                before the caller was told the work had started. Absent means
+                nobody asked the gate, and the backstop below does.
 
         Returns:
             WorkflowExecutionResult with execution details and metrics
 
         Raises:
             WorkflowNotFoundError: If workflow doesn't exist
+            MaintenancePausedError: If admission is paused and no ticket was
+                presented (#1387)
         """
+        # #1387, FIRST, before anything is loaded or created: this is the one
+        # place every admission path converges, so a path that forgets its own
+        # refusal is still refused here rather than quietly admitted.
+        #
+        # Skipped for a ticketed execution, and that is the point rather than a
+        # concession. This runs inside a fire-and-forget task, after the caller
+        # has already been told `dispatched` or 200, and an exception here
+        # cannot reach them - it is logged and swallowed. Re-deciding an
+        # admission the gate already granted therefore does not refuse the
+        # work, it loses it, leaving a trigger record claiming a run that no
+        # longer exists. The ticket was issued under the transition lock, so
+        # "the flag changed since" means the operator paused AFTER this was
+        # admitted, and admitted work runs to completion (#1387: this gates
+        # admission, not execution).
+        if admitted is None and self._maintenance is not None:
+            await refuse_if_paused(self._maintenance)
+
         workflow = await self._workflow_repo.get_by_id(command.aggregate_id)
         if workflow is None:
             raise WorkflowNotFoundError(command.aggregate_id)
@@ -356,6 +391,11 @@ class ExecuteWorkflowHandler:
         )
 
         try:
+            # #1387: the ticket travels all the way to the write. The lease it
+            # represents ends when this execution's start event is durable -
+            # the processor is the only place that knows when that is - and
+            # until then `set_mode(active=True)` waits, so a deploy cannot
+            # drain past work that is admitted but not yet visible.
             return await self._processor.run(
                 workflow_id=command.aggregate_id,
                 workflow_name=workflow.name or "",
@@ -363,6 +403,7 @@ class ExecuteWorkflowHandler:
                 inputs=merged_inputs,
                 execution_id=execution_id,
                 repos=repos,
+                admitted=admitted,
             )
         except StreamAlreadyExistsError:
             logger.warning(
@@ -484,6 +525,14 @@ class ExecuteWorkflowHandler:
                     timeout_seconds=phase.timeout_seconds,
                     clone_repos=phase.clone_repos,
                     can_open_pr=phase.can_open_pr,
+                    # Dropping this would put the unpushed-work gate back to
+                    # guessing what an uncommitted change means, which is
+                    # #1308 (a read-only phase failed for a Cargo.lock its own
+                    # `cargo check` rewrote). The default it would fall back to
+                    # is True, so the failure mode of forgetting is a phase
+                    # that is judged strictly rather than one that is not
+                    # judged at all.
+                    delivers_repo_changes=phase.delivers_repo_changes,
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

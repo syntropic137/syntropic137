@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        FailureClassification,
         PhaseDefinition,
+        ReportedFailureReason,
     )
 
 
@@ -83,10 +85,13 @@ class FailExecutionCommand:
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,
+        classification: FailureClassification,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
+        reported_failure_reason: ReportedFailureReason | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -105,6 +110,12 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
         #: What the failed phase had already written, kept out of its workspace
         #: before this failure tore it down (#1321). `()` when it wrote nothing
         #: collectable, which is every failure that got this far before.
@@ -123,6 +134,23 @@ class FailExecutionCommand:
         #: and 133 tool calls behind it needed a bigger budget. Same exit code,
         #: opposite responses, and no field either could be sorted on.
         self.failed_phase_usage = failed_phase_usage or PhaseUsage()
+        #: Whether the machinery failed or the work was correctly judged not
+        #: deliverable (#1357). REQUIRED, unlike every optional field above,
+        #: and the only field on this command that is: there are three places
+        #: in production that fail an execution, they fail it for genuinely
+        #: different reasons, and a default here would let a new fourth one
+        #: inherit whichever answer happened to be written years earlier. Two
+        #: of the three are unambiguously the platform - a restart orphaning a
+        #: run, a stale-execution sweep - and saying so at those call sites is
+        #: documentation a default would delete.
+        self.classification = classification
+        #: What the failing PHASE said caused it (#1372), `None` when it said
+        #: nothing this reader knows - which is every one of the three call
+        #: sites above except the one that read an agent's own report, and is
+        #: why this defaults where the field above does not. Carried beside
+        #: the classification and never folded into it (#1392): an operator
+        #: reads the agent's word, and no number is computed from it.
+        self.reported_failure_reason = reported_failure_reason
 
 
 class StartPhaseCommand:
@@ -143,6 +171,27 @@ class StartPhaseCommand:
         self.phase_name = phase_name
         self.phase_order = phase_order
         self.session_id = session_id
+
+
+class RetryPhaseCommand:
+    """Command to abandon this phase's current attempt and start another (#1335).
+
+    Carries `reason` because the aggregate refuses on the budget, not on the
+    fault: whether a fault is worth another attempt is a judgement about the
+    agent harness's stream and belongs to the slice that reads it, while how
+    many attempts a phase may have is a rule about the execution and belongs
+    here. The reason travels so the event can record it either way.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
 
 
 class CompletePhaseCommand:

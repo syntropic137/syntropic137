@@ -67,6 +67,11 @@ _EVERY_FIELD: Mapping[str, object] = {
     # default for can_open_pr, so True is the only value that cannot be
     # produced by a dropped mapping (#1197).
     "can_open_pr": True,
+    # NOT the default. True is the default, so asserting it would pass with the
+    # mapping deleted -- and the value that has to survive is the one that
+    # turns the unpushed-work gate's reading of an uncommitted change from
+    # "unsaved deliverable" into "build-tool side effect" (#1308).
+    "delivers_repo_changes": False,
     "argument_hint": "[task]",
     "model": "gpt-5.6-sol",
     "provider": "codex",
@@ -125,6 +130,10 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # default and `PhaseYamlDefinition` all default to False, because a phase
     # nobody has thought about must not be able to publish (#1197).
     assert phase.can_open_pr is True
+    # False cannot be produced by any fallback: the domain field, the `p.get`
+    # default and `PhaseYamlDefinition` all default to True, because a phase
+    # nobody has thought about must keep the gate (#1308).
+    assert phase.delivers_repo_changes is False
     assert phase.argument_hint == "[task]"
     assert phase.model == "gpt-5.6-sol"
     assert phase.provider == "codex"

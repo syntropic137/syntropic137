@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.29.0/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.29.1-beta.7/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -282,6 +282,11 @@
         "can_open_pr": {
           "default": false,
           "title": "Can Open Pr",
+          "type": "boolean"
+        },
+        "delivers_repo_changes": {
+          "default": true,
+          "title": "Delivers Repo Changes",
           "type": "boolean"
         },
         "argument_hint": {

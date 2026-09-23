@@ -62,5 +62,6 @@ async def test_failure_log_names_the_secret_injection_setup(
     assert "Secret-injection setup failed" in message
     assert "Setup phase failed" not in message
     assert "ws-1236" in message
+    # This adapter log retains its explicit key/value status for operators.
     assert "exit=1" in message
     assert "could not read Username" in message

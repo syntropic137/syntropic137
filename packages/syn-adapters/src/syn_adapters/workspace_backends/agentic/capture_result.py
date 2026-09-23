@@ -36,6 +36,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
+from syn_shared.display import format_exit_code
 
 __all__ = [
     "LOSS_COUNTERS",
@@ -247,7 +248,8 @@ def _refuse_unreadable(
         # binary is older than --json, which is a configuration problem rather
         # than a capture success.
         return _unknown(
-            f"exporter produced no parseable JSON result (exit {exit_code}); "
+            f"exporter produced no parseable JSON result "
+            f"(exit {format_exit_code(exit_code)}); "
             "the binary may predate --json"
         )
 
@@ -312,7 +314,8 @@ def _verdict(
         return AuthoritativeCapture(
             state=CaptureState.UNKNOWN,
             reason=(
-                f"exporter exit {exit_code} contradicts captured_everything={captured_everything}"
+                f"exporter exit {format_exit_code(exit_code)} contradicts "
+                f"captured_everything={captured_everything}"
             ),
             **fields,  # type: ignore[arg-type]
         )

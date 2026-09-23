@@ -82,6 +82,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 from syn_shared.env_constants import ENV_CLAUDE_CODE_OAUTH_TOKEN, ENV_GH_REPO, ENV_GITHUB_TOKEN
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -129,8 +130,9 @@ class _CapturingProcessor:
         inputs: dict[str, str],
         execution_id: str,
         repos: list[RepositoryRef],
+        admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult:
-        del workflow_name, inputs, repos
+        del workflow_name, inputs, repos, admitted
         self.phases = list(phases)
         return WorkflowExecutionResult(
             workflow_id=workflow_id,
@@ -649,6 +651,52 @@ def _run_gh(
 #:   quotation of the template if the template is not a complete report, and
 #:   the template is in these bytes. Leaving the examples closed would have
 #:   left the parser's contract unhonoured by the only thing that produces it.
+#: * #1324 gave each outcome ONE complete fence - marker, JSON and terminator
+#:   together - after #1256 left the terminator in a fence with no JSON and the
+#:   JSON in fences with no terminator, so an agent had to assemble the block
+#:   from two places and could silently omit the terminator. Shared, seen by
+#:   every phase.
+#: * #1324 again, reworked, and these bytes move a second time. The first fix
+#:   kept #1256's emitter guarantee by making ``comments`` a ``<"...">`` slot,
+#:   so the fences were complete but still not COPYABLE - an agent that copied
+#:   one faithfully wrote no readable verdict and lost the run exactly as
+#:   before. The JSON is now literal in both fences and nothing in them is left
+#:   to substitute. That gives up "the prompt closes no block of its own",
+#:   which cannot be kept alongside verbatim copyability - the bytes of a
+#:   copyable example ARE the bytes of a report - and keeps the half that
+#:   protects #1256: quoting these bytes can only refuse a phase, never
+#:   complete one. Argued in `workspace_prompt`'s docstring, pinned by
+#:   `test_the_prompt_can_never_manufacture_a_completion`.
+#: * #1324 a third time, and the bytes move again. Literal fences fixed what an
+#:   agent copying them writes and nothing about an agent that writes its own
+#:   schema instead: exec-cd5e75eaeb63 pushed its commit and then reported
+#:   `{"status": "completed", ...}`, which named no `success` at all. The key
+#:   and its value type are now a rule stated above the fences rather than
+#:   something only demonstrated inside them. Shared, seen by every phase, and
+#:   prose only - no fence changed, so the manufacture-a-completion guarantee
+#:   above is untouched.
+#: * #1372 gave the failure fences a `failure_reason`, and there are now three
+#:   of them rather than one. The classification an operator reads to decide
+#:   whether to re-dispatch could not express "the task was impossible" at
+#:   all, and nothing in a `success=false` report carried the evidence - the
+#:   comments are prose, and the platform cannot read prose. So the phase names
+#:   the cause in the block it already writes. Shared, seen by every phase, and
+#:   necessarily so: a vocabulary offered to some phases and not others would
+#:   make the classification depend on which prompt a run happened to get.
+#:   Nothing in the fences is left to substitute, so the copyability the #1324
+#:   entries above argue for is preserved; pinned by
+#:   `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
+#: * #1392 added a fourth word, `unknown`, and the prose that tells an agent
+#:   what each of the four is read AS. The table offered no way to say "I could
+#:   not tell", and the sentence that stood in for one - leave the key out -
+#:   described an omission the parser does not treat that way: an absent reason
+#:   reads as an ordinary reported failure, which is what every report written
+#:   before the key existed means and is the one thing it cannot be used to
+#:   say. So the state got a word of its own, and the paragraph now describes
+#:   what happens rather than what was intended. Shared, seen by every phase:
+#:   a phase that could not tell is not a property of which prompt it got.
+#:   Nothing in the fences is left to substitute, so #1324's copyability holds;
+#:   pinned by `test_each_failure_fence_copied_verbatim_carries_the_class_it_names`.
 _THE_PREAMBLE_A_CLONING_PHASE_GETS = """\
 ## Syn137 Workspace Environment
 
@@ -743,35 +791,91 @@ the previous phase failed - report this in your output.
 ## Task Result (REQUIRED)
 
 **The very last thing in your response must be a `TASK_RESULT` block.** It is
-three parts, and it is read as your result only when all three are there:
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-```
-TASK_RESULT: <-- replace this with one of the JSON objects below
-TASK_RESULT_END
-```
+**The key that carries your outcome is named `success`, never `status`, and its
+value is the JSON boolean `true` or `false`** - not the quoted string `"true"`,
+not a number, and not a word like `completed`. Agents that invented their own
+key here have lost finished, pushed work: `success` is the field the
+orchestrator reads, and a block naming the outcome anything else is not
+guaranteed to be read at all.
 
-If you completed the task successfully, the JSON object is:
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of four words - never a sentence, which is
+what `comments` is for:
 
-```
-{"success": true, "comments": "Brief summary of what was accomplished"}
-```
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+| `unknown` | you cannot honestly tell which of the three it was | somebody reads the run |
 
-If you could NOT complete the task (blocked, missing access, error, etc.):
+Those four go to four different people, so the wrong word fetches the wrong one
+and the right one never hears. Write `unknown` rather than guessing: it is
+recorded as a failure nobody has classified, which is exactly what it is.
 
-```
-{"success": false, "comments": "Specific reason why — what was missing or what failed"}
-```
+What it is read as is what you SAID, recorded beside the outcome and shown to
+whoever opens the run - not as a finding about the platform. Leaving the key
+out is not the same as writing `unknown`: an omitted reason is read as an
+ordinary reported failure, which is what every report written before this key
+existed means, and it is the one thing here you cannot use to say "I could not
+tell".
 
-Examples of failure reasons:
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
-The `TASK_RESULT_END` line is what marks the block as your result rather than a
-mention of one, so write it. Without it your phase is failed as unreadable
-instead of completed. With it you are free to quote, explain or discuss this
-format anywhere else in your reply - nothing outside a closed block is read.
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
+
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
+
+You completed the task - copy both lines:
+
+```
+TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+TASK_RESULT_END
+```
+
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}
+TASK_RESULT_END
+```
+
+It failed and you cannot honestly tell which of the three - copy both lines:
+
+```
+TASK_RESULT: {"success": false, "failure_reason": "unknown", "comments": "Specific reason why — what happened, and what you could not establish about it"}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 

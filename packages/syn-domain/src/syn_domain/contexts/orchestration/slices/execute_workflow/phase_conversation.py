@@ -47,5 +47,9 @@ async def record_phase_conversation(
         input_tokens=result.tokens.input_tokens,
         output_tokens=result.tokens.output_tokens,
         started_at=started_at,
-        success=result.command.exit_code == 0,
+        # The run's own status, not the completion's. This runs BEFORE the
+        # processor decides the phase outcome, so on a cancelled run there is no
+        # completion to ask - and asking one anyway is how a cancelled phase came
+        # to be filed as a success (#1341). None is not 0, so it is not a success.
+        success=result.exit_code == 0,
     )
