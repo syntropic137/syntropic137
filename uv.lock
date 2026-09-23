@@ -55,7 +55,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentic-session-store", marker = "extra == 'dev'", directory = "lib/agentic-primitives/lib/python/agentic_session_store" },
+    { name = "agentic-session-store", marker = "extra == 'dev'", editable = "lib/agentic-primitives/lib/python/agentic_session_store" },
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.3.0" },
     { name = "pydantic", specifier = "==2.13.4" },
