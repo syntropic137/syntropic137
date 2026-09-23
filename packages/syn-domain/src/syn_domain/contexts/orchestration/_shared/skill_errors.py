@@ -17,8 +17,9 @@ After the #772 Phase A redesign, these error families remain at the API tier:
 - ``SkillNotRegistered`` raised by ``SkillResolutionService`` when a
   workflow references a skill that has not yet been registered via
   ``POST /skills/registrations``.
-- ``SkillInstallFailed`` raised by ``WorkspaceProvisionHandler`` when the
-  in-container ``skills add`` invocation exits nonzero.
+- ``SkillInstallFailed`` raised by ``WorkspaceProvisionHandler`` when a
+  phase's skills do not get installed - either the in-container ``skills
+  add`` ended badly, or the install was refused before it ran.
 
 The previous ``SkillSourceUnreachable`` / ``SkillVersionNotFound`` /
 ``SkillAuthRequired`` errors were CLI-emitted (git clone failures) and
@@ -28,7 +29,7 @@ ever calling the API.
 
 from __future__ import annotations
 
-from syn_shared.display import format_exit_code
+from syn_shared.process_exit import describe_process_failure
 
 
 class SkillError(Exception):
@@ -141,17 +142,54 @@ class SkillNotRegistered(SkillError):
 
 
 class SkillInstallFailed(SkillError):
-    """The in-container 'skills add' invocation exited nonzero."""
+    """A phase's skills did not get installed, said in a way that survives.
+
+    This message is persisted as the execution's ``error_message``, so it has
+    the same duty as the setup phase's (#1158): say how the install ENDED
+    before quoting what it printed. ``skills add`` writes progress to stderr
+    too, so an install killed at the phase timeout was recorded as "failed
+    (exit -1): Fetching skill ..." - an exit status that says nothing, in
+    front of a reason that is a download going normally.
+
+    Constructed by KIND of failure, never by formatting a message at the call
+    site. There are two kinds and they are not the same fact: an install that
+    ran and ended badly, and one that was refused before anything ran. The
+    second used to be spelled ``exit_code=-1`` with a hand-written explanation
+    passed as ``stderr`` - process-shaped fields for something that was never
+    a process, which is how it came to read as a command that failed.
+    """
 
     error_code = "skill_install_failed"
+    exit_code: int
 
-    def __init__(self, skill_name: str, agent: str, exit_code: int, stderr: str) -> None:
-        super().__init__(
-            f"installing skill {skill_name!r} for agent {agent!r} failed "
-            f"(exit {format_exit_code(exit_code)}): {stderr.strip()[:500]}"
+    #: What an operator can read before the message stops being a message.
+    #: ``skills add`` can print a great deal and this text is stored per
+    #: execution; the bound predates #1158 and is kept.
+    _OUTPUT_LIMIT = 500
+
+    @classmethod
+    def after_exit(
+        cls,
+        skill_name: str,
+        agent: str,
+        *,
+        exit_code: int,
+        output: str,
+        timed_out: bool = False,
+    ) -> SkillInstallFailed:
+        """The in-container ``skills add`` ran and did not succeed."""
+        failure = cls(
+            describe_process_failure(
+                f"installing skill {skill_name!r} for agent {agent!r}",
+                exit_code=exit_code,
+                output=output.strip()[: cls._OUTPUT_LIMIT],
+                timed_out=timed_out,
+            )
         )
-        #: Kept as a number, not only as prose in the message above (#1319).
-        #: This class already took the status and spent all of it on the
-        #: string, so a phase that died installing a skill reported no status
-        #: anywhere queryable. `exit_code_of` reads this attribute.
-        self.exit_code = exit_code
+        failure.exit_code = exit_code
+        return failure
+
+    @classmethod
+    def not_attempted(cls, skill_name: str, reason: str) -> SkillInstallFailed:
+        """Nothing ran, so `reason` is the whole of it and no status is invented."""
+        return cls(f"installing skill {skill_name!r} was not attempted: {reason}")

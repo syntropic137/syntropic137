@@ -105,7 +105,7 @@ def test_a_timeout_still_says_it_timed_out() -> None:
 
 def test_a_signal_killed_skill_install_names_the_signal() -> None:
     """The same defect on the skill path, where the code is passed one hop."""
-    text = str(SkillInstallFailed("review", "claude", -9, "  "))
+    text = str(SkillInstallFailed.after_exit("review", "claude", exit_code=-9, output="  "))
 
     assert "SIGKILL" in text
     assert "-9" in text

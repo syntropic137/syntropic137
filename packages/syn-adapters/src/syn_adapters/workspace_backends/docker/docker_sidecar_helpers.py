@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from syn_shared.process_exit import describe_process_failure
+
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         SidecarConfig,
@@ -87,9 +89,20 @@ async def run_sidecar_container(docker_cmd: list[str]) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
+    exit_code = proc.returncode
 
-    if proc.returncode != 0:
-        error_msg = stderr.decode().strip() if stderr else "Unknown error"
-        raise RuntimeError(f"Failed to start sidecar: {error_msg}")
+    if exit_code != 0:
+        output = stderr.decode().strip() or stdout.decode().strip()
+        if exit_code is None:
+            detail = "The local `docker run` client has no exit status and printed nothing."
+            if output:
+                detail = f"The local `docker run` client has no exit status: {output}"
+        else:
+            detail = describe_process_failure(
+                "The local `docker run` client",
+                exit_code=exit_code,
+                output=output,
+            )
+        raise RuntimeError(f"Failed to start sidecar: {detail}")
 
     return stdout.decode().strip()
