@@ -587,3 +587,25 @@ response rejection without body disclosure. A fresh full coverage run for
 `/private/tmp/1398-mcp-boundary-clippy.log`, and
 `/private/tmp/1398-sesh-mcp-coverage.log`. Remaining uncovered PostgreSQL/error
 paths still require evidence; the 100% gate and all exclusions are unchanged.
+
+## SeshMagic PostgreSQL integrity proof
+
+Published `9c3afb4` to existing PR #55. Repeated JSON error conversion now uses
+one tested mapper, preserving payload encoding and error variants. Serialization
+failure is exercised with a rejecting serializer. Real database tests reject
+malformed revision metadata, noncontiguous manifests and invalid persisted
+qualified namespaces without publishing a partial head or falling back to an
+unrelated legacy capture. All 43 database failure-path tests pass; 63 adapter
+unit tests pass (two database-only tests excluded from that unit command). Full
+workspace tests and Clippy pass.
+
+The unchanged coverage gate still fails: 99.69% aggregate line coverage, with
+four merged source lines unexecuted plus remaining function/region gaps. This
+is progress on required validation, not acceptance completion. Current evidence:
+`/private/tmp/1398-sesh-storage-coverage.log`,
+`/private/tmp/1398-postgres-integrity-tests.log`,
+`/private/tmp/1398-sesh-missing-lines.log`, and
+`/private/tmp/1398-sesh-coverage.json`.
+
+The separate APSS checkout has unrelated uncommitted topology/CI-performance
+work; it was inspected read-only and must be preserved during release work.
