@@ -42,6 +42,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+LOCAL_WORKSPACE_IMAGE = "agentic-workspace-claude-cli:latest"
+
 
 async def build_images() -> bool:
     """Build Docker images for testing."""
@@ -86,13 +88,7 @@ async def build_images() -> bool:
 
 async def check_images_exist() -> tuple[bool, str]:
     """Check if required Docker images exist."""
-    # syn-workspace:latest was a third image name that nothing in this repo
-    # ever built, so this check could only ever fail. The workspace image is
-    # whatever DEFAULT_WORKSPACE_IMAGE resolves to, which is the same source of
-    # truth the platform provisions from.
-    from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
-
-    for image in [DEFAULT_WORKSPACE_IMAGE, "syn-sidecar:latest"]:
+    for image in [LOCAL_WORKSPACE_IMAGE, "syn-sidecar:latest"]:
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "image",
@@ -208,10 +204,8 @@ async def start_workspace(
         f"HTTPS_PROXY={proxy_url}",
         "-e",
         f"SYN_EXECUTION_ID={execution_id}",
-        # Override entrypoint to keep container running
-        "--entrypoint",
+        LOCAL_WORKSPACE_IMAGE,
         "sleep",
-        "syn-workspace:latest",
         "infinity",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -336,7 +330,7 @@ async def verify_settings_json_attribution(container_name: str) -> bool:
         "exec",
         container_name,
         "cat",
-        "/workspace/.claude/settings.json",
+        "/home/agent/.claude/settings.json",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -349,8 +343,8 @@ async def verify_settings_json_attribution(container_name: str) -> bool:
     try:
         settings = json.loads(stdout.decode())
         attribution = settings.get("attribution", {})
-        commits_disabled = attribution.get("commits") is False
-        prs_disabled = attribution.get("pullRequests") is False
+        commits_disabled = attribution.get("commit") == ""
+        prs_disabled = attribution.get("pr") == ""
 
         if commits_disabled and prs_disabled:
             logger.info("   ✅ Attribution settings: commits & PRs disabled")
@@ -541,8 +535,9 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
             logger.info("   ✅ System init event received")
         if has_assistant:
             logger.info("   ✅ Assistant response event received")
-        if has_result:
-            result_event = next(e for e in events if e.get("type") == "result")
+        result_event = next((e for e in events if e.get("type") == "result"), None)
+        result_is_error = bool(result_event and result_event.get("is_error"))
+        if result_event:
             logger.info("   ✅ Result event received")
             logger.info("   Cost: $%.4f", result_event.get("total_cost_usd", 0))
             usage = result_event.get("usage", {})
@@ -551,6 +546,10 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
                 usage.get("input_tokens", 0),
                 usage.get("output_tokens", 0),
             )
+            if result_is_error:
+                logger.error(
+                    "   Result reported an execution error: %s", result_event.get("result", "")
+                )
         if has_error:
             error_event = next(e for e in events if e.get("type") == "error")
             logger.info("   ❌ Error: %s", error_event.get("error", {}).get("message", "")[:100])
@@ -577,9 +576,13 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         print(f"Result:          {'✅' if has_result else '❌'}")
         print()
 
-        # Test is successful if we got system init (JSONL streaming works)
-        # Full execution requires sidecar proxy to allow Anthropic API calls
-        success = has_system_init
+        success = (
+            all(f17_checks)
+            and has_system_init
+            and has_assistant
+            and result_event is not None
+            and not result_is_error
+        )
 
         if success:
             print("✅ E2E TEST PASSED")
@@ -598,7 +601,7 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         else:
             print("❌ E2E TEST FAILED")
             print()
-            print("Missing expected events (no system init received).")
+            print("One or more workspace, stream, or live-agent acceptance checks failed.")
 
         return success
 
@@ -639,7 +642,7 @@ async def main() -> int:
         if not exists:
             logger.error(error)
             logger.info("Run with --build to build images, or build manually:")
-            logger.info("  ./docker/workspace/build.sh")
+            logger.info("  just workspace-build")
             logger.info("  docker build -t syn-sidecar:latest docker/sidecar-proxy/")
             return 1
 

@@ -147,7 +147,7 @@ echo ""
 # 5. Docker
 echo "🐳 Step 5: Docker Image"
 echo "──────────────────────"
-if docker image inspect syn-workspace:latest >/dev/null 2>&1; then
+if docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1; then
     check_pass "Workspace image exists locally"
 else
     check_warn "Workspace image not found (will build on first E2E test)"
@@ -161,10 +161,10 @@ echo "────────────────────────�
 if [[ "$QUICK_MODE" == "true" ]]; then
     check_info "Skipping E2E tests (--quick mode)"
 else
-    if python scripts/e2e_agent_in_container_test.py >/dev/null 2>&1; then
+    if uv run python scripts/e2e_agent_in_container_test.py >/dev/null 2>&1; then
         check_pass "E2E container test passed"
     else
-        check_fail "E2E container test failed - run: python scripts/e2e_agent_in_container_test.py"
+        check_fail "E2E container test failed - run: uv run python scripts/e2e_agent_in_container_test.py"
     fi
 fi
 echo ""

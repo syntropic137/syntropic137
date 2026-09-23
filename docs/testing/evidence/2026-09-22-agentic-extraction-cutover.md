@@ -81,3 +81,32 @@ partial release to consume or clean up.
 4. Resolve public Syntropic137 CI access to the initially private Agentic
    Workspace source. AgentParadise currently disables repository deploy keys.
 5. Run the production-like Claude and Codex workflow plus rollback proof.
+
+## Merge acceptance criteria
+
+This pull request remains a draft until every item below is evidenced:
+
+- [ ] Public Syntropic137 CI can authenticate to and initialize the private
+  Agentic Workspace submodule from a clean checkout.
+- [ ] Every required GitHub check passes on the final commit.
+- [ ] `just qa-ci` passes locally, except checks documented as GitHub-only.
+- [ ] The local Agentic Workspace image builds from the pinned submodule and
+  the container E2E passes through its real entrypoint.
+- [ ] Both Claude and Codex complete a production-like workflow, producing
+  expected artifacts and event streams without credential leakage.
+- [ ] Signed linux/amd64 and linux/arm64 release images exist with SBOM and
+  provenance. Syntropic pins their immutable digests and verifies the release
+  certificate identity and pinned source revision.
+- [ ] Rollback to the previous signed image digests is executed and recorded.
+- [ ] The final branch commits are attributed to NeuralEmpowerment.
+
+## Local integration attempt
+
+The corrected container E2E starts the extracted workspace image through its
+real entrypoint, connects it to Syntropic's sidecar, confirms Claude CLI,
+workspace directories, settings, and JSONL streaming, and rejects Claude
+result events whose `is_error` field is true. The local run reached that live
+boundary but Claude returned `Not logged in`; therefore it is infrastructure
+proof, not yet a passing live-agent acceptance test. The earlier test falsely
+accepted that error result and has been tightened. Codex and rollback remain
+unrun.
