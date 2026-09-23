@@ -12,13 +12,31 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    computed_field,
+    model_serializer,
+)
 
-# Runtime import: pydantic resolves the annotation below at class-construction
-# time, and the whole point of reusing the DOMAIN enum here is that the API and
-# the CLI cannot grow a second spelling of the same vocabulary (#1357).
-# Imported from the context's public surface, not its internals (ADR-062).
+# Runtime imports, not TYPE_CHECKING ones: pydantic resolves these annotations
+# at class-construction time.
+#
+# FailureClassification: the whole point of reusing the DOMAIN enum here is that
+# the API and the CLI cannot grow a second spelling of the same vocabulary
+# (#1357). Imported from the context's public surface, not its internals
+# (ADR-062).
+#
+# The other three are republished by /health as its own fields, referenced
+# rather than restated - the probe that produces a shape is the only place
+# allowed to define it (#1380).
+from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -1572,6 +1590,257 @@ class RealtimeHealth(BaseModel):
 
     active_executions: int = 0
     active_connections: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Build identity (#1380)
+# ---------------------------------------------------------------------------
+
+
+class _NamesTheRunningRelease(BaseModel):
+    """A response that reports which release of syn-api answered it.
+
+    MORE THAN ONE ENDPOINT HAS TO SAY THIS, so the pair that says it lives here
+    once. ``/health`` reports it inside ``build``; ``/`` reports it flat beside
+    the API's name. They are two views of one fact, and #1380 is what happens
+    when a fact about the running release gets a second home: ``main.py``'s
+    ``"0.5.1"`` and the installed package disagreed for twenty releases and
+    nobody noticed, because nothing required them to be derived from one place.
+
+    Subclass this to gain the pair; do not restate it. What a subclass adds is
+    whatever ELSE that endpoint reports — the image stamps, the links — never a
+    second opinion on the release or on whether it is readable.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: str | None = Field(
+        description="Installed release of the syn-api distribution, as reported by "
+        "importlib.metadata. This is the same string pyproject.toml ships, so it "
+        "identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). "
+        "Null when the distribution's metadata cannot be read, because there is no "
+        "honest release to report then and a plausible one would mislead; read "
+        "version_status to tell that case apart without inspecting the null.",
+    )
+
+    @computed_field(
+        description="Whether the running release could be read at all. 'installed' means "
+        "version names the distribution this process was installed from; 'unavailable' "
+        "means the distribution's metadata could not be read, version is null, and "
+        "nothing has been invented to fill it.",
+    )
+    @property
+    def version_status(self) -> Literal["installed", "unavailable"]:
+        """Derived, never passed in, so it cannot contradict ``version``.
+
+        The pair would otherwise be a second place to get the same fact wrong —
+        ``version: null`` beside ``version_status: "installed"`` is exactly the
+        kind of self-disagreement #1380 is about. It exists as a field anyway
+        because a caller should not have to infer meaning from a null: on
+        ``BuildInfo`` the neighbouring nulls mean "the image did not stamp
+        itself", which is a different fact, and only a named state says which
+        absence a reader is looking at.
+        """
+        return "unavailable" if self.version is None else "installed"
+
+
+class BuildInfo(_NamesTheRunningRelease):
+    """Which build is answering. Populated by ``syn_api.build_info``.
+
+    Reported in three places from that one source: this block on ``GET /health``,
+    the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+    three used to be, or were derived from, a hardcoded literal that had drifted
+    twenty releases behind the installed package.
+
+    The release and its status come from ``_NamesTheRunningRelease``. What this
+    model adds is the two build-time stamps, which only an image can supply and
+    only ``/health`` reports.
+    """
+
+    image_tag: str | None = Field(
+        default=None,
+        description="Container image tag this process was built from, stamped at image "
+        "build time. Null when the build did not stamp one — which is a different "
+        "fact from an unknown tag, and is reported as such.",
+    )
+    commit: str | None = Field(
+        default=None,
+        description="Git commit the image was built from, stamped at image build time. "
+        "Null when the build did not stamp one.",
+    )
+
+
+class RootResponse(_NamesTheRunningRelease):
+    """Payload of ``GET /`` — what this API is, and which build is serving it.
+
+    THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+    a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+    when metadata could not be read: a string in a version field, indistinguish-
+    able to a client from a release actually called that, and exactly the defect
+    #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+    response makes the absence a declared state instead of a word.
+
+    ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+    unavoidable; see the comment at that call in ``main.py``.
+    """
+
+    name: str = Field(description="Human-readable name of this API.")
+    docs: str = Field(description="Path to the interactive API documentation.")
+    health: str = Field(
+        description="Path to the health endpoint, which reports the full "
+        "build block plus read-path status."
+    )
+
+
+class _OmitsAbsentFields(BaseModel):
+    """A response model whose ``None`` fields are omitted rather than sent as null.
+
+    /health's optional blocks have always been ABSENT when they could not be
+    filled in, and callers read them that way: `syn health` branches on whether
+    ``subscription`` is there at all, and "no lag measurement" has to stay
+    distinguishable from ``lag: 0``, which is a measurement saying "at the head".
+
+    A model-level serializer rather than ``response_model_exclude_none``,
+    because that flag is recursive and would also delete ``build.image_tag`` and
+    ``build.commit`` — whose ``null`` is a deliberate answer meaning "this image
+    did not stamp itself", not an absence. Omission is correct for the models
+    that inherit this and wrong one level down, so it is spelled where it is
+    correct.
+    """
+
+    @model_serializer(mode="wrap")
+    def _omit_absent(self, handler: SerializerFunctionWrapHandler):
+        """Deliberately unannotated. Pydantic builds the SERIALIZATION schema from
+        a model serializer's return type, so writing ``-> dict[str, JsonValue]``
+        here replaces every declared property in ``openapi.json`` with
+        ``additionalProperties: {$ref: JsonValue}`` — re-opening the contract
+        this change exists to close, by the same mechanism and less visibly.
+        Left off, pydantic keeps the model's own schema. ``test_health_contract``
+        asserts the schema stays closed and named, which is what would catch an
+        annotation being helpfully added back.
+        """
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
+#: Every value ``subscription.status`` can take. The first four are
+#: ``read_path_health._ReadPathStatus``, which owns that vocabulary; "unknown"
+#: is added here because only /health can produce it — it is what the probe
+#: reports when it failed and has no verdict to publish.
+#: ``test_health_contract.py`` fails if those four ever stop being a subset.
+SubscriptionHealthStatus = Literal["healthy", "degraded", "stalled", "catching_up", "unknown"]
+
+
+class SubscriptionHealth(_OmitsAbsentFields):
+    """The read-path block of ``GET /health``: is the subscription up, and is it behind.
+
+    FLAT, not nested, because that is the wire shape `syn health` and the deploy
+    runbook already read. The fields from ``running`` down are
+    ``CoordinatorSubscriptionService.get_status()``; the ones from
+    ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+    ``lifecycle._describe_subscription_health``.
+
+    EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+    rather than a default: ``lag is None`` means the coordinator is not up yet,
+    so there is nothing whose progress could be measured — which is not the same
+    as "not behind", and must not serialize as ``lag: 0``. When the probe itself
+    fails, ``status`` is "unknown" and nothing else is known at all.
+
+    ``ReadModelLag``'s fields are restated here because the block is flat on the
+    wire and a generated client has to be able to see them. That restatement is
+    the one place this model can drift from its producer, so
+    ``test_health_contract.py`` asserts the two field sets still match.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: SubscriptionHealthStatus = Field(
+        description="Verdict on the read path: 'healthy', 'catching_up' during a replay "
+        "that ends by itself, 'stalled' for a projection that does not, 'degraded' "
+        "for a coordinator that is not running, or 'unknown' when the probe failed.",
+    )
+    running: bool | None = Field(
+        default=None,
+        description="Whether the subscription coordinator is running. Null when the probe "
+        "failed and could not ask.",
+    )
+    projection_count: int | None = Field(
+        default=None, description="How many projections the coordinator is driving."
+    )
+    realtime_enabled: bool | None = Field(
+        default=None, description="Whether a realtime (SSE) projection is attached."
+    )
+    is_catching_up: bool | None = Field(
+        default=None,
+        description="True while the coordinator is replaying history and some projection has "
+        "not reached the head. Reads may 404 for recently written aggregates. Ends "
+        "by itself. Null when the subscription is not up yet and lag is unmeasurable.",
+    )
+    is_stalled: bool | None = Field(
+        default=None,
+        description="True when a projection is behind the head and its checkpoint has stopped "
+        "moving. Does NOT resolve on its own. Null when lag is unmeasurable.",
+    )
+    lag: int | None = Field(
+        default=None,
+        description="Distance of the furthest-behind projection from the store head, in "
+        "lag_unit. 0 means at the head; null means not measurable.",
+    )
+    lag_unit: Literal["events"] | None = Field(
+        default=None, description="Unit of lag: event-store global-nonce positions, not seconds."
+    )
+    head_position: int | None = Field(
+        default=None, description="Global nonce of the newest event in the store."
+    )
+    lagging_projections: list[ProjectionLag] | None = Field(
+        default=None,
+        description="Every projection short of the head, furthest behind first. Empty when "
+        "all are at the head; null when lag is unmeasurable.",
+    )
+
+
+class HealthResponse(_OmitsAbsentFields):
+    """Payload of ``GET /health``.
+
+    EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+    typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+    put ``additionalProperties: true`` in ``openapi.json`` and an
+    ``[key: string]: unknown`` index signature in the generated CLI types: the
+    fields `syn health` actually reads were invisible to every generated
+    consumer, and a probe could change shape without the drift check noticing.
+    The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+    declared at their source and referenced, not copied — but the fact that
+    /health publishes them is this model's to state.
+
+    ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+    ``_OmitsAbsentFields``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: str = Field(description="'healthy' while the process is alive and accepting writes.")
+    mode: str = Field(description="'full', or 'degraded' when some subsystem is impaired.")
+    build: BuildInfo = Field(description="Which build is answering (#1380).")
+    degraded_reasons: list[DegradedReason] | None = Field(
+        default=None,
+        description="Every way this instance is up but not fully serving. Omitted entirely "
+        "when there are none, which is how a reader tells 'nothing is wrong' from "
+        "'something is and it is not listed here'.",
+    )
+    subscription: SubscriptionHealth | None = Field(
+        default=None,
+        description="Read-path health. Omitted when no subscription service is wired up at "
+        "all, e.g. in offline mode.",
+    )
+    codex_auth: CodexAuthStatus | None = Field(
+        default=None,
+        description="Freshness of this instance's codex credential. Omitted when the probe "
+        "could not run — a credential hint must never be able to take /health down.",
+    )
+    warnings: list[str] | None = Field(
+        default=None,
+        description="Human-readable notes that need attention but do not degrade the "
+        "instance. Omitted when there are none.",
+    )
 
 
 # ---------------------------------------------------------------------------

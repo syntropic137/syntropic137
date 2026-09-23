@@ -452,7 +452,16 @@ Pass conditions:
 just bump-version 0.20.0
 ```
 
-This updates every version-carrying file atomically, regenerates `uv.lock`, and re-runs `--check`. Validate independently with `just check-version`.
+This updates every version-carrying file atomically, regenerates `uv.lock`,
+reinstalls and re-runs `just codegen`, then re-runs `--check`. Validate
+independently with `just check-version`.
+
+The codegen step is not optional: since
+[#1380](https://github.com/syntropic137/syntropic137/issues/1380) `openapi.json`'s
+`info.version` is read from the installed package rather than a hardcoded
+literal, so the committed spec and the CLI/dashboard types generated from it
+change with the version. Commit whatever it rewrites along with the bump, or
+`codegen-check` fails on the release PR.
 
 ### 2. Commit and Push
 

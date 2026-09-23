@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, cast
 
@@ -124,6 +125,22 @@ class _SignalsWhenSubscribed:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SubscriptionServiceStatus:
+    """What this service can say about itself without measuring anything.
+
+    Read by ``/health`` and published there field for field, so these names are
+    part of that endpoint's contract. A frozen dataclass rather than a dict
+    because the consumer used to reach in by string key — ``status.get("running",
+    False)`` silently defaulted a missing field to "not running", which is the
+    worst possible guess for a health probe to make on its own behalf.
+    """
+
+    running: bool
+    projection_count: int
+    realtime_enabled: bool
+
+
 class CoordinatorSubscriptionService:
     """Subscription service using SubscriptionCoordinator (ADR-014).
 
@@ -176,13 +193,13 @@ class CoordinatorSubscriptionService:
         """Check if the subscription is running."""
         return self._running
 
-    def get_status(self) -> dict:
+    def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
-        return {
-            "running": self._running,
-            "projection_count": len(self._projections),
-            "realtime_enabled": self._realtime_projection is not None,
-        }
+        return SubscriptionServiceStatus(
+            running=self._running,
+            projection_count=len(self._projections),
+            realtime_enabled=self._realtime_projection is not None,
+        )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
         """How far the read models are behind, and which projection is worst.

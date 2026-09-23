@@ -12,6 +12,7 @@ from fastapi import Request  # noqa: TC002 — FastAPI needs Request at runtime 
 from fastapi.responses import JSONResponse
 
 from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics
+from syn_collector.collector.version import CollectorHealth, collector_version
 from syn_collector.events.types import BatchResponse, CollectedEvent, EventBatch
 
 if TYPE_CHECKING:
@@ -147,9 +148,14 @@ def register_routes(
         )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        """Health check endpoint."""
-        return {"status": "healthy"}
+    async def health() -> CollectorHealth:
+        """Health check endpoint.
+
+        Names the running build (#1380). Without it the only way to tell which
+        collector a deployment is running is `docker inspect` over SSH, which
+        is not a check anything gating on a rollout can make.
+        """
+        return CollectorHealth(status="healthy", version=collector_version())
 
     @app.get("/stats")
     async def stats() -> dict[str, Any]:
