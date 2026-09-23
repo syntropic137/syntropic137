@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.agent_sessions import (
     AcquisitionStatusEvidence,
@@ -27,7 +27,11 @@ from syn_domain.contexts.agent_sessions import (
 if TYPE_CHECKING:
     from agentic_isolation.child_journal import ChildChange, WorkspaceChildJournalReader
 
-    from syn_domain.contexts.agent_sessions import SessionEvidenceWritePort
+
+class ChildEvidenceWriter(Protocol):
+    async def append(self, batch: EvidenceBatch) -> int: ...
+
+    async def observe_acquisition(self, batch: EvidenceBatch) -> int: ...
 
 
 def child_evidence(change: ChildChange, run: RunIdentity, spool_id: str) -> EvidenceBatch:
@@ -140,7 +144,7 @@ class ChildDrainProgress:
 
 
 class ChildJournalDrain:
-    def __init__(self, evidence: SessionEvidenceWritePort) -> None:
+    def __init__(self, evidence: ChildEvidenceWriter) -> None:
         self._evidence = evidence
 
     async def page(
@@ -159,11 +163,11 @@ class ChildJournalDrain:
         try:
             page = await reader.page(after, watermark)
         except Exception:
-            await self._evidence.append(
+            await self._evidence.observe_acquisition(
                 child_read_status(run, spool_id, observation_sequence, failed=True)
             )
             raise
         for change in page.changes:
             await self._evidence.append(child_evidence(change, run, spool_id))
-        await self._evidence.append(success)
+        await self._evidence.observe_acquisition(success)
         return ChildDrainProgress(page.watermark, page.next_after, len(page.changes))

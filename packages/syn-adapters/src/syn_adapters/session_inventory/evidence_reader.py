@@ -12,11 +12,12 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions import (
     EvidenceBatch,
     EvidencePage,
-    InventoryPublicationConflict,
     PendingEvidence,
     RunIdentity,
     StoredEvidenceBatch,
 )
+
+from .evidence_writes import append_locked, lock_run, observe_status
 
 if TYPE_CHECKING:
     from .database import Pool
@@ -31,50 +32,15 @@ class PostgresSessionEvidence:
             await conn.execute(Path(__file__).with_name("schema.sql").read_text())
 
     async def append(self, batch: EvidenceBatch) -> int:
-        run = batch.evidence.run
-        args = (run.source_instance_id, run.execution_id)
         async with self._pool.acquire() as conn, conn.transaction():
-            await conn.execute(
-                """INSERT INTO session_evidence_watermarks (source_instance_id,execution_id)
-                VALUES ($1,$2) ON CONFLICT DO NOTHING""",
-                *args,
-            )
-            current = await conn.fetchval(
-                """SELECT watermark::text FROM session_evidence_watermarks
-                WHERE source_instance_id=$1 AND execution_id=$2 FOR UPDATE""",
-                *args,
-            )
-            prior = await conn.fetch(
-                """SELECT sequence::text,payload::text FROM session_evidence_batches
-                WHERE source_instance_id=$1 AND execution_id=$2 AND producer_id=$3 AND batch_id=$4""",
-                *args,
-                batch.producer_id,
-                batch.batch_id,
-            )
-            if prior:
-                if EvidenceBatch.model_validate_json(prior[0]["payload"]) != batch:
-                    raise InventoryPublicationConflict("evidence batch identity reused")
-                return int(prior[0]["sequence"])
-            if current is None:
-                raise RuntimeError("missing evidence counter after initialization")
-            sequence = int(current) + 1
-            await conn.execute(
-                """INSERT INTO session_evidence_batches
-                (source_instance_id,execution_id,sequence,producer_id,batch_id,payload)
-                VALUES ($1,$2,$3,$4,$5,$6::jsonb)""",
-                *args,
-                sequence,
-                batch.producer_id,
-                batch.batch_id,
-                batch.model_dump_json(),
-            )
-            await conn.execute(
-                """UPDATE session_evidence_watermarks SET watermark=$3
-                WHERE source_instance_id=$1 AND execution_id=$2""",
-                *args,
-                sequence,
-            )
-            return sequence
+            current = await lock_run(conn, batch.evidence.run)
+            return await append_locked(conn, batch, current)
+
+    async def observe_acquisition(self, batch: EvidenceBatch) -> int:
+        """Persist a monotonic status checkpoint; append only semantic transitions."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            current = await lock_run(conn, batch.evidence.run)
+            return await observe_status(conn, batch, current)
 
     async def watermark(self, run: RunIdentity) -> int:
         async with self._pool.acquire() as conn:

@@ -170,3 +170,21 @@ ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_after_sequence
     BIGINT NOT NULL DEFAULT 0 CHECK (child_after_sequence >= 0);
 ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_watermark
     BIGINT CHECK (child_watermark >= child_after_sequence);
+
+-- One checkpoint per acquisition stream. Repeated healthy polls do not create
+-- evidence batches or wake reconciliation; sequence fences still advance.
+CREATE TABLE IF NOT EXISTS session_acquisition_heads (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    evidence_sequence BIGINT NOT NULL CHECK (evidence_sequence >= 1),
+    payload JSONB NOT NULL,
+    PRIMARY KEY (source_instance_id,execution_id,producer_id,stream_id)
+);
+CREATE INDEX IF NOT EXISTS session_evidence_acquisition_latest
+    ON session_evidence_batches (
+        source_instance_id,execution_id,producer_id,
+        (payload->'evidence'->'acquisition_statuses'->0->>'stream_id'),
+        ((payload->'evidence'->'acquisition_statuses'->0->>'sequence')::bigint) DESC
+    ) WHERE jsonb_array_length(payload->'evidence'->'acquisition_statuses')=1;

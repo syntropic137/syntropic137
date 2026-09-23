@@ -61,8 +61,8 @@ async def test_page_returns_progress_only_after_every_append_succeeds() -> None:
     assert result.persisted == 2
     assert result.watermark == 2
     assert result.next_after is None
-    assert [call.args[0] for call in evidence.append.await_args_list][:-1] == first_batches
-    assert not evidence.append.await_args.args[0].evidence.acquisition_statuses[0].failed
+    assert [call.args[0] for call in evidence.append.await_args_list] == first_batches
+    assert not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
 
 
 def test_central_resolver_reconstructs_depth_three_from_child_journal_changes() -> None:
@@ -135,14 +135,14 @@ async def test_read_failure_is_durable_and_later_recovery_supersedes_it() -> Non
     drain = ChildJournalDrain(evidence)
     with pytest.raises(OSError):
         await drain.page(reader, run=run, spool_id="spool", observation_sequence=7)
-    failed = evidence.append.await_args.args[0]
+    failed = evidence.observe_acquisition.await_args.args[0]
     assert "private/path" not in failed.model_dump_json()
     before = resolve_relationships(failed.evidence)
     assert any(gap.reason == "child_journal_unreadable" for gap in before.gaps)
     reader.page.side_effect = None
     reader.page.return_value = ChildPage(watermark=0, changes=(), next_after=None)
     await drain.page(reader, run=run, spool_id="spool", observation_sequence=8)
-    recovered = evidence.append.await_args.args[0]
+    recovered = evidence.observe_acquisition.await_args.args[0]
     statuses = (*failed.evidence.acquisition_statuses, *recovered.evidence.acquisition_statuses)
     for order in (statuses, statuses[::-1]):
         after = resolve_relationships(SessionEvidence(run=run, acquisition_statuses=order))
@@ -152,7 +152,7 @@ async def test_read_failure_is_durable_and_later_recovery_supersedes_it() -> Non
     reader.page.side_effect = OSError("unavailable")
     with pytest.raises(OSError):
         await drain.page(reader, run=run, spool_id="spool", observation_sequence=9)
-    latest = evidence.append.await_args.args[0]
+    latest = evidence.observe_acquisition.await_args.args[0]
     result = resolve_relationships(
         SessionEvidence(
             run=run, acquisition_statuses=(*statuses, *latest.evidence.acquisition_statuses)
@@ -164,7 +164,7 @@ async def test_read_failure_is_durable_and_later_recovery_supersedes_it() -> Non
 async def test_success_status_must_be_durable_before_page_acknowledgement() -> None:
     reader, evidence = AsyncMock(), AsyncMock()
     reader.page.return_value = ChildPage(watermark=0, changes=(), next_after=None)
-    evidence.append.side_effect = ConnectionError("journal database unavailable")
+    evidence.observe_acquisition.side_effect = ConnectionError("journal database unavailable")
     with pytest.raises(ConnectionError):
         await ChildJournalDrain(evidence).page(
             reader,
@@ -172,7 +172,7 @@ async def test_success_status_must_be_durable_before_page_acknowledgement() -> N
             spool_id="spool",
             observation_sequence=1,
         )
-    assert not evidence.append.await_args.args[0].evidence.acquisition_statuses[0].failed
+    assert not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
 
 
 def test_cross_harness_binding_preserves_both_namespaces() -> None:

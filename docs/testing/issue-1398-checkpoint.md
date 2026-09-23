@@ -20,7 +20,7 @@ not mark its entire acceptance criterion complete. The exact scope remains the
 | 8 | Large bounded pagination under concurrent writes | Large native pipeline and SQL snapshot-pagination tests pass | Audit >1000-node and >500-observation thresholds, indexes and every client cursor contract |
 | 9 | API/CLI/UI parity and strict completeness | Routes and client tests exist; local UI demonstrated | Canonical detail/navigation/filtering and full client parity matrix |
 | 10 | Whole-object authorization and safe transcript access | Real archive/revocation/shared-byte tests pass | Full scope/raw-token/expired/redacted/secret-diagnostic matrix |
-| 11 | Retention, immutable revisions, deletion without resurrection | Immutable archives, revocation, retractions implemented | Physical expiry/deletion, durable cross-store tombstones and cleanup quotas; unchanged recovery polls currently grow evidence |
+| 11 | Retention, immutable revisions, deletion without resurrection | Immutable archives, revocation, retractions implemented | Physical expiry/deletion, durable cross-store tombstones and cleanup quotas |
 | 12 | Resumable backfill and unchanged billing/platform totals | Qualified pricing read seam exists | Backfill acquisition, qualified producer/ledger/leader wiring and cumulative-resume regressions |
 | 13 | Deterministic centralized historical reconstruction | Native pipeline, late child and stale publication tests pass | Historical-source acquisition and complete replay/correction matrix |
 | 14 | Fake harness extension and dependency enforcement | Harness registry and topology checks exist | Run explicit contract and vendor-boundary tests on final changes |
@@ -74,6 +74,23 @@ packaged-entrypoint conformance option. Local logs:
 `/private/tmp/1398-installed-native-tests.log`. Rebuilding/deploying the API and
 full-stack mixed-harness proof remain pending, as do descendant settlement and
 run-wide coverage closure.
+
+## Recovery checkpoint follow-up
+
+Unchanged child-journal polls now update one durable acquisition head instead of
+appending evidence and triggering another reconstruction. Status transitions
+remain append-only; the head fences stale observations across restart. An indexed
+legacy lookup preserves existing histories and revision hashes. Real PostgreSQL
+checks pass (19), worker tests pass (10), Ruff passes, and Pyright reports zero
+errors (16 existing warnings). Architecture checks only fail the two known
+upstream default-branch reachability gates after retrying with network access.
+
+The isolated API was rebuilt with this change and is healthy. The previous live
+parent/child inventory and exact archived transcript hashes passed verification
+after restart. Full mixed-harness workflow proof and remaining acceptance rows
+are still pending. Local logs: `/private/tmp/1398-status-checkpoint-sql.log`,
+`/private/tmp/1398-status-checkpoint-unit.log`, and
+`/private/tmp/1398-checkpoint-api-rebuild.log`.
 
 ## Follow-up after draft PR creation
 
