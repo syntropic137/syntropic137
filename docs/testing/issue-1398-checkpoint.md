@@ -609,3 +609,16 @@ is progress on required validation, not acceptance completion. Current evidence:
 
 The separate APSS checkout has unrelated uncommitted topology/CI-performance
 work; it was inspected read-only and must be preserved during release work.
+
+## Inventory replay fencing and dependency CI follow-up
+
+SeshMagic commit `a8ce403` adds a real PostgreSQL regression proving that an
+inconsistent restored publication marker cannot let an older revision replace
+the current head. The regression and full workspace tests pass. The unchanged
+100% coverage gate still fails at 99.69% aggregate lines; merged uncovered lines
+are now the legacy get/raw disappearance branches and MCP test transport branch.
+Function/region gaps remain. Evidence stays in the local coverage log above.
+
+Agentic Primitives PR #418 now has every hosted check green, including all image
+builds and the Integration Gate. This removes its pending CI check, but does not
+establish release completion or full issue #1398 acceptance.
