@@ -53,6 +53,16 @@ The `sdlc/review` skill from Agentic Skills was mounted into the locally built
 local source plus computed content hash
 `fd46e54c1de9d9b2b2d1532b19e726a9459049c12cd6d88d50675cf425aa2dbf`.
 
+## Updated release-candidate image
+
+Agentic Workspace commit
+`6862f9846d4c511237c02c9691217955cbd9bda4` built successfully as the local
+`agentic-workspace-omni-agent:extraction-rc` image on arm64. The build executed
+the pinned `skills@1.7.0` install layer and all existing toolchain and package
+assertions. A clean container smoke test reported Skills `1.7.0`, Claude Code
+`2.1.250`, and Codex CLI `0.150.1`, and confirmed the workspace entrypoint and
+SDLC plugin payload exist.
+
 ## Release attempt
 
 Agentic Workspace Actions run `35815343298` built both workspace images for
