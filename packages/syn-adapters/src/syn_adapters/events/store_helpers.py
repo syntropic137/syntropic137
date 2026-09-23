@@ -7,16 +7,23 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.events.models import AgentEvent
 from syn_adapters.postgres_text import pg_copy_row
+from syn_domain import tool_call_counts
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
 
 logger = logging.getLogger(__name__)
+
+
+#: What an event that carries no session at all is stored under. Not an id:
+#: no session lookup asks for it. See ``_event_to_copy_row``.
+NO_SESSION_ID = "unknown"
 
 
 def _event_to_copy_row(validated: AgentEvent) -> str:
@@ -53,7 +60,7 @@ def _event_to_copy_row(validated: AgentEvent) -> str:
         [
             time.isoformat(),
             event_type,
-            session_id if session_id is not None else "unknown",
+            session_id if session_id is not None else NO_SESSION_ID,
             exec_id,
             phase_id,
             data_json,
@@ -61,13 +68,28 @@ def _event_to_copy_row(validated: AgentEvent) -> str:
     )
 
 
+@dataclass(frozen=True)
+class CopyPayload:
+    """One batch, ready to write: the COPY rows and the tool calls they add.
+
+    The two travel together because they are counted from the same validated
+    events, in the same pass, and are applied in the same transaction. An event
+    that failed validation is in neither, which is the only reason the tally
+    cannot be taken from ``events`` by the caller instead (#1322).
+    """
+
+    buffer: io.BytesIO
+    tool_calls: list[tool_call_counts.ToolCallTally]
+
+
 def _build_copy_buffer(
     events: list[dict[str, Any]],
     execution_id: str | None,
     phase_id: str | None,
-) -> io.BytesIO:
-    """Build a BytesIO buffer of tab-separated rows for COPY."""
+) -> CopyPayload:
+    """Build the COPY buffer for a batch, and tally the tool calls in it."""
     buffer = io.BytesIO()
+    counted: list[tuple[str, str, str | None]] = []
     for event in events:
         if execution_id and "execution_id" not in event:
             event = {**event, "execution_id": execution_id}
@@ -79,8 +101,15 @@ def _build_copy_buffer(
             logger.warning("Skipping invalid event: %s", e)
             continue
         buffer.write(_event_to_copy_row(validated).encode("utf-8"))
+        # From the insert tuple, not from `event`: the stored spelling of the
+        # ids and the normalised event type are decided there, and a tally
+        # keyed by anything else is a tally no reader will ever find (#1241).
+        _time, row_type, row_session, row_exec, _phase, _data = validated.to_insert_tuple()
+        counted.append(
+            (row_type, row_session if row_session is not None else NO_SESSION_ID, row_exec)
+        )
     buffer.seek(0)
-    return buffer
+    return CopyPayload(buffer=buffer, tool_calls=tool_call_counts.tally(counted))
 
 
 # Keys in the top-level event dict that must NOT be overridden by user data.

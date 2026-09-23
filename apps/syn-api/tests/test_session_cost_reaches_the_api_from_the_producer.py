@@ -32,16 +32,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.costs import _session_cost_to_api, session_cost_to_data
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import CostField
 from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
     _LIST_ALL_FROM_SUMMARY_QUERY,
     _LIST_ALL_FROM_TOKEN_USAGE_QUERY,
     _STARTED_AT_BY_SESSION_QUERY,
-    _TOOL_COUNT_BY_SESSION_QUERY,
     SessionCostQueryService,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
-    _COUNT_BATCH_QUERY,
     _MIN_TIME_BATCH_QUERY,
     _SESSION_SUMMARY_BATCH_QUERY,
     _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
@@ -53,6 +52,11 @@ if TYPE_CHECKING:
     from syn_api.routes.costs import SessionCostResponse
 
 pytestmark = pytest.mark.unit
+
+#: Stands in for whatever SQL the tool-call tally issues. Both the detail and
+#: the list path read tool calls from it now rather than counting
+#: ``agent_events`` rows (#1322), and neither is in a position to care how.
+_TALLY = "<tool call tally>"
 
 _MODEL = "claude-opus-5"
 _WORKSPACE = "ws-1041-finalized"
@@ -204,9 +208,10 @@ class _ProjectingConnection:
 
     async def fetch(self, query: str, *_args: object) -> list[_ProjectedRow]:
         aliases = frozenset(_selected_aliases(query))
+        key = _TALLY if tool_call_counts.TABLE in query else query
         return [
             _ProjectedRow(source=row, columns=aliases & _columns_of(row))
-            for row in self._rows_by_query.get(query, [])
+            for row in self._rows_by_query.get(key, [])
         ]
 
 
@@ -275,7 +280,7 @@ async def _finalized_response() -> SessionCostResponse:
     service = _service(
         {
             _SESSION_SUMMARY_BATCH_QUERY: [_SUMMARY_EVENT],
-            _COUNT_BATCH_QUERY: [_ToolCountRow(session_id="sess-1041", cnt=10)],
+            _TALLY: [_ToolCountRow(session_id="sess-1041", cnt=10)],
             _MIN_TIME_BATCH_QUERY: [
                 _StartedAtRow(
                     session_id="sess-1041",
@@ -296,7 +301,7 @@ async def _listed_responses() -> dict[str, SessionCostResponse]:
         {
             _LIST_ALL_FROM_SUMMARY_QUERY: [_SUMMARY_EVENT],
             _LIST_ALL_FROM_TOKEN_USAGE_QUERY: [_TOKEN_EVENT],
-            _TOOL_COUNT_BY_SESSION_QUERY: [_ToolCountRow(session_id="sess-1041", cnt=10)],
+            _TALLY: [_ToolCountRow(session_id="sess-1041", cnt=10)],
             _STARTED_AT_BY_SESSION_QUERY: [
                 _StartedAtRow(
                     session_id="sess-1041",

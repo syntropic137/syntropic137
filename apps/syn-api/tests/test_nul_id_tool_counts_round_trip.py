@@ -1,4 +1,4 @@
-"""The executions list must count tools under the id agent_events holds (#1241).
+"""The executions list must count tools under the id the tally holds (#1241).
 
 ``_fetch_tool_counts`` binds execution ids into ``execution_id = ANY($1)`` and
 then RETURNS A MAPPING KEYED BY THOSE IDS, so it has two ways to lose the
@@ -7,18 +7,39 @@ looks up. Either shows the same thing on the dashboard - an execution with 0
 tool calls, which is a perfectly ordinary number.
 
 The double holds its rows under the spelling the writer produced and serves
-them only to a query that asks for it, which is all Postgres does here.
+them only to a query that asks for it, which is all Postgres does here. The
+table behind it changed in #1322 - from ``agent_events`` to the tally - and
+the round trip this pins is the reason that move had to preserve the spelling:
+the tally is keyed by the same sanitised id the events were.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, fields
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
-#: One column value as asyncpg would hand it back - named rather than erased,
-#: because the untyped-dicts ratchet counts test files too.
-type _Cell = str | int
+
+@dataclass(frozen=True)
+class _TallyRow:
+    """One tally row, read by column name the way asyncpg's ``Record`` is.
+
+    Named and typed fields rather than a str-keyed dict: the shape is the two
+    columns the tally read selects, and a row whose ``execution_id`` is a
+    declared ``str`` is one this file's whole point - the spelling that
+    survives the round trip - can be stated about.
+    """
+
+    execution_id: str
+    cnt: int
+
+    def __getitem__(self, column: str) -> object:
+        if column not in {f.name for f in fields(self)}:
+            raise KeyError(column)
+        return getattr(self, column)
+
 
 NUL = chr(0)
 LONE_SURROGATE = chr(0xDEAD)
@@ -40,24 +61,24 @@ def _stored_spelling() -> str:
     return event.execution_id
 
 
-class _AgentEvents:
+class _Tally:
     def __init__(self) -> None:
         self.binds: list[tuple[object, ...]] = []
 
-    async def fetch(self, _query: str, *args: object) -> list[dict[str, _Cell]]:
+    async def fetch(self, _query: str, *args: object) -> list[_TallyRow]:
         self.binds.append(args)
         wanted = args[0]
         assert isinstance(wanted, list)
         if STORED_ID not in wanted:
             return []
-        return [{"execution_id": STORED_ID, "cnt": 7}]
+        return [_TallyRow(execution_id=STORED_ID, cnt=7)]
 
 
 class _Acquire:
-    def __init__(self, conn: _AgentEvents) -> None:
+    def __init__(self, conn: _Tally) -> None:
         self._conn = conn
 
-    async def __aenter__(self) -> _AgentEvents:
+    async def __aenter__(self) -> _Tally:
         return self._conn
 
     async def __aexit__(self, *_exc: object) -> bool:
@@ -65,7 +86,7 @@ class _Acquire:
 
 
 class _Pool:
-    def __init__(self, conn: _AgentEvents) -> None:
+    def __init__(self, conn: _Tally) -> None:
         self.conn = conn
 
     def acquire(self) -> _Acquire:
@@ -84,7 +105,7 @@ async def test_tool_counts_round_trip_for_a_nul_bearing_execution_id(
     from syn_api.routes.executions.queries import _fetch_tool_counts
 
     assert _stored_spelling() == STORED_ID
-    store = _EventStore(_Pool(_AgentEvents()))
+    store = _EventStore(_Pool(_Tally()))
     monkeypatch.setattr(_wiring, "get_event_store_instance", lambda: store)
 
     counts = await _fetch_tool_counts([RAW_ID])

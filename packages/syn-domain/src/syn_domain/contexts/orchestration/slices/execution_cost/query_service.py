@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     import asyncpg
 
+from syn_domain import tool_call_counts
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
@@ -29,7 +30,6 @@ from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 
 # List all executions with cost data from session_summary (authoritative).
@@ -102,14 +102,6 @@ WHERE event_type = $1
 GROUP BY execution_id, data->>'model'
 """
 
-_TOOL_COUNT_BY_EXECUTION_QUERY = """
-SELECT execution_id, COUNT(*) as cnt
-FROM agent_events
-WHERE event_type = $1
-  AND execution_id IS NOT NULL
-GROUP BY execution_id
-"""
-
 # Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
 # set of execution ids instead of the N-most-recent (issue #1077). Used when
 # the caller already knows which executions it wants (e.g. one page of a
@@ -155,15 +147,6 @@ FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
 GROUP BY execution_id, data->>'model'
-"""
-
-# Same shape as _TOOL_COUNT_BY_EXECUTION_QUERY, scoped by id (issue #1077).
-_TOOL_COUNT_BY_EXECUTION_IDS_QUERY = """
-SELECT execution_id, COUNT(*) as cnt
-FROM agent_events
-WHERE event_type = $1
-  AND execution_id = ANY($2::text[])
-GROUP BY execution_id
 """
 
 # Per-execution, per-phase cost breakdown.
@@ -238,14 +221,15 @@ class ExecutionCostQueryService:
         async with self._pool.acquire() as conn:
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
-            tool_counts = await self._fetch_tool_counts(conn)
+            # From the tally, not from a COUNT(*) over agent_events (#1322).
+            tool_counts = await tool_call_counts.by_execution(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             return await self._assemble(conn, summary_rows, token_rows, tool_counts)
 
     async def list_for_ids(self, execution_ids: Iterable[str]) -> list[ExecutionCost]:
         """Batch cost lookup for a caller-provided set of execution ids.
 
         Same fixed-count query shape as ``list_all`` (4 round trips: summary,
-        token_usage, tool counts, phase costs), but scoped by id instead of
+        token_usage, the tool-call tally, phase costs), but scoped by id instead of
         recency + limit, so it returns exactly the requested executions
         regardless of how the caller selected them. Replaces one round trip
         of up to 6 sequential queries *per execution id* (issue #1077).
@@ -261,7 +245,12 @@ class ExecutionCostQueryService:
         async with self._pool.acquire() as conn:
             summary_rows = await conn.fetch(_BY_IDS_FROM_SUMMARY_QUERY, SESSION_SUMMARY, ids)
             token_rows = await conn.fetch(_BY_IDS_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE, ids)
-            tool_counts = await self._fetch_tool_counts_for_ids(conn, ids)
+            # From the tally, not from a COUNT(*) over agent_events. That count
+            # decompressed every segment of every execution on the page,
+            # because event_type is in neither compress_segmentby nor
+            # compress_orderby - the same defect as on the sessions list, and
+            # the reason /executions took 4-30s (#1322).
+            tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             return await self._assemble(conn, summary_rows, token_rows, tool_counts)
 
     async def _assemble(
@@ -300,20 +289,6 @@ class ExecutionCostQueryService:
                 continue
             rows_by_execution.setdefault(eid, []).append(row)
         return rows_by_execution
-
-    async def _fetch_tool_counts(self, conn: object) -> dict[str, int]:
-        """Fetch tool call counts per execution."""
-        rows = await conn.fetch(_TOOL_COUNT_BY_EXECUTION_QUERY, TOOL_EXECUTION_COMPLETED)  # type: ignore[union-attr]
-        return {row["execution_id"]: row["cnt"] for row in rows}  # type: ignore[index]
-
-    async def _fetch_tool_counts_for_ids(
-        self, conn: object, execution_ids: list[str]
-    ) -> dict[str, int]:
-        """Fetch tool call counts per execution, scoped to the given ids."""
-        rows = await conn.fetch(  # type: ignore[union-attr]
-            _TOOL_COUNT_BY_EXECUTION_IDS_QUERY, TOOL_EXECUTION_COMPLETED, execution_ids
-        )
-        return {row["execution_id"]: row["cnt"] for row in rows}  # type: ignore[index]
 
     async def _fetch_phase_cost_map(
         self, conn: object, execution_ids: list[str]

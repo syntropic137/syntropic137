@@ -494,8 +494,9 @@ def create_coordinator_service(
     )
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
+    from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (24 total - bumped for #772)
+    # Create all checkpointed projections (25 total - bumped for #1322)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -538,6 +539,13 @@ def create_coordinator_service(
             GlobalClaudePluginsProjection(projection_store),
             # --- Skill injection (issue #772) ---
             SkillLockProjection(projection_store),
+            # --- Tool-call tally (issue #1322) ---
+            # Not fed by replay: each tool call is counted in the transaction
+            # that stores the event, so this is here for the rebuild half of
+            # the lifecycle. Registered means an operator rebuilding the read
+            # models recounts this table too; unregistered, it was the one
+            # they emptied and never refilled.
+            ToolCallCountsProjection(pool=pool),  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         ],
     )
 
