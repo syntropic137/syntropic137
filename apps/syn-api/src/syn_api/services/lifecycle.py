@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from syn_shared.codex_auth_status import CodexAuthStatus
 
 logger = logging.getLogger(__name__)
+SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
 
 
 def _handle_recovery_task_exception(task: asyncio.Task[None]) -> None:
@@ -330,12 +331,8 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
     # Unconditional and never probed: an operator or an agent asking "which
     # build is this?" must get an answer from a degraded deployment too, since
     # that is precisely when the question gets asked (#1380).
-    build = get_build_info()
-    degraded_reasons = list(_state.degraded_reasons)
-
     subscription, read_path_reasons = await _describe_subscription_health()
-    degraded_reasons.extend(read_path_reasons)
-
+    degraded_reasons = [*_state.degraded_reasons, *read_path_reasons]
     codex_auth = _describe_codex_auth_health()
     warnings = [codex_auth.detail] if codex_auth is not None and codex_auth.needs_attention else []
 
@@ -343,7 +340,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
         HealthResponse(
             status="healthy",
             mode="degraded" if degraded_reasons else "full",
-            build=build,
+            build=get_build_info(),
             degraded_reasons=degraded_reasons or None,
             subscription=subscription,
             codex_auth=codex_auth,
@@ -585,9 +582,7 @@ async def _init_event_store() -> Result[None, LifecycleError]:
     return Ok(None)
 
 
-async def _describe_subscription_health() -> tuple[
-    SubscriptionHealth | None, tuple[DegradedReason, ...]
-]:
+async def _describe_subscription_health() -> SubscriptionHealthResult:
     """The read-path block of /health, and any degraded reasons it raises.
 
     Returns ``(None, ())`` when no subscription service is wired up at all: the
@@ -626,16 +621,14 @@ async def _describe_subscription_health() -> tuple[
         lag = await _state.subscription_service.describe_read_model_lag()
         verdict = _judge_read_path(running=sub_status.running, lag=lag)
 
-        return (
-            SubscriptionHealth(
-                status=verdict.status,
-                running=sub_status.running,
-                projection_count=sub_status.projection_count,
-                realtime_enabled=sub_status.realtime_enabled,
-                **(lag.model_dump() if lag is not None else {}),
-            ),
-            verdict.degraded_reasons,
+        health = SubscriptionHealth(
+            status=verdict.status,
+            running=sub_status.running,
+            projection_count=sub_status.projection_count,
+            realtime_enabled=sub_status.realtime_enabled,
+            **(lag.model_dump() if lag is not None else {}),
         )
+        return health, verdict.degraded_reasons
     except Exception:
         logger.debug("subscription health probe failed", exc_info=True)
         return SubscriptionHealth(status="unknown"), ()
