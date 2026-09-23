@@ -37,9 +37,22 @@ logger = logging.getLogger(__name__)
 PUBLICATION_PERMISSION = "pull_requests"
 """The permission `POST /repos/{owner}/{repo}/pulls` requires.
 
-Creating a pull request is the only thing being taken away. `read` keeps
-`gh pr view`, `gh pr diff` and `gh pr checkout` - which the implement phase
-needs whenever it reworks an existing PR.
+`read` keeps `gh pr view`, `gh pr diff` and `gh pr checkout` - which the
+implement phase needs whenever it reworks an existing PR - and keeps
+`git push`, which is `contents`.
+
+BUT CREATION IS NOT THE ONLY THING IT TAKES. `pull_requests` is one
+read/write switch over the whole pull request surface, so downgrading it also
+removes submitting a review (`gh pr review`, `POST .../pulls/{n}/reviews`) and
+the review-thread mutations `addPullRequestReviewThreadReply` and
+`resolveReviewThread`. Commenting via the issues endpoint - which is what
+`gh pr comment` and `acknowledgments.py` use - is governed by `issues` and is
+untouched.
+
+That gap is not expressible in a token: GitHub has no permission meaning "may
+respond on a pull request but may not open one". A phase that must reply to
+review threads therefore has to hold the same permission that lets it open a
+PR. See the audit note on #1122 for the three trigger workflows this affects.
 """
 
 

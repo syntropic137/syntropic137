@@ -9,6 +9,8 @@ from datetime import datetime
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    FailureClassification,
+    ReportedFailureReason,
 )
 
 
@@ -64,8 +66,34 @@ class PhaseExecutionDetail:
     completed_at: datetime | str | None = None
     """When the phase completed."""
 
+    timeout_seconds: int | None = None
+    """The wall-clock budget this phase was given, in seconds.
+
+    Carried to the API boundary for one reason: an exit 124 with no budget
+    beside it cannot be told from any other death that reports 124, and the
+    two need opposite responses - a bigger budget, or do not pay for this run
+    again (#1262). Read against ``duration_seconds``, which is the other half
+    of that comparison and is right above.
+
+    ``None`` means the run stated no phase definitions, not a budget of zero.
+    Same hop rule as every field around it: the projection writes it, this
+    model carries it, and the API serves it, because a value that stops at any
+    one of the three reaches no reader.
+    """
+
     error_message: str | None = None
     """Error message if phase failed."""
+
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it promised to write (#1195, #1300).
+
+    Carried the whole way to the API boundary for the reason the flag exists at
+    all: a phase that completed on a salvage and one that completed on its own
+    written deliverable are different outcomes, and a reader who cannot tell
+    them apart cannot audit either. Every hop between the event and the HTTP
+    response has to pass it; this is one of them.
+    """
 
     observed_branches: tuple[BranchObservation, ...] | None = None
     """How this failed phase's branches stood when it died (#1200).
@@ -105,7 +133,9 @@ class PhaseExecutionDetail:
             "duration_seconds": self.duration_seconds,
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
+            "timeout_seconds": self.timeout_seconds,
             "error_message": self.error_message,
+            "deliverable_recovered": self.deliverable_recovered,
             "observed_branches": (
                 None
                 if self.observed_branches is None
@@ -137,7 +167,9 @@ class PhaseExecutionDetail:
             duration_seconds=data.get("duration_seconds"),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            timeout_seconds=data.get("timeout_seconds"),
             error_message=data.get("error_message"),
+            deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             observed_branches=_observed_branches(data.get("observed_branches")),
         )
 
@@ -200,6 +232,32 @@ class WorkflowExecutionDetail:
     error_message: str | None = None
     """Error message if execution failed."""
 
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside the `failed` status (#1357).
+
+    `PLATFORM` for the machinery breaking, `CORRECT_REFUSAL` for a phase that
+    reported `TASK_RESULT success=false` and was recorded faithfully - the
+    system working - and `UNCLASSIFIED` for a run that ended before anything
+    recorded the distinction, which is every failure predating the field and
+    every row written by a projection that had not caught up.
+
+    Carried here rather than derived at the API boundary because the numbers
+    are computed from the read model: a failure rate summed over `status =
+    failed` counts a correct refusal as a defect, and no amount of colour in
+    the UI can fix a total that was already wrong when it was summed.
+    """
+
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What the failing phase SAID caused it (#1372), `None` when it said nothing.
+
+    A REPORT, kept beside the measurement above and never merged into it
+    (#1392): the classification is what the platform observed and is what every
+    failure number is summed from, while this is one of a closed set of words
+    the run chose about itself. An operator reads it - "agent reported: task"
+    is the first thing worth knowing about a failed run - and no total counts
+    it.
+    """
+
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -232,6 +290,16 @@ class WorkflowExecutionDetail:
             completed_phases=data.get("completed_phases", 0),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
+            # Through `from_stored` for the reason it exists: a row written
+            # before this field, or by a writer that knows a member this reader
+            # does not, reads `UNCLASSIFIED` instead of raising (#1357).
+            failure_classification=FailureClassification.from_stored(
+                data.get("failure_classification")
+            ),
+            # The same coercion, for the same reason, one field over.
+            reported_failure_reason=ReportedFailureReason.from_stored(
+                data.get("reported_failure_reason")
+            ),
             repos=tuple(data.get("repos", [])),
         )
 
@@ -263,6 +331,10 @@ class WorkflowExecutionDetail:
             "completed_phases": self.completed_phases,
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
+            "failure_classification": self.failure_classification.value,
+            "reported_failure_reason": (
+                None if self.reported_failure_reason is None else self.reported_failure_reason.value
+            ),
             "repos": list(self.repos),
         }
 

@@ -6,8 +6,10 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-# Runtime import: Pydantic resolves the field annotation below (noqa: TC001)
-from syn_api.types import BranchObservationInfo  # noqa: TC001
+# Runtime import: Pydantic resolves the field annotations below, and
+# `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.types import BranchObservationInfo, PhaseActivityInfo
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 from syn_shared.display import EM_DASH
 
 
@@ -65,6 +67,14 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase's deliverable was recovered from its transcript
+    rather than read off the file it declared (#1195, #1300).
+
+    The end of the chain the flag travels: event -> projection record -> read
+    model -> here. A client auditing which runs stood on a salvage reads this;
+    `status` says `completed` either way.
+    """
     model: str | None = None
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
@@ -101,6 +111,18 @@ class PhaseExecutionInfo(BaseModel):
     carry that, so this reports the two readings and stops.
     """
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, and against what budget (#1262).
+
+    The four readings that tell a phase killed on its deadline from one that
+    hung - both exit 124, and they need opposite responses. `PhaseActivityInfo`
+    states what each one means and what its nulls do not mean.
+
+    Served so that an operator, or the agent triaging the run, can decide
+    without opening a transcript. `operations` below carries the same activity
+    row by row; this is the summary of it, and `operations_count` is
+    deliberately not that list's length.
+    """
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -145,6 +167,26 @@ class ExecutionDetailResponse(BaseModel):
     """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: `platform` for
+    the machinery breaking, `correct_refusal` for a phase that reported
+    `success=false` and was recorded faithfully, `unclassified` for a run that
+    ended before anything recorded the difference. This is the model the HTTP
+    route actually returns, so a value that stops short of here never reaches
+    a client.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
+    """
     repos: list[str] = Field(default_factory=list)
 
 
@@ -183,6 +225,26 @@ class ExecutionSummaryResponse(BaseModel):
     duration_display: str = "—"
     tool_call_count: int = 0
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionSummary`: `platform` for
+    the machinery breaking, `correct_refusal` for a phase that reported
+    `success=false` and was recorded faithfully, `unclassified` for a run that
+    ended before anything recorded the difference. This is the model the HTTP
+    route actually returns, so a value that stops short of here never reaches
+    a client.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
+    """
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
 

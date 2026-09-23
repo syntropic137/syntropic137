@@ -22,6 +22,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query impo
     _MIN_TIME_BATCH_QUERY,
     _SESSION_SUMMARY_BATCH_QUERY,
     _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
+    MAX_SESSIONS_PER_QUERY,
     TimescaleSessionCostQuery,
 )
 
@@ -43,6 +44,7 @@ def _summary_row(session_id: str, *, total_input: int | None = 1_000) -> _FakeRo
         "sdk_cost": Decimal("0.25"),
         "duration_ms_val": 4_000,
         "agent_model": _MODEL,
+        "workspace_id": "ws-from-summary",
         "completed_at": datetime(2026, 9, 3, 6, 0, tzinfo=UTC),
         "execution_id": "exec-1",
         "phase_id": "verify",
@@ -67,15 +69,28 @@ def _token_row(session_id: str) -> _FakeRow:
 
 
 class _CountingConnection:
-    """Serves rows by query text and counts every round-trip it was asked for."""
+    """Serves rows by query text and records every round-trip it was asked for.
+
+    Rows are filtered to the id array the query actually bound, the way the
+    database would. That is what makes "every id still has a cost" a real
+    assertion once the ids arrive in more than one batch: an implementation
+    that fetched only the first batch would go on returning rows for the ids
+    it never asked about if the fake ignored the array.
+    """
 
     def __init__(self, rows_by_query: dict[str, list[_FakeRow]]) -> None:
         self._rows_by_query = rows_by_query
         self.calls: list[str] = []
+        #: The session-id array bound by each round-trip, in order.
+        self.batches: list[list[str]] = []
 
-    async def fetch(self, query: str, *_args: object) -> list[_FakeRow]:
+    async def fetch(self, query: str, *args: object) -> list[_FakeRow]:
         self.calls.append(query)
-        return self._rows_by_query.get(query, [])
+        ids = args[0] if args and isinstance(args[0], list) else None
+        if ids is None:
+            return self._rows_by_query.get(query, [])
+        self.batches.append([str(sid) for sid in ids])
+        return [row for row in self._rows_by_query.get(query, []) if row["session_id"] in ids]
 
 
 class _Acquire:
@@ -218,3 +233,68 @@ async def test_no_session_ids_asks_the_database_nothing() -> None:
 
     assert await q.calculate_many([]) == {}
     assert pool.acquisitions == 0
+
+
+def _page_of(ids: list[str]) -> dict[str, list[_FakeRow]]:
+    """Every session priced from its summary, so a page is one round-trip each."""
+    return {
+        _SESSION_SUMMARY_BATCH_QUERY: [_summary_row(sid) for sid in ids],
+        _COUNT_BATCH_QUERY: [{"session_id": sid, "cnt": 1} for sid in ids],
+        _MIN_TIME_BATCH_QUERY: [
+            {"session_id": sid, "started_at": datetime(2026, 9, 3, 5, 0, tzinfo=UTC)} for sid in ids
+        ],
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "count", [MAX_SESSIONS_PER_QUERY - 1, MAX_SESSIONS_PER_QUERY, MAX_SESSIONS_PER_QUERY + 1]
+)
+async def test_no_round_trip_binds_more_ids_than_the_cap(count: int) -> None:
+    """The cap is enforced where the query runs, not where the caller is (#1338).
+
+    ``session_id = ANY($1)`` decompresses a segment per id in that array, so the
+    length of the array is the size of the read. The only thing that limited it
+    was ``le=200`` on one HTTP parameter, which no other caller passes through.
+    """
+    ids = [f"sess-{i}" for i in range(count)]
+    q, pool = _query(_page_of(ids))
+
+    results = await q.calculate_many(ids)
+
+    assert [len(batch) for batch in pool.conn.batches if len(batch) > MAX_SESSIONS_PER_QUERY] == []
+    # Chunking must not lose anyone: the ids past the cap are priced too.
+    assert set(results) == set(ids)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_full_page_is_still_one_batch() -> None:
+    """At the cap, behaviour is exactly what it was: four queries, one page.
+
+    The cap restates the HTTP page limit, so the path that motivated #1114 must
+    not start paying extra round-trips for the page size it already used.
+    """
+    ids = [f"sess-{i}" for i in range(MAX_SESSIONS_PER_QUERY)]
+    q, pool = _query(_page_of(ids))
+
+    await q.calculate_many(ids)
+
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 3
+    assert pool.acquisitions == 1
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_one_id_past_the_cap_becomes_a_second_batch() -> None:
+    """One over is two round-trip groups, of the cap and the remainder."""
+    ids = [f"sess-{i}" for i in range(MAX_SESSIONS_PER_QUERY + 1)]
+    q, pool = _query(_page_of(ids))
+
+    results = await q.calculate_many(ids)
+
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 3 + [1] * 3
+    assert pool.acquisitions == 2
+    assert len(results) == MAX_SESSIONS_PER_QUERY + 1
+    assert results[f"sess-{MAX_SESSIONS_PER_QUERY}"].total_cost_usd == Decimal("0.25")

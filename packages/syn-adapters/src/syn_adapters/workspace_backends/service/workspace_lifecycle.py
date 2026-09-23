@@ -76,6 +76,13 @@ def create_workspace_aggregate(
     return aggregate
 
 
+#: Environment keys owned by the workspace contract rather than by callers.
+#:
+#: Each is validated at exactly one place, and letting ``extra_environment``
+#: write them would move the enforcement point without moving the guarantee.
+_RESERVED_ENV_KEYS = frozenset({"SYN_OPERATOR_NAME", "SYN_OPERATOR_EMAIL"})
+
+
 def build_isolation_config(
     *,
     config: WorkspaceServiceConfig,
@@ -100,7 +107,20 @@ def build_isolation_config(
     """
     merged_environment = dict(config.environment or {})
     if extra_environment:
-        merged_environment.update(extra_environment)
+        # Reserved keys are a container CONTRACT, not per-call configuration.
+        # SYN_OPERATOR_* is validated once, as a pair, by OperatorSettings: both
+        # present or neither, and no line break in either, because the value
+        # becomes a commit-message trailer. A caller-supplied override could
+        # reintroduce every state that validation exists to exclude - a half
+        # pair, a different identity, or a newline payload - by writing the key
+        # directly and never constructing the settings object.
+        #
+        # No production caller passes these today. That is the reason to close
+        # it now, while the invariant is still true, rather than after some
+        # future caller quietly makes it false.
+        merged_environment.update(
+            {k: v for k, v in extra_environment.items() if k not in _RESERVED_ENV_KEYS}
+        )
 
     return IsolationConfig(
         execution_id=execution_id,

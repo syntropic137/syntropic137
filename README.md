@@ -11,7 +11,7 @@
 
 # Syntropic137
 
-Running 10 parallel coding agents in a terminal is about as far as you can go before it becomes unmanageable. Syntropic137 scales that to 100+ with workflow orchestration, full observability on every tool call and conversation, per-phase routing across Claude Code and Codex, and a self-hosted workflow marketplace. Your data stays yours.
+Scale coding agents past what a terminal can hold. Syntropic137 is multi-harness orchestration: run Claude Code and Codex across workflows, with every tool call and conversation captured. Self-hosted, so your data stays yours.
 
 **Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability. Every tool call, token, cost, conversation, and artifact is permanently captured in a queryable event store.
 

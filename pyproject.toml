@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.28.0"
+version = "0.29.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -147,6 +147,11 @@ testpaths = [
     "scripts/workflows",
     "scripts/tests",
     "infra/scripts/tests",
+    # The envoy sidecar's ext_authz check server. Not a package - the tests
+    # import it by path - but it is production code on the request path of
+    # every agent, and it was untested when #1080 broke every method but
+    # GET and POST.
+    "docker/token-injector/tests",
 ]
 pythonpath = [
     "apps/syn-api/src",

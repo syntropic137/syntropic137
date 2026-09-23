@@ -23,6 +23,8 @@ Usage:
 """
 
 from syn_domain.contexts.artifacts._shared import (
+    UNREPORTED_AGENT,
+    AgentIdentity,
     ArtifactAggregate,
     ArtifactType,
     ContentType,
@@ -47,6 +49,7 @@ from syn_domain.contexts.artifacts.domain.services import (
 )
 from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
+    ArtifactStorageError,
 )
 from syn_domain.contexts.artifacts.slices.create_artifact import (
     MIN_ARTIFACT_CONTENT_LENGTH,
@@ -66,12 +69,15 @@ from syn_domain.contexts.artifacts.slices.upload_artifact import (
 
 __all__ = [
     "MIN_ARTIFACT_CONTENT_LENGTH",
+    "UNREPORTED_AGENT",
+    "AgentIdentity",
     "ArtifactAggregate",
     "ArtifactContentStoragePort",
     "ArtifactCreatedEvent",
     "ArtifactCreationTimeRecoveredEvent",
     "ArtifactQueryService",
     "ArtifactQueryServiceProtocol",
+    "ArtifactStorageError",
     "ArtifactType",
     "ArtifactUploadedEvent",
     "ContentType",

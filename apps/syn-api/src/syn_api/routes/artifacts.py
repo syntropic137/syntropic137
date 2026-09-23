@@ -50,11 +50,23 @@ class ArtifactSummaryResponse(BaseModel):
 
     id: str
     workflow_id: str | None
+    #: Which run produced it (#1306). On the row because the list is the only
+    #: place a client can check that ``?execution_id=`` was honoured: an
+    #: ignored filter and a matching one return the same shape, and the rows
+    #: were the one thing that could have told them apart.
+    execution_id: str | None = None
     phase_id: str | None
     artifact_type: str
     title: str | None = None
     size_bytes: int = 0
     created_at: str | None = None
+    #: Who produced it (#1284). On the summary as well as the detail because a
+    #: caller asking "which models produced this execution's phases" asks it of
+    #: the LIST; needing a detail call per row to answer it is the same gap one
+    #: request further out. None on either means not reported, never "as
+    #: configured" - see ArtifactDetail.
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 class ArtifactListResponse(BaseModel):
@@ -118,6 +130,11 @@ class ArtifactResponse(BaseModel):
     created_at: str | None = None
     created_by: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    #: Who produced it (#1284). Carried here as well as on ArtifactDetail
+    #: because THIS is the model `GET /artifacts/{id}` answers with; a field
+    #: added only to the internal one never reaches the wire.
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 # =============================================================================
@@ -127,6 +144,7 @@ class ArtifactResponse(BaseModel):
 
 async def list_artifacts(
     workflow_id: str | None = None,
+    execution_id: str | None = None,
     session_id: str | None = None,
     phase_id: str | None = None,
     artifact_type: str | None = None,
@@ -152,6 +170,11 @@ async def list_artifacts(
 
     Args:
         workflow_id: Filter by workflow ID.
+        execution_id: Filter by the execution run the artifact belongs to.
+            This is the query the phase pipeline actually asks -- "what did
+            THIS run produce" -- and until #1306 it was the one filter the
+            endpoint did not offer, so asking narrowed nothing and the answer
+            was whatever any run had written most recently.
         session_id: Filter by session ID.
         phase_id: Filter by phase ID.
         artifact_type: Filter by artifact type. Also the facet dimension, so
@@ -172,6 +195,7 @@ async def list_artifacts(
         projection = manager.artifact_list
         domain_page = await projection.page(
             workflow_id=workflow_id,
+            execution_id=execution_id,
             session_id=session_id,
             phase_id=phase_id,
             artifact_types=[artifact_type] if artifact_type else None,
@@ -187,6 +211,7 @@ async def list_artifacts(
                     ArtifactSummary(
                         id=a.id,
                         workflow_id=a.workflow_id,
+                        execution_id=a.execution_id,
                         phase_id=a.phase_id,
                         artifact_type=a.artifact_type,
                         title=a.name,
@@ -194,6 +219,11 @@ async def list_artifacts(
                         created_at=datetime.fromisoformat(a.created_at)
                         if isinstance(a.created_at, str)
                         else a.created_at,
+                        # Named here or the list answers null for an artifact
+                        # whose detail answers correctly - see the comment on
+                        # excluded_undated below, which is this same hop (#1284).
+                        agent_provider=a.agent_provider,
+                        agent_model=a.agent_model,
                     )
                     for a in domain_page.rows
                 ],
@@ -284,6 +314,8 @@ async def get_artifact(
                 content_hash=artifact.content_hash,
                 size_bytes=artifact.size_bytes,
                 created_at=_parse_artifact_created_at(artifact.created_at),
+                agent_provider=artifact.agent_provider,
+                agent_model=artifact.agent_model,
             )
         )
     except Exception as e:
@@ -511,17 +543,21 @@ def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse
     return ArtifactSummaryResponse(
         id=a.id,
         workflow_id=a.workflow_id,
+        execution_id=a.execution_id,
         phase_id=a.phase_id,
         artifact_type=a.artifact_type,
         title=a.title,
         size_bytes=a.size_bytes or 0,
         created_at=str(a.created_at) if a.created_at else None,
+        agent_provider=a.agent_provider,
+        agent_model=a.agent_model,
     )
 
 
 @router.get("", response_model=ArtifactListResponse)
 async def list_artifacts_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
+    execution_id: str | None = Query(None, description="Filter by execution ID"),
     phase_id: str | None = Query(None, description="Filter by phase ID"),
     session_id: str | None = Query(None, description="Filter by session ID"),
     artifact_type: str | None = Query(None, description="Filter by artifact type"),
@@ -549,6 +585,13 @@ async def list_artifacts_endpoint(
 ) -> ArtifactListResponse:
     """List artifacts with optional filtering.
 
+    ``execution_id`` is declared here rather than left to the client because an
+    undeclared query parameter is dropped, not refused (#1306): a real id, a
+    nonsense id and no filter at all returned the same unfiltered page, so "this
+    run's deliverable" resolved to whatever any run wrote most recently. The
+    same defect #1263 fixed on ``/sessions``, on the surface where it decides
+    what a phase reads.
+
     The window is named after ``created_at`` because that is the timestamp an
     artifact has; the siblings bound ``started_at`` and spell it
     ``started_after``. The validation is the same one (#1186): a bound with no
@@ -557,6 +600,7 @@ async def list_artifacts_endpoint(
     effective_page_size = resolve_page_size(page_size, limit)
     result = await list_artifacts(
         workflow_id=workflow_id,
+        execution_id=execution_id,
         session_id=session_id,
         phase_id=phase_id,
         artifact_type=artifact_type,
@@ -621,6 +665,8 @@ async def get_artifact_endpoint(
         created_at=str(a.created_at) if a.created_at else None,
         created_by=None,
         metadata={},
+        agent_provider=a.agent_provider,
+        agent_model=a.agent_model,
     )
 
 
@@ -638,8 +684,11 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
 
     a = result.value
 
-    # The metadata projection lists the artifact but object storage hasn't received
-    # the bytes yet — a race between ArtifactCreatedEvent and the MinIO upload (#700).
+    # The metadata projection lists the artifact but has no content to answer
+    # with. It is no longer the upload that lags: upload does not report success
+    # until the write is readable, so ArtifactCreatedEvent never publishes a
+    # storage_uri ahead of its bytes (#700). What remains is read-model
+    # catch-up - the row is there before the content that fills it.
     # Signal retry-later instead of a misleading 200-with-null body.
     if a.content is None and a.size_bytes and a.size_bytes > 0:
         raise HTTPException(

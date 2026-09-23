@@ -14,6 +14,12 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
+# Runtime import: pydantic resolves the annotation below at class-construction
+# time, and the whole point of reusing the DOMAIN enum here is that the API and
+# the CLI cannot grow a second spelling of the same vocabulary (#1357).
+# Imported from the context's public surface, not its internals (ADR-062).
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -466,6 +472,48 @@ class ExecutionSummary(BaseModel):
     """
     tool_call_count: int = 0
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -502,6 +550,48 @@ class ExecutionDetail(BaseModel):
     """
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -542,11 +632,23 @@ class ArtifactSummary(BaseModel):
 
     id: str
     workflow_id: str | None = None
+    #: Which run produced it (#1306). The row has always carried it; the list
+    #: did not report it, so a client that asked for one execution's artifacts
+    #: could not tell from the answer whether it had got them. Reported as well
+    #: as filtered on, because a filter a client cannot verify is what the
+    #: silent drop looked like from outside.
+    execution_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    #: Who produced it (#1284). Same two facts as on ArtifactDetail, carried on
+    #: the row because the list is where "which models ran this execution's
+    #: phases" is asked. None on either means not reported, never "as
+    #: configured".
+    agent_provider: str | None = None
+    agent_model: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -826,6 +928,135 @@ class BranchObservationInfo(BaseModel):
     from "this phase is holding work no remote has"."""
 
 
+class PhaseActivityInfo(BaseModel):
+    """What a phase was DOING when it ended, and against what budget (#1262).
+
+    THE ANSWER TO "was it busy or was it stuck", for the one failure that
+    cannot answer it itself. A phase killed on its deadline exits 124, and so
+    does a phase that hung; the two need opposite responses - dispatch a
+    continuation with a bigger budget, or do not pay for that run a second
+    time - and until this model existed nothing in the execution record
+    separated them. An operator had to open the transcript, and four runs in
+    one day were triaged without one.
+
+    Read as a whole, the fields are the triage:
+
+    * many operations and a push moments before the end - it was working, and
+      the budget was too short;
+    * a handful of operations and no push for most of an hour - it stalled,
+      and a bigger budget buys another stalled hour;
+    * ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,
+      as against a 124 reported well inside the budget, which is some other
+      death wearing the same exit code.
+
+    Every field is a READING, never a verdict. Nothing here says "stalled":
+    that word is a judgement about intent, and these are four measurements
+    that let a reader make it.
+
+    AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+    The activity readings come from Lane 2, which fails soft, and a lookup that
+    raised or found no database once produced zero operations and no push -
+    which is precisely the shape of a stall. The feature built to stop an
+    operator being told "do not pay for this again" on no evidence was
+    manufacturing exactly that signal out of its own outage.
+    ``telemetry_available`` says whether the timeline was read at all, and the
+    readings taken from it are null when it was not.
+    """
+
+    telemetry_available: bool = False
+    """Whether this phase's Lane 2 timeline could be read at all.
+
+    False means NOTHING BELOW THAT COMES FROM THE TIMELINE WAS MEASURED - the
+    query raised, no database was reachable, or the phase never got a session
+    to record against. It is NOT a statement about the phase, which may have
+    been busy or stalled; it is a statement about this record.
+
+    It is a field of its own rather than being left to be inferred from a null
+    ``operations_count`` because ``last_push_at`` and
+    ``seconds_since_last_push`` cannot carry the distinction themselves: null
+    already means "no push was observed" there, and that is a real, and the
+    most expensive, reading. One flag answers for all three.
+
+    ``elapsed_seconds`` and ``timeout_seconds`` are unaffected - they come from
+    the execution record, not from telemetry - so a phase whose timeline is
+    unreadable can still be read against its cap. It is busy-versus-stalled
+    that is withheld, and only that.
+
+    It defaults to False so that an ``activity`` nobody summarised claims
+    nothing, rather than claiming an idle phase.
+    """
+
+    operations_count: int | None = None
+    """Operations this phase performed, as ``phases[].operations`` records them.
+
+    ``None`` when ``telemetry_available`` is False, and ``0`` only when the
+    timeline was read and held nothing. Both are answers and they are different
+    answers; the sentinel that would merge them is not worth inventing, because
+    zero is already a real one - a phase whose process never got anywhere did
+    make no calls, and that says the failure is upstream of the agent.
+
+    NOT ``len(operations)``, and the difference is not cosmetic: a tool call is
+    two rows there, a start and a completion, so the list's length is about
+    twice the work that happened, and was counted that way until #1061. This
+    counts the CALLS, folding both rows of one call together by
+    ``ToolOperation.call_identity``.
+
+    Populated on a phase that was killed, which is the only reason it is worth
+    serving: it is read per request from the Lane 2 timeline, where every row
+    was written as its line arrived, so a phase that made 300 calls and then
+    died reports 300. A field written only at a clean teardown would report
+    nothing for exactly the runs this exists to triage.
+    """
+
+    last_push_at: datetime | None = None
+    """When this phase last pushed, as the timeline observed it.
+
+    ``None`` means NO PUSH WAS OBSERVED - including a phase whose work was
+    never pushed at all, which is the strongest thing this model can say about
+    lost work. It is not "pushed at time zero", and it is not a claim the push
+    reached the remote: the observation is written when the push is initiated
+    (the pre-push hook, ADR-043), so this is when the phase last TRIED.
+
+    READ IT WITH ``telemetry_available``. The null above is an observation, and
+    it is only an observation when something observed: with the flag False
+    nothing looked, and no claim about pushing is being made here at all.
+
+    Covers the legacy ``git_push_started``/``git_push_completed`` spellings as
+    well as today's ``git_push``. A rule that knew one of the three would
+    answer "never pushed" for a session recorded under another, which is the
+    expensive direction to be wrong in - it reads as a stall.
+    """
+
+    seconds_since_last_push: float | None = None
+    """Seconds from ``last_push_at`` to the end of the phase.
+
+    The stall signal stated as the number an operator actually compares. "The
+    end" is the same instant ``elapsed_seconds`` measures to: the completion
+    for a phase that finished, and the moment of the read for one still
+    running, so a live phase's silence grows while a dead one's is frozen.
+
+    ``None`` when nothing was pushed - ``elapsed_seconds`` is then the whole
+    answer, because the silence is the entire phase - or when the phase has no
+    end to measure to, or when ``telemetry_available`` is False and there was
+    no timeline to find a push in.
+    """
+
+    elapsed_seconds: float | None = None
+    """How long the phase ran. The same measurement ``duration_seconds``
+    reports on the phase itself, restated beside the budget it has to be read
+    against, and taken from that one value rather than computed again.
+
+    ``None`` is genuinely unknown, never zero.
+    """
+
+    timeout_seconds: int | None = None
+    """The wall-clock budget the phase was given, from its workflow definition.
+
+    ``None`` means the run stated no phase definitions and nothing knows the
+    budget - not that there was none, and not zero.
+    """
+
+
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
 
@@ -839,6 +1070,16 @@ class PhaseExecution(BaseModel):
     # already declares the field. This intermediate model was the one hop that
     # dropped it, so every failed phase surfaced error_message: null.
     error_message: str | None = None
+    deliverable_recovered: bool = False
+    """True when this phase completed on a deliverable recovered from its
+    transcript rather than the file it declared (#1195, #1300).
+
+    A salvaged phase COMPLETES - discarding a finished run over a missing
+    report is the cost #1300 measured - so `status` alone cannot distinguish
+    it, and this is the only field that can. It is here, on the record the API
+    serves, and not only on `PhaseCompletedEvent`, because a fact that reaches
+    no read model reaches no reader.
+    """
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -879,6 +1120,16 @@ class PhaseExecution(BaseModel):
     verifiably unchanged when in truth nothing looked.
     """
     operations: list[ToolOperation] = Field(default_factory=list)
+    activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
+    """What this phase was doing when it ended, summarised from `operations`
+    and the phase's budget (#1262).
+
+    Summarised HERE, one hop before the response, rather than at the response
+    boundary: the count has to fold a call's two rows together by
+    `ToolOperation.call_identity`, and that rule lives on the projection's
+    dataclass, which is the shape `_map_phase_detail` still holds and this
+    model no longer does.
+    """
 
 
 class ExecutionDetailFull(BaseModel):
@@ -919,6 +1170,48 @@ class ExecutionDetailFull(BaseModel):
     started_at: datetime | str | None = None
     completed_at: datetime | str | None = None
     error_message: str | None = None
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside `status` (#1357).
+
+    `status` says the run did not deliver; this says WHAT to do about it. The
+    machinery broke (`platform`, fix it); or a phase judged the work not
+    deliverable and was recorded faithfully (`correct_refusal`, read it and
+    close it) - the system working. `unclassified` is a run nobody classified:
+    a run that ended before anything recorded the difference, every failure
+    predating the field, and a phase that reported it could not tell.
+    `task` - the request itself was wrong - is a member nothing produces
+    today; see `reported_failure_reason`.
+
+    THIS IS A MEASUREMENT AND NOT A REPORT (#1392), which is the whole reason
+    it is a separate field from `reported_failure_reason` beside it. Every
+    failure NUMBER is computed from this one, so nothing a phase can write
+    about itself decides it: a phase that names its own cause is heard, in the
+    other field, and the only thing its word can do to this one is WITHDRAW a
+    claim by saying it could not tell.
+
+    Served rather than derived by the caller: the CLI and the dashboard are
+    where failure rates are read off, and a consumer left to infer this from
+    `error_message` prose is a consumer that will infer it differently from
+    every other consumer.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    WHAT THE AGENT SAID, never what the platform found - that is
+    `failure_classification` above, and the two are deliberately one field
+    apart so a reader can see both at once rather than having to know which
+    they are holding. The only corroboration behind anything here is that the
+    process exited cleanly and its stream arrived intact, which is evidence
+    about the harness and not about whether the task was possible. So it is
+    shown to an operator as a quotation - "the agent reported: task" - and no
+    failure rate is computed from it.
+
+    `None` means the phase named no cause this reader knows: no key (every
+    report written before #1372), a misspelling, or a value of the wrong type.
+    Distinct from `unknown`, which is the word a phase writes to say it could
+    not tell, and which is the one report that moves the classification - to
+    `unclassified`, withdrawing the claim that anything was established.
+    """
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -996,6 +1289,20 @@ class ArtifactDetail(BaseModel):
     content_hash: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+    agent_provider: str | None = None
+    """Harness that ran the phase which produced this artifact (issue #1284).
+
+    None means no phase produced it, or it predates ArtifactCreated v6.
+    """
+    agent_model: str | None = None
+    """Model that harness ANNOUNCED while running, never the one requested.
+
+    This is the field a cross-model review reads to prove a DIFFERENT model
+    checked the work (#1284). None means the harness reported no model - true of
+    every codex phase today - and a client MUST render it as "not reported"
+    rather than falling back to the phase's configured model, which would look
+    like evidence and be none.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -1021,14 +1328,21 @@ class DashboardMetrics(BaseModel):
 
 
 class SessionCostData(BaseModel):
-    """Cost data for a single session."""
+    """Cost data for a single session.
+
+    Every field `SessionCostResponse` declares must appear here, or the
+    response advertises it and always serves its default (#1041). The two
+    field sets are compared in `test_dto_carries_every_response_field.py`.
+    """
 
     session_id: str
     execution_id: str | None = None
     workflow_id: str | None = None
     phase_id: str | None = None
+    workspace_id: str | None = None
     total_cost_usd: Decimal = Decimal("0")
     token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
@@ -1045,8 +1359,22 @@ class SessionCostData(BaseModel):
     duration_ms: int = 0
     cost_by_model: dict = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
+    tokens_by_tool: dict[str, int] = Field(default_factory=dict)
+    cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
     unpriced_observation_count: int = 0
     """Observations whose model had no rate; non-zero means cost is INCOMPLETE."""
+    unmeasured_fields: list[str] = Field(default_factory=list)
+    """Names of fields ON THIS MODEL whose value was never measured.
+
+    A field listed here holds its default, not a reading. Today that is always
+    ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``: no
+    read path can derive them from ``agent_events``.
+
+    It is a list of names rather than nulls on the fields themselves because a
+    null is as falsy as a zero, and a client writing ``x ?? 0`` erases the
+    distinction exactly the way #1041 erased these fields for a month. A
+    non-empty list is truthy and has to be read.
+    """
     is_finalized: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -2037,4 +2365,48 @@ class SkillStorageStatsResponse(BaseModel):
     truncated: bool = Field(
         default=False,
         description="True if the backend returned a partial listing, so the counts are floors.",
+    )
+
+
+class MaintenanceModeResponse(BaseModel):
+    """Whether new workflow executions are being admitted (#1387).
+
+    ``active`` is the gate: while it is true every admission path refuses and
+    the deploy script may swap containers knowing nothing new can start.
+    Executions already running are unaffected.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    active: bool = Field(
+        default=False,
+        description="True when new execution admission is refused.",
+    )
+    reason: str = Field(default="", description="Operator-supplied reason for the pause.")
+    since: datetime | None = Field(
+        default=None,
+        description="When admission was paused. Null while admission is open.",
+    )
+    actor: str = Field(default="", description="Who set the current state.")
+
+
+class SetMaintenanceModeRequest(BaseModel):
+    """Set or clear maintenance mode (#1387).
+
+    The response is not sent until the state is durably persisted, so a caller
+    that has seen a 200 knows no further execution can be admitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    active: bool = Field(description="True to refuse new executions, false to resume admitting.")
+    reason: str = Field(
+        default="",
+        max_length=500,
+        description="Why admission is paused; echoed back to every refused caller.",
+    )
+    actor: str = Field(
+        default="",
+        max_length=200,
+        description="Who is pausing. Free text - the deploy script sends its own name.",
     )

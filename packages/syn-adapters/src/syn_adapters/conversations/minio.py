@@ -22,6 +22,8 @@ from syn_adapters.conversations.minio_session import (
     list_sessions_for_execution as _list_sessions_for_execution,
 )
 from syn_adapters.conversations.minio_session import retrieve_session as _retrieve_session
+from syn_adapters.conversations.object_key import conversation_object_key
+from syn_adapters.postgres_text import pg_safe
 
 if TYPE_CHECKING:
     from minio import Minio
@@ -149,8 +151,12 @@ class MinioConversationStorage:
         if not self._initialized:
             await self.initialize()
 
-        # Build object key
-        object_key = f"sessions/{session_id}/conversation.jsonl"
+        # Canonicalise once, here, at the point the id enters the store. Every
+        # value derived below - the object key, the index row, the key returned
+        # to the caller - comes from this one binding, so none of them can name
+        # a different session than the others (#1241).
+        session_id = pg_safe(session_id)
+        object_key = conversation_object_key(session_id)
 
         # Join lines into JSONL content
         content = "\n".join(lines)

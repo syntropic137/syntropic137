@@ -64,14 +64,15 @@ _NO_PAIR: dict[str, str] = {
 #: was never meant for. Each entry is asserted to be in the intersection it
 #: claims to except: the first version of this list had four entries, three of
 #: which were not on the source model at all and so excepted nothing.
-_NOT_FROM_THE_READ_MODEL: dict[str, str] = {
-    "SessionCostResponse.workspace_id": "TODO(#1041): dropped today, tracked not excused",
-    "SessionCostResponse.compute_cost_usd": "TODO(#1041): dropped today, tracked not excused",
-    "SessionCostResponse.tokens_by_tool": "TODO(#1041): dropped today, tracked not excused",
-    "SessionCostResponse.cost_by_tool_tokens": "TODO(#1041): dropped today, tracked not excused",
-    "ExecutionDetailFull.phases": "mapped through _map_phase_to_response, not copied",
-    "ExecutionDetailResponse.phases": "mapped through _map_phase_to_response, not copied",
-}
+#:
+#: Empty, and that is the honest state: every entry it used to hold named a
+#: field that the route now really does pass. An entry for a passed field is
+#: worse than no entry, because it reads as a decision while gating nothing -
+#: the four #1041 fields sat here as "dropped today, tracked not excused" for a
+#: month after they stopped being dropped, so the gate that exists to catch
+#: exactly that drop was standing down for exactly those fields. The staleness
+#: assertion below is what stops an entry outliving its cause again.
+_NOT_FROM_THE_READ_MODEL: dict[str, str] = {}
 
 
 def _model_field_names(module: str, class_name: str) -> set[str]:
@@ -156,6 +157,12 @@ def test_every_shared_field_is_actually_passed(
             assert field in (source_fields & destination), (
                 f"{key} excepts a field that is not on both {source[1]} and "
                 f"{class_name}, so it excepts nothing and hides nothing. Remove it."
+            )
+            assert field not in passed, (
+                f"{key} excuses a field that {class_name}(...) already passes, so the "
+                f"excuse gates nothing while reading as a decision - and it holds this "
+                f"gate off the one field it names, which is how #1041 stayed excused "
+                f"for a month after it was passed again. Remove it."
             )
 
     dropped = sorted((source_fields & destination) - excepted - passed)

@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_test_markers import (
     Budget,
+    collect_census,
     count_xfail_markers,
     evaluate,
     is_excluded,
@@ -171,3 +172,65 @@ class TestBudgetSemantics:
     def test_nonzero_budget_renders_warn_not_pass(self) -> None:
         """Tech debt should stay visible while it is still owed."""
         assert "WARN" in Budget("xfail", 2, 2, "#444").render()
+
+
+@pytest.mark.unit
+class TestCollectionErrorsAreNotAnImprovement:
+    """A census pytest could not finish measuring is not a census.
+
+    The gate used to read pytest's summary line and ignore its exit status. One
+    import error anywhere in a test root makes pytest stop early (exit 2) while
+    still printing ``N tests collected`` - with N short by the tests that never
+    imported. The ratchet then sees a smaller number, which is what real
+    progress also looks like, and passes.
+
+    These tests run pytest for real against a throwaway tree, because the whole
+    defect lives in what the subprocess did rather than in what it printed. A
+    test that fed the parser a canned string could not tell the two apart, and
+    would be the same green-check-that-checks-nothing one level down.
+    """
+
+    BROKEN = "import module_that_does_not_exist_xyz\n\n\ndef test_c() -> None: ...\n"
+    GOOD = "def test_a() -> None: ...\n\n\ndef test_b() -> None: ...\n"
+
+    def test_import_error_fails_the_gate_instead_of_shrinking_the_census(
+        self, tmp_path: Path
+    ) -> None:
+        """Three tests exist, two are collectable; the answer is neither 2 nor 3."""
+        (tmp_path / "test_good.py").write_text(self.GOOD)
+        (tmp_path / "test_broken.py").write_text(self.BROKEN)
+
+        with pytest.raises(SystemExit) as raised:
+            collect_census(str(tmp_path))
+
+        assert "exit 2" in str(raised.value), (
+            "the gate must say which exit status it refused, or the operator "
+            "cannot tell a collection break from a usage error"
+        )
+
+    def test_refusal_carries_the_module_that_failed_to_import(self, tmp_path: Path) -> None:
+        """pytest reports collection errors on stdout, so a stderr-only
+        diagnostic would be empty exactly when the reason is needed."""
+        (tmp_path / "test_broken.py").write_text(self.BROKEN)
+
+        with pytest.raises(SystemExit) as raised:
+            collect_census(str(tmp_path))
+
+        assert "module_that_does_not_exist_xyz" in str(raised.value)
+
+    def test_a_clean_tree_still_reports_its_count(self, tmp_path: Path) -> None:
+        """The refusal must be caused by the failure, not by the fixture."""
+        (tmp_path / "test_good.py").write_text(self.GOOD)
+
+        assert collect_census(str(tmp_path)) == 2
+
+    def test_a_filter_that_matches_nothing_is_a_census_of_zero(self, tmp_path: Path) -> None:
+        """Exit 5 is the goal state of the unmarked ratchet, not a breakage.
+
+        Its summary reads "no tests collected", which no parser here matches,
+        so treating exit 5 as an ordinary run would crash the gate on the day
+        the ratchet finally reaches 0.
+        """
+        (tmp_path / "test_good.py").write_text(self.GOOD)
+
+        assert collect_census(str(tmp_path), "-m", "unit") == 0

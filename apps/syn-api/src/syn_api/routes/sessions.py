@@ -373,6 +373,7 @@ def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
 
 async def list_sessions(
     workflow_id: str | None = None,
+    execution_id: str | None = None,
     status: str | None = None,
     statuses: list[str] | None = None,
     started_after: datetime | None = None,
@@ -390,6 +391,7 @@ async def list_sessions(
 
     Args:
         workflow_id: Filter by workflow ID.
+        execution_id: Filter by the execution the session belongs to.
         status: Filter by single session status (legacy).
         statuses: Filter by multiple statuses (OR'd together). Takes
             precedence over ``status``.
@@ -407,6 +409,7 @@ async def list_sessions(
     projection = manager.session_list
     domain_page = await projection.page(
         workflow_id=workflow_id,
+        execution_id=execution_id,
         statuses=statuses if statuses else ([status] if status else None),
         started_after=started_after,
         started_before=started_before,
@@ -513,23 +516,44 @@ async def _load_tool_operations(manager: ProjectionManager, session_id: str) -> 
         return []
 
 
-async def _load_cost_data(
-    session_id: str, fallback_tokens: int, fallback_cost: Decimal
-) -> _CostData:
+def _lane1_tokens(session: DomainSessionSummary) -> _CostData:
+    """The whole token breakdown Lane 1 recorded for this session.
+
+    Used when Lane 2 has nothing to say. It carries every field, not just the
+    total: the totals-only fallback reported 4321 total tokens against a 0/0
+    input/output split, which is a breakdown that does not add up to its own
+    total. Lane 1 has had all four counts since OperationRecorded first
+    accumulated them - they were simply not read (#1034, same hop as ISS-217).
+    """
+    return _CostData(
+        input_tokens=session.input_tokens,
+        output_tokens=session.output_tokens,
+        cache_creation_tokens=session.cache_creation_tokens,
+        cache_read_tokens=session.cache_read_tokens,
+        total_tokens=session.total_tokens,
+        total_cost_usd=Decimal("0"),
+    )
+
+
+async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
     """Load cost data for a session via SessionCostQueryService (TimescaleDB).
 
     Uses the query service directly instead of the deprecated projection method.
     See #532 for the architectural rationale.
+
+    Takes the Lane 1 row rather than a handful of fallback scalars, so that
+    "what do we fall back to" is answered in one place instead of at each
+    call site.
     """
     try:
         query_svc = get_session_cost_query()
-        cost = await query_svc.get(session_id)
+        cost = await query_svc.get(session.id)
     except Exception:
-        logger.exception("Failed to load cost data for session %s", session_id)
-        return _CostData(total_tokens=fallback_tokens, total_cost_usd=fallback_cost)
+        logger.exception("Failed to load cost data for session %s", session.id)
+        return _lane1_tokens(session)
 
     if cost is None:
-        return _CostData(total_tokens=fallback_tokens, total_cost_usd=fallback_cost)
+        return _lane1_tokens(session)
 
     return _CostData(
         input_tokens=cost.input_tokens,
@@ -537,7 +561,7 @@ async def _load_cost_data(
         cache_creation_tokens=cost.cache_creation_tokens,
         cache_read_tokens=cost.cache_read_tokens,
         # ISS-217: Use authoritative totals from cost projection; fall back to session_list
-        total_tokens=cost.total_tokens or fallback_tokens,
+        total_tokens=cost.total_tokens or session.total_tokens,
         total_cost_usd=cost.total_cost_usd,
         # Dropping this was the fix failing inside its own PR: session detail is
         # the most-viewed cost surface, and without the count it renders a
@@ -572,8 +596,9 @@ async def get_session(
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
     operations = await _load_tool_operations(manager, session_id)
-    # Lane 2: session cost from TimescaleDB; fallback to 0 if unavailable (#695)
-    cd = await _load_cost_data(session_id, session.total_tokens, Decimal("0"))
+    # Lane 2: session cost from TimescaleDB; falls back to the Lane 1 token
+    # counts (never to zero) when there is no cost row (#695, #1034)
+    cd = await _load_cost_data(session)
     # A running session has no completed_at, so Lane 2's duration_ms is unset
     # and this reported None for the whole run. Computed against the wall clock
     # instead. Terminal sessions keep whatever Lane 2 recorded.
@@ -690,6 +715,14 @@ def _build_session_summary_response(
 @router.get("", response_model=SessionListResponse)
 async def list_sessions_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
+    execution_id: str | None = Query(
+        None,
+        description=(
+            "Filter by the execution these sessions belong to. Every session "
+            "carries one; before this existed the parameter was accepted and "
+            "silently dropped, returning the whole collection (#1263)."
+        ),
+    ),
     status: str | None = Query(None, description="Filter by single status (legacy)"),
     statuses: str | None = Query(
         None,
@@ -719,6 +752,7 @@ async def list_sessions_endpoint(
     effective_page_size = resolve_page_size(page_size, limit)
     result = await list_sessions(
         workflow_id=workflow_id,
+        execution_id=execution_id,
         status=status,
         statuses=parse_statuses(statuses, status),
         started_after=started_after,

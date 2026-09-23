@@ -7,9 +7,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, PhaseOutputFile
+from syn_domain.contexts.artifacts._shared.value_objects import (
+    UNREPORTED_AGENT,
+    ArtifactType,
+    PhaseOutputFile,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+    UnfinishedPhase,
     map_artifact_type,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
@@ -113,6 +118,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
         assert len(result.artifact_ids) == 2
         assert result.first_content == "# Result"
@@ -147,6 +153,7 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
         assert result.artifact_ids == []
         assert result.first_content is None
@@ -208,14 +215,14 @@ class TestArtifactCollector:
         assert queried == [("e1", ["p1", "p2"])]
 
     @pytest.mark.asyncio
-    async def test_collect_partial_success(self) -> None:
+    async def test_collecting_from_an_unfinished_phase_stores_what_it_wrote(self) -> None:
         """Test successful partial artifact collection."""
         repo = MockArtifactRepo()
         collector = ArtifactCollector(repo, None, None)
         workspace = MockWorkspace(
             collected_files=[("artifacts/output/partial.md", b"partial content")]
         )
-        result = await collector.collect_partial(
+        result = await collector.collect_from_unfinished_phase(
             workspace=workspace,
             workflow_id="w1",
             phase_id="p1",
@@ -223,18 +230,20 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
         assert len(result) == 1
         assert len(repo.saved) == 1
 
     @pytest.mark.asyncio
-    async def test_collect_partial_never_raises(self) -> None:
+    async def test_collecting_from_an_unfinished_phase_never_raises(self) -> None:
         class BrokenWorkspace:
             async def collect_files(self, patterns: list[str]) -> list[tuple[str, bytes]]:
                 raise RuntimeError("disk full")
 
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
-        result = await collector.collect_partial(
+        result = await collector.collect_from_unfinished_phase(
             workspace=BrokenWorkspace(),
             workflow_id="w1",
             phase_id="p1",
@@ -242,6 +251,8 @@ class TestArtifactCollector:
             session_id="s1",
             phase_name="Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
         assert result == []
 
@@ -280,6 +291,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -307,13 +319,14 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.first_content == "# Real Result"
 
     @pytest.mark.asyncio
     async def test_partial_collection_skips_junk_too(self) -> None:
-        """collect_partial is the interrupt path and uses the same pattern, so
+        """The keep-what-it-wrote path uses the same pattern, so
         it inherits the same defect. Fixing only the happy path would leave
         every cancelled run still sweeping junk.
         """
@@ -326,7 +339,7 @@ class TestBuildJunkIsNotCollected:
             ]
         )
 
-        ids = await collector.collect_partial(
+        ids = await collector.collect_from_unfinished_phase(
             workspace=workspace,
             workflow_id="w1",
             phase_id="p1",
@@ -334,6 +347,8 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
 
         assert len(ids) == 1
@@ -360,6 +375,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -390,6 +406,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 2
@@ -420,6 +437,7 @@ class TestBuildJunkIsNotCollected:
             session_id="s1",
             phase_name="Test Phase",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert len(result.artifact_ids) == 4
@@ -453,6 +471,7 @@ class TestExactlyOnePrimaryDeliverable:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True, False, False]
@@ -473,6 +492,7 @@ class TestExactlyOnePrimaryDeliverable:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True]
@@ -500,6 +520,7 @@ class TestADeclaredOutputMustBeProduced:
                 session_id="s1",
                 phase_name="Verify",
                 output_artifact_types=("analysis_report",),
+                agent=UNREPORTED_AGENT,
             )
 
         message = str(excinfo.value)
@@ -529,11 +550,12 @@ class TestADeclaredOutputMustBeProduced:
                 session_id="s1",
                 phase_name="Falsify",
                 output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
             )
 
     @pytest.mark.asyncio
     async def test_an_interrupted_phase_salvaging_nothing_does_not_raise(self) -> None:
-        """collect_partial is the interrupt path and stays best-effort.
+        """Keeping an unfinished phase's output stays best-effort.
 
         An interrupted phase already has a verdict. Raising a contract
         violation over an empty salvage would overwrite "cancelled" with a
@@ -541,7 +563,7 @@ class TestADeclaredOutputMustBeProduced:
         """
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
 
-        ids = await collector.collect_partial(
+        ids = await collector.collect_from_unfinished_phase(
             workspace=MockWorkspace(),
             workflow_id="w1",
             phase_id="p1",
@@ -549,6 +571,8 @@ class TestADeclaredOutputMustBeProduced:
             session_id="s1",
             phase_name="Interrupted",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
 
         assert ids == []
@@ -573,6 +597,7 @@ class TestADeclaredOutputMustBeProduced:
             session_id="s1",
             phase_name="Planning",
             output_artifact_types=("plan", "markdown"),
+            agent=UNREPORTED_AGENT,
         )
 
         assert [a.artifact_type for a in repo.saved] == [ArtifactType.PLAN]

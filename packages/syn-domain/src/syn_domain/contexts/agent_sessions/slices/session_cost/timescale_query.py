@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
+from syn_domain.storable_text import pg_safe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -22,6 +26,43 @@ from syn_shared.events import (
 )
 
 # --- The four queries, all keyed by a session-id ARRAY -----------------------
+#
+# WHY THESE STILL READ RAW EVENTS, AND WHAT THAT DOES AND DOES NOT BOUND
+# (#1338).
+#
+# All four filter `event_type`, which is in neither compress_segmentby
+# (session_id) nor compress_orderby (time), so inside a compressed chunk it
+# cannot be answered from an index - the segment is decompressed and filtered
+# row by row. #1338 asked whether that makes them the next /executions-style
+# latency bug. These are NARROWER than the execution-keyed paths, for a reason
+# that is about the id they lead on rather than about event_type:
+#
+#   `session_id` IS the segmentby column. A compressed chunk stores one
+#   independently addressable segment per session_id, so `session_id = ANY($1)`
+#   discards whole segments before decompressing any of them. Sessions that are
+#   not on the page are never touched.
+#
+# NARROWER IS NOT BOUNDED, and this comment used to say bounded. Nothing here
+# limits the events WITHIN a selected session: a session that emitted a million
+# events is a million rows decompressed and filtered, for one row of output.
+# What is bounded is the number of sessions per round-trip, and only because
+# `calculate_many` caps it - see MAX_SESSIONS_PER_QUERY. Before that cap the
+# only limit was `le=200` on the HTTP query parameter, which is not where these
+# queries run and does not constrain any other caller.
+#
+# The per-session ceiling is the part still outstanding, and it is the same
+# shape of debt as the execution-keyed paths next door: only a maintained
+# per-session read model removes it.
+#
+# The rule for changing anything here: a query in this file MUST keep leading
+# on session_id. Re-keying one on execution_id or on time alone returns
+# identical numbers and every correctness test still passes, while giving up
+# the segment discard and reading every chunk in range. Pinned by
+# packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
+#
+# #1338 also shipped `idx_events_session_type (session_id, event_type, time)`,
+# which removes the per-row event_type recheck on the UNCOMPRESSED chunks. It
+# helps recent data, and it does not change either bound above.
 #
 # WHY (issue #1114). `calculate` ran up to four round-trips per session, and the
 # sessions list endpoint called it once per row: `limit=50` cost 2.4s and
@@ -47,6 +88,8 @@ SELECT DISTINCT ON (session_id)
     (data->>'total_cost_usd')::numeric as sdk_cost,
     (data->>'duration_ms')::bigint as duration_ms_val,
     data->>'model' as agent_model,
+    data->>'workspace_id' as workspace_id,
+    (data->>'num_turns')::int as num_turns,
     time as completed_at,
     execution_id,
     phase_id
@@ -102,6 +145,20 @@ FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
 GROUP BY session_id
 """
+
+#: The most session ids `calculate_many` will bind into one round-trip.
+#:
+#: Each of the four queries above decompresses every segment it selects, so the
+#: work of one round-trip grows with the number of ids in the array. Something
+#: has to cap that array, and until #1338 the only thing that did was `le=200`
+#: on the sessions-list HTTP parameter - a constraint on one caller, in a layer
+#: these queries know nothing about, silently absent from every other caller
+#: and from every direct use of the query service.
+#:
+#: 200 is that page cap restated where the query runs, so the HTTP path behaves
+#: exactly as it did (a full page is still one round-trip) and a caller asking
+#: for more pays extra round-trips rather than one unbounded one.
+MAX_SESSIONS_PER_QUERY = 200
 
 
 def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
@@ -364,6 +421,7 @@ class TimescaleSessionCostQuery:
         started_at: datetime | None,
         completed_at: datetime | None,
         duration_ms: int | None,
+        summary: asyncpg.Record | None,
     ) -> SessionCost:
         """Assemble a SessionCost from priced, model-grouped totals.
 
@@ -373,6 +431,23 @@ class TimescaleSessionCostQuery:
         rather than asserted (issue #890). ``cost_by_model`` carries only the
         groups that were actually priced; an entry there claims that model cost
         that much.
+
+        ``compute_cost_usd``, ``tokens_by_tool`` and ``cost_by_tool_tokens``
+        are deliberately NOT assigned here, and are not assignable: a
+        ``tool_completed`` observation records ``{tool_name, tool_use_id,
+        success, output_preview}`` and a ``token_usage`` observation records no
+        tool, so no query over ``agent_events`` can attribute tokens to a tool,
+        and no compute rate table exists to price one. They keep their
+        ``SessionCost`` defaults and stay listed in ``unmeasured_fields``,
+        which is what stops the resulting zeroes from reading as measurements
+        (#1041).
+
+        ``summary`` is the authoritative ``session_summary`` row this was
+        priced from, or ``None`` when it fell back to ``token_usage``. It is
+        the only thing that can answer whether the session finished and how
+        many turns it took, and passing the row rather than two extra
+        arguments keeps those two answers from drifting apart: both are true
+        exactly when a summary exists.
         """
         sc = SessionCost(session_id=session_id)
         sc.input_tokens = totals.input_tokens
@@ -390,6 +465,14 @@ class TimescaleSessionCostQuery:
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
         sc.workspace_id = totals.workspace_id
+        if summary is not None:
+            # A summary row IS the session's completion record, so its presence
+            # is what "finalized" means on this path - the list path already
+            # read it that way and this one reported every finished session as
+            # still running.
+            sc.is_finalized = True
+            sc.turns = summary.get("num_turns") or 0
+            sc.record_measured(CostField.TURNS)
         if completed_at:
             sc.completed_at = completed_at
         if duration_ms is not None:
@@ -404,24 +487,39 @@ class TimescaleSessionCostQuery:
         two things that have to agree about pricing, and nothing would force
         them to.
         """
+        session_id = pg_safe(session_id)
         return (await self.calculate_many([session_id])).get(session_id)
 
     async def calculate_many(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
-        """Calculate cost for many sessions in a fixed number of round-trips.
+        """Calculate cost for many sessions, four round-trips per batch.
 
         Sessions with no cost data are absent from the result, exactly as
         ``calculate`` returns ``None`` for them. Order is not meaningful; the
-        caller indexes by session id.
+        caller indexes by session id - by the STORED id, which is what the
+        result is keyed by and what the rows carry.
+
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
+
+        ANY NUMBER OF IDS IS ACCEPTED; NO NUMBER OF IDS IS ONE QUERY. Ids are
+        taken ``MAX_SESSIONS_PER_QUERY`` at a time, so the size of each array
+        bound into the four queries is capped here rather than trusted to the
+        caller. Up to a full page that is the single batch it always was; past
+        it, the caller pays another four round-trips instead of handing the
+        database an array of unbounded length. See the comment on that
+        constant for why this layer is where the cap belongs.
         """
-        ids = list(dict.fromkeys(session_ids))
-        if not ids:
-            return {}
-        page = await self._fetch_page(ids)
+        ids = list(dict.fromkeys(pg_safe(sid) for sid in session_ids))
         results: dict[str, SessionCost] = {}
-        for sid in ids:
-            cost = self._cost_for(sid, page)
-            if cost is not None:
-                results[sid] = cost
+        for start in range(0, len(ids), MAX_SESSIONS_PER_QUERY):
+            batch = ids[start : start + MAX_SESSIONS_PER_QUERY]
+            page = await self._fetch_page(batch)
+            for sid in batch:
+                cost = self._cost_for(sid, page)
+                if cost is not None:
+                    results[sid] = cost
         return results
 
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
@@ -475,4 +573,5 @@ class TimescaleSessionCostQuery:
             started_at=started_at,
             completed_at=completed_at,
             duration_ms=duration_ms,
+            summary=summary,
         )
