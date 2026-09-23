@@ -13,21 +13,75 @@ and take the base and head SHAs from it.
 > goes. Look in the directory first and fall back to the flat file. If neither
 > exists, stop and say so rather than proceeding on no input.
 
-**You are in a fresh workspace on the default branch** - the PR's code is not
-checked out here. Fetch and use the exact SHAs the previous phase recorded, and
-confirm what you are looking at:
-
-```
-git fetch origin
-git rev-parse origin/main origin/<pr-branch>    # must match the recorded SHAs
-```
-
-If they differ, the branch moved since the previous phase; say so rather than
-reviewing a different commit than the one that was mapped.
-
 Your job is to try to make the PR's central claim FALSE, and to report honestly
 whether you succeeded. A review that sets out to confirm a change finds it
 confirmed.
+
+## First: pin the refs you are reviewing
+
+**You are in a fresh workspace on the default branch** - the PR's code is not
+checked out here. Checking it out is the first thing you do, and the last two
+lines are how you learn that it worked, because an agent that believes it is
+reading the PR while the tree holds `main` produces a confident review of code
+nobody changed:
+
+```bash
+git fetch origin
+git checkout --detach <recorded-head>
+test "$(git rev-parse HEAD)" = "<recorded-head>"                # the tree IS the PR
+test "$(git rev-parse origin/<pr-branch>)" = "<recorded-head>"  # and the PR has not moved
+git rev-parse origin/main    # for the record only - NOT a gate
+git diff <recorded-base>...HEAD
+```
+
+**Both `test` lines must exit 0, and nothing below them is valid until they
+do.** They are the gate. Paste their exit status into your report; a gate whose
+result you did not read is not a gate. If the first fails you are reviewing the
+wrong tree, and if the second fails the head moved - see the table below for
+which of those you can continue past.
+
+**The head is the review; the base is not.** One of those two refs moving
+invalidates your work and the other does not, and treating them alike costs a
+whole run:
+
+| what moved | what it means | what you do |
+|---|---|---|
+| **the head** | the code under review changed, and the map you were given describes commits that are no longer the PR | stop and report it. Findings against a superseded head send the author to fix what is already fixed |
+| **`origin/main`** | unrelated work landed while you ran; the head is exactly the one that was recorded | keep going, and record the move |
+
+A queue merges to `origin/main` here, so base movement is the normal condition
+of this repository rather than an exception: a review that halts for it cannot
+run concurrently with a merge, and one that did halt threw away $10.09 of
+finished work and delivered no verdict (#1290). Neither gate above reads
+`origin/main`, so the move costs you one line of disclosure and nothing else.
+Put that line in your output, so the report can carry it:
+
+```text
+Reviewed against base `<recorded-base>`; `origin/main` has since moved to `<current-main>`.
+```
+
+### When the merge, and not the head, is what you are judging
+
+Some findings are not about the head alone: "this caller no longer exists",
+"this collides with what just landed", "these two changes are each correct and
+contradict each other". Those are claims about the MERGE RESULT, and the merge
+visible from the recorded base is the one that existed when the map was
+written. Asserting such a claim against a base you know has moved is the same
+dishonesty as reviewing the wrong head, pointed the other way.
+
+So produce the merge before you make one, and say which base it is against.
+Do it in a second worktree, so that the merge cannot leave your review tree on
+some other commit and there is nothing to remember to restore:
+
+```
+git worktree add ../merge-check <recorded-head> && git -C ../merge-check merge origin/main
+git worktree remove --force ../merge-check
+```
+
+A conflict is a finding, not a reason to stop. If you cannot produce the merge,
+say the claim is unsettled against current `origin/main` rather than asserting
+it against the old base - an unsettled claim that is labelled is useful, and
+one that is quietly stale is not.
 
 ## Where to attack
 

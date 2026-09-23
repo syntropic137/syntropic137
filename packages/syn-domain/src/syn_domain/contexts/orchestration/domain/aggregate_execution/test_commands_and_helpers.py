@@ -13,6 +13,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     ProvisionWorkspaceCompletedCommand,
     StartExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    FailureClassification,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     _evt,
     _parse_phase_definitions,
@@ -128,8 +131,10 @@ class TestCommandsImportable:
             failed_phase_id="p-1",
             completed_phases=0,
             total_phases=1,
+            classification=FailureClassification.PLATFORM,
         )
         assert cmd.error == "boom"
+        assert cmd.classification is FailureClassification.PLATFORM
 
     def test_interrupt_with_partial_state(self) -> None:
         cmd = InterruptExecutionCommand(

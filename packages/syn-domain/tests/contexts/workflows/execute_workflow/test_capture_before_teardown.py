@@ -108,6 +108,7 @@ def _runtime(capture: object, workspace: object, cm: object) -> PhaseRuntime:
         workspace_cm=cast("AbstractAsyncContextManager[ManagedWorkspace]", cm),
         agent_env={},
         claude_cmd=[],
+        delivers_repo_changes=True,
     )
     runtime._session_ids[PHASE] = "s-1"  # pyright: ignore[reportPrivateUsage]
     return runtime

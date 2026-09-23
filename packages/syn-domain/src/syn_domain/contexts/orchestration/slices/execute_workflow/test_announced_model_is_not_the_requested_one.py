@@ -659,6 +659,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
         processor._runtimes.of("exec-1").record_agent_run(
             "verify",
@@ -672,7 +673,7 @@ class TestTheProcessorAssemblesTheIdentityItself:
                 ),
             ),
         )
-        await processor._handle_collect_artifacts(
+        await processor._workspaces_for("exec-1", {}).collect(
             TodoItem(
                 execution_id="exec-1",
                 action=TodoAction.COLLECT_ARTIFACTS,

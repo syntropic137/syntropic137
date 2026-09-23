@@ -30,7 +30,8 @@ class WorkspaceServicePort(Protocol):
         execution_id: str,
         workflow_id: str | None = None,
         phase_id: str | None = None,
-        with_sidecar: bool = False,
+        *,
+        with_sidecar: bool = True,
         inject_tokens: bool = False,
     ) -> AbstractAsyncContextManager["ManagedWorkspace"]:
         """Create an isolated workspace for agent execution.

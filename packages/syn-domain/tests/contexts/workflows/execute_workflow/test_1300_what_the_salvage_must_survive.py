@@ -215,7 +215,10 @@ class _Process:
         provisioned once as far as the record is concerned, and re-announcing
         it would rewind the to-do list to RUN_AGENT and re-run the agent.
         """
-        result = await self.processor._provision_workspace(  # pyright: ignore[reportPrivateUsage]
+        result = await self.processor._workspaces_for(  # pyright: ignore[reportPrivateUsage]
+            todo.execution_id,
+            {},
+        ).provision(
             todo=todo,
             phase=phase,
             aggregate=aggregate,
@@ -223,9 +226,6 @@ class _Process:
             repo_urls=[],
             completed_phase_ids=self.completed_phase_ids,
             phase_outputs=self.phase_outputs,
-            # The restart under test carries no trigger inputs; what the
-            # salvage recovers has to come from the event stream either way.
-            inputs={},
         )
         self.processor._runtimes.of(todo.execution_id).attach_workspace(  # pyright: ignore[reportPrivateUsage]
             phase.phase_id,
@@ -233,6 +233,7 @@ class _Process:
             workspace_cm=result.workspace_cm,
             agent_env=result.agent_env,
             claude_cmd=result.claude_cmd,
+            delivers_repo_changes=True,
         )
 
 

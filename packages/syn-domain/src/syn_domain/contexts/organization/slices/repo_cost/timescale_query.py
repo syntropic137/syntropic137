@@ -22,6 +22,26 @@ if TYPE_CHECKING:
 
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
+# SAME EXECUTION-KEYED SHAPE AS execution_cost/ (#1338 asked for this to be
+# assessed alongside it). Both queries below are
+# `event_type = $1 AND execution_id = ANY($2)`: execution_id is neither
+# segmentby nor orderby, so a compressed chunk cannot be narrowed by it and
+# every segment in range is decompressed.
+#
+# One thing makes these better than their execution_cost equivalents and it is
+# worth not losing: they are BATCHED. A repo's executions are priced in two
+# round-trips over an id array rather than two per execution, so the scan is
+# paid once over the whole execution-id set rather than once per row - and
+# over the WHOLE set, not once per page: `calculate_all` binds every
+# correlated execution id it was given, with no pagination of its own. The
+# per-row multiplier that made /executions 21.8s is absent; the per-call cost
+# still grows with how many executions the caller hands over.
+#
+# They are covered by `idx_events_execution_type (execution_id, event_type,
+# time)` on the uncompressed chunks, and by nothing on the compressed ones.
+# When the execution-keyed read model in #1338 lands, these are its second
+# consumer - not a separate piece of work.
+
 # Aggregate cost per execution from session_summary (authoritative)
 _EXECUTION_COSTS_QUERY = """
 SELECT

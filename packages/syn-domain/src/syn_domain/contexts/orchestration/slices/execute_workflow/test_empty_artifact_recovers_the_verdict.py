@@ -499,6 +499,7 @@ class TestTheVerdictSurvivesEveryHop:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         aggregate = WorkflowExecutionAggregate()
@@ -526,6 +527,10 @@ class TestTheVerdictSurvivesEveryHop:
         # attribute of a MagicMock is truthy.
         agent_result.stream_result.verdict = AgentVerdict.from_agent_text(SAID)
         agent_result.command.exit_code = 0
+        # The status the processor actually reads, which is the run's own rather
+        # than the completion's since #1341. On a MagicMock this would otherwise
+        # be a truthy mock and read as a non-zero exit.
+        agent_result.exit_code = 0
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)
         processor._agent_handler = agent_handler
@@ -569,10 +574,10 @@ class TestTheVerdictSurvivesEveryHop:
             await processor._handle_run_agent(run_todo, phase, aggregate, _DispatchContext())
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
-            await processor._handle_collect_artifacts(
+            await processor._workspaces_for("exec-0bac0e1ed2b2", {}).collect(
                 collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 

@@ -54,7 +54,7 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 | **event-store** | Rust gRPC event sourcing server | Custom (Rust) | 50051 |
 | **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.29.2-pg16` | 5432 |
 | **redis** | Pub/sub + caching (AOF persistence) | `redis:7-alpine` | 6379 |
-| **minio** | S3-compatible object storage (artifacts, conversations) | `minio/minio` | 9000 |
+| **minio** | S3-compatible object storage (artifacts, conversations) | `quay.io/minio/minio` | 9000 |
 | **cloudflared** | Cloudflare Tunnel for external access (optional) | `cloudflare/cloudflared` | — |
 | **envoy-proxy** | Shared Envoy proxy — injects API credentials into agent requests (ISS-43) | Custom (Envoy + token injector) | 8081 |
 | **workspace-*** | Dynamically spawned agent containers (Claude CLI inside Docker, on `agent-net`) | `agentic-workspace-claude-cli` | — |

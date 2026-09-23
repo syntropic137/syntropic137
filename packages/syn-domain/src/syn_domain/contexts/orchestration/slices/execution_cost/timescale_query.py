@@ -33,6 +33,39 @@ from syn_shared.events import (
     TOOL_EXECUTION_COMPLETED,
 )
 
+# OUTSTANDING AT SCALE: EVERY QUERY IN THIS FILE IS EXECUTION-KEYED (#1338).
+#
+# The five statements below filter `agent_events` on `execution_id`. That
+# column is in neither compress_segmentby (session_id) nor compress_orderby
+# (time), so once a chunk is compressed NOTHING in these predicates can narrow
+# it: finding one execution's rows means decompressing every segment of every
+# chunk in the range. `idx_events_execution` and the `idx_events_execution_type`
+# that #1338 added both stop at the compression boundary - an index cannot be
+# used inside a compressed chunk for a non-segmentby column, so they bound the
+# cost for today's data (the policy compresses at 1 day) and nothing before it.
+#
+# `_EXECUTION_START_QUERY` is the worst of them: it filters on execution_id and
+# nothing else, so it reads EVERY event type there is.
+#
+# This is the half of #1338 that an index does not close. Fixing it properly
+# means a maintained read model keyed by execution_id - a tally with its own
+# rebuild story, as #1322 did for tool counts - or re-keying these onto the
+# session ids of the execution, since session_id IS the segmentby column and
+# the session-cost path next door discards whole segments for exactly that
+# reason. That would make these NARROWER, not bounded: the session-cost path
+# has no bound on the events within a session either, and caps only the number
+# of ids per round-trip. Neither is a query change, which is why neither is in
+# #1338's first pass.
+#
+# It is NOT currently known to be slow: #1322 measured the tool-count scan at
+# 60,562 buffers / 905ms for one page, and these were never measured. Treat the
+# shape as the warning, and measure before rewriting - with
+# EXPLAIN (ANALYZE, BUFFERS) against compressed chunks at a realistic row
+# count, since a plan on an uncompressed table proves nothing here.
+#
+# Counted and pinned by
+# packages/syn-domain/tests/test_cost_read_paths_scan_agent_events_by_event_type.py.
+
 # Prefer session_summary rows (authoritative totals from Claude CLI).
 # Aggregates across all sessions in the execution.
 #

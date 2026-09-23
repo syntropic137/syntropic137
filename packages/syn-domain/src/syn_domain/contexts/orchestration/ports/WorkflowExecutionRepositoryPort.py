@@ -21,7 +21,11 @@ class WorkflowExecutionRepositoryPort(Protocol):
     This is the primary mechanism for event sourcing workflow executions.
     """
 
-    async def get_by_id(self, execution_id: str) -> "WorkflowExecutionAggregate | None":
+    # The identifier below is positional-only. The implementation is the generic
+    # RepositoryAdapter[TAggregate], which necessarily names it aggregate_id, and
+    # Protocol matching compares parameter NAMES for anything not positional-only
+    # -- so a domain-specific name here would leave this port unsatisfiable (#1305).
+    async def get_by_id(self, execution_id: str, /) -> "WorkflowExecutionAggregate | None":
         """Retrieve execution aggregate by ID.
 
         Args:
@@ -45,7 +49,7 @@ class WorkflowExecutionRepositoryPort(Protocol):
         """
         ...
 
-    async def exists(self, execution_id: str) -> bool:
+    async def exists(self, execution_id: str, /) -> bool:
         """Check if an execution exists.
 
         Args:
