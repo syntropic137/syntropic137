@@ -308,5 +308,4 @@ See: `PROJECT-PLAN_20251202_AGENTIC-SDK-INTEGRATION.md`
 ## References
 
 - [claude-agent-sdk documentation](https://github.com/anthropics/claude-agent-sdk)
-- [agentic-primitives hooks](../../lib/agentic-primitives/docs/hooks/README.md)
-- [Example: 001-claude-agent-sdk-integration](../../lib/agentic-primitives/examples/001-claude-agent-sdk-integration/)
+- [agentic-primitives hooks](../../lib/agentic-primitives/docs/architecture/hooks-system-overview.md)

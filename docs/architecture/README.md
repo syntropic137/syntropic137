@@ -228,8 +228,6 @@ VSA Scanner → Manifest JSON → Diagram Generator → Markdown + Mermaid
 - C4 model integration
 - PlantUML export
 
-**See:** [Project Plan Phase 3](../../PROJECT-PLAN_20260126_PHASE3-EVENT-MODELING.md) (when created)
-
 ---
 
 **Questions?** See [AGENTS.md](../../AGENTS.md) or relevant ADRs.

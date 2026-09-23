@@ -3,7 +3,7 @@
 **Created:** 2026-08-16
 **Context:** [ADR-067](../adrs/ADR-067-model-registry-and-cost-attribution.md) |
 [AP spec](20260816-spec_ap-model-registry-changes.md) |
-[Release plan](../testing/output/RELEASE-PLAN-v0.25.5.md)
+Release plan: `docs/testing/output/RELEASE-PLAN-v0.25.5.md` (historical artifact)
 
 Everything here needs *you* - credentials, accounts, or a policy decision. Nothing else
 is blocked on these; implementation proceeds up to the point where it needs one.
