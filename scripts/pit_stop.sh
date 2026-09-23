@@ -7,15 +7,17 @@
 # STAGE EARLY, SWAP LATE. Everything except the swap is safe while executions
 # run, so it happens first. The drain gate is the only stage that waits, and
 # the swap is one `compose up` after it. Recreating the API kills in-flight
-# executions (#1381), which is why the drain is the speed limit.
+# executions (#1381), which is why the drain is the speed limit. Admission is
+# PAUSED for that whole window (#1387): draining alone only observes, so a
+# webhook or a poller could admit work in the gap before the swap.
 #
-#   stages: prepare -> build -> ship -> stage | drain -> swap -> verify
+#   stages: prepare -> build -> ship -> stage | gate -> drain -> swap -> verify -> ungate
 #   --stage-only  stop after `stage` (runs may still be in flight)
-#   --swap-only   skip to `drain`; the version must already be staged
+#   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
 set -euo pipefail
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -105,6 +107,31 @@ sys.exit(1 if busy else 0)
 PY
 }
 
+# Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
+# `drained` is a statement about one instant, and nothing used to stop a
+# webhook, a poller or an operator admitting work in the gap between that
+# instant and the swap. This is what makes the drain a gate.
+#
+# The state is durable, so the container that comes up after the swap reads it
+# and stays closed until `verify` passes. Clearing is therefore the LAST thing
+# the deploy does, not something the swap does implicitly.
+maintenance() {  # $1: true|false, $2: reason
+    if [ "$DRY" = 1 ]; then printf '   (dry-run) PUT /maintenance active=%s\n' "$1"; return 0; fi
+    curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 30 -X PUT "$API/maintenance" \
+        -H 'Content-Type: application/json' \
+        -d "{\"active\": $1, \"reason\": \"$2\", \"actor\": \"pit_stop.sh\"}" \
+        -o "$TMP/maintenance.json" || return 1
+    # Trust the RESPONSE, not the 200. The endpoint returns the state it
+    # persisted, and a set call that did not persist is the window this whole
+    # mechanism exists to close.
+    python3 - "$TMP/maintenance.json" "$1" <<'GATE'
+import json, sys
+mode = json.load(open(sys.argv[1]))
+print(f"   maintenance: active={mode['active']} reason={mode['reason']!r}")
+sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
+GATE
+}
+
 pinned_tag() {  # the tag the compose FILE pins syn-api to (not the running container)
     remote "grep -oE 'syn-api:v[0-9][^[:space:]\"]*' $COMPOSE_DIR/$COMPOSE | head -1 | cut -d: -f2"
 }
@@ -172,10 +199,20 @@ if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
     echo "   pins=2 images=2"
 fi
 
+step "gate: pausing execution admission for the rest of the pit stop"
+maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
+
 step "drain: waiting for every execution to be terminal (timeout ${DRAIN_TIMEOUT}s)"
 waited=0
 until drained; do
-    [ "$waited" -ge "$DRAIN_TIMEOUT" ] && die "not drained after ${DRAIN_TIMEOUT}s; nothing was recreated"
+    if [ "$waited" -ge "$DRAIN_TIMEOUT" ]; then
+        # Nothing has been recreated yet, so the platform is exactly as it was
+        # apart from the gate. Leaving it shut would strand admission on a
+        # deploy that never happened.
+        maintenance false "" || \
+            echo "   WARNING: admission is still paused; clear it with PUT /maintenance" >&2
+        die "not drained after ${DRAIN_TIMEOUT}s; nothing was recreated"
+    fi
     sleep 60; waited=$((waited + 60))
 done
 
@@ -208,6 +245,12 @@ if [ "$DRY" = 0 ]; then
     done
     [ "$healthy" = 1 ] || die "projections not healthy after the swap"
 fi
+# AFTER verify, deliberately. Every stage above can `die`, and a deploy that
+# failed should leave the new container refusing rather than admitting work to
+# a version nobody has confirmed is healthy.
+step "gate: resuming execution admission"
+maintenance false "" || die "$TAG is live but the clear did not complete; retry PUT /maintenance (a 503 means admission is open but the paused triggers were not woken, #1387)"
+
 if [ "$DRY" = 1 ]; then
     step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
 else

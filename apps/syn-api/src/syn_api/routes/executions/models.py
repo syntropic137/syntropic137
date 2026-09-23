@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
 from syn_api.types import BranchObservationInfo, PhaseActivityInfo
-from syn_domain.contexts.orchestration import FailureClassification
+from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 from syn_shared.display import EM_DASH
 
 
@@ -177,6 +177,16 @@ class ExecutionDetailResponse(BaseModel):
     route actually returns, so a value that stops short of here never reaches
     a client.
     """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
+    """
     repos: list[str] = Field(default_factory=list)
 
 
@@ -224,6 +234,16 @@ class ExecutionSummaryResponse(BaseModel):
     ended before anything recorded the difference. This is the model the HTTP
     route actually returns, so a value that stops short of here never reaches
     a client.
+    """
+    reported_failure_reason: ReportedFailureReason | None = None
+    """The word the failing phase wrote for what caused it, if it wrote one (#1392).
+
+    Same field, same meaning, as on `syn_api.types.ExecutionDetail`: what the
+    AGENT SAID, beside the `failure_classification` the PLATFORM measured and
+    never folded into it. This is the model the HTTP route actually returns,
+    so a report that stops short of here never reaches a client - and a
+    dashboard with nothing to quote falls back to showing the measurement
+    alone, which is the state #1392 was opened about.
     """
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None

@@ -193,7 +193,7 @@ class ArtifactCollectionPort(Protocol):
 class EventStreamPort(Protocol):
     """Port for streaming stdout from command execution (JSONL events)."""
 
-    async def stream(
+    def stream(
         self,
         handle: IsolationHandle,
         command: list[str],

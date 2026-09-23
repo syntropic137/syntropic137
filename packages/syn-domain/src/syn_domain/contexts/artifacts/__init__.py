@@ -43,6 +43,9 @@ from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import 
 from syn_domain.contexts.artifacts.domain.events.ArtifactCreationTimeRecoveredEvent import (
     ArtifactCreationTimeRecoveredEvent,
 )
+from syn_domain.contexts.artifacts.domain.read_models import (
+    ArtifactSummary,
+)
 from syn_domain.contexts.artifacts.domain.services import (
     ArtifactQueryService,
     ArtifactQueryServiceProtocol,
@@ -78,6 +81,7 @@ __all__ = [
     "ArtifactQueryService",
     "ArtifactQueryServiceProtocol",
     "ArtifactStorageError",
+    "ArtifactSummary",
     "ArtifactType",
     "ArtifactUploadedEvent",
     "ContentType",

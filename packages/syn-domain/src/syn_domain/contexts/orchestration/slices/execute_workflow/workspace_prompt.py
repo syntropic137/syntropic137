@@ -119,6 +119,54 @@ Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
 copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
 #1324 - and that the rendered prompt, read whole by the production reader, never
 yields SUCCESS.
+
+WHY THERE IS A FAILURE FENCE PER REASON AND NOT ONE WITH A SLOT IN IT (#1372).
+The block now carries `failure_reason`, which is what tells a task that could
+not be done apart from a platform that broke apart from a judgement not to ship
+- three different people act on those, and an operator opening the run is shown
+the word the phase wrote. A key stated only in prose is the shape that has already failed
+twice here: #1324 was an agent that never looked at the fences, and the fix was
+to state the rule AND hand out something copyable. One failure fence with the
+word left out would state the rule and hand out a block that reports no reason,
+so the common path - copy the fence, replace the comments - would write nothing
+into the field and the classification would stay exactly as blind as before.
+
+And it cannot be one fence with a `"task|platform|refused"` slot, which is the
+obvious third option: that is the `<...>` placeholder of two paragraphs above,
+spelled without the angle brackets. An agent that copies it verbatim writes a
+word no reader knows.
+
+So the rule above the fences is a table of the words, and there is one complete
+literal fence per OUTCOME - five now rather than two. Nothing about #1324's
+property changes: every fence is still copyable with no substitution but the
+`comments` sentence, every one still carries its own terminator, and a quotation
+of the section still settles as FAILURE. What the count buys is that the label
+an operator reads is written by an agent that only had to copy.
+
+AND THE FIFTH WORD IS THERE BECAUSE THE PROMPT ALREADY PROMISED IT (#1392).
+This text used to say that leaving the key out would be read as "could not
+tell". It was not, and it could not have been: an absent key is also what every
+phase wrote before the key existed, so absence has to keep meaning what it meant
+then - an ordinary reported failure - and an agent honestly following that
+instruction produced `correct_refusal`, which says the system WORKED. The exact
+opposite of what it meant. "I could not tell" is now a word an agent writes,
+`unknown`, and it reaches a genuinely unclassified record; the paragraph in the
+prompt says what actually happens to each, which is the only version of this
+that can stay true.
+
+THE FIELD IS FAIL-SOFT BY CONSTRUCTION, which is what makes handing out five
+blocks safe. A misspelled, invented or omitted reason costs the LABEL and never
+the run - `ReportedFailureReason.from_reported` resolves it to "no reason given"
+and the verdict stands exactly as it did. That is the opposite of the terminator,
+where the cost of getting it wrong is the whole phase, and it is why the two are
+allowed to be stated with different force.
+
+AND THE LABEL IS A REPORT, WHICH THE PROMPT SAYS IN AS MANY WORDS (#1392). The
+word an agent writes here is shown to whoever opens the run and is never summed
+into a failure number - see `ReportedFailureReason`. Telling agents otherwise
+would be both untrue and an invitation: a phase told that `platform` books an
+outage, or that `task` books none, has been handed a lever on the numbers that
+measure it.
 """
 
 from __future__ import annotations
@@ -269,15 +317,37 @@ key here have lost finished, pushed work: `success` is the field the
 orchestrator reads, and a block naming the outcome anything else is not
 guaranteed to be read at all.
 
-A failure reason is specific. What a useful one looks like:
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of four words - never a sentence, which is
+what `comments` is for:
+
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+| `unknown` | you cannot honestly tell which of the three it was | somebody reads the run |
+
+Those four go to four different people, so the wrong word fetches the wrong one
+and the right one never hears. Write `unknown` rather than guessing: it is
+recorded as a failure nobody has classified, which is exactly what it is.
+
+What it is read as is what you SAID, recorded beside the outcome and shown to
+whoever opens the run - not as a finding about the platform. Leaving the key
+out is not the same as writing `unknown`: an omitted reason is read as an
+ordinary reported failure, which is what every report written before this key
+existed means, and it is the one thing here you cannot use to say "I could not
+tell".
+
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
 
 Write ONE complete block, for your outcome only. A complete block is read as
-your report wherever it sits, so do not copy out the other one to explain the
-format - once it is closed it is a report and not a quotation, whatever the
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
 words around it say. Discussing the format in prose is free; closing a second
 block is not.
 
@@ -293,11 +363,33 @@ TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplis
 TASK_RESULT_END
 ```
 
-You could NOT complete the task, because you were blocked, lacked access, or hit
-an error - copy both lines:
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
 
 ```
-TASK_RESULT: {{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT: {{"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}}
+TASK_RESULT_END
+```
+
+It failed and you cannot honestly tell which of the three - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "unknown", "comments": "Specific reason why — what happened, and what you could not establish about it"}}
 TASK_RESULT_END
 ```
 

@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
 
 import type { FailureClassification } from '../types'
-import { REFUSED, outcomeTone } from '../utils/executionOutcome'
+import { REFUSED, TASK_FAILED, outcomeTone } from '../utils/executionOutcome'
 
 interface StatusBadgeProps {
   status: string
@@ -28,6 +28,10 @@ const statusColors: Record<string, { bg: string; text: string; ring: string }> =
   // Red is reserved for the machinery failing, which is the only kind of
   // failure an operator can act on (#1357).
   [REFUSED]: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
+  // A run that could not be done as asked (#1372): amber for the same reason
+  // - the platform delivered the run intact - but its own LABEL, because the
+  // operator's next move is to rewrite the brief and not to read and close.
+  [TASK_FAILED]: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   cancelled: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
   interrupted: { bg: 'bg-orange-500/20', text: 'text-orange-400', ring: 'ring-orange-500/30' },
   skipped: { bg: 'bg-slate-500/20', text: 'text-slate-400', ring: 'ring-slate-500/30' },
