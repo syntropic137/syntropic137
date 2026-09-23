@@ -73,7 +73,7 @@ Scope is optional but encouraged — use the bounded context name when applicabl
 1. Keep PRs focused — one logical change per PR
 2. Fill out the PR template
 3. Ensure CI passes (QA + typecheck + tests)
-4. PRs are squash-merged
+4. PRs are merged with merge commits (squash and rebase merges are disabled)
 
 ### Code Review
 

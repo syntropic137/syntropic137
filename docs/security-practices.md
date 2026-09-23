@@ -59,10 +59,14 @@ The `onlyBuiltDependencies` approach for pnpm is preferred over blanket `--ignor
 
 ## Credential Management
 
-Secrets are managed via **1Password** and injected at runtime through environment variables. They are never hardcoded or committed.
+Secrets are managed via **1Password** and injected at runtime through environment
+variables or Docker secret files. Database and Redis passwords and the GitHub App
+private key use files under `/run/secrets` in the self-host stack. Secret values
+are never hardcoded or committed.
 
 - API keys and tokens live in 1Password vaults
 - `.op-save-secrets.sh` (gitignored) handles local secret injection
+- `docker/secrets/` supplies file-backed secrets to containers and is gitignored
 - CI secrets are stored as GitHub Actions secrets scoped to this repository
 
 **Rotation:** All tokens should have an expiry date. Rotate on any suspected exposure.
