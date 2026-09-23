@@ -27,6 +27,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
+from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
 
 if TYPE_CHECKING:
@@ -418,7 +419,7 @@ class CreateWorkflowRequest(BaseModel):
         default=None,
         min_length=1,
         max_length=100,
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+        pattern=PHASE_ID_PATTERN,
     )
     name: str
     workflow_type: str = "custom"

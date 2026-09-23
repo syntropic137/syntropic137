@@ -2,7 +2,7 @@
 
 $ARGUMENTS
 
-The bootstrap report is at `artifacts/input/bootstrap.md`. **If it says the task's
+The premise report is at `artifacts/input/premise.md`. **If it says the task's
 premise is false, stop. Change nothing** and report that. Do not try to salvage
 the task by reinterpreting it.
 

@@ -258,7 +258,7 @@ def format_phase(phase_id: str | None) -> str | None:
     raw = phase_id.strip()
     if not raw:
         return raw
-    if _UUID_RE.match(raw):
+    if _UUID_RE.fullmatch(raw):
         return f"Phase {raw.split('-', 1)[0]}"
     words = raw.replace("_", " ").replace("-", " ").split()
     return " ".join(word.capitalize() for word in words) if words else raw

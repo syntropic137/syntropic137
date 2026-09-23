@@ -391,6 +391,37 @@ class TestValuesCannotRestructureTheDocument:
         assert skills[0]["source"] == "https://github.com/a/b #frag"
 
 
+class TestAPhaseIdIsValidatedWhole:
+    """#1355's defect at the export hop.
+
+    `_validate_phase_id` exists to keep an id safe to interpolate into a path
+    and into hand-built YAML, and it is the LAST thing between a phase id and
+    both. It asked an anchored `^...$` pattern with `.match()`, which in Python
+    stops at a trailing newline rather than at the end of the string, so
+    `premise\n` passed the safety check and was written into two lines of the
+    emitted document.
+
+    Tested at the emitter, not at the pattern: the value was always well-formed
+    where it was checked and only became wrong where it was used.
+    """
+
+    def test_a_phase_id_with_a_trailing_newline_is_refused(self) -> None:
+        phase = PhaseDefinitionResponse(phase_id="premise\n", name="P", order=1)
+
+        with pytest.raises(ValueError, match="unsafe characters"):
+            _yaml_phase_lines(phase)
+
+    def test_a_dotted_phase_id_still_exports(self) -> None:
+        """The negative control. `.` is legal in the grammar, so tightening the
+        matcher must not start refusing ids that were always valid."""
+        phase = PhaseDefinitionResponse(phase_id="premise.v2", name="P", order=1)
+
+        parsed = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+
+        assert parsed["id"] == "premise.v2"
+        assert parsed["prompt_file"] == "phases/premise.v2.md"
+
+
 class TestAShorthandRefExportsAsAScalar:
     """A ref known only as a shorthand string has no source/version to split.
 

@@ -233,7 +233,7 @@ def _resolve_local_image_id(image_ref: str) -> str:
         raise ImageVerificationError(msg)
 
     image_id = completed.stdout.strip()
-    if not _IMAGE_ID_PATTERN.match(image_id):
+    if not _IMAGE_ID_PATTERN.fullmatch(image_id):
         msg = (
             f"Could not read an image ID for {image_ref!r}: docker reported "
             f"{image_id!r}, which is not a sha256 image ID. Refusing to run an "

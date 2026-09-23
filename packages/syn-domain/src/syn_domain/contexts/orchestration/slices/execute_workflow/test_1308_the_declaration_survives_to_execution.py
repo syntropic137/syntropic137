@@ -129,12 +129,9 @@ async def _executable_phases(
 #: value no dropped hop can produce, so each entry fails if the declaration is
 #: lost anywhere between the YAML and `ExecutablePhase`.
 _REPORTING = [
-    ("sdlc/implement", "bootstrap"),
+    ("sdlc/implement", "premise"),
     ("sdlc/implement", "verify"),
     ("sdlc/implement", "open_pr"),
-    ("sdlc/implement-v2", "premise"),
-    ("sdlc/implement-v2", "verify"),
-    ("sdlc/implement-v2", "open_pr"),
     ("sdlc/pr-review", "investigate"),
     ("sdlc/pr-review", "verify"),
     ("sdlc/pr-review", "report"),
@@ -150,7 +147,7 @@ _REPORTING = [
     ("sdlc/research-plan", "plan"),
     ("sdlc/research-plan", "cross-model-review"),
     ("sdlc/research-plan", "revise"),
-    ("custom/bake-sonnet", "bootstrap"),
+    ("custom/bake-sonnet", "premise"),
     ("custom/bake-sonnet", "verify"),
     ("custom/bake-sonnet", "open_pr"),
 ]
@@ -160,7 +157,6 @@ _REPORTING = [
 #: above while switching #1184 off for the only two phases that commit.
 _OWNS_A_BRANCH = [
     ("sdlc/implement", "implement"),
-    ("sdlc/implement-v2", "implement"),
     ("sdlc/quickfix", "quickfix"),
     ("custom/bake-sonnet", "implement"),
 ]
@@ -212,14 +208,14 @@ async def test_an_edit_to_a_phase_leaves_its_declaration_where_the_author_put_it
         then=[
             WorkflowPhaseUpdatedEvent(
                 workflow_id=WorkflowDefinition.from_file(workflow).id,
-                phase_id="bootstrap",
-                prompt_template="Edited: check the toolchain and stop.",
+                phase_id="premise",
+                prompt_template="Edited: check the premise and stop.",
             )
         ],
     )
 
-    assert edited["bootstrap"].prompt_template == "Edited: check the toolchain and stop."
-    assert edited["bootstrap"].delivers_repo_changes is False
+    assert edited["premise"].prompt_template == "Edited: check the premise and stop."
+    assert edited["premise"].delivers_repo_changes is False
     # The edit is to one phase. Its neighbours are not collateral.
     assert edited["implement"].delivers_repo_changes is True
     assert edited["verify"].delivers_repo_changes is False

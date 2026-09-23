@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseYamlDefinition,
     WorkflowDefinition,
+    is_phase_id,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
 
@@ -340,6 +341,118 @@ def grant_violations(path: Path) -> list[str]:
     return violations
 
 
+#: What ends an `artifacts/input/...` reference written in prose.
+#:
+#: Prompts are markdown, so a reference is nearly always fenced in backticks
+#: and often followed by a comma or a closing bracket. `\S+` would swallow all
+#: of that and turn every reference into a non-id.
+_REFERENCE_ENDS = r"\s`'\"),;\]}"
+
+#: A phase prompt naming the artifact directory of ANOTHER phase.
+#:
+#: This finds CANDIDATES only. It deliberately does not encode the phase-id
+#: grammar - `_referenced_phase` asks `is_phase_id` that - because the copy of
+#: the grammar that used to live here is what #1298 tripped over: it left the
+#: `.` out, so `artifacts/input/premise.old.md` matched its longest legal
+#: prefix `premise` and the gate reported a dead reference as a live one.
+#:
+#: The trailing `\.?` is a sentence period, not part of an id. Without it the
+#: unfenced `... at artifacts/input/premise.md.` reads as a reference to a
+#: phase named `premise.md.`, which the grammar does permit. Note which way
+#: that error runs: it invents a missing phase rather than resolving to an
+#: existing one, so a mistake here is loud. Do NOT "simplify" this by
+#: stripping trailing dots from the captured text instead - that turns a
+#: reference to `premise.` into a reference to `premise`, which is the #1298
+#: false negative rebuilt by hand.
+_INPUT_REF = re.compile(rf"artifacts/input/([^{_REFERENCE_ENDS}]+?)\.?(?=[{_REFERENCE_ENDS}]|$)")
+
+
+def _referenced_phase(tail: str) -> str | None:
+    """The phase id a prompt reference names, or None when it names no id.
+
+    `tail` is whatever followed `artifacts/input/`. Two shapes reach here,
+    because two are what the injection layer creates: the durable directory
+    `<phase-id>/...`, and the flat `<phase-id>.md` alias kept for one release
+    (#988). Anything else - a `<phase-id>` placeholder, a bare `artifacts/input/`,
+    a path that is not an id at all - names no phase, and saying so is the
+    whole job: the caller must never be handed a prefix of what it passed in.
+    """
+    segment, separator, _ = tail.partition("/")
+    head = segment if separator else segment.removesuffix(".md")
+    return head if is_phase_id(head) else None
+
+
+def stale_phase_references(path: Path, *, phase_library_dir: Path | None = None) -> list[str]:
+    """Names a phase rename left pointing at something that is no longer there.
+
+    THE INVARIANT: every name that identifies a phase must identify a phase
+    that exists, and a phase's inputs must name one that ran before it.
+
+    WHY A GATE AND NOT A README RULE. `workflows/sdlc/README.md` already states
+    both halves - prompt files are named for their phase id, and phase ids are
+    load bearing because a later phase reads `artifacts/input/<phase-id>` - and
+    the reason it gives for the first is that it makes a rename "break loudly
+    in one place instead of silently in two". Nothing made it break at all.
+    Both halves are prose in two different files, which is the shape a reviewer
+    reads past, and it is the same shape `grant_violations` exists for.
+
+    A rename that updates the phase and forgets the prompt after it is the
+    worst version, because it fails at RUN time, deep in a workflow, as an
+    empty input directory rather than an error. The phase after it then reads
+    nothing and proceeds - #1298's `bootstrap` -> `premise` rename touched four
+    workflows, and each one had a downstream prompt naming the old id.
+
+    Deliberately keyed on the DIRECTORY name and not on `input_artifacts`. A
+    phase declares the artifact TYPES it consumes, never whose they are, so the
+    declaration cannot express this and only the prompt says which phase is
+    being read.
+    """
+    definition = WorkflowDefinition.from_file(path, phase_library_dir=phase_library_dir)
+    order_of = {phase.id: phase.order for phase in definition.phases}
+    violations: list[str] = []
+
+    # prompt_file is consumed by `from_file` - it inlines the body and deletes
+    # the key - so the raw mapping is the only place the filename survives.
+    raw = yaml.safe_load(path.read_text())
+    for raw_phase in raw.get("phases") or []:
+        prompt_file = raw_phase.get("prompt_file")
+        phase_id = raw_phase.get("id")
+        if not isinstance(prompt_file, str) or not isinstance(phase_id, str):
+            continue
+        if prompt_file.startswith("shared://"):
+            # A shared prompt is named for the JOB and reused by phases with
+            # different ids; that is the point of the library.
+            continue
+        if Path(prompt_file).stem != phase_id:
+            violations.append(
+                f"phase '{phase_id}' reads prompt_file '{prompt_file}', which is "
+                f"named for a different phase. Name it '{phase_id}.md' so a "
+                f"rename breaks here instead of silently somewhere else."
+            )
+
+    for phase in definition.phases:
+        referenced = {
+            named
+            for tail in _INPUT_REF.findall(phase.prompt_template or "")
+            if (named := _referenced_phase(tail)) is not None
+        }
+        for named in sorted(referenced):
+            if named not in order_of:
+                violations.append(
+                    f"phase '{phase.id}' is told to read artifacts/input/{named}, "
+                    f"but this workflow has no phase '{named}'. Its input "
+                    f"directory will be empty at run time, and nothing will say so."
+                )
+            elif order_of[named] >= phase.order:
+                violations.append(
+                    f"phase '{phase.id}' (order {phase.order}) is told to read "
+                    f"artifacts/input/{named}, which is order {order_of[named]} - "
+                    f"not yet run. Its input directory will be empty at run time."
+                )
+
+    return violations
+
+
 def main() -> int:
     files = _workflow_files()
     if not files:
@@ -372,6 +485,7 @@ def main() -> int:
         # Only once the file is known to load: `grant_violations` re-reads it
         # through `from_file`, which is what raised above.
         failures.extend((path, why) for why in grant_violations(path))
+        failures.extend((path, why) for why in stale_phase_references(path))
 
     for path, why in failures:
         print(f"  FAIL {path.relative_to(_ROOT)}\n       {why}")

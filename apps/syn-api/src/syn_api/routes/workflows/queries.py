@@ -24,7 +24,11 @@ from syn_api.types import (
 )
 
 # Imported from the context's public surface, not its internals (ADR-062).
-from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_domain.contexts.orchestration import (
+    FailureClassification,
+    ReportedFailureReason,
+    is_phase_id,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -313,7 +317,6 @@ async def export_workflow(
 # -- Export helpers -----------------------------------------------------------
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 # Characters that require quoting in YAML scalar values.
 _YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
@@ -324,14 +327,14 @@ def _sanitize_slug(name: str) -> str:
     slug = name.lower().replace(" ", "-")
     slug = re.sub(r"[^a-z0-9._-]", "", slug)
     slug = slug.strip(".-")
-    if not slug or not _SAFE_SLUG_RE.match(slug):
+    if not slug or not _SAFE_SLUG_RE.fullmatch(slug):
         slug = "workflow"
     return slug
 
 
 def _validate_phase_id(phase_id: str) -> str:
     """Validate a phase ID is safe for use in file paths."""
-    if not _SAFE_ID_RE.match(phase_id):
+    if not is_phase_id(phase_id):
         msg = f"Phase ID contains unsafe characters: {phase_id!r}"
         raise ValueError(msg)
     return phase_id
