@@ -305,18 +305,23 @@ class TestCredentialsAreScopedToTheirRepo:
 
     @staticmethod
     def _apply_credential_lines(tmp_path: Path, script: str) -> dict[str, str]:
+        """Run the WHOLE script in a fresh HOME and ask git what it resolves.
+
+        The whole of it rather than the lines that look like credential lines:
+        picking them out by prefix silently dropped the staging and rename that
+        now put the file in place (#1396), and a test that re-derives a subset
+        of the script is testing the subset. ``clone_repos=False`` at every
+        call site is what makes running all of it safe - nothing here reaches
+        a network.
+        """
         home = tmp_path / "home"
         home.mkdir()
         env = _isolated_git_env(home)
-        lines = [
-            ln
-            for ln in script.splitlines()
-            if "credential" in ln and (ln.startswith("git config") or ln.startswith("printf"))
-        ]
-        assert lines, "no credential lines found in generated script"
-        subprocess.run(
-            ["bash", "-e", "-c", "\n".join(lines)], env=env, capture_output=True, text=True
+        assert "git clone" not in script, "this helper runs the script; it must clone nothing"
+        run = subprocess.run(
+            ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
         )
+        assert run.returncode == 0, run.stderr
 
         def ask(path: str) -> str:
             proc = subprocess.run(
@@ -345,6 +350,7 @@ class TestCredentialsAreScopedToTheirRepo:
                 "https://github.com/org/repo-a": "TOKEN_A",
                 "https://github.com/other/repo-b": "TOKEN_B",
             },
+            clone_repos=False,
         )
         got = self._apply_credential_lines(tmp_path, secrets.build_setup_script())
         assert got["repo-a"] == "TOKEN_A"

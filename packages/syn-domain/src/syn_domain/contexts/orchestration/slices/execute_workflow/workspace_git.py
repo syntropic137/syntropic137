@@ -153,7 +153,46 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 #: this module is what put the wrapper in the argv, so this module is what can
 #: say that 124 means the command was cut off rather than that it answered
 #: 124. Without it an operator reads "exited 124" and has to go and look it up.
-_BOUND_FIRED_EXIT_CODE: Final[int] = 124
+#:
+#: Public so that a caller which cut a command off ITSELF can report the same
+#: code rather than inventing a second one (#1396): the salvage push in the
+#: unpushed-work guard bounds its own wait when the phase is being cancelled,
+#: and a reader must not have to know which of the two bounds fired to know
+#: that the answer never arrived.
+BOUND_FIRED_EXIT_CODE: Final[int] = 124
+
+
+def answered(result: ExecutionResult) -> bool:
+    """Whether a command produced a result at all, or was cut off before one arrived.
+
+    THE ONE PLACE that decides what "it did not finish" looks like, so that a
+    caller asking it gets the whole rule rather than the half it remembered.
+    Two ways to be cut off and one word for it: the BACKEND says so when it
+    enforced its own limit, and `timeout` says so with `BOUND_FIRED_EXIT_CODE`
+    when the bound `run_bounded` put in the argv fired. Every command on this
+    path goes through `run_bounded`, so both readings are available for any of
+    them.
+
+    FALSE IS NOT "IT FAILED" - it is the stronger and narrower statement that
+    NO ANSWER EXISTS. A command that ran and exited non-zero answered: the
+    remote said no, the path was not a repository, git refused the argv. That
+    distinction is what `unpushed_work_guard` spends when it decides whether a
+    failed rehearsal is a verdict about the phase or merely silence (#1396),
+    and it is why this is a predicate about the result rather than a flag the
+    caller sets from what it was expecting.
+
+    WHAT IT DOES NOT SEPARATE, stated here because the limit is load-bearing
+    and invisible otherwise: among commands that DID answer, git does not
+    distinguish an authorization refusal from a transport fault. Measured on
+    the workspace image's git 2.39.5 - a DNS failure, a refused connection, an
+    HTTP 401, 403, 500 and 502 all exit 128, and `GIT_TRACE2_EVENT` reports
+    the same ``"code":128`` and the same error ``fmt`` for every one of them.
+    The only datum that differs is the prose in the message. So a caller can
+    learn from this whether an answer arrived, and must not believe it can
+    learn from anything here WHY the answer was no.
+    """
+    return not (result.timed_out or result.exit_code == BOUND_FIRED_EXIT_CODE)
+
 
 # Waits between attempts. A failed probe did not answer the question, so ask
 # again; a fired time bound is final because repeating it only repeats the wait.
@@ -162,9 +201,33 @@ _MAX_ATTEMPTS: Final[int] = len(_RETRY_BACKOFF_SECONDS) + 1
 
 
 class GitWorkspace(Protocol):
-    """The single workspace capability this slice needs: run a command in it."""
+    """A workspace this slice can run git in, and whose credential it can renew.
+
+    TWO CAPABILITIES AND NOT ONE, because every git command here that reaches
+    a remote spends a credential with a shorter life than the container's.
+    The workspace's is a GitHub App installation token: minted once during
+    provisioning, capped by GitHub at an hour, and never extended. A phase may
+    run for longer than that, and the commands that matter most here - the
+    quarantine push, the rehearsal that proves it would work - run at the two
+    ends of that window. So "can I run a command in it" is not enough to know
+    a push will be authorised, and a protocol that promised only the first
+    would have every caller discovering the second by being refused (#1393).
+
+    `renew_git_credential` is therefore not an optional extra a caller probes
+    for. A double that cannot renew is not a workspace this slice can be
+    trusted against, and making it part of the protocol is what says so at the
+    type level rather than at teardown.
+    """
 
     async def execute(self, command: list[str]) -> ExecutionResult: ...
+
+    async def renew_git_credential(self) -> None:
+        """Install a freshly minted credential, or raise `CredentialRenewalFailedError`.
+
+        Says nothing about whether the credential it replaced still worked -
+        see that error for why nothing can.
+        """
+        ...
 
 
 async def run_bounded(
@@ -221,7 +284,7 @@ async def checked(
         result = await run_bounded(workspace, command, timeout_seconds=timeout_seconds)
         if result.success and result.exit_code == 0 and not result.timed_out:
             return result.stdout
-        cut_off = result.timed_out or result.exit_code == _BOUND_FIRED_EXIT_CODE
+        cut_off = not answered(result)
         if cut_off or attempt == _MAX_ATTEMPTS:
             raise WorkspaceInspectionFailedError(
                 doing=doing,
@@ -329,7 +392,9 @@ async def git_remote(workspace: GitWorkspace, repo: str, *args: str, doing: str)
     )
 
 
-async def push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) -> ExecutionResult:
+async def push(
+    workspace: GitWorkspace, repo: str, *, commit: str, ref: str, dry_run: bool = False
+) -> ExecutionResult:
     """The one command whose failure is an answer rather than the lack of one.
 
     A push can fail for reasons that say nothing about whether the workspace
@@ -352,9 +417,26 @@ async def push(workspace: GitWorkspace, repo: str, *, commit: str, ref: str) -> 
     A push cut off by the bound exits 124 and is reported as a failed push,
     which is the honest reading: the objects exist locally, the ref may or may
     not have landed, and the caller must not promise it did.
+
+    ``dry_run`` is the SAME push with the last steps left out, and the
+    sameness is the point rather than a convenience (#1393). git still
+    contacts the remote, still authenticates, and still negotiates with
+    ``git-receive-pack``; what it does not do is send objects or ask for any
+    ref to move. That is what makes the rehearsal the guard runs at phase
+    start evidence about THIS command - one function, one argv, one
+    credential, so the two cannot drift into testing different things. It is a
+    flag rather than a second function for exactly that reason.
+
+    WHAT A DRY RUN CANNOT SEE (#1396): the update itself. ``receive-pack``
+    runs ``pre-receive``, evaluates rulesets and locks refs only for a real
+    update, so a remote that accepts the connection and then declines
+    ``refs/syn/lost`` returns 0 here and non-zero for the real push. Callers
+    must not read a dry run as "this push would be accepted"; the guard's
+    `rehearse_quarantine_credential` is named and documented for the narrower
+    claim that is actually true.
     """
     return await run_bounded(
         workspace,
-        git_argv(repo, "push", "origin", f"{commit}:{ref}"),
+        git_argv(repo, "push", *(("--dry-run",) if dry_run else ()), "origin", f"{commit}:{ref}"),
         timeout_seconds=REMOTE_TIMEOUT_SECONDS,
     )

@@ -82,16 +82,26 @@ and a submodule's own objects are outside it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from time import monotonic
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    ExecutionResult,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     QuarantinedWork,
     SavedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
+    run_quarantine_rehearsal,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+    BOUND_FIRED_EXIT_CODE,
     GitWorkspace,
     checked,
     git,
@@ -133,6 +143,45 @@ _QUARANTINE_NAMESPACE: Final[str] = "refs/syn/lost"
 #: be staged - at the cost of re-hashing every tracked file, which is
 #: acceptable on a path that only runs when a phase is already failing.
 _SCRATCH_INDEX: Final[str] = "/tmp/syn-quarantine.index"
+
+#: How long the rescue push may go on being waited for AFTER the phase has
+#: been cancelled (#1396). A cancellation is a request to stop, so the salvage
+#: cannot simply ignore it: what it buys is the few seconds the push needs to
+#: finish, and then the cancellation is re-applied whatever the answer was.
+#: Generous against `REMOTE_TIMEOUT_SECONDS`, which is the bound already in the
+#: push's own argv, so in the ordinary case THAT one fires first and this is
+#: the backstop for a workspace backend that never returns at all.
+#:
+#: A module global read at call time, like the bounds in `workspace_git`, so a
+#: test can lower it and make the backstop fire in a second.
+_CANCELLED_PUSH_SECONDS: Final[float] = 30.0
+
+#: How many times the phase-start rehearsal tries something that talks to
+#: GitHub before it reads a failure as this phase's verdict (#1396). Minting a
+#: token and a dry-run push are both one request to a third party, and a
+#: timeout, a 5xx or a secondary rate limit are momentary - refusing an
+#: execution for one throws away a phase that would have run perfectly.
+_RENEWAL_ATTEMPTS: Final[int] = 3
+
+#: The wait between those attempts. Long enough to outlive a blip, short
+#: enough that the whole rehearsal stays a few seconds of phase start.
+#:
+#: Module globals, read at call time like the bounds in `workspace_git`, so a
+#: test can make the retries instant.
+_RENEWAL_RETRY_SECONDS: Final[float] = 2.0
+
+
+async def rehearse_quarantine_credential(
+    workspace: GitWorkspace, *, execution_id: str, phase_id: str
+) -> None:
+    """Rehearse the quarantine credential and connection before a phase runs."""
+    await run_quarantine_rehearsal(
+        workspace,
+        phase_id=phase_id,
+        ref=_quarantine_ref(execution_id, phase_id),
+        attempts=_RENEWAL_ATTEMPTS,
+        retry_seconds=_RENEWAL_RETRY_SECONDS,
+    )
 
 
 async def refuse_to_complete_unsaved_phase(
@@ -219,7 +268,7 @@ async def quarantine_unpushed_work(
             its push landed: work saved before the failure is not unsaved by
             it, and work whose push failed is not saved by being listed.
     """
-    ref = f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+    ref = _quarantine_ref(execution_id, phase_id)
     quarantined: list[QuarantinedWork] = []
     try:
         repos = await repositories(workspace)
@@ -234,7 +283,25 @@ async def quarantine_unpushed_work(
         for repo in repos:
             work = await _unsaved_work(workspace, repo, uncommitted_is_work=repo not in protected)
             if work is not None:
-                quarantined.append(await _quarantine(workspace, repo, work, ref=ref))
+                record, cancellation = await _quarantine(workspace, repo, work, ref=ref)
+                quarantined.append(record)
+                if cancellation is not None:
+                    # SAID OUT LOUD BEFORE IT IS RE-APPLIED, because re-raising
+                    # is the end of this walk: the repositories after this one
+                    # are not visited, and the error that would have named the
+                    # refs is never built. What was pushed still exists, and an
+                    # operator who only sees "cancelled" has no way to know it
+                    # (#1396).
+                    logger.warning(
+                        "This phase was cancelled while its work was being rescued. The "
+                        "push for %s was completed anyway and %s. Repositories after it "
+                        "were not reached. Re-applying the cancellation now.",
+                        repo,
+                        f"landed at {ref}"
+                        if record.pushed_ref
+                        else f"was refused ({record.push_error}), so that work is NOT RECOVERABLE",
+                    )
+                    raise cancellation
     except WorkspaceInspectionFailedError as unreadable:
         # PARTIAL PROGRESS IS STILL PROGRESS, and this loop is the only place
         # that knows there was any. Repositories are done ONE AT A TIME, so by
@@ -291,6 +358,15 @@ async def save_unpushed_work(
     strictly worse error, about a different subject. A workspace that stops
     answering becomes `SavedWork.unreadable`, which reports the absence of a
     verdict rather than a verdict of "nothing was lost".
+
+    "NEVER RAISES" IS ABOUT FAILURES, NOT ABOUT CANCELLATION (#1396). An
+    `asyncio.CancelledError` still leaves here, and must: it is not a report
+    about this workspace but the caller's own request to stop, and a task that
+    swallowed it would go on to report normal completion and could never be
+    stopped again. What changed is what happens FIRST - the rescue push is
+    made and its outcome written to the log before the cancellation is
+    re-applied, where previously the cancellation passed straight through the
+    `except Exception` below and the push was never attempted at all.
 
     THAT MEANS `Exception`, not just the two the gate declares. The two are
     what the gate raises when a command ANSWERED badly; they are not what a
@@ -520,8 +596,8 @@ async def _quarantine(
     work: _UnsavedWork,
     *,
     ref: str,
-) -> QuarantinedWork:
-    """Push ``work`` to ``ref`` in ``repo`` and report where it landed.
+) -> tuple[QuarantinedWork, asyncio.CancelledError | None]:
+    """Push ``work`` to ``ref`` in ``repo``, say where it landed, and say if cancelled.
 
     A plain push, never a force: the ref is unique to this phase run, so the
     only thing that could already occupy it is a writer nobody predicted, and
@@ -534,6 +610,27 @@ async def _quarantine(
     That is the same false reassurance as a false ``completed``, in a smaller
     costume, so the only failure this reports as data is the one that happens
     after the objects exist.
+
+    THE CREDENTIAL IS RENEWED IMMEDIATELY BEFORE THE PUSH, and that is the
+    whole of #1393's fix. This runs at teardown, which on a phase that
+    exhausted a 3600s budget is by arithmetic later than the one-hour life
+    GitHub gives the installation token the setup phase installed - so the
+    push that matters most is the one most certain to be refused. Renewing
+    here rather than at the top of the walk keeps the cost on the path that
+    actually pushes: a clean phase, which is almost all of them, pays nothing
+    and needs no flag to remember it.
+
+    A CANCELLATION IS RETURNED, NEVER DROPPED AND NEVER RAISED HERE (#1396).
+    `asyncio.CancelledError` is a `BaseException`, so the two "never raises"
+    handlers on this path - both written as `except Exception` - let it
+    through, and a phase cancelled while its credential was being renewed lost
+    the rescue push entirely: the commit exists, the container is about to go,
+    and nothing was attempted. So the push is made anyway, under its own
+    bound, and the cancellation travels back to the walk as a value - which is
+    the only way the record BELOW can be written down before the cancellation
+    is re-applied. Swallowing it instead would be worse than the bug: a task
+    that reports normal completion after being cancelled is a task nobody can
+    stop.
     """
     await checked(
         workspace,
@@ -553,12 +650,16 @@ async def _quarantine(
         _commit_message(ref),
         identity=True,
     )
-    pushed = await push(workspace, repo, commit=commit.strip(), ref=ref)
+    cancelled = await _renew_credential(workspace, doing=f"quarantining {repo}")
+    pushed, cancelled_pushing = await _push_despite_cancellation(
+        workspace, repo, commit=commit.strip(), ref=ref
+    )
+    cancellation = cancelled or cancelled_pushing
 
     name = repo.rsplit("/", 1)[-1]
     if pushed.exit_code != 0:
         logger.error("Quarantine push failed for %s -> %s: %s", repo, ref, pushed.stderr)
-        return QuarantinedWork(
+        record = QuarantinedWork(
             repo=name,
             branch=work.branch,
             commit_count=work.commit_count,
@@ -566,13 +667,168 @@ async def _quarantine(
             pushed_ref=None,
             push_error=(pushed.stderr or pushed.stdout).strip() or "push exited non-zero",
         )
-    logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
-    return QuarantinedWork(
-        repo=name,
-        branch=work.branch,
-        commit_count=work.commit_count,
-        files=work.files,
-        pushed_ref=ref,
+    else:
+        logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
+        record = QuarantinedWork(
+            repo=name,
+            branch=work.branch,
+            commit_count=work.commit_count,
+            files=work.files,
+            pushed_ref=ref,
+        )
+    return record, cancellation
+
+
+def _quarantine_ref(execution_id: str, phase_id: str) -> str:
+    """Where this phase's rescued work goes, and where the rehearsal aims.
+
+    One function because the rehearsal at phase start and the push at teardown
+    must name the SAME ref: a rehearsal against a different one would prove
+    something true about a ref nobody uses, which is worse than not rehearsing
+    at all - it would report a working net that had never been tested.
+    """
+    return f"{_QUARANTINE_NAMESPACE}/{execution_id}/{phase_id}"
+
+
+async def _renew_credential(
+    workspace: GitWorkspace, *, doing: str
+) -> asyncio.CancelledError | None:
+    """Give this workspace a usable credential if it can be given one.
+
+    NEVER RAISES, which is the opposite of what the phase-start rehearsal wants
+    from the same call and the reason the two ask separately. Here the phase
+    has already failed and a commit is waiting to be pushed: a renewal that
+    could not happen is a reason the push MIGHT fail, not a reason to skip it.
+    The token already in the container may have minutes left, and spending it
+    is the only way to find out. So the failure is logged and the push goes
+    ahead, where its own result is reported honestly either way.
+
+    NEVER RAISES MEANS ANY EXCEPTION, not just the documented one. The
+    protocol says implementations raise `CredentialRenewalFailedError`, and
+    catching only that would make this promise conditional on every present
+    and future workspace keeping its half of it - while the cost of one that
+    does not is precisely #1393's cost: the rescue push is never attempted,
+    the commit dies with the container, and the honest `NOT RECOVERABLE`
+    report that the push would have produced is never written either. An
+    optional improvement to the credential must not be able to take the thing
+    it was improving with it, so the second handler is deliberate and not
+    defensive clutter: at this point in a phase there is no exception worth
+    more than the attempt.
+
+    AND "ANY EXCEPTION" WAS STILL NOT ENOUGH (#1396). `asyncio.CancelledError`
+    is a `BaseException` in 3.12, so `except Exception` never saw it: an
+    execution cancelled while this await was in flight skipped the push
+    completely, which is the one outcome the whole handler exists to prevent,
+    arriving by the one route it did not cover. It is RETURNED rather than
+    caught-and-forgotten, because a cancelled task that goes on to report
+    normal completion cannot be stopped by anyone - the caller pushes, writes
+    down what happened, and re-applies it.
+
+    `KeyboardInterrupt` and `SystemExit` are deliberately NOT covered. They
+    are the process being told to stop, not this phase; a rescue push that
+    outlived a Ctrl-C would be a workspace holding an operator's terminal
+    hostage over work they had just said they no longer wanted.
+
+    Returns:
+        The cancellation to re-apply once the push has been made and
+        reported, or None when nothing cancelled this.
+    """
+    try:
+        await workspace.renew_git_credential()
+    except asyncio.CancelledError as cancelled:
+        logger.warning(
+            "This phase was cancelled while its git credential was being renewed before "
+            "%s. The rescue push will still be attempted - with whatever credential the "
+            "container already holds - and the cancellation re-applied afterwards.",
+            doing,
+        )
+        return cancelled
+    except CredentialRenewalFailedError as unrenewable:
+        logger.error(
+            "Could not renew this workspace's git credential before %s (%s). The push "
+            "will be attempted with the credential already in the container, which on "
+            "a phase that ran its full budget has probably expired.",
+            doing,
+            unrenewable,
+        )
+    except Exception:
+        logger.exception(
+            "Renewing this workspace's git credential before %s raised something other "
+            "than CredentialRenewalFailedError, which its protocol says it will not. "
+            "The push will be attempted with the credential already in the container.",
+            doing,
+        )
+    return None
+
+
+async def _push_despite_cancellation(
+    workspace: GitWorkspace, repo: str, *, commit: str, ref: str
+) -> tuple[ExecutionResult, asyncio.CancelledError | None]:
+    """The rescue push, given the seconds it needs even while being cancelled.
+
+    THE PUSH IS THE POINT OF THIS WHOLE PATH, and it is one await long. A
+    cancellation delivered anywhere in that await - and teardown is exactly
+    when cancellations arrive - would otherwise abandon a commit that exists,
+    in a container that is about to be destroyed, with the objects nowhere
+    else. So the push runs as its own task behind `asyncio.shield`: cancelling
+    this coroutine no longer cancels it, and the answer is still collected.
+
+    BOUNDED, because "ignore the cancellation until the push returns" is not a
+    promise this may make. `_CANCELLED_PUSH_SECONDS` is the whole of the extra
+    time a cancelled phase can cost, after which the push is abandoned and
+    reported with `BOUND_FIRED_EXIT_CODE` - the same code the bound inside the
+    push's own argv would produce, because a reader needs "the answer never
+    came", not which bound produced it. Repeated cancellations are absorbed
+    for as long as the deadline allows and no longer, so a caller that cancels
+    in a loop cannot be held.
+
+    Returns:
+        The push's result, and the first cancellation that arrived while it
+        was in flight for the caller to re-apply, or None.
+    """
+    pushing = asyncio.ensure_future(push(workspace, repo, commit=commit, ref=ref))
+    deadline = monotonic() + _CANCELLED_PUSH_SECONDS
+    cancelled: asyncio.CancelledError | None = None
+    while True:
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(pushing), timeout=max(0.0, deadline - monotonic())
+            ), cancelled
+        except asyncio.CancelledError as arrived:
+            # The SHIELD is what makes this recoverable: `wait_for` cancelled
+            # its own await, never `pushing`, which is still running. Kept to
+            # be re-applied, and only the first one - they are the same
+            # request, and the caller needs a cancellation, not a count.
+            cancelled = cancelled or arrived
+            if pushing.done():
+                return pushing.result(), cancelled
+            if monotonic() >= deadline:
+                pushing.cancel()
+                return _cut_off(repo, ref), cancelled
+        except TimeoutError:
+            pushing.cancel()
+            return _cut_off(repo, ref), cancelled
+
+
+def _cut_off(repo: str, ref: str) -> ExecutionResult:
+    """What a push that never answered inside its bound is reported as.
+
+    A FAILED PUSH, never an absent one: the objects may or may not have
+    reached the remote, so the caller must report the work as unrecoverable
+    and name the ref. Reading it as a success is the false reassurance this
+    whole module exists to refuse, and reading it as "nothing was attempted"
+    would send an operator past a ref that might be there.
+    """
+    return ExecutionResult(
+        exit_code=BOUND_FIRED_EXIT_CODE,
+        success=False,
+        duration_ms=0.0,
+        stderr=(
+            f"The rescue push of {repo} to {ref} was still running "
+            f"{_CANCELLED_PUSH_SECONDS:.0f}s after this phase was cancelled and was "
+            f"abandoned. Whether the ref exists is unknown."
+        ),
+        timed_out=True,
     )
 
 

@@ -554,6 +554,66 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
     return lines
 
 
+class CredentialRenewalFailedError(Exception):
+    """This workspace's git credential is not known to be usable (#1393).
+
+    Raised by the adapter that mints and installs the credential, and caught
+    by both of its callers - neither of whom lets it end a phase on its own
+    (#1396). The startup rehearsal retries it a bounded number of times and
+    then keeps the credential the setup phase installed, because a mint that
+    failed is a statement about GitHub's availability, not about the token
+    minutes old in this container. The quarantine path logs it and pushes
+    anyway, because that token may still have minutes left and a push that
+    might work beats one that was never attempted.
+
+    It says nothing about whether the OLD credential still works. Nothing can:
+    the only way to find out is to spend it on a push, which is what both
+    callers go on to do - and at phase start, that push's own refusal is the
+    only thing that refuses the phase.
+    """
+
+
+class QuarantinePathUnusableError(Exception):
+    """This phase has no credential that reaches origin, so it is given no work (#1393).
+
+    THE HALF OF THE NET THAT CAN BE TESTED BEFORE THE FALL. The unpushed-work
+    guard's quarantine push runs exactly once per phase, at teardown, on a
+    phase that has already failed - so a workspace that cannot be given a
+    credential, or cannot reach ``origin`` at all, is invisible until the
+    moment the work is riding on it, and `exec-db6f687e991a` is what that
+    costs: a commit and nine modified files, correctly detected, correctly
+    pushed at, and refused.
+
+    So the same push is rehearsed at phase start with ``--dry-run``: same
+    remote, same ``refs/syn/lost`` namespace, same credential, no objects sent
+    and no ref created. Failing here ends the phase before its agent runs,
+    when the entire cost is the minute of provisioning already spent. That is
+    a deliberately worse trade than it first looks - a phase whose quarantine
+    push would have worked and whose dry run failed for some unrelated reason
+    is refused for nothing - and it is still the right one, because the
+    alternative is handing an hour of agent time to a workspace that has just
+    demonstrated it cannot give the work back.
+
+    WHAT IT DOES NOT MEAN (#1396): that the remote would ACCEPT the push. A
+    dry run stops before ``git-receive-pack``'s update phase, so no
+    ``pre-receive`` hook and no ruleset is consulted, and a remote that
+    declines ``refs/syn/lost`` declines it for the first time at teardown.
+    This error is therefore raised for a credential or a connection, never for
+    a policy - see `rehearse_quarantine_credential`, which is named for what
+    it can prove.
+    """
+
+    def __init__(self, *, phase_id: str, detail: str) -> None:
+        super().__init__(
+            f"Phase {phase_id!r} will not be run: the quarantine path it would "
+            f"depend on to hand work back cannot be used, so anything this phase "
+            f"then failed to push would be unrecoverable rather than merely "
+            f"unpushed. {detail}"
+        )
+        self.phase_id = phase_id
+        self.detail = detail
+
+
 class WorkspaceInspectionFailedError(Exception):
     """The gate could not read the workspace, so it refused to call it clean (#1184).
 
