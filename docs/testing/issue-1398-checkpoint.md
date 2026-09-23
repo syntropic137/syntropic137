@@ -149,6 +149,22 @@ Exporter tombstone transport, origin scheduling, queue cleanup and the complete
 cross-store interruption matrix remain unfinished. This commit is local and has
 not yet been pushed to the existing SeshMagic draft PR.
 
+## Exporter deletion transport
+
+The exporter now accepts bounded `--capture-delete` requests and persists exact
+qualified APSS content hashes in its destination-bound SQLite outbox. Drain
+prioritizes deletion within the existing operation bound; failure survives
+restart, only 204 acknowledges deletion, and deleted revisions cannot be
+re-enqueued. A 410 upload response cancels delivery and queues deletion. Schema
+migration is serialized across processes. Full exporter tests and strict Clippy
+pass. Measured line coverage is 97.11%, above the unchanged 97% CI floor.
+Logs: `/private/tmp/1398-exporter-delete-full.log` and
+`/private/tmp/1398-exporter-delete-coverage.log`.
+
+Physical exporter spool cleanup, host tombstone scheduling and real cross-store
+interruption tests remain unfinished. New exporter and SeshMagic commits are
+still local pending coordinated draft PR updates.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
