@@ -9,6 +9,7 @@ from syn_domain.contexts.agent_sessions import (
     InventoryReplicationProcessManager,
 )
 
+from .capture_deletion_worker import CaptureDeletionWorker
 from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
 from .capture_delivery_worker import CaptureDeliveryWorker
 from .evidence_reader import PostgresSessionEvidence
@@ -56,20 +57,22 @@ def create_replication_manager(
     if settings.capture_replication_enabled:
         if archive is None or settings.capture_write_token is None:
             raise ValueError("capture delivery requires archive storage and capture credentials")
+        capture_transport = ExporterCaptureTransport(
+            ExporterConfig(
+                binary=settings.exporter_binary,
+                outbox_dir=settings.archive_dir / "capture-delivery" / destination / source,
+                store_url=url,
+                token=settings.capture_write_token,
+            )
+        )
         capture_work = CaptureDeliveryWorker(
             PostgresCaptureDeliveryJobs(pool, source_id, destination),
             archive,
-            ExporterCaptureTransport(
-                ExporterConfig(
-                    binary=settings.exporter_binary,
-                    outbox_dir=settings.archive_dir / "capture-delivery" / destination / source,
-                    store_url=url,
-                    token=settings.capture_write_token,
-                )
-            ),
+            capture_transport,
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             journal=PostgresSessionEvidence(pool),
+            deletions=CaptureDeletionWorker(pool, capture_transport, source_id, destination),
         )
     supervisor = ReplicationSupervisor(
         InventoryReplicationWorker(

@@ -126,7 +126,11 @@ async def create_inventory_runtime(
     drain = LocalSpoolDrain(capture)
     work = _InventoryWork(
         retention=LocalBodyRetention(
-            pool, archive, source_id, age_seconds=settings.local_body_retention_seconds
+            pool,
+            archive,
+            source_id,
+            age_seconds=settings.local_body_retention_seconds,
+            exporter_binary=settings.exporter_binary,
         )
         if settings.local_body_retention_seconds is not None
         else None,

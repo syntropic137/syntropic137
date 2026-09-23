@@ -191,3 +191,13 @@ Delivery and receipt leases reject completion after cancellation, and discovery
 for a new destination excludes durable deletion requests. This stops host retry
 churn; already queued exporter operations and remote copies still require
 separate tombstone delivery.
+
+
+Envelope expiry first asks the installed standard exporter for the APSS content
+hash and commits it to the deletion request. A later tick removes bytes. Hashing
+requires no remote configuration or credential. If hashing is unavailable, expiry
+retains the body and retries. Capture replication queues that qualified deletion
+through the exporter before advancing a destination-specific SQL checkpoint;
+interrupted enqueue repeats idempotently. A destination added later discovers
+retained deletion requests too. This now connects host expiry to remote deletion
+transport, but physical exporter spool cleanup is still pending.

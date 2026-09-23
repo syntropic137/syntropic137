@@ -207,3 +207,15 @@ CREATE INDEX IF NOT EXISTS session_capture_retention_age
 
 ALTER TABLE session_capture_delivery_jobs
     ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE session_body_deletions ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    capture_id TEXT NOT NULL,
+    PRIMARY KEY(source_instance_id,destination_id,producer_id,capture_id)
+);
+CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
+    ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));

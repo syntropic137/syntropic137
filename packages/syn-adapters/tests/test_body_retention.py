@@ -111,7 +111,9 @@ async def test_crash_after_unlink_retries_durable_request(db_pool, tmp_path):
 
 
 @pytest.mark.parametrize("already_queued", [False, True])
-async def test_expiry_cancels_delivery_and_fences_claimed_worker(db_pool, tmp_path, already_queued):
+async def test_expiry_cancels_delivery_and_fences_claimed_worker(
+    db_pool, tmp_path, already_queued, monkeypatch
+):
     from syn_adapters.session_inventory.capture_delivery_jobs import (
         CaptureDeliveryLeaseLost,
         PostgresCaptureDeliveryJobs,
@@ -135,7 +137,18 @@ async def test_expiry_cancels_delivery_and_fences_claimed_worker(db_pool, tmp_pa
         await jobs.finish(lease, queued=True)
         receipt_lease = await jobs.claim_receipt()
         assert receipt_lease is not None
-    assert await LocalBodyRetention(db_pool, archive, source, age_seconds=86400).step()
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        "syn_adapters.session_inventory.body_retention.original_envelope_hash",
+        AsyncMock(return_value="sha256:" + "a" * 64),
+    )
+    retention = LocalBodyRetention(
+        db_pool, archive, source, age_seconds=86400, exporter_binary=Path("/fixture/exporter")
+    )
+    assert await retention.step()
+    assert await archive.get(capture.archive) is not None
+    assert await retention.step()
     with pytest.raises(CaptureDeliveryLeaseLost):
         await jobs.renew(lease)
     with pytest.raises(CaptureDeliveryLeaseLost):
@@ -149,3 +162,78 @@ async def test_expiry_cancels_delivery_and_fences_claimed_worker(db_pool, tmp_pa
     await fresh_destination.discover()
     assert await fresh_destination.claim() is None
     assert await archive.get(capture.archive) is None
+
+
+async def test_real_exporter_retains_deletion_key_before_body_removal(db_pool, tmp_path):
+    import json
+    import os
+    from pathlib import Path
+
+    from pydantic import SecretStr
+
+    from syn_adapters.session_inventory.capture_deletion_worker import CaptureDeletionWorker
+    from syn_adapters.session_inventory.exporter_transport import (
+        ExporterCaptureTransport,
+        ExporterConfig,
+    )
+
+    binary = os.environ.get("SYN_TEST_EXPORTER_BINARY")
+    if not binary:
+        pytest.skip("requires current standard exporter binary")
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    body = json.dumps(
+        {
+            "scs_version": "1.0",
+            "origin": {"host": "test", "environment": "local"},
+            "agent": "codex",
+            "source_format": "codex-rollout-jsonl",
+            "session_id": "native",
+            "started_at": "2026-09-22T00:00:00Z",
+            "last_activity_at": "2026-09-22T00:00:01Z",
+            "raw": "exact\r\n",
+        }
+    ).encode()
+    ref = await archive.put(body)
+    capture = CataloguedCapture(
+        run=RunIdentity(source_instance_id=source, execution_id="run"),
+        producer_id="test",
+        capture_id="envelope",
+        harness="codex",
+        native_id="native",
+        content_format="envelope",
+        archive=ref,
+    )
+    await PostgresCaptureCatalog(db_pool).record(capture)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE session_capture_catalog SET created_at=now()-interval '2 days' WHERE source_instance_id=$1",
+            source,
+        )
+    retention = LocalBodyRetention(
+        db_pool, archive, source, age_seconds=86400, exporter_binary=Path(binary)
+    )
+    assert await retention.step()
+    assert await archive.get(ref) == body
+    assert await LocalBodyRetention(
+        db_pool, archive, source, age_seconds=86400, exporter_binary=Path(binary)
+    ).step()
+    assert await archive.get(ref) is None
+    transport = ExporterCaptureTransport(
+        ExporterConfig(
+            binary=Path(binary),
+            outbox_dir=tmp_path / "queue",
+            store_url="http://127.0.0.1:1",
+            token=SecretStr("test-only"),
+        )
+    )
+    failed = AsyncMock()
+    failed.delete.side_effect = OSError("interrupted")
+    with pytest.raises(OSError):
+        await CaptureDeletionWorker(db_pool, failed, source, "replica").step()
+    assert await CaptureDeletionWorker(db_pool, transport, source, "replica").step()
+    assert not await CaptureDeletionWorker(db_pool, transport, source, "replica").step()
+    pending = await transport.drain()
+    assert pending.failed == 1 and pending.remaining == 1
+    assert await CaptureDeletionWorker(db_pool, transport, source, "new-replica").step()

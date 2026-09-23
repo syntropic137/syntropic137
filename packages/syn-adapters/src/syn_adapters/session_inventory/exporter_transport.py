@@ -36,6 +36,32 @@ class ExporterConfig:
             raise ValueError("exporter timeout must be positive")
 
 
+@dataclass(frozen=True)
+class LocalExporterConfig:
+    binary: Path
+    timeout_seconds: float = 45
+
+
+class EnvelopeHash(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    schema_version: int = Field(ge=1, le=1)
+    content_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+async def original_envelope_hash(binary: Path, envelope: bytes) -> str:
+    if not binary.is_absolute() or len(envelope) > 64 * 1024 * 1024:
+        raise ExporterTransportError("invalid local envelope hash input")
+    code, output = await _run_exporter(
+        LocalExporterConfig(binary), ("--envelope-hash",), envelope, channel="capture"
+    )
+    if code != 0:
+        raise ExporterTransportError("exporter rejected envelope hash input")
+    try:
+        return EnvelopeHash.model_validate_json(output).content_hash
+    except ValueError:
+        raise ExporterTransportError("exporter returned an invalid envelope hash") from None
+
+
 class EnqueueReceipt(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
     schema_version: int = Field(strict=True, ge=1, le=1)
@@ -93,6 +119,23 @@ class ExporterCaptureTransport:
             return EnqueueReceipt.model_validate_json(output)
         except ValueError:
             raise ExporterTransportError("exporter returned an invalid capture receipt") from None
+
+    async def delete(self, identity: QualifiedTranscript, content_hash: str) -> EnqueueReceipt:
+        import json
+
+        EnvelopeHash(schema_version=1, content_hash=content_hash)
+        payload = json.dumps(
+            {"identity": identity.model_dump(), "content_hash": content_hash}
+        ).encode()
+        code, output = await _run_exporter(
+            self._config, ("--capture-delete",), payload, channel="capture"
+        )
+        if code != 0:
+            raise ExporterTransportError("exporter rejected capture deletion")
+        try:
+            return EnqueueReceipt.model_validate_json(output)
+        except ValueError:
+            raise ExporterTransportError("exporter returned an invalid deletion receipt") from None
 
     async def receipt(
         self, identity: QualifiedTranscript, envelope: bytes
@@ -188,7 +231,7 @@ class ExporterInventoryTransport:
 
 
 async def _run_exporter(
-    config: ExporterConfig,
+    config: ExporterConfig | LocalExporterConfig,
     arguments: tuple[str, ...],
     payload: bytes,
     *,
@@ -205,13 +248,23 @@ async def _run_exporter(
                 stderr=asyncio.subprocess.PIPE,
                 # Deliberate process-environment mapping, not domain state.
                 env={
-                    "SESSION_STORE_URL": config.store_url,
-                    (
-                        "CAPTURE_WRITE_TOKEN" if channel == "capture" else "INVENTORY_WRITE_TOKEN"
-                    ): config.token.get_secret_value(),
-                    (
-                        "EXPORTER_CAPTURE_DIR" if channel == "capture" else "EXPORTER_INVENTORY_DIR"
-                    ): str(config.outbox_dir),
+                    **(
+                        {
+                            "SESSION_STORE_URL": config.store_url,
+                            (
+                                "CAPTURE_WRITE_TOKEN"
+                                if channel == "capture"
+                                else "INVENTORY_WRITE_TOKEN"
+                            ): config.token.get_secret_value(),
+                            (
+                                "EXPORTER_CAPTURE_DIR"
+                                if channel == "capture"
+                                else "EXPORTER_INVENTORY_DIR"
+                            ): str(config.outbox_dir),
+                        }
+                        if isinstance(config, ExporterConfig)
+                        else {}
+                    ),
                     **(
                         {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
                         if "SYSTEMROOT" in os.environ

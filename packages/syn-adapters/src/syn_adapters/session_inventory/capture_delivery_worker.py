@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         SessionTranscriptArchivePort,
     )
 
+    from .capture_deletion_worker import CaptureDeletionWorker
     from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
     from .exporter_transport import CaptureDrain, ExporterCaptureTransport
 
@@ -33,6 +34,7 @@ class CaptureDeliveryWorker:
         transport: ExporterCaptureTransport,
         *,
         journal: SessionEvidenceWritePort | None = None,
+        deletions: CaptureDeletionWorker | None = None,
         lease_seconds: int = 120,
         retry_seconds: int = 10,
     ) -> None:
@@ -41,8 +43,11 @@ class CaptureDeliveryWorker:
         self._jobs, self._archive, self._transport = jobs, archive, transport
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
         self._journal = journal
+        self._deletions = deletions
 
     async def enqueue_step(self) -> bool:
+        if self._deletions is not None and await self._deletions.step():
+            return True
         # Each live tick checks one durable acknowledgement and queues at most
         # one capture. HTTP delivery remains in the independently scheduled drain.
         if self._journal is not None:

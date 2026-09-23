@@ -165,6 +165,22 @@ Physical exporter spool cleanup, host tombstone scheduling and real cross-store
 interruption tests remain unfinished. New exporter and SeshMagic commits are
 still local pending coordinated draft PR updates.
 
+## Host deletion scheduling
+
+Envelope expiry now commits the original APSS content hash before removing bytes.
+The standard exporter provides credential-free `--envelope-hash`; Python does not
+reimplement canonical hashing. Capture replication schedules durable deletion
+before upload work and checkpoints only after exporter enqueue. Deletion requests
+remain available to newly configured destinations. Five PostgreSQL retention
+tests pass, including the actual exporter while the store is unreachable, failed
+enqueue/restart, and hash-before-unlink ordering. Forty-two related host unit tests
+pass; Pyright has zero errors (16 existing warnings). Exporter CLI tests and strict
+Clippy pass. Logs: `/private/tmp/1398-host-deletion-tests.log` and
+`/private/tmp/1398-envelope-hash-cli.log`.
+
+The full real exporter/server interruption matrix and physical exporter spool
+cleanup remain unfinished. Changes are local and not yet deployed to the demo.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
