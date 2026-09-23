@@ -3,12 +3,15 @@
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
+    CaptureEvidence,
+    CoverageContract,
     IdentityBindingEvidence,
     InvocationContextEvidence,
     MembershipEvidence,
     SessionEvidence,
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+    BodyAvailability,
     EvidenceClass,
     EvidenceReference,
     EvidenceRetraction,
@@ -187,3 +190,74 @@ def test_retracting_workspace_context_keeps_host_membership_only() -> None:
     resolved = resolve_relationships(original.model_copy(update={"retractions": (correction,)}))
     assert len(resolved.memberships) == 1
     assert resolved.memberships[0].node.local_id == "root"
+
+
+def test_child_intent_expands_expected_set_before_native_binding_or_capture() -> None:
+    source = evidence().model_copy(
+        update={
+            "bindings": (),
+            "coverage_contract": CoverageContract(
+                contract_id="supported/1", expected_nodes=(node("root"),), sealed=True
+            ),
+        }
+    )
+    resolved = resolve_relationships(source)
+    assert resolved.coverage.expected_count == 2
+    assert set(resolved.coverage.missing_keys) == {node("root").key, node("child").key}
+    assert resolved.coverage.state == "open"
+    assert any(
+        gap.reason == "expected_body_unavailable" and node("child").key in gap.node_keys
+        for gap in resolved.gaps
+    )
+    assert resolved.bindings == ()
+    repeated = source.model_copy(update={"invocation_contexts": source.invocation_contexts * 3})
+    assert resolve_relationships(repeated) == resolved
+
+
+def test_child_capture_does_not_reseal_contract_that_omitted_its_intent() -> None:
+    source = evidence()
+    contract = CoverageContract(
+        contract_id="supported/1", expected_nodes=(node("root"),), sealed=True
+    )
+    captured = source.model_copy(
+        update={
+            "coverage_contract": contract,
+            "captures": tuple(
+                CaptureEvidence(
+                    node=ref,
+                    availability=BodyAvailability.PRESENT,
+                    archived_byte_hash="0" * 64,
+                    receipt_sequence=1,
+                    evidence=proof("capture-" + str(index)),
+                )
+                for index, ref in enumerate((node("root"), source.bindings[0].transcript))
+            ),
+        }
+    )
+    resolved = resolve_relationships(captured)
+    assert resolved.coverage.expected_count == 2
+    assert resolved.coverage.missing_keys == ()
+    assert resolved.coverage.state == "open"
+    # Only a new host contract accounting for the child can seal this set.
+    settled = captured.model_copy(
+        update={
+            "coverage_contract": contract.model_copy(
+                update={"expected_nodes": (node("root"), node("child"))}
+            )
+        }
+    )
+    assert resolve_relationships(settled).coverage.state == "reconciled"
+
+
+def test_unverified_child_context_reopens_contract_without_inventing_expectations() -> None:
+    source = evidence(attempt="stale").model_copy(
+        update={
+            "coverage_contract": CoverageContract(
+                contract_id="supported/1", expected_nodes=(node("root"),), sealed=True
+            )
+        }
+    )
+    resolved = resolve_relationships(source)
+    assert resolved.coverage.expected_count == 1
+    assert resolved.coverage.state == "open"
+    assert "unverified_invocation_context" in {gap.reason for gap in resolved.gaps}

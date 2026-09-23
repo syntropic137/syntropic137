@@ -465,3 +465,24 @@ stub host port availability; dedicated preflight tests still verify occupied
 ports. All 50 environment-manager tests and Ruff pass. The complete unit gate
 is running again; its result remains pending. This does not change acceptance
 coverage or the two known upstream reachability failures.
+
+## Child expectation reconciliation follow-up
+
+Resolver version 5 expands an existing host coverage contract using durable child
+intents joined to the exact registered invocation attempt. No native ID or body
+is required. A child omitted by an older contract reopens its seal, including
+when that child's capture subsequently arrives. Unverified or conflicting child
+contexts also prevent sealed coverage. Observations alone still cannot establish
+a coverage contract. Descendant lifecycle settlement and production sealing
+remain unfinished.
+
+42 focused domain/adapter tests pass. Five real PostgreSQL pipeline tests pass,
+including reload from the evidence journal, missing child reporting, publication
+of the expanded expected set and preservation of the earlier snapshot. Pyright
+reports zero errors and 16 existing warnings; Ruff and architecture fitness
+thresholds pass without budget changes. The full Python unit
+gate completed successfully on the preceding baseline after the host-port test
+fix (79% aggregate coverage); these resolver changes have the focused checks
+above. Logs remain local under `/private/tmp/1398-child-coverage*` and
+`/private/tmp/1398-current-unit-ci.log`. No acceptance row is marked complete by
+these checks.

@@ -4,6 +4,7 @@ from collections import defaultdict
 from itertools import chain
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
+    CoverageContract,
     InvocationContextEvidence,
     MembershipEvidence,
     SessionEvidence,
@@ -72,3 +73,28 @@ def _derive(
         )
         for proof in proofs
     ]
+
+
+def context_coverage(
+    contract: CoverageContract | None,
+    children: tuple[MembershipEvidence, ...],
+    gaps: tuple[InventoryGap, ...],
+) -> CoverageContract | None:
+    """Durable child intents expand an existing host contract before capture.
+
+    Only the exact registered-attempt join supplies these children. A late
+    intent invalidates an older seal; observing its body cannot seal it again.
+    A subsequent host contract must explicitly account for that invocation.
+    Unverified/conflicting contexts also prevent a claim of complete coverage.
+    """
+    if contract is None:
+        return None
+    expected = {ref.key: ref for ref in contract.expected_nodes}
+    previous = set(expected)
+    expected.update((child.node.key, child.node) for child in children)
+    return contract.model_copy(
+        update={
+            "expected_nodes": tuple(expected[key] for key in sorted(expected)),
+            "sealed": contract.sealed and not gaps and set(expected) == previous,
+        }
+    )

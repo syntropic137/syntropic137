@@ -18,7 +18,9 @@ from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     CaptureEvidence,
     CoverageContract,
+    InvocationContextEvidence,
     LineageEvidence,
+    MembershipEvidence,
     SessionEvidence,
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
@@ -26,6 +28,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     CoverageState,
     EvidenceClass,
     EvidenceReference,
+    InventoryGap,
     InventoryNodeRef,
 )
 from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
@@ -395,3 +398,100 @@ async def test_large_native_inventory_capture_retries_without_duplicates_or_trun
             break
         after = page.next_after
     assert total == 1103
+
+
+async def test_persisted_child_intent_reopens_older_seal_without_native_capture(
+    db_pool: asyncpg.Pool,
+) -> None:
+    run = RunIdentity(source_instance_id=f"child-coverage-{uuid4()}", execution_id="run")
+    journal = PostgresSessionEvidence(db_pool)
+    inventory = PostgresSessionInventory(db_pool)
+    await journal.ensure_ready()
+    root, child = tuple(
+        InventoryNodeRef(
+            kind="invocation", source_instance_id=run.source_instance_id, local_id=name
+        )
+        for name in ("root", "child")
+    )
+    await journal.append(
+        EvidenceBatch(
+            batch_id="host",
+            producer_id="host",
+            evidence=SessionEvidence(
+                run=run,
+                memberships=(
+                    MembershipEvidence(
+                        node=root,
+                        run=run,
+                        phase_id="phase",
+                        attempt_id="attempt",
+                        confidence=EvidenceClass.REGISTERED,
+                        evidence=reference("host"),
+                    ),
+                ),
+                coverage_contract=CoverageContract(
+                    contract_id="supported/1",
+                    expected_nodes=(root,),
+                    sealed=True,
+                ),
+            ),
+        )
+    )
+    handler = BuildInventorySnapshotHandler(
+        journal, inventory, max_evidence_records=100, max_evidence_batches=100
+    )
+    request = ReconciliationRequest(
+        run=run,
+        evidence_watermark=1,
+        expected_head=None,
+        snapshot_id=uuid4(),
+        resolver_version=RESOLVER_VERSION,
+    )
+    first = await handler.handle(request)
+    assert first.coverage.expected_count == 1
+    assert first.coverage.state is CoverageState.MISSING
+    await inventory.publish(run, first.snapshot_id, None)
+    await journal.append(
+        EvidenceBatch(
+            batch_id="child",
+            producer_id="workspace",
+            evidence=SessionEvidence(
+                run=run,
+                invocation_contexts=(
+                    InvocationContextEvidence(
+                        controller=root,
+                        child=child,
+                        attempt_id="attempt",
+                        evidence=reference("child-intent"),
+                    ),
+                ),
+            ),
+        )
+    )
+    # Re-create the reader so this proof depends on durable evidence, not memory.
+    restored = BuildInventorySnapshotHandler(
+        PostgresSessionEvidence(db_pool),
+        inventory,
+        max_evidence_records=100,
+        max_evidence_batches=100,
+    )
+    second = await restored.handle(
+        request.model_copy(
+            update={
+                "evidence_watermark": 2,
+                "expected_head": first.snapshot_id,
+                "snapshot_id": uuid4(),
+            }
+        )
+    )
+    assert second.coverage.expected_count == 2
+    assert second.coverage.state is CoverageState.OPEN
+    assert set(second.coverage.missing_keys) == {root.key, child.key}
+    await inventory.publish(run, second.snapshot_id, first.snapshot_id)
+    page = await inventory.page(run, second.snapshot_id, "gap")
+    assert any(
+        isinstance(item, InventoryGap) and child.key in item.node_keys for item in page.items
+    )
+    old = await inventory.page(run, first.snapshot_id, "node")
+    assert old.snapshot.coverage.expected_count == 1
+    assert old.snapshot.coverage.state is CoverageState.MISSING

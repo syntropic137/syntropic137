@@ -46,10 +46,10 @@ if TYPE_CHECKING:
     )
 
 from .inventory_corrections import active_evidence
-from .invocation_contexts import context_memberships
+from .invocation_contexts import context_coverage, context_memberships
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/4"
+RESOLVER_VERSION = "syn-session-relationships/5"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -160,7 +160,12 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     )
     child_memberships, context_gaps = context_memberships(evidence)
     evidence = evidence.model_copy(
-        update={"memberships": (*evidence.memberships, *child_memberships)}
+        update={
+            "memberships": (*evidence.memberships, *child_memberships),
+            "coverage_contract": context_coverage(
+                evidence.coverage_contract, child_memberships, context_gaps
+            ),
+        }
     )
     nodes = _nodes(evidence)
     resolved_edges, conflict_gaps = resolve_parent_conflicts(lineage(evidence.edges))
