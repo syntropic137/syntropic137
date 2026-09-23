@@ -151,7 +151,14 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     )
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=definition.id))
 
-    assert [p.phase_id for p in captured] == ["premise", "implement", "verify", "open_pr"], (
+    assert [p.phase_id for p in captured] == [
+        "premise",
+        "implement",
+        "verify",
+        "fix",
+        "reverify",
+        "open_pr",
+    ], (
         "the workflow's phase list changed; these assertions name phases by id"
     )
     return {p.phase_id: p for p in captured}
