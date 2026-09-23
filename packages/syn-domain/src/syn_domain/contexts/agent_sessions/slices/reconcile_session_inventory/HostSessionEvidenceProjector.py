@@ -9,6 +9,7 @@ from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedE
 )
 from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
+    InvocationLifecycleEvidence,
     LineageEvidence,
     MembershipEvidence,
     NodeEvidence,
@@ -130,5 +131,39 @@ class HostSessionEvidenceProjector:
                 batch_id=envelope.metadata.event_id,
                 producer_id=reference.producer_id,
                 evidence=invocation_evidence(event, self._source, reference),
+            )
+        )
+
+        if event.status == "registered":
+            return
+        # Separate stream leaves every historical identity batch byte-equivalent.
+        producer = "syntropic-invocation-lifecycle"
+        lifecycle_reference = reference.model_copy(
+            update={
+                "producer_id": producer,
+                "extractor_version": "host-invocation-lifecycle/1",
+            }
+        )
+        await self._evidence.append(
+            EvidenceBatch(
+                batch_id=envelope.metadata.event_id,
+                producer_id=producer,
+                evidence=SessionEvidence(
+                    run=RunIdentity(
+                        source_instance_id=self._source, execution_id=event.execution_id
+                    ),
+                    invocation_lifecycle=(
+                        InvocationLifecycleEvidence(
+                            node=InventoryNodeRef(
+                                kind="invocation",
+                                source_instance_id=self._source,
+                                local_id=event.invocation_id,
+                            ),
+                            sequence=envelope.metadata.aggregate_nonce + 1,
+                            status=event.status,
+                            evidence=lifecycle_reference,
+                        ),
+                    ),
+                ),
             )
         )

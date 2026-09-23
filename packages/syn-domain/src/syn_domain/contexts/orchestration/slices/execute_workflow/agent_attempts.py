@@ -122,6 +122,8 @@ def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityC
 
 
 def _invocation_outcome(result: AgentExecutionResult) -> InvocationStatus:
+    if result.launch_failed:
+        return InvocationStatus.LAUNCH_FAILED
     if result.stream_result.interrupt_requested:
         return InvocationStatus.CANCELLED
     return InvocationStatus.COMPLETED if result.command.exit_code == 0 else InvocationStatus.FAILED

@@ -33,15 +33,17 @@ def _reason(items: list[InvocationLifecycleEvidence]) -> str | None:
     for item in items:
         producer = item.evidence.producer_id
         latest[producer] = max(latest.get(producer, 0), item.sequence)
-    outcomes = {
-        (item.status, item.exit_code)
-        for item in items
-        if item.sequence == latest[item.evidence.producer_id]
-    }
-    terminals = {(item.status, item.exit_code) for item in items if item.status != "launched"}
-    if len(outcomes) != 1 or len(terminals) > 1 or (terminals and outcomes != terminals):
+    outcomes = {item.status for item in items if item.sequence == latest[item.evidence.producer_id]}
+    terminals = {item.status for item in items if item.status != "launched"}
+    codes = {item.exit_code for item in items if item.exit_code is not None}
+    if (
+        len(outcomes) != 1
+        or len(terminals) > 1
+        or len(codes) > 1
+        or (terminals and outcomes != terminals)
+    ):
         return "conflicting_invocation_lifecycle"
-    status, _ = next(iter(outcomes))
+    status = next(iter(outcomes))
     if status == "completed":
         return None
     if status == "launched":

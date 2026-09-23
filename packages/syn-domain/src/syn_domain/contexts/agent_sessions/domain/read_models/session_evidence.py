@@ -53,7 +53,10 @@ class AcquisitionStatusEvidence(InventoryModel):
 
 
 class InvocationLifecycleEvidence(InventoryModel):
-    """Producer-sequenced process observations, independent of capture settlement."""
+    """Producer-sequenced invocation outcomes, independent of capture settlement.
+
+    A missing exit code stays unknown (historical host events omit it).
+    """
 
     node: InventoryNodeRef
     sequence: int = Field(ge=1)
@@ -65,6 +68,8 @@ class InvocationLifecycleEvidence(InventoryModel):
     def _outcome(self) -> InvocationLifecycleEvidence:
         if self.node.kind != "invocation":
             raise ValueError("lifecycle observation requires an invocation")
+        if self.exit_code is None:
+            return self
         expected = {
             "launched": self.exit_code is None,
             "launch_failed": self.exit_code is None,

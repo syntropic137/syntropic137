@@ -545,3 +545,60 @@ async def test_child_process_outcome_survives_real_journal_restart(db_pool: asyn
     assert result.bindings == ()
     assert result.coverage.state is CoverageState.UNKNOWN
     assert "invocation_launch_failed" in {gap.reason for gap in result.gaps}
+
+
+async def test_host_launch_failure_replays_without_rewriting_identity_batch(
+    db_pool: asyncpg.Pool,
+) -> None:
+    from event_sourcing import EventEnvelope, EventMetadata
+
+    from syn_domain.contexts.agent_sessions import HostSessionEvidenceProjector
+    from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
+        SessionInvocationRecordedEvent,
+    )
+    from syn_domain.contexts.agent_sessions.domain.services.evidence_assembly import (
+        assemble_evidence,
+    )
+    from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
+        resolve_relationships,
+    )
+
+    run = RunIdentity(source_instance_id=f"host-outcome-{uuid4()}", execution_id="run")
+    writer = PostgresSessionEvidence(db_pool)
+    await writer.ensure_ready()
+    projector = HostSessionEvidenceProjector(writer, run.source_instance_id)
+    for sequence, status in enumerate(("registered", "launch_failed"), start=1):
+        event = SessionInvocationRecordedEvent.model_validate(
+            {
+                "session_id": "platform",
+                "execution_id": run.execution_id,
+                "phase_id": "phase",
+                "invocation_id": "invocation",
+                "attempt_id": "attempt",
+                "harness": "codex",
+                "status": status,
+            }
+        )
+        envelope = EventEnvelope(
+            event=event,
+            metadata=EventMetadata(
+                event_id=f"event-{sequence}",
+                aggregate_id="platform",
+                aggregate_type="AgentSession",
+                aggregate_nonce=sequence,
+                global_nonce=sequence,
+                event_type=SessionInvocationRecordedEvent.event_type,
+            ),
+        )
+        await projector.handle(envelope)
+        watermark = await writer.watermark(run)
+        await projector.handle(envelope)
+        assert await writer.watermark(run) == watermark
+    restored = PostgresSessionEvidence(db_pool)
+    page = await restored.read(run, await restored.watermark(run))
+    assert len(page.items) == 3
+    assert page.items[1].batch.evidence.invocation_lifecycle == ()
+    result = resolve_relationships(assemble_evidence(run, page.items))
+    assert "invocation_launch_failed" in {gap.reason for gap in result.gaps}
+    assert result.bindings == ()
+    assert result.coverage.state is CoverageState.OPEN

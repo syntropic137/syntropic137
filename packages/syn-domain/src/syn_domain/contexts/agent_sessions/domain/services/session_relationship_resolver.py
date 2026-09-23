@@ -50,7 +50,7 @@ from .invocation_contexts import context_coverage, context_memberships
 from .invocation_lifecycle import lifecycle_gaps
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/6"
+RESOLVER_VERSION = "syn-session-relationships/7"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:

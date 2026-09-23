@@ -13,5 +13,5 @@ class SessionInvocationRecordedEvent(DomainEvent):
     invocation_id: str
     attempt_id: str
     harness: str
-    status: Literal["registered", "launched", "completed", "failed", "cancelled"]
+    status: Literal["registered", "launched", "launch_failed", "completed", "failed", "cancelled"]
     native_session_id: str | None = None

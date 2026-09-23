@@ -164,7 +164,7 @@ class FinalUsage:
 class AgentExecutionResult:
     """Result of agent execution."""
 
-    __slots__ = ("command", "stream_result", "subagents", "tokens")
+    __slots__ = ("command", "launch_failed", "stream_result", "subagents", "tokens")
 
     def __init__(
         self,
@@ -172,11 +172,13 @@ class AgentExecutionResult:
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
         command: AgentExecutionCompletedCommand,
+        launch_failed: bool = False,
     ) -> None:
         self.stream_result = stream_result
         self.tokens = tokens
         self.subagents = subagents
         self.command = command
+        self.launch_failed = launch_failed
 
 
 class AgentExecutionHandler:
@@ -410,4 +412,5 @@ class AgentExecutionHandler:
             tokens=tokens,
             subagents=subagents,
             command=command,
+            launch_failed=launch.launch_failed,
         )

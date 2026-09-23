@@ -158,3 +158,31 @@ async def test_registration_failure_never_enters_dispatch_body() -> None:
         async with registered_attempt(manager, "claude"):
             entered = True
     assert not entered
+
+
+def test_failed_launch_is_terminal_and_cannot_acquire_native_identity() -> None:
+    aggregate = _aggregate()
+    intent = SessionInvocationState(
+        invocation_id="invocation", attempt_id="attempt", harness="codex"
+    )
+    _record(aggregate, intent)
+    failed = intent.model_copy(update={"status": InvocationStatus.LAUNCH_FAILED})
+    _record(aggregate, failed)
+    restored = AgentSessionAggregate()
+    restored.rehydrate(aggregate.get_uncommitted_events())
+    assert restored.invocations == (failed,)
+    with pytest.raises(ValueError, match="native identity"):
+        _record(restored, failed.model_copy(update={"native_session_id": "impossible"}))
+    with pytest.raises(ValueError, match="terminal"):
+        _record(restored, intent.model_copy(update={"status": InvocationStatus.LAUNCHED}))
+
+
+def test_observed_launch_cannot_be_reclassified_as_launch_failure() -> None:
+    aggregate = _aggregate()
+    intent = SessionInvocationState(
+        invocation_id="invocation", attempt_id="attempt", harness="codex"
+    )
+    _record(aggregate, intent)
+    _record(aggregate, intent.model_copy(update={"status": InvocationStatus.LAUNCHED}))
+    with pytest.raises(ValueError, match="observed launch"):
+        _record(aggregate, intent.model_copy(update={"status": InvocationStatus.LAUNCH_FAILED}))

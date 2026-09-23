@@ -147,7 +147,7 @@ def test_lifecycle_cannot_bypass_scope_and_batch_quota() -> None:
         EvidenceBatch(producer_id="journal", batch_id="1", evidence=source(*(item,) * 501))
 
 
-@pytest.mark.parametrize("status,code", [("completed", None), ("launch_failed", 1), ("failed", 0)])
+@pytest.mark.parametrize("status,code", [("launch_failed", 1), ("failed", 0)])
 def test_malformed_outcomes_are_rejected(status: str, code: int | None) -> None:
     with pytest.raises(ValueError, match="disagree"):
         observation(1, status, code)
@@ -176,3 +176,12 @@ def test_same_sequence_conflicting_outcomes_remain_visible() -> None:
     )
     result = resolve_relationships(source(completed, failed))
     assert "conflicting_invocation_lifecycle" in {gap.reason for gap in result.gaps}
+
+
+def test_unknown_exit_code_is_not_fabricated_or_conflicting_with_later_proof() -> None:
+    historical = observation(1, "completed")
+    precise = observation(2, "completed", 0)
+    assert historical.exit_code is None
+    result = resolve_relationships(source(historical, precise))
+    assert {gap.reason for gap in result.gaps} == {"expected_body_unavailable"}
+    assert result.coverage.state == "open"

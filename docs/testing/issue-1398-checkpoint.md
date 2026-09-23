@@ -512,3 +512,33 @@ budget changes. Pyright has zero errors (16 existing
 warnings). Logs: `/private/tmp/1398-lifecycle-domain.log`,
 `/private/tmp/1398-lifecycle-sql.log`, `/private/tmp/1398-lifecycle-conflicts.log`
 and `/private/tmp/1398-lifecycle-pyright.log`.
+
+## Host lifecycle and failed-exec proof follow-up
+
+Host invocation events now project lifecycle observations through a separate
+producer, preserving earlier immutable identity batches on replay. Missing exit
+codes in historical host events remain unknown; later exact-code evidence is
+compatible unless known outcomes disagree. Resolver version 7 records this
+semantic change.
+
+A controlled launch now carries positively observed exec failure from the
+wrapper through the execution result and invocation aggregate. The terminal
+`launch_failed` state cannot follow an observed launch or acquire a native ID.
+Silence and transport errors do not prove failed exec. This exposed and fixed an
+existing boundary bug: an announced process silently exiting 126/127 must remain
+launched unless a diagnostic signed by the challenged wrapper proves exec
+failed. Real subprocess regressions exercise silent exits 3/126/127.
+
+284 session, launch-boundary, retry and child-drain tests pass on the final
+changes. Real adapter subprocess regressions also pass (one existing Linux-only
+case skipped on macOS). Seven
+real PostgreSQL pipeline tests pass, including host outcome restart and
+idempotent projection without changing identity batches. Ruff passes; Pyright
+has zero errors and 16 existing warnings. Final architecture fitness thresholds
+pass without budget changes. All 74 domain events validate. Logs:
+`/private/tmp/1398-host-lifecycle-tests.log`,
+`/private/tmp/1398-host-lifecycle-sql.log`,
+`/private/tmp/1398-silent-exit-process-proof.log` and
+`/private/tmp/1398-host-lifecycle-pyright.log`. Native descendant settlement,
+no-launch coverage accounting, final capture sealing and release gates remain
+unfinished.

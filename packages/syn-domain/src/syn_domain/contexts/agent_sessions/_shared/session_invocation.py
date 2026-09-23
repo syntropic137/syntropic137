@@ -13,6 +13,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
 class InvocationStatus(StrEnum):
     REGISTERED = "registered"
     LAUNCHED = "launched"
+    LAUNCH_FAILED = "launch_failed"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -37,9 +38,11 @@ def validate_invocation_transition(
             raise ValueError("invocation must be registered before launch or binding")
         return
     _validate_identity(previous, successor)
+    _validate_launch_failure(previous, successor)
     if previous == successor:
         return
     if previous.status in (
+        InvocationStatus.LAUNCH_FAILED,
         InvocationStatus.COMPLETED,
         InvocationStatus.FAILED,
         InvocationStatus.CANCELLED,
@@ -62,3 +65,13 @@ def _validate_identity(previous: SessionInvocationState, successor: SessionInvoc
         and previous.native_session_id != successor.native_session_id
     ):
         raise ValueError("invocation native identity cannot be rebound")
+
+
+def _validate_launch_failure(
+    previous: SessionInvocationState, successor: SessionInvocationState
+) -> None:
+    if successor.status == InvocationStatus.LAUNCH_FAILED:
+        if previous.status not in (InvocationStatus.REGISTERED, InvocationStatus.LAUNCH_FAILED):
+            raise ValueError("observed launch cannot become a failed launch")
+        if successor.native_session_id is not None:
+            raise ValueError("failed launch cannot have a native identity")
