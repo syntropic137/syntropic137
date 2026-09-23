@@ -11,6 +11,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.artifacts import UNREPORTED_AGENT
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -63,7 +64,6 @@ class TestAgentExecutionHandler:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             conversation_lines=["line1"],
         )
 
@@ -113,7 +113,6 @@ class TestAgentExecutionHandler:
             line_count=5,
             interrupt_requested=True,
             interrupt_reason="User cancelled",
-            agent_task_result=None,
         )
 
         with patch(
@@ -155,7 +154,6 @@ class TestAgentExecutionHandler:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             total_cost_usd=0.0319,
             reported_usage=ReportedUsage(
                 input_tokens=685,
@@ -204,7 +202,6 @@ class TestAgentExecutionHandler:
             line_count=5,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             total_cost_usd=0.0319,
             reported_usage=ReportedUsage(
                 input_tokens=685,
@@ -265,7 +262,6 @@ class TestAgentExecutionHandler:
             line_count=3,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             reported_usage=ReportedUsage(
                 input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
             ),
@@ -323,7 +319,6 @@ class TestAgentExecutionHandler:
             line_count=1,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             error_reason=MISSING_TERMINAL_TURN_REASON,
         )
 
@@ -364,7 +359,6 @@ class TestAgentExecutionHandler:
             line_count=43,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             error_reason=error_reason,
         )
         with patch(
@@ -472,7 +466,6 @@ class TestAgentExecutionHandler:
             line_count=3,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
             reported_usage=ReportedUsage(
                 input_tokens=12, output_tokens=7, cache_creation=0, cache_read=0
             ),
@@ -558,6 +551,7 @@ class TestArtifactCollectionHandler:
             session_id="sess-1",
             phase_name="Research",
             output_artifact_types=("text",),
+            agent=UNREPORTED_AGENT,
         )
 
         assert isinstance(result.command, ArtifactsCollectedCommand)
@@ -606,6 +600,7 @@ class TestArtifactCollectionHandler:
             session_id="sess-1",
             phase_name="Research",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.command.artifact_ids == []
@@ -650,11 +645,16 @@ class TestHandlerRegistry:
 class TestDetectExitCode:
     """Tests for _detect_exit_code helper."""
 
-    def test_interrupt_does_not_return_1(self) -> None:
-        """interrupt_requested must NOT synthesise exit code 1.
+    def test_interrupt_with_no_observed_status_is_unknown(self) -> None:
+        """interrupt_requested must synthesise NO exit code - not 1, and not 0.
 
-        The processor (_handle_cancel_signal) owns the cancellation routing.
-        _detect_exit_code must only return the actual process exit code.
+        This asserted `== 0` until #1341. It was written to pin that
+        cancellation is not failure, and it still does; the 0 came along as the
+        way of saying so, and that was the defect. A cancelled process was asked
+        to stop, which says nothing about what it stopped WITH - so the status
+        here is unobserved exactly as it is on every other path, and 0 claimed a
+        clean exit for it. `_run_headless` tells a cancellation from an
+        unexplained exit by reading `interrupt_requested` itself.
         """
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
             _detect_exit_code,
@@ -667,11 +667,13 @@ class TestDetectExitCode:
             line_count=5,
             interrupt_requested=True,
             interrupt_reason="cancel",
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = None
-        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 0
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) is None, (
+            "a cancelled run whose exit status nobody observed has no status; "
+            "0 would claim it exited cleanly"
+        )
 
     def test_nonzero_stream_exit_code(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -685,7 +687,6 @@ class TestDetectExitCode:
             line_count=5,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 42
@@ -703,7 +704,6 @@ class TestDetectExitCode:
             line_count=10,
             interrupt_requested=False,
             interrupt_reason=None,
-            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0
@@ -1767,7 +1767,13 @@ class TestWorkspaceProvisionSkills:
             )
 
         materializer.fetch_for_workspace.assert_awaited_once_with((skill,))
-        workspace.execute.assert_awaited_with(
+        # assert_any_await, not assert_awaited_with: provisioning keeps running
+        # after the skills install (the operator-attribution hook appends further
+        # execute() calls when SYN_OPERATOR_* is configured), so "was the last
+        # await" is not a property of the skills install and asserting it made
+        # these tests pass or fail on an unrelated variable (#1282). The argv,
+        # timeout and working directory stay exact - that is what is being tested.
+        workspace.execute.assert_any_await(
             ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
             timeout_seconds=120,
             working_directory="/workspace",

@@ -283,3 +283,43 @@ itself - and each needs the check for a different reason. The trigger path is
 the one that bites: it acknowledges a dispatch before any validation, so a
 refusal inside the async task leaves a record claiming a run that has no
 execution and never will.
+
+### `mcpc` was evaluated as a tool gateway: rejected for scoping, kept for reach
+
+Two separate questions got conflated the first time this was written, and the
+answers differ.
+
+**As a replacement for `allowed_tools`, it does not work.** Its configuration
+unit is a SERVER, not a tool, so it offers no tool-level policy primitive to
+scope a phase with. Routing a phase's tools through it would mean granting that
+phase `Bash` and surrendering `allowed_tools` - the one tool-level control
+enforced today, and on section 3's measurement the only axis Claude gives us at
+all. Nothing has changed about that.
+
+**As a way to reach external MCP servers from inside a workspace, it works.**
+This section previously recorded a flat rejection on the strength of a second
+claim - that the bridge's unix-domain socket could not be created inside a
+sandboxed harness. That claim was wrong. It was measured on macOS, where the
+Seatbelt profile denies the `listen`, and generalised to the platform that
+actually runs phases. Re-measured inside the pinned Linux image, the bridge
+starts, both `claude -p` and `codex exec` reach it, and per-tool operations
+still land in the observability stream rather than collapsing into one opaque
+`Bash` call. `--proxy` is described in mcpc's own repository as a proxy for AI
+sandboxes; that is the mode that applies here.
+
+So the standing position is narrower than "rejected": mcpc is not a scoping
+mechanism, and it remains a live candidate for the gateway question in #1297,
+where the open decision is per-phase versus shared gateway rather than whether
+the transport works.
+
+Negative result originally from `exec-99d8c34c1be0`, whose own plan recommended
+recording it here rather than spending an ADR number on it. It rules out one
+candidate answer to #1052, which proposes a per-phase `mcpServers` field as the
+shape for this work; nothing decided above changes. A separate finding from the
+same research is filed as #1254.
+
+The generalisation error is worth keeping visible, because it is not specific to
+mcpc: **a sandbox denial observed on the developer's machine says nothing about
+the sandbox that runs the workload.** macOS Seatbelt and Linux Landlock deny
+different syscalls. Any capability ruled out on this evidence should be
+re-measured inside the image before the ruling is recorded.

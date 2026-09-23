@@ -25,13 +25,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
+from typing import TYPE_CHECKING, NamedTuple
 
 import asyncpg
 
+from syn_adapters.postgres_text import pg_json, pg_safe
 from syn_shared.events import SESSION_ERROR
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 _TERMINAL_STATUSES = ("failed", "cancelled")
 
@@ -86,6 +90,43 @@ VALUES ($1, '{SESSION_ERROR}', $2, $3, $4, $5::jsonb)
 """
 
 
+class _Observation(NamedTuple):
+    """The parameters of one backfilled ``session_error`` row, in _INSERT order."""
+
+    started_at: datetime
+    session_id: str | None
+    execution_id: str | None
+    phase_id: str | None
+    data_json: str
+
+
+def _observation(row: asyncpg.Record) -> _Observation:
+    """Build one row's insert parameters from the session that failed.
+
+    ``error_message`` is whatever the agent said on its way out and the session
+    id came from the harness, so this writes the same untrusted text into the
+    same columns as the live path and is made storable the same way (#1241) -
+    a codepoint Postgres refuses fails the whole backfill, not the one row.
+
+    Attribution is the session's START, matching how live usage is attributed,
+    rather than the moment it gave up.
+    """
+    return _Observation(
+        started_at=row["started_at"],
+        session_id=pg_safe(row["session_id"]),
+        execution_id=pg_safe(row["execution_id"]),
+        phase_id=pg_safe(row["phase_id"]),
+        data_json=pg_json(
+            {
+                "status": row["status"],
+                "error_message": row["error_message"],
+                "model": row["model"],
+                "backfilled": True,
+            }
+        ),
+    )
+
+
 async def _run(dsn: str, *, apply: bool) -> int:
     conn = await asyncpg.connect(dsn)
     try:
@@ -108,22 +149,7 @@ async def _run(dsn: str, *, apply: bool) -> int:
 
         written = 0
         for row in rows:
-            payload = {
-                "status": row["status"],
-                "error_message": row["error_message"],
-                "model": row["model"],
-                "backfilled": True,
-            }
-            # Placed on the session's START, matching how live usage is
-            # attributed, rather than on the moment it gave up.
-            await conn.execute(
-                _INSERT,
-                row["started_at"],
-                row["session_id"],
-                row["execution_id"],
-                row["phase_id"],
-                json.dumps(payload),
-            )
+            await conn.execute(_INSERT, *_observation(row))
             written += 1
         print(f"\nWrote {written} observation(s).")
         return 0

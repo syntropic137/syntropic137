@@ -37,15 +37,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.artifacts import UNREPORTED_AGENT
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_TITLE_MARKER,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+    UnfinishedPhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
     PhaseProducedNoDeclaredOutputError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    AgentVerdict,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_event_stream_processor import (
     MockWorkspace,
@@ -120,6 +125,7 @@ async def _collect(
         phase_name="Verify",
         output_artifact_types=("analysis_report",),
         last_agent_message=last_agent_message,
+        agent=UNREPORTED_AGENT,
     )
 
 
@@ -297,6 +303,7 @@ class TestTheThreeOutcomesAreTellableApart:
             session_id="s1",
             phase_name="Answer",
             output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
         )
 
         assert result.artifact_ids == []
@@ -434,6 +441,7 @@ class TestTheVerdictSurvivesEveryHop:
             phase_id="verify",
             session_id="s1",
             agent_model="gpt-5.6",
+            rollout=None,
         )
 
         result = await processor.process_stream(
@@ -448,13 +456,26 @@ class TestTheVerdictSurvivesEveryHop:
     async def test_the_processor_carries_it_from_the_agent_run_to_collection(self) -> None:
         """The hop with no natural test at either end: `_handle_run_agent`
         remembers it and `_handle_collect_artifacts`, a separate dispatch,
-        hands it to the collector."""
+        hands it to the collector.
+
+        The AGGREGATE is what remembers, and is real here for that reason:
+        since #1300's review the processor holds nothing between the two
+        dispatches, so a double in its place would assert the hop against
+        something that does not carry the value in production."""
         from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
             TodoAction,
             TodoItem,
         )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+            AgentExecutionCompletedCommand,
+            ArtifactsCollectedCommand,
+            StartExecutionCommand,
+        )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutablePhase,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+            WorkflowExecutionAggregate,
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
             ArtifactCollectionResult,
@@ -464,6 +485,9 @@ class TestTheVerdictSurvivesEveryHop:
         )
         from syn_domain.contexts.orchestration.slices.execute_workflow.test_workflow_execution_processor import (
             _make_processor,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+            _DispatchContext,
         )
 
         processor = _make_processor()
@@ -475,12 +499,38 @@ class TestTheVerdictSurvivesEveryHop:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(
+            StartExecutionCommand(
+                execution_id="exec-0bac0e1ed2b2",
+                workflow_id="w1",
+                workflow_name="W",
+                total_phases=1,
+                inputs={},
+            )
+        )
         agent_result = MagicMock()
         agent_result.stream_result.last_agent_message = SAID
         agent_result.stream_result.interrupt_requested = False
+        agent_result.command = AgentExecutionCompletedCommand(
+            execution_id="exec-0bac0e1ed2b2",
+            phase_id="verify",
+            session_id="s1",
+            exit_code=0,
+            last_agent_message=SAID,
+        )
+        # A real verdict, not a MagicMock: `_handle_run_agent` refuses to
+        # complete a phase whose verdict refuses completion (#1256), and every
+        # attribute of a MagicMock is truthy.
+        agent_result.stream_result.verdict = AgentVerdict.from_agent_text(SAID)
         agent_result.command.exit_code = 0
+        # The status the processor actually reads, which is the run's own rather
+        # than the completion's since #1341. On a MagicMock this would otherwise
+        # be a truthy mock and read as a non-zero exit.
+        agent_result.exit_code = 0
         agent_handler = MagicMock()
         agent_handler.handle = AsyncMock(return_value=agent_result)
         processor._agent_handler = agent_handler
@@ -488,7 +538,15 @@ class TestTheVerdictSurvivesEveryHop:
         collection_handler = MagicMock()
         collection_handler.handle = AsyncMock(
             return_value=ArtifactCollectionResult(
-                artifact_ids=["a1"], first_content="x", command=MagicMock(), files=[]
+                artifact_ids=["a1"],
+                first_content="x",
+                command=ArtifactsCollectedCommand(
+                    execution_id="exec-0bac0e1ed2b2",
+                    phase_id="verify",
+                    artifact_ids=["a1"],
+                    session_id="s1",
+                ),
+                files=[],
             )
         )
 
@@ -513,14 +571,14 @@ class TestTheVerdictSurvivesEveryHop:
             ".WorkflowExecutionProcessor.record_phase_conversation",
             new=AsyncMock(),
         ):
-            await processor._handle_run_agent(run_todo, phase, MagicMock())
+            await processor._handle_run_agent(run_todo, phase, aggregate, _DispatchContext())
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
-            await processor._handle_collect_artifacts(
-                collect_todo, phase, MagicMock(), [], PhaseOutputCache()
+            await processor._workspaces.collect(
+                collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 
         assert collection_handler.handle.await_args.kwargs["last_agent_message"] == SAID
@@ -548,6 +606,7 @@ class TestTheVerdictSurvivesEveryHop:
             session_id="s1",
             phase_name="Verify",
             output_artifact_types=("analysis_report",),
+            agent=UNREPORTED_AGENT,
             last_agent_message=SAID,
         )
 
@@ -556,12 +615,12 @@ class TestTheVerdictSurvivesEveryHop:
 
 
 class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
-    """The same empty-file shape on `collect_partial`, which has its own rules.
+    """The same empty-file shape on the keep-what-it-wrote path, which has its own rules.
 
     Not recovery: an interrupted phase's outcome is already decided by the
     interrupt, and substituting a transcript there would invent a deliverable
     for a run nobody reads as one. What is fixed is that the store's refusal
-    used to escape into `collect_partial`'s blanket `except` and abandon every
+    used to escape into that path's blanket `except` and abandon every
     REMAINING file, so one empty file cost the whole salvage.
     """
 
@@ -570,7 +629,7 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
         repo = _Repo()
         collector = ArtifactCollector(repo, None, None)
 
-        ids = await collector.collect_partial(
+        ids = await collector.collect_from_unfinished_phase(
             workspace=_Workspace(  # type: ignore[arg-type]
                 collected_files=[
                     ("artifacts/output/empty.md", b""),
@@ -583,6 +642,8 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
             session_id="s1",
             phase_name="Verify",
             output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
         )
 
         assert len(ids) == 1, "the file after the empty one must still be salvaged"

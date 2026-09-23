@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    NonZeroExitError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -547,18 +550,15 @@ class WorkspaceProvisionHandler:
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
-            # Names WHICH setup and WHICH phase (#1236), then lets the exit
-            # status lead (#1158): this message is what a caller persists as
-            # the execution's error_message, and stderr alone made a killed
-            # container read as a git failure.
-            raise RuntimeError(
-                describe_process_failure(
-                    f"Secret-injection setup for phase '{phase_name}'",
-                    exit_code=setup_result.exit_code,
-                    output=setup_result.stderr,
-                    timed_out=setup_result.timed_out,
-                )
+            detail = describe_process_failure(
+                f"Secret-injection setup for phase '{phase_name}'",
+                exit_code=setup_result.exit_code,
+                output=setup_result.stderr,
+                timed_out=setup_result.timed_out,
             )
+            if setup_result.signal_death is not None:
+                detail = f"{detail}\n{setup_result.signal_death.describe()}"
+            raise NonZeroExitError(detail, exit_code=setup_result.exit_code)
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)

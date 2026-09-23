@@ -33,7 +33,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
+    FailureClassification,
+    FinishedAgentRun,
     PhaseDefinition,
+    ReportedFailureReason,
+    StrandedDeliverable,
 )
 
 if TYPE_CHECKING:
@@ -132,10 +136,39 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
+        #: What kind of failure ended this run (#1357), for a run that has
+        #: ended in one. `UNCLASSIFIED` until a `WorkflowFailed` event says
+        #: otherwise, which is also what every such event written before the
+        #: field existed replays as.
+        self._failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+        self._reported_failure_reason: ReportedFailureReason | None = None
         self._cancel_reason: str | None = None
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
+        #: What each RUNNING phase's agent left behind, keyed by phase.
+        #:
+        #: Replayed state, not a cache. The salvage (#1195, #1300) turns this
+        #: into the phase's deliverable when nothing was written to
+        #: `artifacts/output/`, and the decision it feeds - complete or fail -
+        #: is a domain outcome. Held in the processor, as it was until #1300's
+        #: review, it was destroyed by any restart between the agent finishing
+        #: and its artifacts being collected: the rescue then worked only for
+        #: runs where nothing much had gone wrong. Entries are dropped as each
+        #: phase's artifacts are collected, so this never grows past the phases
+        #: currently in flight - and so their presence IS the statement that
+        #: the phase's output has not been collected yet.
+        self._finished_agent_runs: dict[str, FinishedAgentRun] = {}
+        #: The name each started phase goes by, so a salvage can title what it
+        #: stores the way the live collector titles it.
+        self._phase_names: dict[str, str] = {}
+        #: Phases whose deliverable was salvaged rather than written.
+        #:
+        #: Decided at collection and needed at completion, which are two
+        #: different to-do items and therefore two possible processes - the
+        #: same restart hazard as the message above, and here for the same
+        #: reason rather than because the value is expensive to recompute.
+        self._recovered_phases: set[str] = set()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -155,10 +188,78 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """
         return self._running_phase_id
 
+    def last_agent_message_for(self, phase_id: str) -> str | None:
+        """What this phase's agent said as it finished, or None.
+
+        The input to the #1195/#1300 salvage, answered from the event stream
+        so the answer is the same in the process that heard it and in one that
+        started afterwards.
+        """
+        run = self._finished_agent_runs.get(phase_id)
+        return run.last_agent_message if run is not None else None
+
+    @property
+    def stranded_deliverable(self) -> StrandedDeliverable | None:
+        """The deliverable this execution can still produce, or None.
+
+        Answers one question - "is there finished work here that nothing has
+        collected?" - so that a caller deciding what to do with an execution a
+        restart left running does not have to know which pair of events opens
+        and closes that window, nor that the window exists.
+
+        It is non-None for exactly the gap the salvage exists for: a phase
+        whose agent finished and said something, whose artifacts were never
+        collected, in an execution that is still RUNNING. Outside that gap
+        there is either nothing to recover or a deliverable already stored,
+        and in both cases the honest answer is None.
+        """
+        if self._status != ExecutionStatus.RUNNING:
+            return None
+        execution_id = self.aggregate_id
+        if execution_id is None:
+            return None
+        phase_id = self._running_phase_id
+        if phase_id is None:
+            return None
+        run = self._finished_agent_runs.get(phase_id)
+        if run is None:
+            return None
+        return StrandedDeliverable(
+            execution_id=execution_id,
+            workflow_id=self._workflow_id or "",
+            phase_id=run.phase_id,
+            phase_name=run.phase_name,
+            session_id=run.session_id,
+            last_agent_message=run.last_agent_message,
+        )
+
     @property
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    @property
+    def failure_classification(self) -> FailureClassification:
+        """What kind of failure ended this run, for a run that failed (#1357).
+
+        Beside `status` rather than folded into it: `failed` is what happened
+        and stays true for every value here, and this says what KIND. A run
+        that has not failed reads `UNCLASSIFIED`, which is also what a failure
+        recorded before the field existed reads - the aggregate cannot
+        distinguish those two and does not pretend to, because `status` already
+        does it exactly.
+        """
+        return self._failure_classification
+
+    @property
+    def reported_failure_reason(self) -> ReportedFailureReason | None:
+        """What the failing phase SAID caused it (#1372), None when it did not.
+
+        Apart from `failure_classification` deliberately and permanently: that
+        one is what the platform measured and is what failure numbers are
+        computed from, this one is a claim the run made about itself (#1392).
+        """
+        return self._reported_failure_reason
 
     @property
     def cancel_reason(self) -> str | None:
@@ -261,6 +362,32 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             observed_branches=(
                 None if command.observed_branches is None else list(command.observed_branches)
             ),
+            # Straight through, None included: "nothing observed a status" is
+            # a fact about the failure and coercing it to 0 would report a
+            # clean exit for a phase nobody watched (#1319).
+            exit_code=command.exit_code,
+            failed_phase_artifact_ids=list(command.failed_phase_artifact_ids),
+            # Spread into four named fields HERE, once, rather than carried as
+            # a nested object: every sibling `failed_phase_*` field on this
+            # event is flat, and the projection that reads them reads flat
+            # keys. The total is deliberately not a fifth field - it is derived
+            # from these four wherever it is wanted, so it cannot disagree with
+            # them (#1262).
+            failed_phase_input_tokens=command.failed_phase_usage.input_tokens,
+            failed_phase_output_tokens=command.failed_phase_usage.output_tokens,
+            failed_phase_cache_creation_tokens=command.failed_phase_usage.cache_creation_tokens,
+            failed_phase_cache_read_tokens=command.failed_phase_usage.cache_read_tokens,
+            # Straight from the command, never re-derived here (#1357). The
+            # only frame that could tell a correct refusal from a crash was the
+            # one holding the phase's own verdict, several hops upstream; an
+            # aggregate looking at `error_type` or at the message text would be
+            # guessing, and guessing is what put the distinction in prose.
+            failure_classification=command.classification,
+            # Beside it, never instead of it (#1392). The classification is
+            # what the platform measured; this is what the phase SAID, and the
+            # event is where the two stop being one frame's local variables and
+            # start being the record every read model is built from.
+            reported_failure_reason=command.reported_failure_reason,
         )
         self._apply(event)
 
@@ -305,6 +432,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             success=True,
             artifact_id=command.artifact_id,
             session_id=command.session_id,
+            # Read off replayed state rather than taken from the command: the
+            # salvage is decided at COLLECT_ARTIFACTS and reported here, a
+            # different to-do item and possibly a different process, so the
+            # only honest source is the stream. It also keeps
+            # CompletePhaseCommand - and every caller of it - unchanged.
+            deliverable_recovered=command.phase_id in self._recovered_phases,
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             cache_creation_tokens=command.cache_creation_tokens,
@@ -355,6 +488,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             exit_code=command.exit_code,
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
+            last_agent_message=command.last_agent_message,
         )
         self._apply(event)
 
@@ -380,6 +514,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             collected_at=datetime.now(UTC),
             first_content_preview=command.first_content_preview,
             session_id=command.session_id,
+            deliverable_recovered=command.deliverable_recovered,
         )
         self._apply(event)
 
@@ -519,12 +654,29 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at = _evt(event, "failed_at")
         self._error = _evt(event, "error_message")
         self._status = ExecutionStatus.FAILED
+        # Coerced rather than read, because this applier replays events older
+        # than the field: `from_stored` turns a missing key - and a member some
+        # newer writer knows and this reader does not - into `UNCLASSIFIED`
+        # instead of a `ValueError` that would stop the whole stream rehydrating
+        # (#1357).
+        self._failure_classification = FailureClassification.from_stored(
+            _evt(event, "failure_classification")
+        )
+        # Same coercion, same reason, one field over: a reason written by a
+        # newer version is a word this reader does not know, and reads as "no
+        # reason given" rather than stopping the stream (#1372).
+        self._reported_failure_reason = ReportedFailureReason.from_stored(
+            _evt(event, "reported_failure_reason")
+        )
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
         """Apply PhaseStartedEvent."""
         self._current_phase_order = _evt(event, "phase_order", 0)
-        self._running_phase_id = _evt(event, "phase_id")
+        phase_id = _evt(event, "phase_id")
+        self._running_phase_id = phase_id
+        if phase_id:
+            self._phase_names[phase_id] = _evt(event, "phase_name") or phase_id
 
     @event_sourcing_handler("PhaseCompleted")
     def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
@@ -538,13 +690,34 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._current_phase_workspace_id = _evt(event, "workspace_id")
 
     @event_sourcing_handler("AgentExecutionCompleted")
-    def on_agent_execution_completed(self, _event: AgentExecutionCompletedEvent) -> None:
-        """Apply AgentExecutionCompletedEvent — no state change needed."""
+    def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
+        """Apply AgentExecutionCompletedEvent — keep what the agent left behind."""
+        said = _evt(event, "last_agent_message")
+        if not said:
+            return
+        phase_id: str = _evt(event, "phase_id") or ""
+        if not phase_id:
+            return
+        self._finished_agent_runs[phase_id] = FinishedAgentRun(
+            phase_id=phase_id,
+            phase_name=self._phase_names.get(phase_id, phase_id),
+            session_id=_evt(event, "session_id") or "",
+            last_agent_message=said,
+        )
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
     def on_artifacts_collected_for_phase(self, event: ArtifactsCollectedForPhaseEvent) -> None:
         """Apply ArtifactsCollectedForPhaseEvent."""
         self._artifact_ids.extend(_evt(event, "artifact_ids", []))
+        phase_id = _evt(event, "phase_id")
+        if _evt(event, "deliverable_recovered", False):
+            self._recovered_phases.add(phase_id)
+        # The salvage input has done its job for this phase and stops being
+        # replayed state: a later to-do item for the same phase must re-read
+        # the deliverable, never re-salvage from a stale message. Dropping it
+        # is also what makes `stranded_deliverable` answer None once the
+        # output is safely stored.
+        self._finished_agent_runs.pop(phase_id, None)
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, _event: NextPhaseReadyEvent) -> None:

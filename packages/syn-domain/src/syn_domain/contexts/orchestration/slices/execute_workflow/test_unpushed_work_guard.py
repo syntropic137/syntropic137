@@ -31,22 +31,30 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import workspace_git
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     QuarantinedWork,
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
-    GitWorkspace,
+    _read_only_mount,
     quarantine_unpushed_work,
     refuse_to_complete_unsaved_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
@@ -54,6 +62,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import PhaseResult
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+        GitWorkspace,
+    )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -208,6 +219,25 @@ class _Clone:
         self.git("config", "protocol.ext.allow", "always")
         self.git("remote", "set-url", "origin", f"ext::sleep {seconds}")
 
+    def hang_the_clean_filter(self, seconds: int) -> None:
+        """Make reading this repository's worktree run a program that never returns.
+
+        THE LOCAL HALF of `hang_the_remote`, and the one that matters more
+        (#1231): a `clean` filter is code the REPOSITORY supplies and git runs
+        while reading files, so it turns a local command into an unbounded
+        wait without any network being involved. `.gitattributes` names the
+        driver and the repository's own config supplies the program - both of
+        them things a phase's checkout carries - and `git add --all`, which
+        the quarantine runs over every path, invokes it for each one.
+
+        A config value rather than a hook script on purpose: it needs no
+        executable file, so this stages the hang identically on a tmpdir
+        mounted `noexec`, where a hook would simply be ignored and the test
+        would pass for the wrong reason.
+        """
+        (self.path / ".gitattributes").write_text("* filter=syn-hang\n")
+        self.git("config", "filter.syn-hang.clean", f"sleep {seconds}")
+
     def break_the_remote(self) -> None:
         """Point origin somewhere that does not exist, so asking it fails.
 
@@ -240,9 +270,26 @@ class _Clone:
             == 0
         )
 
-    async def run_gate(self) -> None:
+    async def run_gate(
+        self, *, delivers_repo_changes: bool = True, workspace: GitWorkspace | None = None
+    ) -> None:
+        """Run the gate as `_PHASE_ID` - `implement`, which owns a branch.
+
+        True is the default here because it is what `implement` declares, and
+        because it is the reading every test above this line is about. The
+        tests that pass False say so at the call, where the declaration is the
+        thing under test (#1308).
+
+        ``workspace`` is for the tests that need the phase to have run
+        somewhere other than an ordinary writable checkout. Defaulting to this
+        clone's own is what makes "declared False and still failed" the
+        ordinary case rather than a contrived one.
+        """
         await quarantine_unpushed_work(
-            self.workspace, execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+            workspace if workspace is not None else self.workspace,
+            execution_id=_EXECUTION_ID,
+            phase_id=_PHASE_ID,
+            delivers_repo_changes=delivers_repo_changes,
         )
 
 
@@ -364,6 +411,177 @@ async def test_d_a_phase_that_changed_nothing_succeeds(clone: _Clone) -> None:
     assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
 
 
+# --------------------------------------------------------------------------
+# What it takes to exempt a dirty tree (#1308).
+#
+# `test_b` above and the two tests below stage THE SAME EVIDENCE - one
+# modified tracked file, uncommitted - and one of the three ends differently.
+# Nothing in the diff separates them, which is the whole finding: on
+# exec-e7e34af42553 a bootstrap phase ran `cargo check`, `Cargo.lock` was
+# rewritten, and the phase was failed for it.
+#
+# THE DECLARATION IS NOT WHAT SEPARATES THEM, and an earlier cut of this fix
+# said it was. `delivers_repo_changes: false` is a statement of intent by a
+# phase that still holds Bash and Write, so believing it on its own discards
+# an agent's real edit - #1184's exact failure, re-entered through the
+# exemption. What separates them is the declaration AND a read-only mount:
+# the phase disclaimed the change and was unable to make it.
+# --------------------------------------------------------------------------
+
+
+def _rewrite_a_tracked_lockfile(clone: _Clone, content: str) -> None:
+    """Stage #1308's evidence: one TRACKED file, modified, uncommitted.
+
+    Tracked and already pushed, in its own commit, before it is dirtied - so
+    what the gate sees afterwards is exactly the one porcelain line the
+    incident reported and nothing else. An untracked file would be a different
+    status code and a different question.
+    """
+    (clone.path / "Cargo.lock").write_text("written by cargo check\n")
+    clone.git("add", "Cargo.lock")
+    clone.git("commit", "-m", "track a lockfile")
+    clone.git("push", "origin", _BRANCH)
+    (clone.path / "Cargo.lock").write_text(content)
+    # `clone.git` strips, so the porcelain status code arrives without its
+    # leading space.
+    assert clone.git("status", "--porcelain") == "M Cargo.lock", (
+        "this fixture must leave exactly one modified tracked file"
+    )
+
+
+async def test_a_declaration_alone_does_not_exempt_a_writable_repository(
+    clone: _Clone,
+) -> None:
+    """THE CORRECTION #1317 NEEDED, and the one that costs the exemption its bite.
+
+    A phase declaring it delivers no repository changes, in the ordinary
+    workspace every phase actually gets - a checkout the agent owns and can
+    write. The declaration says the dirty file is not a deliverable; nothing
+    says the agent did not write it, and in this workspace the agent could
+    have. So it is treated as work: the phase fails and the change is
+    quarantined where someone can fetch it back.
+
+    This is `test_b` with the declaration flipped and the outcome unchanged,
+    which is the point. The phases that declare False in this repository hold
+    Bash or Write, research-experiment-plan's `experiment` phase among them, so
+    the alternative is an agent-authored edit destroyed with the container by
+    a gate built to prevent exactly that. A phase failed for a lockfile is
+    recoverable in one retry; an edit dropped on the floor is not recoverable
+    at all, and nobody is told it happened.
+    """
+    _rewrite_a_tracked_lockfile(clone, "or was this an agent? nothing here can tell\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "or was this an agent? nothing here can tell"
+    ), "the change the declaration discounted was not kept anywhere"
+
+
+async def test_the_lockfile_a_build_tool_rewrote_does_not_fail_a_read_only_phase(
+    clone: _Clone,
+) -> None:
+    """THE #1308 INCIDENT, in the shape it will have once it can be exempted.
+
+    A tracked lockfile, rewritten by a tool the phase ran while inspecting the
+    toolchain, in a phase whose deliverable is a markdown report AND whose
+    checkout was mounted read-only. Both halves hold, so the phase completes
+    and nothing is quarantined: no agent in that container could have authored
+    the line, whatever the line says.
+
+    NOTHING MOUNTS THEM READ-ONLY TODAY, so this is the contract the
+    provisioning half has to satisfy rather than a path production takes -
+    hence the mount table comes from a double. Until it does, #1308's incident
+    gets the test above instead, which is a phase failed for its tool's churn,
+    and that is the honest trade: it is the cheaper of the two mistakes.
+
+    The path is named `Cargo.lock` because that is what the incident named, and
+    for no other reason - the gate is told nothing about filenames and must
+    not be.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+
+    await clone.run_gate(
+        delivers_repo_changes=False,
+        workspace=_MountedReadOnly(clone.workspace, clone.path),
+    )
+
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_read_only_mount_does_not_exempt_a_phase_that_delivers_changes(
+    clone: _Clone,
+) -> None:
+    """The other half of "both, or neither".
+
+    A read-only mount is evidence about the agent, not permission to skip the
+    gate, so it cannot exempt a phase whose deliverable IS a branch. Without
+    this, reading the mount table first and the declaration never would pass
+    every other test here while switching #1184 off for `implement`.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an edit, in a phase that delivers edits\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(
+            delivers_repo_changes=True,
+            workspace=_MountedReadOnly(clone.workspace, clone.path),
+        )
+
+
+async def test_a_reporting_phase_that_committed_still_fails_and_keeps_its_work(
+    clone: _Clone,
+) -> None:
+    """THE GATE'S PURPOSE, which the declaration must not be able to switch off.
+
+    No build tool writes a commit, so a commit is an authoring act whatever the
+    phase declared. A phase that says it delivers no repository changes and
+    commits anyway has produced work, and that work must still be saved and the
+    phase must still fail - otherwise the declaration is a way to opt out of
+    #1184 entirely, one line at a time.
+    """
+    authored = clone.commit("investigation.py", "committed by a phase that said it would not\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.reachable_in_origin(authored, _QUARANTINE_REF)
+
+
+async def test_a_reporting_phase_holding_commits_quarantines_its_whole_tree(
+    clone: _Clone,
+) -> None:
+    """The declaration decides what COUNTS as work, never what gets SAVED.
+
+    Once a phase is failing for a commit, everything beside that commit is
+    worth keeping - including the uncommitted change the declaration said was
+    not a deliverable, because the judgement that produced that verdict is now
+    known to be about a phase that authored something after all.
+
+    So this holds both at once, and asserts the discounted change on BOTH
+    halves of the output, because they are built from different things and only
+    one of them is automatic. The commit's tree comes from `git add --all`,
+    which was never selective; the error's file list is `_UnsavedWork.files`,
+    which is chosen, and choosing the discounted subset there would hand an
+    operator a ref whose contents their own recovery notes do not mention.
+    """
+    clone.commit("investigation.py", "committed by a phase that said it would not\n")
+    (clone.path / "README.md").write_text("and the tool dirtied this too\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate(delivers_repo_changes=False)
+
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:README.md") == (
+        "and the tool dirtied this too"
+    ), "the quarantine commit is missing the working tree it was built from"
+    reported = [line.strip() for line in str(raised.value).splitlines()]
+    # Two spaces: the report prints the porcelain line verbatim, and its status
+    # code is " M" - modified in the tree, unstaged.
+    assert "uncommitted:  M README.md" in reported, (
+        f"the quarantine saved a path the report it printed does not name: {reported}"
+    )
+
+
 async def test_e_quarantining_touches_no_branch_and_no_tag(clone: _Clone) -> None:
     """(e) The quarantine push writes one ref and moves nothing else."""
     before = clone.origin_refs()
@@ -413,48 +631,14 @@ async def test_the_phase_that_holds_unpushed_work_is_never_reported_completed(
     ``completed`` with its work gone. So this asserts against the aggregate the
     processor would have told, not against the guard's return value.
     """
-    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-        ExecutionTodoProjection,
-    )
-
     clone.commit("never-pushed.py", "work the workspace was about to eat\n")
-    processor = WorkflowExecutionProcessor(
-        execution_repository=AsyncMock(),
-        session_repository=AsyncMock(),
-        workspace_service=MagicMock(),
-        artifact_repository=AsyncMock(),
-        artifact_content_storage=None,
-        artifact_query=None,
-        conversation_storage=None,
-        observability_writer=None,
-        controller=None,
-        prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
-        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
-    )
-    processor._runtime._workspaces[_PHASE_ID] = clone.workspace  # type: ignore[assignment]
-    aggregate = MagicMock(workflow_id="wf-1")
-    completed_phase_ids: list[str] = []
-
-    async def complete() -> None:
-        await processor._handle_complete_phase(
-            TodoItem(
-                execution_id=_EXECUTION_ID,
-                action=TodoAction.COMPLETE_PHASE,
-                phase_id=_PHASE_ID,
-                session_id="sess-1",
-            ),
-            aggregate,
-            [],
-            completed_phase_ids,
-        )
+    run = _PhaseRun(clone.workspace)
 
     with pytest.raises(UnpushedWorkQuarantinedError):
-        await complete()
+        await run.complete()
 
-    aggregate.complete_phase.assert_not_called()
-    assert completed_phase_ids == []
+    run.aggregate.complete_phase.assert_not_called()
+    assert run.completed_phase_ids == []
 
 
 # --------------------------------------------------------------------------
@@ -500,6 +684,7 @@ async def test_the_ref_is_named_from_the_todo_the_hop_was_handed(tmp_path: Path)
         await refuse_to_complete_unsaved_phase(
             {"verify": clone.workspace},
             _completing("verify", execution_id="exec-a-different-run"),
+            delivers_repo_changes=True,
         )
 
     refs = clone.origin_refs()
@@ -524,6 +709,7 @@ async def test_the_hop_inspects_the_phase_its_todo_names_and_no_other(tmp_path: 
     await refuse_to_complete_unsaved_phase(
         {"implement": running.workspace, "verify": completing.workspace},
         _completing("verify"),
+        delivers_repo_changes=True,
     )
 
     saved = [ref for ref in running.origin_refs() if ref.startswith("refs/syn/lost/")]
@@ -537,7 +723,9 @@ async def test_a_phase_whose_workspace_is_already_gone_is_holding_nothing() -> N
     the phase completes - and the gate must not go looking in some other
     phase's workspace for something to say about this one.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing("verify"))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing("verify"), delivers_repo_changes=True
+    )
 
 
 async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() -> None:
@@ -547,7 +735,9 @@ async def test_a_todo_with_no_phase_names_no_workspace_and_so_holds_nothing() ->
     hop has one answer for "no workspace to inspect" however it arises, rather
     than a `None` key that quietly matches nothing.
     """
-    await refuse_to_complete_unsaved_phase({"implement": _NeverRun()}, _completing(None))
+    await refuse_to_complete_unsaved_phase(
+        {"implement": _NeverRun()}, _completing(None), delivers_repo_changes=True
+    )
 
 
 # --------------------------------------------------------------------------
@@ -583,11 +773,26 @@ _UNREACHABLE = ExecutionResult(
 )
 
 
+def _unbounded(command: list[str]) -> list[str]:
+    """``command`` without the time bound the gate puts in front of every one.
+
+    `timeout --kill-after=<n> <n>` is three arguments the gate prepends to
+    everything it runs (#1231), so anything reading an argv positionally has
+    to step over them first.
+    """
+    return command[3:] if command[:1] == ["timeout"] else command
+
+
 def _operation(command: list[str]) -> str:
-    """What this argv is doing: the git subcommand, or the bare program."""
-    if "git" in command:
-        return command[command.index("git") + 3]  # git, -C, <repo>, <subcommand>
-    return command[0]
+    """What this argv is doing: the git subcommand, or the bare program.
+
+    Found after `-C <repo>` rather than at a fixed offset from `git`: the
+    `-c` overrides that disable hooks sit between the two and would move it.
+    """
+    argv = _unbounded(command)
+    if "-C" in argv:
+        return argv[argv.index("-C") + 2]
+    return argv[0]
 
 
 class _BreaksOn:
@@ -627,6 +832,133 @@ class _BreaksOn:
         return await self._inner.execute(command)
 
 
+class _FlakesOn:
+    """A real workspace whose named operation fails a bounded number of times."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        times: int,
+        returning: ExecutionResult = _UNREACHABLE,
+    ) -> None:
+        self._inner = inner
+        self._failing = failing
+        self._times = times
+        self._returning = returning
+        self.asked = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != self._failing:
+            return await self._inner.execute(command)
+        self.asked += 1
+        if self.asked <= self._times:
+            return self._returning
+        return await self._inner.execute(command)
+
+
+async def _skip_retry_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(workspace_git.asyncio, "sleep", no_wait)
+
+
+async def test_a_probe_that_dies_once_can_recover_a_clean_real_repository(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("shipped.py", "work that reached the remote\n")
+    clone.git("push", "origin", _BRANCH)
+    workspace = _FlakesOn(clone.workspace, "rev-parse", times=1)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+
+
+async def test_a_recovered_probe_still_quarantines_real_unpushed_work(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("never-pushed.py", "work that must survive\n")
+    workspace = _FlakesOn(clone.workspace, "status", times=1)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_every_failed_attempt_still_fails_closed(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    workspace = _FlakesOn(
+        clone.workspace,
+        "find",
+        times=workspace_git._MAX_ATTEMPTS,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == workspace_git._MAX_ATTEMPTS  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_fired_bound_is_not_retried(clone: _Clone, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _skip_retry_waits(monkeypatch)
+    bound = ExecutionResult(
+        exit_code=124,
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr="",
+    )
+    workspace = _FlakesOn(clone.workspace, "find", times=1, returning=bound)
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 1
+
+
+class _MountedReadOnly:
+    """The real workspace, except the given paths are on read-only mounts.
+
+    The enforcement half of #1308's exemption, staged the only way a test can
+    stage it: a real read-only bind mount needs CAP_SYS_ADMIN, which neither
+    this suite nor the agent it stands in for has - that impossibility is the
+    entire reason the gate trusts the mount table and not the phase.
+
+    So `cat /proc/self/mountinfo` is answered with a table in the kernel's own
+    format and EVERY OTHER COMMAND IS REAL, including the git that reads the
+    dirty tree. What is substituted is the world the phase ran in, never the
+    gate's reading of it.
+    """
+
+    def __init__(self, inner: GitWorkspace, *read_only: Path) -> None:
+        self._inner = inner
+        self._read_only = read_only
+
+    def _table(self) -> str:
+        lines = ["21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"]
+        lines += [
+            f"{index} 21 0:{index} / {path} ro,relatime shared:{index} - ext4 /dev/sdb rw"
+            for index, path in enumerate(self._read_only, start=30)
+        ]
+        return "\n".join(lines) + "\n"
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _unbounded(command) == ["cat", "/proc/self/mountinfo"]:
+            return ExecutionResult(
+                exit_code=0, success=True, duration_ms=0.0, stdout=self._table(), stderr=""
+            )
+        return await self._inner.execute(command)
+
+
 class _NoRepositories:
     """A reachable workspace holding no repositories at all.
 
@@ -649,7 +981,7 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object) -> None:
+    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
@@ -675,18 +1007,32 @@ class _PhaseRun:
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
-        self.processor._runtime._workspaces[_PHASE_ID] = workspace  # type: ignore[assignment]
-        self.processor._runtime.begin(
-            _PHASE_ID,
-            session_manager=self.session,  # type: ignore[arg-type]
-            started_at=datetime.now(UTC),
-        )
+        # `also_as` puts the SAME workspace behind a second phase id, which is
+        # what lets one dirty tree be completed twice under two declarations.
+        for phase_id in (_PHASE_ID, *([also_as] if also_as is not None else [])):
+            self.processor._runtime._workspaces[phase_id] = workspace  # type: ignore[assignment]
+            self.processor._runtime.begin(
+                phase_id,
+                session_manager=self.session,  # type: ignore[arg-type]
+                started_at=datetime.now(UTC),
+            )
 
     @property
     def workspace_still_held(self) -> bool:
         return _PHASE_ID in self.processor._runtime.live_workspaces
 
-    async def complete(self) -> None:
+    async def complete(self, *, delivers_repo_changes: bool = True) -> None:
+        """Complete the phase, as a phase declaring ``delivers_repo_changes``.
+
+        The declaration is carried on a real `ExecutablePhase`, which is what
+        `_dispatch` hands this handler, rather than passed to the handler as a
+        boolean: what has to survive the hop is the FIELD BEING READ off that
+        object, and a test that passed the boolean itself would stay green
+        with the read deleted (#1308).
+
+        True by default because `_PHASE_ID` is `implement`, which owns a
+        branch; the tests about the declaration itself say so at the call.
+        """
         await self.processor._handle_complete_phase(
             TodoItem(
                 execution_id=_EXECUTION_ID,
@@ -694,9 +1040,42 @@ class _PhaseRun:
                 phase_id=_PHASE_ID,
                 session_id="sess-1",
             ),
+            ExecutablePhase(
+                phase_id=_PHASE_ID,
+                name="Make the change",
+                order=1,
+                delivers_repo_changes=delivers_repo_changes,
+            ),
             self.aggregate,
             self.phase_results,
             self.completed_phase_ids,
+        )
+
+    async def dispatch_complete(self, phase_id: str, phases: list[ExecutablePhase]) -> None:
+        """Complete `phase_id` THE WAY run() does: through `_dispatch`.
+
+        `complete()` above hands `_handle_complete_phase` a phase built at the
+        call site, which is the wrong end of the hop it is asserting on: the
+        real caller is `_dispatch`, which looks the phase up in `phase_map` by
+        the to-do item's id. That lookup is where a phase's declaration could
+        be read off a DIFFERENT phase, and a test that constructs the phase
+        itself can never see it (#1317 review, MEDIUM 3).
+        """
+        await self.processor._dispatch(
+            todo=TodoItem(
+                execution_id=_EXECUTION_ID,
+                action=TodoAction.COMPLETE_PHASE,
+                phase_id=phase_id,
+                session_id="sess-1",
+            ),
+            aggregate=self.aggregate,
+            phase_map={phase.phase_id: phase for phase in phases},
+            phase_results=self.phase_results,
+            all_artifact_ids=[],
+            completed_phase_ids=self.completed_phase_ids,
+            phase_outputs=PhaseOutputCache(),
+            repos=None,
+            dispatch_ctx=_DispatchContext(),
         )
 
     async def fail_the_way_the_engine_does(self, error: Exception) -> object:
@@ -813,6 +1192,56 @@ async def test_d_a_failed_inspection_leaves_teardown_to_the_failure_path(
     assert not run.workspace_still_held, "the failure path left the workspace open"
 
 
+async def test_the_declaration_reaches_the_gate_from_the_phase_being_completed(
+    clone: _Clone,
+) -> None:
+    """THE HOP #1308 WAS LOST AT, asserted against the aggregate.
+
+    `_handle_complete_phase` was handed a `TodoItem` and nothing else, while
+    `_dispatch` had the `ExecutablePhase` one frame up and gave it to every
+    other handler. So the declaration had nowhere to arrive, and no test of the
+    guard alone can show that it now does: hand the gate the right boolean
+    directly and every one of them stays green with this hop deleted.
+
+    What is asserted is therefore the aggregate being TOLD the phase completed,
+    which is the outcome the incident got wrong - a phase that had done its job
+    reported as failed - with the dirty tree still sitting in the workspace.
+    The workspace is mounted read-only because the declaration alone no longer
+    exempts anything; both halves have to arrive for the hop to be visible at
+    all, and the declaration is the half that travels.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten AGAIN by cargo check\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path))
+
+    await run.complete(delivers_repo_changes=False)
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_the_same_workspace_completing_a_phase_that_owns_a_branch_still_fails(
+    clone: _Clone,
+) -> None:
+    """The other half of the hop, on identical evidence.
+
+    Same dirty lockfile, same workspace, same handler - only the phase's
+    declaration differs, and the outcome inverts. Without this, a hop that
+    ignored the phase and hardcoded False would satisfy the test above while
+    removing the gate from every phase in the system.
+    """
+    _rewrite_a_tracked_lockfile(clone, "edited by an agent that forgot to commit\n")
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.complete(delivers_repo_changes=True)
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "edited by an agent that forgot to commit"
+    )
+
+
 async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone) -> None:
     """(e) THE TRUE NEGATIVE THAT MUST NOT REGRESS.
 
@@ -834,7 +1263,10 @@ async def test_e_a_workspace_with_no_repositories_still_completes(clone: _Clone)
 async def test_e_at_the_gate_an_empty_but_reachable_workspace_is_silence() -> None:
     """(e) The same true negative one hop down, at the gate itself."""
     await quarantine_unpushed_work(
-        _NoRepositories(), execution_id=_EXECUTION_ID, phase_id=_PHASE_ID
+        _NoRepositories(),
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        delivers_repo_changes=True,
     )
 
 
@@ -1284,3 +1716,149 @@ def test_a_record_that_names_neither_a_ref_nor_a_reason_is_rejected() -> None:
                 pushed_ref=pushed_ref,
                 push_error=push_error,
             )
+
+
+# --------------------------------------------------------------------------
+# The phase_map lookup (#1317 review, MEDIUM 3).
+#
+# Both tests below run ONE workspace holding ONE dirty tree through the real
+# `_dispatch`, twice, changing only which phase id the to-do item names. The
+# declarations are opposite, so a `_dispatch` that took the wrong entry out of
+# `phase_map` - the first, the last, the one being provisioned - swaps the two
+# outcomes, and neither test can be satisfied by the handler alone.
+# --------------------------------------------------------------------------
+
+_REPORTING_PHASE_ID = "bootstrap"
+
+
+def _two_phases_declaring_opposite_things() -> list[ExecutablePhase]:
+    """The phase map of a workflow with one of each, in that order."""
+    return [
+        ExecutablePhase(
+            phase_id=_REPORTING_PHASE_ID,
+            name="Check the toolchain",
+            order=1,
+            delivers_repo_changes=False,
+        ),
+        ExecutablePhase(
+            phase_id=_PHASE_ID,
+            name="Make the change",
+            order=2,
+            delivers_repo_changes=True,
+        ),
+    ]
+
+
+async def test_dispatch_reads_the_declaration_of_the_phase_the_todo_names(
+    clone: _Clone,
+) -> None:
+    """The reporting phase's own entry, found by id, in a read-only checkout.
+
+    `bootstrap` is first in the map and second would also be a passing
+    accident, so the companion test below names the other one against the same
+    map and the same tree.
+    """
+    _rewrite_a_tracked_lockfile(clone, "rewritten by cargo check\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    await run.dispatch_complete(_REPORTING_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_REPORTING_PHASE_ID]
+    assert not [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_dispatch_does_not_lend_one_phases_declaration_to_another(
+    clone: _Clone,
+) -> None:
+    """The same map, the same tree, the same mount - the other phase id.
+
+    `implement` delivers a branch, so its dirty tree is work however
+    read-only the mount was and however its neighbour was declared. If this
+    quarantines nothing, the gate is reading a phase the to-do item did not
+    name, and every phase downstream of a reporting one has lost #1184.
+    """
+    _rewrite_a_tracked_lockfile(clone, "an agent's edit, never committed\n")
+    run = _PhaseRun(_MountedReadOnly(clone.workspace, clone.path), also_as=_REPORTING_PHASE_ID)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await run.dispatch_complete(_PHASE_ID, _two_phases_declaring_opposite_things())
+
+    run.aggregate.complete_phase.assert_not_called()
+    assert clone.origin_git("show", f"{_QUARANTINE_REF}:Cargo.lock") == (
+        "an agent's edit, never committed"
+    )
+
+
+# --------------------------------------------------------------------------
+# Reading the mount table (#1308).
+#
+# The gate weakens itself on this answer, so every way of getting it wrong
+# costs work. The tables below are in the kernel's own format; the fields the
+# reader uses are the 5th and 6th, and everything either side of them is
+# present so that a reader counting from the wrong end fails here.
+# --------------------------------------------------------------------------
+
+_ROOT_MOUNT = "21 20 0:20 / / rw,relatime shared:1 - overlay overlay rw"
+
+
+@pytest.mark.parametrize(
+    ("table", "expected", "why"),
+    [
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount at the repository itself",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a read-only mount ABOVE it still governs it",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,relatime - ext4 /dev/sdb rw",
+            False,
+            "a writable mount at the repository itself",
+        ),
+        (
+            _ROOT_MOUNT,
+            False,
+            "nothing but a writable root",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/application ro - ext4 /dev/sdb rw",
+            False,
+            "a LONGER sibling path is not this repository - prefix, not path, matching",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:1 / /workspace ro,relatime - ext4 /dev/sdb rw\n"
+            "31 30 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw",
+            False,
+            "a WRITABLE mount nested inside a read-only one: the deepest wins",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n"
+            "30 21 8:2 / /workspace/repos rw,relatime - ext4 /dev/sdc rw\n"
+            "31 30 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "and the same nesting the other way round",
+        ),
+        (
+            f"{_ROOT_MOUNT}\ntruncated nonsense\n"
+            "30 21 8:1 / /workspace/repos/app ro,relatime - ext4 /dev/sdb rw",
+            True,
+            "a line that is not a record is skipped, not guessed at",
+        ),
+        (
+            f"{_ROOT_MOUNT}\n30 21 8:1 / /workspace/repos/app rw,ro_something - ext4 /dev/sdb rw",
+            False,
+            "an option that merely STARTS with ro is not ro",
+        ),
+    ],
+)
+def test_the_mount_table_is_read_for_the_path_that_governs(
+    table: str, expected: bool, why: str
+) -> None:
+    """One repository path, nine tables, and the reading that decides the gate."""
+    assert _read_only_mount(table, "/workspace/repos/app") is expected, why

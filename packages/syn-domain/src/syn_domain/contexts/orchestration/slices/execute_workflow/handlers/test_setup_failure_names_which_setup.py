@@ -133,7 +133,7 @@ async def test_setup_failure_with_no_stderr_still_names_setup_and_phase() -> Non
     )
 
     assert f"Secret-injection setup for phase '{FAILING_PHASE_NAME}'" in message
-    assert "Setup phase" not in message
+    assert "Setup phase failed" not in message
     assert "exited 2" in message
 
 

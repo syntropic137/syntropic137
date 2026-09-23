@@ -19,10 +19,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    _DispatchContext,
 )
 
 
-def _make_processor() -> WorkflowExecutionProcessor:
+def _make_processor(artifact_repository: object | None = None) -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -48,7 +49,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
         workspace_service=workspace_service,
-        artifact_repository=AsyncMock(),
+        artifact_repository=artifact_repository or AsyncMock(),
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
@@ -111,6 +112,7 @@ class TestAgentRunnerSelection:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
         phase = ExecutablePhase(
             phase_id="p-1",
@@ -130,6 +132,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         assert handler.handle.await_args.kwargs["runner"] == expected_runner
@@ -168,6 +171,7 @@ class TestAgentRunnerSelection:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
 
         session_mgr = MagicMock()
@@ -192,6 +196,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
         session_mgr.mark_launched.assert_not_awaited()
@@ -223,6 +228,7 @@ class TestAgentRunnerSelection:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=["agent"],
+            delivers_repo_changes=True,
         )
         # Deliberately no session manager registered for this phase.
 
@@ -244,6 +250,7 @@ class TestAgentRunnerSelection:
                 ),
                 phase,
                 MagicMock(workflow_id="wf-1"),
+                _DispatchContext(),
             )
 
 
@@ -455,6 +462,7 @@ class TestProcessorCancellation:
             workspace_cm=workspace_cm_a,
             agent_env={"FOO": "bar"},
             claude_cmd=["claude", "--model", "haiku"],
+            delivers_repo_changes=True,
         )
         processor._runtime.attach_workspace(
             "phase-b",
@@ -462,6 +470,7 @@ class TestProcessorCancellation:
             workspace_cm=workspace_cm_b,
             agent_env={"BAZ": "qux"},
             claude_cmd=["claude", "--model", "sonnet"],
+            delivers_repo_changes=True,
         )
 
         started_at = datetime.now(UTC)
@@ -517,6 +526,7 @@ class TestProcessorCancellation:
             workspace_cm=failing_cm,
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
         # phase-b holds a workspace CM and nothing else, which is what a phase
         # that died between provisioning and its first use looks like.
@@ -666,7 +676,7 @@ class TestStaleCollectArtifactsGuard:
 
         assert processor._runtime.workspace_for("p-1") is None
 
-        await processor._handle_collect_artifacts(
+        await processor._workspaces.collect(
             todo,
             phase,
             aggregate,
@@ -740,6 +750,7 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
             workspace_cm=AsyncMock(),
             agent_env={},
             claude_cmd=[],
+            delivers_repo_changes=True,
         )
 
         handler = MagicMock()
@@ -763,10 +774,10 @@ class TestPhaseOutputCacheCarriesTheWholeTree:
 
         with patch(
             "syn_domain.contexts.orchestration.slices.execute_workflow"
-            ".WorkflowExecutionProcessor.ArtifactCollectionHandler",
+            ".phase_workspace.ArtifactCollectionHandler",
             return_value=handler,
         ):
-            await processor._handle_collect_artifacts(todo, phase, MagicMock(), [], cache)
+            await processor._workspaces.collect(todo, phase, MagicMock(), [], cache)
 
         assert cache.files == {"p-1": files}
         assert cache.primary == {"p-1": "r"}

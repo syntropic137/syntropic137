@@ -259,7 +259,7 @@ class WorkspaceService:
             isolation=isolation,  # type: ignore[arg-type]
             sidecar=sidecar,
             token_injection=token_injection,
-            event_stream=event_stream,  # type: ignore[arg-type]
+            event_stream=event_stream,
             config=cfg,
         )
 
@@ -291,13 +291,13 @@ class WorkspaceService:
         store = InMemoryTokenStore()
         tvs = TokenVendingService(store)
         vending = TokenVendingServiceAdapter(tvs)
-        token_injection = SidecarTokenInjectionAdapter(vending, sidecar)  # type: ignore[arg-type]  # MemorySidecarAdapter satisfies SidecarPort protocol
+        token_injection = SidecarTokenInjectionAdapter(vending, sidecar)
 
         return cls(
             isolation=isolation,
-            sidecar=sidecar,  # type: ignore[arg-type]  # MemorySidecarAdapter satisfies SidecarPort protocol
+            sidecar=sidecar,
             token_injection=token_injection,
-            event_stream=event_stream,  # type: ignore[arg-type]
+            event_stream=event_stream,
             config=cfg,
         )
 
@@ -365,13 +365,13 @@ class WorkspaceService:
         store = InMemoryTokenStore()
         tvs = TokenVendingService(store)
         vending = TokenVendingServiceAdapter(tvs)
-        token_injection = SidecarTokenInjectionAdapter(vending, sidecar)  # type: ignore[arg-type]  # MemorySidecarAdapter satisfies SidecarPort protocol
+        token_injection = SidecarTokenInjectionAdapter(vending, sidecar)
 
         return cls(
             isolation=isolation,
-            sidecar=sidecar,  # type: ignore[arg-type]  # MemorySidecarAdapter satisfies SidecarPort protocol
+            sidecar=sidecar,
             token_injection=token_injection,
-            event_stream=event_stream,  # type: ignore[arg-type]
+            event_stream=event_stream,
             config=cfg,
         )
 

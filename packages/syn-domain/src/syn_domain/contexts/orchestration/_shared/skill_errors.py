@@ -160,6 +160,7 @@ class SkillInstallFailed(SkillError):
     """
 
     error_code = "skill_install_failed"
+    exit_code: int
 
     #: What an operator can read before the message stops being a message.
     #: ``skills add`` can print a great deal and this text is stored per
@@ -177,7 +178,7 @@ class SkillInstallFailed(SkillError):
         timed_out: bool = False,
     ) -> SkillInstallFailed:
         """The in-container ``skills add`` ran and did not succeed."""
-        return cls(
+        failure = cls(
             describe_process_failure(
                 f"installing skill {skill_name!r} for agent {agent!r}",
                 exit_code=exit_code,
@@ -185,6 +186,8 @@ class SkillInstallFailed(SkillError):
                 timed_out=timed_out,
             )
         )
+        failure.exit_code = exit_code
+        return failure
 
     @classmethod
     def not_attempted(cls, skill_name: str, reason: str) -> SkillInstallFailed:

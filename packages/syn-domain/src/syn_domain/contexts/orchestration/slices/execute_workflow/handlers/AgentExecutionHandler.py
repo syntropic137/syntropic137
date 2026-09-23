@@ -22,6 +22,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProces
     MISSING_TERMINAL_TURN_REASON,
     CodexStreamProcessor,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    ExitStatusUnavailableError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
     StreamResult,
@@ -55,15 +58,37 @@ def _detect_exit_code(
     workspace: ManagedWorkspace,
     phase_id: str,
     tokens: TokenAccumulator,
-) -> int:
-    """Determine agent exit code from stream result and workspace state.
+) -> int | None:
+    """What the agent's process exited with, or None if nothing observed it.
 
-    Note: If interrupt_requested=True, the caller is responsible for routing
-    to the cancellation path. This function returns only the actual process
-    exit code.
+    0 IS RETURNED ONLY WHEN THE VALUE IS EXPLICITLY 0 (#1319). The workspace
+    reports None whenever no stream status was ever completed, and that
+    includes a container removed out from under the run - so returning 0 for
+    None made "exited cleanly" and "nobody was left to watch" the same answer.
+    They are opposite situations needing opposite responses, and 0 is the one
+    that gets acted on. The caller turns this None into a failure carrying no
+    status at all; see `ExitStatusUnavailableError`.
+
+    THERE IS NO EXCEPTION FOR A CANCELLED RUN (#1341). One used to live here,
+    returning 0 when `interrupt_requested` was set, on the reasoning that the
+    caller routes cancellation on that flag and never reads this number. The
+    reasoning was wrong twice over: `record_phase_conversation` stores
+    `success = exit_code == 0` one hop BEFORE that routing runs, so every
+    cancelled phase's transcript was filed as a success; and "no consumer reads
+    it" describes today's callers, not the value, which was free to mean
+    "exited cleanly" to any consumer added later.
+
+    A cancelled run is expressed by the PATH it takes - `ExecutionCancelledEvent`,
+    which carries no exit status at all - so this number never had to carry that
+    meaning. Interrupting a process tells you that it was asked to stop, not what
+    it stopped with; the status is as unobserved here as anywhere else, and None
+    says so. `_run_headless` reads `interrupt_requested` itself to tell a
+    cancellation from a genuinely unexplained one.
     """
     stream_exit_code = workspace.last_stream_exit_code
-    if stream_exit_code is not None and stream_exit_code != 0:
+    if stream_exit_code is None:
+        return None
+    if stream_exit_code != 0:
         logger.error(
             "Agent CLI exited with code %d (phase=%s, lines=%d)",
             stream_exit_code,
@@ -102,6 +127,48 @@ async def _produced_deliverable(workspace: ManagedWorkspace, phase_id: str) -> b
         )
         return False
     return any(content for _, content in collected)
+
+
+async def _exit_code_after_codex_verdict(
+    *,
+    runner: AgentRunner,
+    stream_result: StreamResult,
+    exit_code: int | None,
+    workspace: ManagedWorkspace,
+    phase_id: str,
+) -> int | None:
+    """``exit_code``, overridden to 1 when codex could not trust its own stream.
+
+    The codex parser reserves ``error_reason`` for a BROKEN stream (malformed
+    JSON, no terminal ``turn.completed``), and that verdict has to outrank a
+    process that exited 0: exiting cleanly says nothing about whether the
+    stream the process wrote was complete.
+
+    ONE exception (issue #1111): a stream that simply stopped before
+    ``turn.completed``, having produced the phase's deliverable, is a telemetry
+    gap and not a failed phase. Failing it discards finished work and skips
+    every downstream phase - three complete codex reviews were lost this way in
+    twelve hours. An auth failure or a malformed line still fails here, because
+    it carries a DIFFERENT reason and because a codex that never authenticated
+    writes nothing to artifacts/output.
+
+    A ``None`` exit code is returned untouched. "Nobody observed the exit" is
+    not a verdict this can improve on, and it is the caller's to fail (#1319);
+    turning it into a number here would be the same invention that issue is
+    about, just one function further down.
+    """
+    if runner != AgentRunner.CODEX or stream_result.error_reason is None or exit_code != 0:
+        return exit_code
+    if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
+        await _produced_deliverable(workspace, phase_id)
+    ):
+        logger.warning(
+            "Codex stream ended without turn.completed but the phase produced "
+            "a deliverable (phase=%s) - completing with ESTIMATED usage",
+            phase_id,
+        )
+        return exit_code
+    return 1
 
 
 @dataclass(frozen=True)
@@ -162,21 +229,47 @@ class FinalUsage:
 
 
 class AgentExecutionResult:
-    """Result of agent execution."""
+    """What one agent run produced: what it spent, how it ended, what to report.
 
-    __slots__ = ("command", "stream_result", "subagents", "tokens")
+    `command` is the completion to hand the aggregate, and it is None for a run
+    that did not complete. A CANCELLED run is the case: it has no exit status to
+    report and nothing to claim, and `AgentExecutionCompletedEvent.exit_code` is
+    an `int`, because a completion always exited with something. Rather than
+    invent a number to fill that field on a run that never reached it - which is
+    the #1319 defect wearing the cancel path as a disguise (#1341) - there is no
+    command, and the processor routes the cancellation instead.
+
+    `exit_code` is the authoritative status for consumers that only need to know
+    how the process ended, and it is None on exactly the same terms as anywhere
+    else: nothing observed one. Reading it rather than `command.exit_code` is
+    what lets those consumers run before the completion is decided, which is
+    where the transcript recorder sits.
+
+    `usage` is what the phase spent and is always real, cancelled or not: a run
+    killed after an hour of tool calls did not cost nothing (#1164).
+    """
+
+    __slots__ = ("command", "exit_code", "stream_result", "subagents", "tokens", "usage")
 
     def __init__(
         self,
         stream_result: StreamResult,
         tokens: TokenAccumulator,
         subagents: SubagentTracker,
-        command: AgentExecutionCompletedCommand,
+        command: AgentExecutionCompletedCommand | None,
+        *,
+        exit_code: int | None = None,
+        usage: FinalUsage | None = None,
     ) -> None:
         self.stream_result = stream_result
         self.tokens = tokens
         self.subagents = subagents
         self.command = command
+        # A command IS a completion, so it carries the status; `exit_code` is
+        # read only when there is no command to take it from. Keeping the two
+        # from disagreeing matters more than saving the caller an argument.
+        self.exit_code = command.exit_code if command is not None else exit_code
+        self.usage = usage if usage is not None else FinalUsage.resolve(stream_result, tokens)
 
 
 class AgentExecutionHandler:
@@ -257,6 +350,13 @@ class AgentExecutionHandler:
                 phase_id=todo.phase_id,
                 session_id=session_id,
                 agent_model=agent_model,
+                # The workspace IS the rollout source: codex wrote the file
+                # inside this container, so the thing that can still reach it
+                # is the thing that still holds the container (#1284). Passing
+                # it here rather than reading the model later is what keeps the
+                # read inside the container's lifetime - by collection time the
+                # workspace is torn down and the only copy is gone.
+                rollout=workspace,
             )
         return EventStreamProcessor(
             tokens=tokens,
@@ -327,33 +427,13 @@ class AgentExecutionHandler:
             await launch.settle(workspace.last_stream_exit_code)
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
-        if (
-            runner == AgentRunner.CODEX
-            and stream_result.error_reason is not None
-            and exit_code == 0
-        ):
-            # The codex parser reserves error_reason for a BROKEN stream
-            # (malformed JSON / missing terminal turn.completed); force a
-            # non-zero phase exit even when the process exit was 0.
-            #
-            # ONE exception (issue #1111): a stream that simply stopped before
-            # `turn.completed`, having produced the phase's deliverable, is a
-            # telemetry gap, not a failed phase. Failing it discards finished
-            # work and skips every downstream phase - three complete codex
-            # reviews were lost this way in twelve hours. An auth failure or a
-            # malformed line still fails here, because it carries a DIFFERENT
-            # reason and because a codex that never authenticated writes
-            # nothing to artifacts/output.
-            if stream_result.error_reason == MISSING_TERMINAL_TURN_REASON and (
-                await _produced_deliverable(workspace, todo.phase_id)
-            ):
-                logger.warning(
-                    "Codex stream ended without turn.completed but the phase produced "
-                    "a deliverable (phase=%s) - completing with ESTIMATED usage",
-                    todo.phase_id,
-                )
-            else:
-                exit_code = 1
+        exit_code = await _exit_code_after_codex_verdict(
+            runner=runner,
+            stream_result=stream_result,
+            exit_code=exit_code,
+            workspace=workspace,
+            phase_id=todo.phase_id,
+        )
 
         # Resolved ONCE, for both lanes. The session_summary used to be written
         # straight from `stream_result.result_*` while the command below used
@@ -383,6 +463,39 @@ class AgentExecutionHandler:
                 totals_are_authoritative=usage.is_authoritative,
             )
 
+        # AFTER the session summary above, and that order is deliberate: the
+        # tokens a phase burned are Lane 2 and are true whether or not anyone
+        # saw the process exit. Raising before the summary would make an
+        # unobservable exit also an uncosted one.
+        #
+        # There is no `exit_code` to put on the command, so no command is
+        # built. `AgentExecutionCompletedCommand` can only say the run
+        # completed with a number, and the one thing known here is that the
+        # number is unknown - writing 0 into it is exactly the lie #1319 is
+        # about. The failure path records the status as absent instead.
+        #
+        # A CANCELLATION IS NOT AN UNEXPLAINED EXIT, and this is the only place
+        # that can tell them apart (#1341). Both arrive here with no status,
+        # because the stream loop interrupts the process and breaks without
+        # waiting for one - so an unobserved status is the ORDINARY end of a
+        # cancelled run, not a rare one. The difference is that here we know
+        # why: we asked it to stop. Raising would report the user's own cancel
+        # as a failed execution, so the run returns normally and the processor
+        # routes it on `interrupt_requested`, as it already does. It returns
+        # WITHOUT a command: there is still no status, and nothing is owed one.
+        if exit_code is None and not stream_result.interrupt_requested:
+            raise ExitStatusUnavailableError(todo.phase_id, lines_seen=stream_result.line_count)
+
+        if exit_code is None:
+            return AgentExecutionResult(
+                stream_result=stream_result,
+                tokens=tokens,
+                subagents=subagents,
+                command=None,
+                exit_code=None,
+                usage=usage,
+            )
+
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
@@ -392,6 +505,10 @@ class AgentExecutionHandler:
             output_tokens=usage.output_tokens,
             cache_creation_tokens=usage.cache_creation,
             cache_read_tokens=usage.cache_read,
+            # Onto the command, and from there onto the event, so a restart
+            # between here and artifact collection cannot lose the salvage
+            # input (#1195, #1300).
+            last_agent_message=stream_result.last_agent_message,
         )
 
         return AgentExecutionResult(
@@ -399,4 +516,5 @@ class AgentExecutionHandler:
             tokens=tokens,
             subagents=subagents,
             command=command,
+            usage=usage,
         )

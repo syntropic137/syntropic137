@@ -7,12 +7,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+# Runtime import: FailExecutionCommand defaults an absent usage to zeros rather
+# than carrying None into the aggregate, so the class is constructed here.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
+
 if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        FailureClassification,
         PhaseDefinition,
+        ReportedFailureReason,
     )
 
 
@@ -79,8 +85,13 @@ class FailExecutionCommand:
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,
+        classification: FailureClassification,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
+        failed_phase_artifact_ids: tuple[str, ...] = (),
+        failed_phase_usage: PhaseUsage | None = None,
+        reported_failure_reason: ReportedFailureReason | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.error = error
@@ -99,6 +110,47 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
+        #: What the failed phase had already written, kept out of its workspace
+        #: before this failure tore it down (#1321). `()` when it wrote nothing
+        #: collectable, which is every failure that got this far before.
+        #:
+        #: NOT three-valued, unlike the field above: "nothing was kept" and
+        #: "nobody looked" need no telling apart here, because the collection
+        #: is attempted on every path that reaches this command and cannot
+        #: raise. Failing to store an artifact is logged where it happens and
+        #: leaves this empty - the same answer as a phase that wrote nothing,
+        #: and the same consequence either way.
+        self.failed_phase_artifact_ids = failed_phase_artifact_ids
+        #: What the failed phase had spent when it died (#1262), zeros when its
+        #: agent never ran. Here rather than only in `error_message`, which is
+        #: where these counts lived: an exit 124 reporting `(tokens=190+545)` in
+        #: prose was a phase that had stalled, and an exit 124 with 171 messages
+        #: and 133 tool calls behind it needed a bigger budget. Same exit code,
+        #: opposite responses, and no field either could be sorted on.
+        self.failed_phase_usage = failed_phase_usage or PhaseUsage()
+        #: Whether the machinery failed or the work was correctly judged not
+        #: deliverable (#1357). REQUIRED, unlike every optional field above,
+        #: and the only field on this command that is: there are three places
+        #: in production that fail an execution, they fail it for genuinely
+        #: different reasons, and a default here would let a new fourth one
+        #: inherit whichever answer happened to be written years earlier. Two
+        #: of the three are unambiguously the platform - a restart orphaning a
+        #: run, a stale-execution sweep - and saying so at those call sites is
+        #: documentation a default would delete.
+        self.classification = classification
+        #: What the failing PHASE said caused it (#1372), `None` when it said
+        #: nothing this reader knows - which is every one of the three call
+        #: sites above except the one that read an agent's own report, and is
+        #: why this defaults where the field above does not. Carried beside
+        #: the classification and never folded into it (#1392): an operator
+        #: reads the agent's word, and no number is computed from it.
+        self.reported_failure_reason = reported_failure_reason
 
 
 class StartPhaseCommand:
@@ -234,7 +286,13 @@ class ProvisionWorkspaceCompletedCommand:
 
 
 class AgentExecutionCompletedCommand:
-    """Command reported by AgentExecutionHandler after agent finishes."""
+    """Command reported by AgentExecutionHandler after agent finishes.
+
+    `last_agent_message` is the closing message the agent produced on its own
+    stream, and it is on this command - rather than held by the processor -
+    because it is the salvage input (#1195, #1300) and the salvage has to work
+    after a restart. See `AgentExecutionCompletedEvent.last_agent_message`.
+    """
 
     def __init__(
         self,
@@ -246,6 +304,7 @@ class AgentExecutionCompletedCommand:
         output_tokens: int = 0,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
+        last_agent_message: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -255,6 +314,7 @@ class AgentExecutionCompletedCommand:
         self.output_tokens = output_tokens
         self.cache_creation_tokens = cache_creation_tokens
         self.cache_read_tokens = cache_read_tokens
+        self.last_agent_message = last_agent_message
 
 
 class ArtifactsCollectedCommand:
@@ -267,9 +327,15 @@ class ArtifactsCollectedCommand:
         artifact_ids: list[str],
         first_content_preview: str | None = None,
         session_id: str | None = None,
+        deliverable_recovered: bool = False,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
         self.first_content_preview = first_content_preview
         self.session_id = session_id
+        #: Whether what was stored came from the transcript rather than from
+        #: disk. Collection is the only place that knows, and the phase does
+        #: not complete until a later to-do item, so the fact has to be told
+        #: to the aggregate here or be lost (#1195, #1300).
+        self.deliverable_recovered = deliverable_recovered

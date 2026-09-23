@@ -62,6 +62,12 @@ class _NullCollector:
     async def record_tool_started(self, **kwargs: object) -> None:
         self.calls.append(("tool_started", kwargs))
 
+    def note_agent_activity(self) -> None:
+        # Deliberately not recorded as a call: this is a bare fact the stream
+        # processors set on anything the agent did, and every assertion in this
+        # file is about what was RECOGNISED (#1303).
+        return
+
     async def record_tool_completed(self, **kwargs: object) -> None:
         self.calls.append(("tool_completed", kwargs))
 
@@ -109,6 +115,7 @@ def _codex_processor() -> CodexStreamProcessor:
         phase_id="p-1",
         session_id="sess-1",
         agent_model="gpt-5.6",
+        rollout=None,
     )
 
 
