@@ -135,6 +135,20 @@ prevents endless host retry work but does not remove already queued exporter
 copies or remote bodies. Those remain required cross-store work. Test log:
 `/private/tmp/1398-expiry-delivery.log`.
 
+## Replica deletion foundation
+
+SeshMagic commit `05cd9b2` adds migration 0011 and exact qualified-revision
+tombstones. The namespace-authorized DELETE endpoint removes the stored envelope,
+retains identity/inventory history, and blocks late or concurrent re-upload with
+HTTP 410. Tombstones can precede capture. Two real PostgreSQL tests and the real
+HTTP authorization/inventory integration test pass; workspace Clippy passes.
+Logs: `/private/tmp/1398-sesh-delete-sql.log` and
+`/private/tmp/1398-sesh-delete-http.log`.
+
+Exporter tombstone transport, origin scheduling, queue cleanup and the complete
+cross-store interruption matrix remain unfinished. This commit is local and has
+not yet been pushed to the existing SeshMagic draft PR.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push
