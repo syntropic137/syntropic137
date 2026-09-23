@@ -22,6 +22,7 @@ from syn_domain.contexts.agent_sessions import (
     SchedulePendingInventoryHandler,
 )
 
+from .body_availability import PostgresBodyAvailability
 from .body_retention import LocalBodyRetention
 from .capture_catalog import PostgresCaptureCatalog
 from .child_journal import ChildJournalDrain
@@ -60,6 +61,7 @@ class InventoryRuntime:
     inventory: PostgresSessionInventory
     jobs: PostgresSessionInventoryJobs
     archive: LocalSessionTranscriptArchive
+    body_availability: PostgresBodyAvailability
     transcripts: ReadLocalTranscriptHandler
     repository: RepositoryAdapter[InventoryReconciliationAggregate]
     processor: InventoryReconciliationProcessManager
@@ -161,6 +163,7 @@ async def create_inventory_runtime(
         inventory=inventory,
         jobs=jobs,
         archive=archive,
+        body_availability=PostgresBodyAvailability(pool),
         transcripts=ReadLocalTranscriptHandler(
             PostgresCaptureCatalog(pool), archive, InstallationTranscriptAccess(pool, source_id)
         ),

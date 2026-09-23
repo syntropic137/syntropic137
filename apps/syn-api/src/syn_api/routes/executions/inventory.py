@@ -115,7 +115,12 @@ async def get_session_inventory_page(
         )
     except InventoryNotFound as exc:
         raise HTTPException(status_code=404, detail="Published inventory not found") from exc
-    return SessionInventoryPageResponse.model_validate(page.model_dump())
+    overrides = (
+        await get_inventory_runtime().body_availability.overrides(page) if kind == "capture" else ()
+    )
+    return SessionInventoryPageResponse.model_validate(
+        {**page.model_dump(), "body_overrides": overrides}
+    )
 
 
 @router.post("/executions/{execution_id}/session-inventory/reconcile", status_code=202)

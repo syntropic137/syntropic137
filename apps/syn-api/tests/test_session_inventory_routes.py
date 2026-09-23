@@ -113,6 +113,17 @@ def test_published_snapshot_reports_late_evidence_without_replacing_revision(
     assert response.status_code == 200
     assert response.json()["snapshot"]["revision"] == "revision-one"
     assert response.json()["next_after"] is None
+    from syn_domain.contexts.agent_sessions import TranscriptBodyState
+
+    runtime.inventory.page.return_value = InventoryPage(snapshot=snapshot, kind="capture", items=())
+    runtime.body_availability.overrides = AsyncMock(
+        return_value=(TranscriptBodyState(archive_sha256="a" * 64, status="expired"),)
+    )
+    restricted = client.get(
+        f"/executions/run/session-inventory/{snapshot.snapshot_id}/capture"
+    ).json()
+    assert restricted["body_overrides"] == [{"archive_sha256": "a" * 64, "status": "expired"}]
+    assert restricted["snapshot"]["revision"] == "revision-one"
 
 
 def test_refresh_acknowledges_durable_job_and_reads_without_projection_lag(

@@ -49,3 +49,19 @@ it('ignores a late response after leaving the run', async () => {
   resolve(status)
   await waitFor(() => expect(getSessionInventoryPage).not.toHaveBeenCalled())
 })
+
+it('shows current expiry separately from the immutable receipt', async () => {
+  render(<SessionInventory executionId="run" />)
+  await screen.findByText('native-full-id')
+  vi.mocked(getSessionInventoryPage).mockResolvedValue({
+    snapshot, kind: 'capture', next_after: null,
+    body_overrides: [{ archive_sha256: 'a'.repeat(64), status: 'expired' }],
+    items: [{ node: { kind: 'transcript', source_instance_id: 'source', local_id: 'native', harness: 'codex' },
+      destination: 'local', availability: 'present', receipt_sequence: 1, archived_byte_hash: 'a'.repeat(64),
+      evidence: { producer_id: 'test', evidence_id: 'one', source_revision: '1', locator: 'test', extractor_version: '1' } }],
+  })
+  fireEvent.change(screen.getByLabelText('Inventory section'), { target: { value: 'capture' } })
+  expect(await screen.findByText('Current local body: expired')).toBeTruthy()
+  expect(screen.getByText('local availability recorded at capture: present')).toBeTruthy()
+  expect(screen.queryByText('Open local transcript')).toBeNull()
+})

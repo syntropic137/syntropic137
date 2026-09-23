@@ -213,6 +213,21 @@ This updates transcript detail reads. Immutable historical capture receipts stil
 need an explicit current-availability overlay in inventory pages and equivalent
 replica/client treatment. The full acceptance criterion is not yet complete.
 
+## Inventory-page restriction overlays
+
+Capture pages now include separate `body_overrides` for current local expiry or
+withholding. One bounded, indexed lookup uses only hashes present in that page
+and its installation namespace. It does not mutate historical receipts or claim
+unchecked bodies are currently present. Dashboard rows distinguish recorded
+availability from current restrictions and suppress unavailable download controls.
+The real PostgreSQL isolation/immutability test, API route suite, five inventory
+UI tests, dashboard type check and regenerated contracts pass. Logs:
+`/private/tmp/1398-body-overlay-sql.log` and `/private/tmp/1398-overlay-ui.log`.
+
+Replica availability presentation, CLI capture-page navigation and the remaining
+acceptance matrix remain unfinished. These changes have not been deployed to the
+live demo stack or pushed to the draft PR yet.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push

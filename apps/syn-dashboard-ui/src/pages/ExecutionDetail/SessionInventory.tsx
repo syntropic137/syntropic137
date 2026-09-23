@@ -14,18 +14,19 @@ const sections: { kind: InventoryKind; label: string }[] = [
 
 type Capture = Extract<InventoryPage['items'][number], { availability: unknown }>
 
-function CaptureItem({ item, executionId }: { item: Capture; executionId: string }) {
+function CaptureItem({ item, executionId, current }: { item: Capture; executionId: string; current?: string }) {
   return <>
     <code className="break-all">{item.node.local_id}</code>
-    <p>{item.destination ?? 'local'} transcript: {item.availability}</p>
+    <p>{item.destination ?? 'local'} availability recorded at capture: {item.availability}</p>
+    {current && <p>Current local body: {current}</p>}
     {item.transcript_revision && <p className="break-all">Transcript revision: {item.transcript_revision}</p>}
-    {(item.destination ?? 'local') === 'local' && item.archived_byte_hash && item.node.harness && <LocalTranscript
+    {!current && (item.destination ?? 'local') === 'local' && item.archived_byte_hash && item.node.harness && <LocalTranscript
       key={JSON.stringify([executionId, item.node.source_instance_id, item.node.harness, item.node.local_id, item.archived_byte_hash])} executionId={executionId} harness={item.node.harness}
       nativeId={item.node.local_id} revision={item.archived_byte_hash} />}
   </>
 }
 
-function InventoryItem({ item, executionId }: { item: InventoryPage['items'][number]; executionId: string }) {
+function InventoryItem({ item, executionId, bodyOverrides }: { item: InventoryPage['items'][number]; executionId: string; bodyOverrides: InventoryPage['body_overrides'] }) {
   if ('ref' in item) return <>
     <span>{item.ref.kind} {item.ref.harness ?? ''}</span>
     <code className="block break-all select-all">{item.ref.local_id}</code>
@@ -36,7 +37,7 @@ function InventoryItem({ item, executionId }: { item: InventoryPage['items'][num
     <p className="break-all">Parent: <code>{item.parent.local_id}</code></p>
     <p className="break-all">Child: <code>{item.child.local_id}</code></p>
   </>
-  if ('availability' in item) return <CaptureItem item={item} executionId={executionId} />
+  if ('availability' in item) return <CaptureItem item={item} executionId={executionId} current={item.destination === 'local' ? bodyOverrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status : undefined} />
   if ('run' in item) return <>
     <code className="break-all">{item.node.local_id}</code>
     <p>Phase: {item.phase_id ?? 'Unassigned'}. Attempt: {item.attempt_id ?? 'Unknown'}. Confidence: {item.confidence}.</p>
@@ -58,7 +59,7 @@ function InventoryRows({ page }: { page: InventoryPage }) {
   if (page.items.length === 0) return <p>No {sections.find(s => s.kind === page.kind)?.label.toLowerCase()} in this revision.</p>
   return <ul className="space-y-2">
     {page.items.map((item, index) => <li key={index} className="rounded border border-[var(--color-border)] p-3">
-      <InventoryItem item={item} executionId={page.snapshot.run.execution_id} />
+      <InventoryItem item={item} executionId={page.snapshot.run.execution_id} bodyOverrides={page.body_overrides} />
     </li>)}
   </ul>
 }

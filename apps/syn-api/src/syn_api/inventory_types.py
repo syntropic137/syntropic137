@@ -4,7 +4,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.agent_sessions import InventoryPage, InventorySnapshot, RunIdentity
+from syn_domain.contexts.agent_sessions import (
+    InventoryPage,
+    InventorySnapshot,
+    RunIdentity,
+    TranscriptBodyState,
+)
 
 
 class SessionInventoryResponse(BaseModel):
@@ -20,7 +25,9 @@ class SessionInventoryResponse(BaseModel):
 
 
 class SessionInventoryPageResponse(InventoryPage):
-    """A bounded page of one immutable published revision."""
+    """Immutable evidence plus current local restrictions; absent overrides are unchecked."""
+
+    body_overrides: tuple[TranscriptBodyState, ...] = ()
 
 
 class SessionInventoryRefreshRequest(BaseModel):

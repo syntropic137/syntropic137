@@ -11814,6 +11814,14 @@
               }
             ],
             "title": "Next After"
+          },
+          "body_overrides": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptBodyState"
+            },
+            "type": "array",
+            "title": "Body Overrides",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -11824,7 +11832,7 @@
           "items"
         ],
         "title": "SessionInventoryPageResponse",
-        "description": "A bounded page of one immutable published revision."
+        "description": "Immutable evidence plus current local restrictions; absent overrides are unchecked."
       },
       "SessionInventoryRefreshRequest": {
         "properties": {
@@ -13349,6 +13357,30 @@
         ],
         "title": "ToolTimelineResponse",
         "description": "Tool execution timeline for a session."
+      },
+      "TranscriptBodyState": {
+        "properties": {
+          "archive_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Archive Sha256"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "expired",
+              "withheld"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "archive_sha256",
+          "status"
+        ],
+        "title": "TranscriptBodyState"
       },
       "TriggerActionResponse": {
         "properties": {

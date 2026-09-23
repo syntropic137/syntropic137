@@ -4805,7 +4805,7 @@ export interface components {
         };
         /**
          * SessionInventoryPageResponse
-         * @description A bounded page of one immutable published revision.
+         * @description Immutable evidence plus current local restrictions; absent overrides are unchecked.
          */
         SessionInventoryPageResponse: {
             snapshot: components["schemas"]["InventorySnapshot"];
@@ -4818,6 +4818,11 @@ export interface components {
             items: (components["schemas"]["InventoryNode"] | components["schemas"]["Membership"] | components["schemas"]["LineageEdge"] | components["schemas"]["CaptureReceipt"] | components["schemas"]["InventoryGap"] | components["schemas"]["EvidenceRetraction"] | components["schemas"]["IdentityBinding"])[];
             /** Next After */
             next_after?: number | null;
+            /**
+             * Body Overrides
+             * @default []
+             */
+            body_overrides: components["schemas"]["TranscriptBodyState"][];
         };
         /** SessionInventoryRefreshRequest */
         SessionInventoryRefreshRequest: {
@@ -5666,6 +5671,16 @@ export interface components {
             total_executions: number;
             /** Executions */
             executions?: components["schemas"]["ToolTimelineEntry"][];
+        };
+        /** TranscriptBodyState */
+        TranscriptBodyState: {
+            /** Archive Sha256 */
+            archive_sha256: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "expired" | "withheld";
         };
         /**
          * TriggerActionResponse

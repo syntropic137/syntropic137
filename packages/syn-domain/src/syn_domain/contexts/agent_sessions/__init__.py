@@ -188,6 +188,8 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     model_from_rollout,
 )
 
+from .domain.read_models.transcript_body_state import TranscriptBodyState
+
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
     "CANONICAL_USAGE_EVENT_FILTER",
@@ -296,6 +298,7 @@ __all__ = [
     "StoredTranscript",
     "TokenMetrics",
     "TokenUsageData",
+    "TranscriptBodyState",
     "TranscriptDeletedError",
     "TranscriptIntegrityError",
     "import_phase_delegates",
