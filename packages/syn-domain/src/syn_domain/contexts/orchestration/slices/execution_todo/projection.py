@@ -48,6 +48,9 @@ from event_sourcing import AutoDispatchProjection
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
+from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
+    PhaseRetryScheduledEvent,
+)
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
     TodoAction,
     TodoItem,
@@ -277,7 +280,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
             ),
         )
 
-    async def on_phase_retry_scheduled(self, event_data: dict) -> None:
+    async def on_phase_retry_scheduled(self, event_data: PhaseRetryScheduledEvent) -> None:
         """Phase attempt abandoned → queue PROVISION_WORKSPACE for it again (#1335).
 
         THE ONE HANDLER THAT MOVES A PHASE BACKWARDS, and the only one that is
@@ -293,11 +296,12 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         the only thing being reconsidered, and the phases already completed
         keep their results and their cost - that is the whole point.
         """
-        execution_id = event_data.get("execution_id", "")
+        event = PhaseRetryScheduledEvent.model_validate(event_data)
+        execution_id = event.execution_id
         if not execution_id:
             return
-        phase_id = event_data.get("phase_id")
-        if not isinstance(phase_id, str):
+        phase_id = event.phase_id
+        if not phase_id:
             return
 
         async with self._lock_for(execution_id):
