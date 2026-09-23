@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
         AgentVerdict,
     )
+    from syn_shared.diagnostics import SignalDeath
 
 
 def describe_exception(error: BaseException) -> str:
@@ -444,6 +446,12 @@ class FailedWorkspaceCommand:
     stderr: str
     timed_out: bool = False
 
+    #: What the backend saw at the moment it reaped a command that was KILLED,
+    #: including the kernel's account of the fault if it was reachable. Carried
+    #: here rather than looked up on demand because by the time this record is
+    #: rendered the workspace is usually gone (#1295).
+    signal_death: SignalDeath | None = None
+
 
 @dataclass(frozen=True)
 class QuarantinedWork:
@@ -658,7 +666,11 @@ _REST_IS_UNVERIFIED: Final[str] = (
 
 def _why(failure: FailedWorkspaceCommand) -> str:
     """Why a command produced no answer, said the same way wherever it is said."""
-    return "timed out, so it did not finish" if failure.timed_out else f"exited {failure.exit_code}"
+    return (
+        "timed out, so it did not finish"
+        if failure.timed_out
+        else f"exited {format_exit_code(failure.exit_code)}"
+    )
 
 
 def _render_inspection_failure(
@@ -678,6 +690,11 @@ def _render_inspection_failure(
     ]
     if stderr:
         lines.append(f"  stderr: {stderr}")
+    # A killed command has no stderr worth reading - it never got to write one
+    # - so the diagnostic IS the explanation and goes where an operator reads
+    # first, not at the end behind the quarantine inventory (#1295).
+    if failure.signal_death is not None:
+        lines.append(failure.signal_death.describe())
     saved, lost = _by_durability(quarantined)
     lines.append(
         _INSPECTION_HEADLINE[bool(saved), bool(lost)].format(

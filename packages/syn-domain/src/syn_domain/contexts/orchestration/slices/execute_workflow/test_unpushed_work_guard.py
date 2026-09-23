@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow import workspace_git
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     QuarantinedWork,
     UnpushedWorkQuarantinedError,
@@ -821,6 +822,99 @@ class _BreaksOn:
         if operation == self._failing and (self._in_repo is None or self._in_repo in command):
             return _UNREACHABLE
         return await self._inner.execute(command)
+
+
+class _FlakesOn:
+    """A real workspace whose named operation fails a bounded number of times."""
+
+    def __init__(
+        self,
+        inner: GitWorkspace,
+        failing: str,
+        *,
+        times: int,
+        returning: ExecutionResult = _UNREACHABLE,
+    ) -> None:
+        self._inner = inner
+        self._failing = failing
+        self._times = times
+        self._returning = returning
+        self.asked = 0
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        if _operation(command) != self._failing:
+            return await self._inner.execute(command)
+        self.asked += 1
+        if self.asked <= self._times:
+            return self._returning
+        return await self._inner.execute(command)
+
+
+async def _skip_retry_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(workspace_git.asyncio, "sleep", no_wait)
+
+
+async def test_a_probe_that_dies_once_can_recover_a_clean_real_repository(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("shipped.py", "work that reached the remote\n")
+    clone.git("push", "origin", _BRANCH)
+    workspace = _FlakesOn(clone.workspace, "rev-parse", times=1)
+
+    await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+
+
+async def test_a_recovered_probe_still_quarantines_real_unpushed_work(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    clone.commit("never-pushed.py", "work that must survive\n")
+    workspace = _FlakesOn(clone.workspace, "status", times=1)
+
+    with pytest.raises(UnpushedWorkQuarantinedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 2
+    assert _QUARANTINE_REF in clone.origin_refs()
+
+
+async def test_every_failed_attempt_still_fails_closed(
+    clone: _Clone, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _skip_retry_waits(monkeypatch)
+    workspace = _FlakesOn(
+        clone.workspace,
+        "find",
+        times=workspace_git._MAX_ATTEMPTS,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == workspace_git._MAX_ATTEMPTS  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_fired_bound_is_not_retried(clone: _Clone, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _skip_retry_waits(monkeypatch)
+    bound = ExecutionResult(
+        exit_code=124,
+        success=False,
+        duration_ms=0.0,
+        stdout="",
+        stderr="",
+    )
+    workspace = _FlakesOn(clone.workspace, "find", times=1, returning=bound)
+
+    with pytest.raises(WorkspaceInspectionFailedError):
+        await clone.run_gate(workspace=workspace)
+
+    assert workspace.asked == 1
 
 
 class _MountedReadOnly:

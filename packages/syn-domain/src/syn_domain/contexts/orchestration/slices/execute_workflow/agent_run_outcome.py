@@ -42,6 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PhaseReportedFailureError,
 )
+from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
@@ -117,10 +118,11 @@ def _platform_reason(result: AgentExecutionResult, *, phase_id: str, exit_code: 
     think one of them is a bug.
     """
     reason = result.stream_result.error_reason
+    rendered_exit = format_exit_code(exit_code)
     base = (
-        f"Agent failed: {reason} (phase={phase_id}, exit_code={exit_code})"
+        f"Agent failed: {reason} (phase={phase_id}, exit_code={rendered_exit})"
         if reason
-        else f"Agent execution failed for phase {phase_id} (exit_code={exit_code})"
+        else f"Agent execution failed for phase {phase_id} (exit_code={rendered_exit})"
     )
     verdict = result.stream_result.verdict
     if not verdict.refuses_completion:

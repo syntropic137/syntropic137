@@ -33,18 +33,23 @@ rather than fail it. Both say so at their own definition. Nothing else may.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     FailedWorkspaceCommand,
     WorkspaceInspectionFailedError,
 )
+from syn_shared.display import format_exit_code
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )
+
+logger = logging.getLogger(__name__)
 
 #: commit-tree needs an identity and the container may have none: the setup
 #: script configures user.name only when GIT_AUTHOR_NAME was supplied. Stating
@@ -150,6 +155,11 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 #: 124. Without it an operator reads "exited 124" and has to go and look it up.
 _BOUND_FIRED_EXIT_CODE: Final[int] = 124
 
+# Waits between attempts. A failed probe did not answer the question, so ask
+# again; a fired time bound is final because repeating it only repeats the wait.
+_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
+_MAX_ATTEMPTS: Final[int] = len(_RETRY_BACKOFF_SECONDS) + 1
+
 
 class GitWorkspace(Protocol):
     """The single workspace capability this slice needs: run a command in it."""
@@ -207,30 +217,34 @@ async def checked(
         WorkspaceInspectionFailedError: the command failed, so it produced no
             verdict and this module refuses to invent one.
     """
-    result = await run_bounded(workspace, command, timeout_seconds=timeout_seconds)
-    if result.success and result.exit_code == 0 and not result.timed_out:
-        return result.stdout
-    raise WorkspaceInspectionFailedError(
-        doing=doing,
-        failure=FailedWorkspaceCommand(
-            # The command as the caller MEANT it, without the bound
-            # `run_bounded` wrapped around it. The wrapper is this module's own
-            # machinery and naming it in the failure would put `timeout
-            # --kill-after=5 30` in front of the git command an operator is
-            # trying to read; `timed_out` below already carries everything it
-            # would tell them.
-            command=tuple(command),
-            exit_code=result.exit_code,
-            stderr=result.stderr,
-            # Two ways to be cut off and one word for it: the BACKEND says so
-            # when it enforced its own limit, and `timeout` says so with an
-            # exit code when the bound `run_bounded` put in the argv fired. A
-            # reader needs "it did not finish" either way, not a number. Every
-            # command goes through `run_bounded`, so 124 can be read this way
-            # whatever the command was.
-            timed_out=result.timed_out or result.exit_code == _BOUND_FIRED_EXIT_CODE,
-        ),
-    )
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        result = await run_bounded(workspace, command, timeout_seconds=timeout_seconds)
+        if result.success and result.exit_code == 0 and not result.timed_out:
+            return result.stdout
+        cut_off = result.timed_out or result.exit_code == _BOUND_FIRED_EXIT_CODE
+        if cut_off or attempt == _MAX_ATTEMPTS:
+            raise WorkspaceInspectionFailedError(
+                doing=doing,
+                failure=FailedWorkspaceCommand(
+                    # Report the command the caller meant, without our timeout wrapper.
+                    command=tuple(command),
+                    exit_code=result.exit_code,
+                    stderr=result.stderr,
+                    timed_out=cut_off,
+                    signal_death=result.signal_death,
+                ),
+            )
+        logger.warning(
+            "Workspace probe did not answer while %s (attempt %d of %d, exited %s); "
+            "asking again: %s",
+            doing,
+            attempt,
+            _MAX_ATTEMPTS,
+            format_exit_code(result.exit_code),
+            result.stderr.strip() or "(no stderr output)",
+        )
+        await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+    raise AssertionError("workspace probe retry loop exhausted without a verdict")
 
 
 async def repositories(workspace: GitWorkspace) -> list[str]:

@@ -134,6 +134,8 @@ async def test_setup_failure_with_no_stderr_still_names_setup_and_phase() -> Non
     assert "Secret-injection setup failed" in message
     assert f"phase '{FAILING_PHASE_NAME}'" in message
     assert "Setup phase failed" not in message
+    # The compact status formatter still names signals while keeping ordinary
+    # exit codes explicit. The status remains present when stderr is absent.
     assert "exit code 2" in message
 
 
