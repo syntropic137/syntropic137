@@ -62,7 +62,9 @@ async def test_page_returns_progress_only_after_every_append_succeeds() -> None:
     assert result.watermark == 2
     assert result.next_after is None
     assert [call.args[0] for call in evidence.append.await_args_list] == first_batches
-    assert not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
+    assert (
+        not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
+    )
 
 
 def test_central_resolver_reconstructs_depth_three_from_child_journal_changes() -> None:
@@ -172,7 +174,9 @@ async def test_success_status_must_be_durable_before_page_acknowledgement() -> N
             spool_id="spool",
             observation_sequence=1,
         )
-    assert not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
+    assert (
+        not evidence.observe_acquisition.await_args.args[0].evidence.acquisition_statuses[0].failed
+    )
 
 
 def test_cross_harness_binding_preserves_both_namespaces() -> None:

@@ -63,7 +63,7 @@ class SessionInventorySettings(BaseSettings):
     local_body_retention_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional local body lifetime since first catalog acquisition. Disabled by default. Expiry permanently deletes exact shared bytes but retains discovery history; remote replicas have separate retention.",
+        description="Optional local body lifetime since first catalog acquisition. Disabled by default. Expiry permanently deletes exact shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination.",
     )
 
     replication_enabled: bool = Field(
