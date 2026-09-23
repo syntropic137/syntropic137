@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -29,6 +30,7 @@ from syn_api.types import (
     Result,
     WorkflowError,
 )
+from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     RESERVED_INPUT_NAMES,
@@ -46,6 +48,9 @@ from syn_shared.agents import (
 from syn_shared.tools import UnsupportedToolNameError
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from syn_domain.contexts._shared import AdmissionTicket
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
 logger = logging.getLogger(__name__)
@@ -363,6 +368,7 @@ async def execute(
     task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
     repos: list[RepositoryRef] | None = None,
+    admitted: AdmissionTicket | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
 
@@ -373,6 +379,11 @@ async def execute(
         task: Optional primary task description.
         tenant_id: Optional tenant ID for multi-tenant deployments.
         repos: Typed repository refs (ADR-063 anti-corruption layer).
+        admitted: The ticket the admission gate issued for this execution
+            (#1387). Omitting it is not a way to skip the gate - the handler
+            checks the flag itself when no ticket arrives. It is how a caller
+            that already took a ticket, under the transition lock, stops the
+            handler re-deciding an admission the caller has already reported.
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
@@ -403,7 +414,7 @@ async def execute(
             execution_id=execution_id,
             task=task,
         )
-        result = await handler.handle(cmd)
+        result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
     except Exception as e:
@@ -423,6 +434,8 @@ async def execute(
             # Lane 2: cost is enriched via execution_cost projection at query time (#695)
             total_cost_usd=Decimal("0"),
             error_message=result.error_message,
+            failure_classification=result.failure_classification,
+            reported_failure_reason=result.reported_failure_reason,
             repos=repo_urls,
         )
     )
@@ -605,6 +618,48 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
         ) from None
 
 
+async def _refuse_while_paused() -> None:
+    """Translate a paused admission gate into 409 (#1387).
+
+    409 rather than 503: the request is well-formed and the service is up, the
+    system state simply forbids it right now. A caller can tell that apart from
+    a failure and retry after the deploy, which is the whole point of the gate
+    having an answer at all.
+
+    The cheap half of the check. It runs before validation so a caller during a
+    deploy is told the gate is shut rather than told its workflow is missing,
+    and so a paused system pays for no preflight. It decides nothing:
+    :func:`_admit_or_409` is what actually admits.
+    """
+    from syn_api._wiring_admission import get_admission_gate
+    from syn_domain.contexts._shared import MaintenancePausedError
+
+    try:
+        await get_admission_gate().refuse_early()
+    except MaintenancePausedError as exc:
+        raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+
+
+@asynccontextmanager
+async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
+    """Hold the gate open across the decisive step, or answer 409 (#1387).
+
+    The decisive step for this route is ``background_tasks.add_task``: after it
+    the response says 200 and the execution WILL run, whatever the flag says a
+    moment later. So that one line goes inside here, and validation stays
+    outside - a repo preflight held inside the gate would stall the operator's
+    ``PUT /maintenance`` behind a network round trip.
+    """
+    from syn_api._wiring_admission import get_admission_gate
+    from syn_domain.contexts._shared import MaintenancePausedError
+
+    try:
+        async with get_admission_gate().admitting() as ticket:
+            yield ticket
+    except MaintenancePausedError as exc:
+        raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
+
+
 async def _validate_execution_request(
     workflow_id: str,
     request: ExecuteWorkflowRequest,
@@ -684,38 +739,77 @@ async def execute_workflow_endpoint(
     request: ExecuteWorkflowRequest,
     background_tasks: BackgroundTasks,
 ) -> ExecuteWorkflowResponse:
-    """Start workflow execution in background."""
+    """Start workflow execution in background.
+
+    Returns 409 while maintenance mode is active; no execution is started.
+    """
+    # #1387, SYNCHRONOUS and first: everything below the `add_task` line runs
+    # after the response has been sent, so a refusal discovered there would
+    # arrive as a 200 followed by an execution that never happened. Before
+    # validation too, so a caller during a deploy is told the gate is shut
+    # rather than being told its workflow does not exist.
+    await _refuse_while_paused()
     _, effective_inputs, typed_repos = await _validate_execution_request(workflow_id, request)
     execution_id = f"exec-{uuid4().hex[:12]}"
 
+    # Bound by the `async with` below, and closed over like every other value
+    # this task carries. Passing it through `add_task` instead would say the
+    # ticket arrived from somewhere else; it did not - it is granted eight
+    # lines down, in this function, and the task is queued under it.
+    admitted: AdmissionTicket
+
     async def _run() -> None:
-        try:
-            result = await execute(
-                workflow_id=workflow_id,
-                inputs=effective_inputs,
-                execution_id=execution_id,
-                task=request.task,
-                repos=typed_repos,
-            )
-            if isinstance(result, Err):
-                logger.error(
-                    "Workflow execution failed",
+        # #1387: the lease, carried across the hop that used to spend it.
+        # `add_task` below only queues this coroutine - Starlette runs it after
+        # the response - so the ticket cannot be released there. It ends inside
+        # `execute()` when the execution's start event is durable, or here if
+        # this task produced no execution at all.
+        with carrying(admitted):
+            try:
+                result = await execute(
+                    workflow_id=workflow_id,
+                    inputs=effective_inputs,
+                    execution_id=execution_id,
+                    task=request.task,
+                    repos=typed_repos,
+                    admitted=admitted,
+                )
+                if isinstance(result, Err):
+                    logger.error(
+                        "Workflow execution failed",
+                        extra={
+                            "execution_id": execution_id,
+                            "workflow_id": workflow_id,
+                            "error": result.message,
+                        },
+                    )
+            except Exception:
+                logger.exception(
+                    "Workflow execution raised exception",
                     extra={
                         "execution_id": execution_id,
                         "workflow_id": workflow_id,
-                        "error": result.message,
                     },
                 )
-        except Exception:
-            logger.exception(
-                "Workflow execution raised exception",
-                extra={
-                    "execution_id": execution_id,
-                    "workflow_id": workflow_id,
-                },
-            )
 
-    background_tasks.add_task(_run)
+    # #1387: the decisive step. Queueing the task IS admitting the work - the
+    # response below says 200 either way - so it happens inside the gate, where
+    # no maintenance transition can complete around it. A refusal here is the
+    # second and final 409, and it is still reachable by the caller because
+    # nothing has been queued yet.
+    #
+    # Leaving this block does NOT release the ticket. It is queued work, not
+    # started work, and `_run` above owns the lease from here.
+    async with _admit_or_409() as admitted:
+        background_tasks.add_task(_run)
+        # Starlette runs queued tasks after the response is sent, and promises
+        # nothing about a response that is never sent - a client that goes away
+        # mid-send, a middleware that replaces the response. `_run` would then
+        # never be entered, so its `carrying` would never settle and the next
+        # deploy's `PUT /maintenance` would wait on this lease forever. Bind
+        # the lease to the queued callable itself, which outlives this block
+        # for exactly as long as Starlette may still call it (#1387).
+        guarantee_settled(admitted, _run)
     logger.info(
         "Started workflow execution",
         extra={

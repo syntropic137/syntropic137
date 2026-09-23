@@ -186,6 +186,9 @@ class TestWorkflowExecutionRoundtrip:
         from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            FailureClassification,
+        )
         from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
@@ -217,6 +220,7 @@ class TestWorkflowExecutionRoundtrip:
                 failed_phase_id="phase-2",
                 completed_phases=1,
                 total_phases=3,
+                classification=FailureClassification.PLATFORM,
             )
         )
         await workflow_execution_repository.save(loaded)

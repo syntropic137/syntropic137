@@ -137,7 +137,7 @@ def _lost_its_terminal_event(spent: PhaseUsage | None = None) -> FakeAgentExecut
     """
     return FakeAgentExecutionHandler.failed(
         exit_code=1,
-        error_reason=MISSING_TERMINAL_TURN_REASON,
+        stream_error=MISSING_TERMINAL_TURN_REASON,
         spent=spent,
     )
 
@@ -293,7 +293,7 @@ class TestALostTerminalEventIsRetriedInPlace:
         agent = AttemptSequence(
             "verify",
             FakeAgentExecutionHandler.failed(
-                exit_code=1, error_reason="codex login failed: refresh_token_reused"
+                exit_code=1, stream_error="codex login failed: refresh_token_reused"
             ),
             FakeAgentExecutionHandler.success(),
         )
