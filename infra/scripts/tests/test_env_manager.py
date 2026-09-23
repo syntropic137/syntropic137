@@ -8,7 +8,9 @@ serialization, env file generation, and compose argument construction.
 from __future__ import annotations
 
 import json
+import os
 import socket
+import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -326,6 +328,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env = em._allocate("feat/cool-feature")
 
@@ -347,6 +350,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env1 = em._allocate("feat/cool-feature")
             _, env2 = em._allocate("feat/cool-feature")
@@ -361,6 +365,7 @@ class TestAllocate:
         with (
             patch.object(em, "REGISTRY_FILE", registry_file),
             patch.object(em, "REPO_ROOT", tmp_path),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env1 = em._allocate("feat/first")
             _, env2 = em._allocate("feat/second")
@@ -384,6 +389,7 @@ class TestRollback:
             patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
             patch.object(em, "REPO_ROOT", tmp_path),
             patch.object(em, "_compose_run", return_value=0),
+            patch.object(em, "_port_free", return_value=True),
         ):
             _, env = em._allocate("feat/doomed")
             # Verify allocation succeeded
@@ -409,6 +415,7 @@ class TestRollback:
             patch.object(em, "REGISTRY_LOCK_FILE", lock_file),
             patch.object(em, "REPO_ROOT", tmp_path),
             patch.object(em, "_compose_run", return_value=0),
+            patch.object(em, "_port_free", return_value=True),
         ):
             em._allocate("feat/keeper")
             _, env2 = em._allocate("feat/doomed")
@@ -481,6 +488,39 @@ class TestSanitizedEnv:
     def test_empty_env_returns_empty_dict(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             assert em._sanitized_env() == {}
+
+
+class TestResolveSecrets:
+    def test_explicit_workspace_candidate_overrides_shared_env(self, tmp_path: Path) -> None:
+        resolver = tmp_path / "resolve_infra_env.py"
+        resolver.write_text("# test stub\n")
+        resolved = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/example/old@sha256:deadbeef\n"
+                "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=false\n"
+                "ANTHROPIC_API_KEY=resolved-secret\n"
+            ),
+            stderr="",
+        )
+
+        with (
+            patch.object(em, "RESOLVE_SCRIPT", resolver),
+            patch.object(em.subprocess, "run", return_value=resolved),
+            patch.dict(
+                os.environ,
+                {
+                    "SYN_WORKSPACE_DOCKER_IMAGE": "agentic-workspace-claude-cli:latest",
+                    "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES": "true",
+                },
+                clear=True,
+            ),
+        ):
+            em._resolve_secrets()
+            assert os.environ["SYN_WORKSPACE_DOCKER_IMAGE"] == "agentic-workspace-claude-cli:latest"
+            assert os.environ["SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES"] == "true"
+            assert os.environ["ANTHROPIC_API_KEY"] == "resolved-secret"
 
 
 # ---------------------------------------------------------------------------

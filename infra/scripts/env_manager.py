@@ -64,6 +64,14 @@ _LEAK_PREFIXES: tuple[str, ...] = (
     "SYN_INSTALL_DIR",
 )
 
+# Explicit operator choices must outrank values resolved from the shared
+# environment. This is how a branch environment selects a local candidate
+# without mutating the developer's normal `.env`.
+_OPERATOR_OVERRIDE_KEYS: tuple[str, ...] = (
+    "SYN_WORKSPACE_DOCKER_IMAGE",
+    "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
+)
+
 # ---------------------------------------------------------------------------
 # Environment sanitization
 # ---------------------------------------------------------------------------
@@ -314,6 +322,10 @@ def _resolve_secrets() -> None:
     Docker Compose inherits credentials (GitHub App PEM, tokens, etc.).
     Without this, on-demand environments start in degraded mode.
     """
+    operator_overrides = {
+        key: os.environ[key] for key in _OPERATOR_OVERRIDE_KEYS if key in os.environ
+    }
+
     if not RESOLVE_SCRIPT.exists():
         print("  [secrets] resolve_infra_env.py not found - skipping", file=sys.stderr)
         return
@@ -353,6 +365,8 @@ def _resolve_secrets() -> None:
         if key:
             os.environ[key] = value
             count += 1
+
+    os.environ.update(operator_overrides)
 
     print(f"  [secrets] Loaded {count} env vars", file=sys.stderr)
 

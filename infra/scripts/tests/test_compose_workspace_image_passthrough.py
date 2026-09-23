@@ -27,6 +27,7 @@ pytestmark = pytest.mark.unit
 
 _DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
 _VAR = "SYN_WORKSPACE_DOCKER_IMAGE"
+_ALLOW_LOCAL_VAR = "SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES"
 
 # The base defines the shared api environment; the published file is what a
 # selfhost operator runs. Between them they cover every deployed path.
@@ -76,3 +77,14 @@ def test_declared_bare_so_unset_stays_distinguishable_from_blank(name: str) -> N
         f"{name}: {_VAR} must be declared bare (null) so compose drops it when "
         f"unset and preserves an explicit blank; got {value!r}"
     )
+
+
+@pytest.mark.parametrize("name", _MUST_CARRY)
+def test_local_image_policy_override_reaches_api(name: str) -> None:
+    """A local image override is unusable unless its explicit policy travels too."""
+    env = _api_environment(_DOCKER_DIR / name)
+    assert _ALLOW_LOCAL_VAR in env, (
+        f"{name}: api drops {_ALLOW_LOCAL_VAR}, so an on-demand environment "
+        "cannot explicitly authorize its already-built candidate image"
+    )
+    assert env[_ALLOW_LOCAL_VAR] == "${SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES:-false}"

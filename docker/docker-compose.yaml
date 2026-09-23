@@ -168,6 +168,9 @@ services:
       # the settings layer can reject the second instead of silently
       # substituting the default image.
       SYN_WORKSPACE_DOCKER_IMAGE:
+      # Required alongside a bare local image override during explicit local
+      # acceptance runs. False by default so production remains fail closed.
+      SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES: ${SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES:-false}
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
     depends_on:
