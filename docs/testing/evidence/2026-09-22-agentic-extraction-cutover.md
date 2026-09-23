@@ -3,8 +3,8 @@
 Date: 2026-09-22
 
 This record covers the pre-merge Syntropic137 compatibility proof for the
-Agentic Primitives split. It is not a production-release attestation. The image
-digest and private-repository CI gates listed below must still pass.
+Agentic Primitives split. It is not a production-release attestation. The
+public-repository CI and live-harness gates listed below must still pass.
 
 ## Immutable sources
 
@@ -65,36 +65,46 @@ Code `2.1.250` and Codex CLI `0.150.1` in `omni-agent`, and Claude Code
 `2.1.126` and Codex CLI `0.144.6` in `claude-cli`. Both images contain the
 workspace entrypoint and SDLC plugin payload.
 
-## Release attempt
+## Signed Workspace release
 
-Agentic Workspace Actions run `35815343298` built both workspace images for
-linux/amd64 and linux/arm64 with SBOM and provenance enabled. GHCR rejected the
-push because the existing package names grant Actions write access only to the
-Agentic Primitives repository. Neither `v0.1.0` image tag exists, so there is no
-partial release to consume or clean up.
+Agentic Workspace Actions run `35908207891` completed successfully from tag
+`v0.1.1` and source commit
+`231b35b00c791d174f6f7063376e71c04074b2d4`. Both images were published for
+linux/amd64 and linux/arm64 with SBOM, provenance, keyless signatures, and
+workflow-side signature verification:
+
+- `agentic-workspace-claude-cli@sha256:69ab1e0d125bccbf46ba9d509140ca2a9b5e74c14dad1844ce0ac50a37d46b3a`
+- `omni-agent-workspace@sha256:862668c9d9ae034e04082edc970769e95a79ac2613ceb0f3dbcaf9772f5591a5`
+
+Local `cosign verify` accepted both digests only for the release identity
+`https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/tags/v0.1.1`
+and GitHub Actions issuer. A negative check using the former Agentic Primitives
+publisher identity failed as required. Syntropic's `PINNED_DIGESTS` and
+generated `.env.example` now reference the new immutable indexes. The focused
+workspace settings, image-name, signature verification, and skill-install
+semantics suites pass: 91 tests.
 
 ## Remaining gates
 
-1. Grant Agentic Workspace Actions write access to both existing GHCR packages.
-2. Complete the signed release and record both multi-architecture index digests.
-3. Update `PINNED_DIGESTS` and verify the new release-tag certificate identity.
-4. Resolve public Syntropic137 CI access to the initially private Agentic
-   Workspace source. AgentParadise currently disables repository deploy keys.
-5. Run the production-like Claude and Codex workflow plus rollback proof.
+1. Make Agentic Workspace public after its disclosure gate so public
+   Syntropic137 CI can initialize the submodule without a private credential.
+2. Reconcile the migration branch with current Syntropic `main` and rerun the
+   full validation set.
+3. Run the production-like Claude and Codex workflow plus rollback proof.
 
 ## Merge acceptance criteria
 
 This pull request remains a draft until every item below is evidenced:
 
-- [ ] Public Syntropic137 CI can authenticate to and initialize the private
-  Agentic Workspace submodule from a clean checkout.
+- [ ] Public Syntropic137 CI can initialize the public Agentic Workspace
+  submodule from a clean checkout.
 - [ ] Every required GitHub check passes on the final commit.
 - [ ] `just qa-ci` passes locally, except checks documented as GitHub-only.
 - [ ] The local Agentic Workspace image builds from the pinned submodule and
   the container E2E passes through its real entrypoint.
 - [ ] Both Claude and Codex complete a production-like workflow, producing
   expected artifacts and event streams without credential leakage.
-- [ ] Signed linux/amd64 and linux/arm64 release images exist with SBOM and
+- [x] Signed linux/amd64 and linux/arm64 release images exist with SBOM and
   provenance. Syntropic pins their immutable digests and verifies the release
   certificate identity and pinned source revision.
 - [ ] Rollback to the previous signed image digests is executed and recorded.
