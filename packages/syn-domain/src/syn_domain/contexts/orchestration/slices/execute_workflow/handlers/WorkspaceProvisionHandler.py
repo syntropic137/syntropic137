@@ -530,9 +530,9 @@ class WorkspaceProvisionHandler:
 
         ``phase_name`` is here for the failure message alone. The ADR-024 setup
         step runs INSIDE every phase, so "setup failed" on its own points an
-        operator at the first workflow phase - which is a different thing and,
-        in #1236, had completed. That phase was then named "Prepare the
-        workspace", which is how it came to be read as the setup step at all;
+        operator at the first workflow phase - a different thing that had
+        completed in #1236. That phase was then named "Prepare the workspace",
+        which is how it came to be read as the setup step at all;
         it is now "Check the task's premise" (#1298), and the message still
         has to say which setup because the ambiguity was never in the name.
 
