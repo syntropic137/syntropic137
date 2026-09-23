@@ -204,6 +204,16 @@ class ExecutionDetailResponse(BaseModel):
     alone, which is the state #1392 was opened about.
     """
     repos: list[str] = Field(default_factory=list)
+    task: str | None = None
+    """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
+    with, or ``None`` if the workflow takes none (#1307)."""
+    inputs: dict[str, str] = Field(default_factory=dict)
+    """The full input set the run was dispatched with, including ``task`` and
+    the ``repos`` string the other fields are derived from.
+
+    Enough to re-dispatch the run: a caller retrying one that died on the
+    platform posts these back rather than reconstructing them from its own
+    notes (#1307)."""
 
 
 class ExecutionSummaryResponse(BaseModel):

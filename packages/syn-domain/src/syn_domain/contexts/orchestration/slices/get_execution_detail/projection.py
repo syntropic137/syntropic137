@@ -81,7 +81,11 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 11  # Bumped: per-phase timeout budgets are now recorded (#1262)
+    # 12, not 11: #1262 (per-phase timeout budgets) and #1307 (dispatch inputs)
+    # both bumped 10 -> 11 independently, on separate branches. Taking either
+    # literal 11 would leave a deployment that had already rebuilt at the other
+    # one's 11 seeing no change here, and so never rebuilding for this field.
+    VERSION = 12
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -156,9 +160,17 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
-        repos = [u.strip() for u in str(repos_raw).split(",") if u.strip()] if repos_raw else []
+        # What the run was dispatched with. Kept whole (#1307): this is the only
+        # record of what the run was ASKED to do, and a reader retrying a run
+        # that died on the platform dispatches these again. Reading one key out
+        # of it and discarding the rest is what left an execution unable to say
+        # what its own task was.
+        inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
+
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
+        # No empty-string special case: "".split(",") is [""], which the filter
+        # already drops, so the guard that used to sit here decided nothing.
+        repos = [u.strip() for u in inputs.get("repos", "").split(",") if u.strip()]
 
         # Each phase's wall-clock budget, keyed by phase id. Stated once, on
         # this event, and not restated by the phase that later consumes it, so
@@ -210,6 +222,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "artifact_ids": [],
             "error_message": None,
             "repos": repos,
+            "inputs": inputs,
             # How many phases this run set out to do, and how many it has done.
             # Read off the SAME event the list projection reads them off, so a
             # run cannot report three phases in one view and one in the other

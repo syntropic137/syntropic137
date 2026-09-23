@@ -437,6 +437,8 @@ async def get(
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -544,6 +546,8 @@ async def get_detail(
             repos=list(detail.repos),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -697,4 +701,6 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
+        task=detail.task,
+        inputs=dict(detail.inputs),
     )

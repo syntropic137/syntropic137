@@ -2748,6 +2748,12 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
+            /** Task */
+            task?: string | null;
+            /** Inputs */
+            inputs?: {
+                [key: string]: string;
+            };
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
