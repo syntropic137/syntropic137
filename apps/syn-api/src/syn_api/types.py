@@ -2366,3 +2366,47 @@ class SkillStorageStatsResponse(BaseModel):
         default=False,
         description="True if the backend returned a partial listing, so the counts are floors.",
     )
+
+
+class MaintenanceModeResponse(BaseModel):
+    """Whether new workflow executions are being admitted (#1387).
+
+    ``active`` is the gate: while it is true every admission path refuses and
+    the deploy script may swap containers knowing nothing new can start.
+    Executions already running are unaffected.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    active: bool = Field(
+        default=False,
+        description="True when new execution admission is refused.",
+    )
+    reason: str = Field(default="", description="Operator-supplied reason for the pause.")
+    since: datetime | None = Field(
+        default=None,
+        description="When admission was paused. Null while admission is open.",
+    )
+    actor: str = Field(default="", description="Who set the current state.")
+
+
+class SetMaintenanceModeRequest(BaseModel):
+    """Set or clear maintenance mode (#1387).
+
+    The response is not sent until the state is durably persisted, so a caller
+    that has seen a 200 knows no further execution can be admitted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    active: bool = Field(description="True to refuse new executions, false to resume admitting.")
+    reason: str = Field(
+        default="",
+        max_length=500,
+        description="Why admission is paused; echoed back to every refused caller.",
+    )
+    actor: str = Field(
+        default="",
+        max_length=200,
+        description="Who is pausing. Free text - the deploy script sends its own name.",
+    )

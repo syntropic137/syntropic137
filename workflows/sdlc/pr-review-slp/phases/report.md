@@ -83,12 +83,23 @@ step is missing from the platform - say so in your deliverable.
 
 These belong in the artifact whatever eventually delivers it.
 
-**1. The head SHA you reviewed.** A verdict against an old head is how a
-reviewer ends up acting on findings that are already fixed - that happened here
-and cost a full run. State it explicitly:
+**1. The refs you reviewed.** A verdict against an old head is how a reviewer
+ends up acting on findings that are already fixed - that happened here and cost
+a full run. The base belongs beside it for the opposite reason: `origin/main`
+moves under a long review constantly and that does NOT invalidate the review,
+but a verdict that does not name the base it judged leaves the reader unable to
+tell a live merge-conflict finding from a stale one. State both:
 
 ```text
-Reviewed at head `<sha>`.
+Reviewed at head `<sha>`, against base `<sha>`.
+```
+
+If the verify phase reported that `origin/main` moved while it ran, carry that
+line through too. It is a fact about the verdict, not a defect in it, and
+omitting it is what made base movement look fatal in the first place (#1290):
+
+```text
+`origin/main` has since moved to `<sha>`; the head did not move, and the findings are against the head.
 ```
 
 **2. Which model ran each phase.** A verdict is only a cross-model check if the

@@ -18,7 +18,8 @@ import logging
 import pytest
 from fastapi import HTTPException
 
-from syn_api._wiring import BackgroundWorkflowDispatcher, _build_agent_command
+from syn_api._wiring import _build_agent_command
+from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.routes.executions.commands import _check_phase_providers
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
