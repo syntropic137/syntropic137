@@ -92,6 +92,24 @@ are still pending. Local logs: `/private/tmp/1398-status-checkpoint-sql.log`,
 `/private/tmp/1398-status-checkpoint-unit.log`, and
 `/private/tmp/1398-checkpoint-api-rebuild.log`.
 
+## Local deletion foundation
+
+The local archive now supports irreversible exact-body deletion with durable
+anti-resurrection markers. Fixed lock stripes serialize reads, writes and deletes
+across archive instances/processes. Tombstones are fsynced before unlink; an
+interruption between those operations still denies reads and puts. Spool replay
+skips explicitly deleted bodies, advances normally, and preserves immutable
+acquisition evidence. This is an archive primitive, not yet an operational
+retention policy or cross-store deletion implementation.
+
+Thirteen archive/recovery unit tests and the real PostgreSQL interrupted-spool
+replay test pass. The latter verifies deletion followed by complete spool replay,
+unchanged evidence watermark and continued absence of bytes. Pyright reports zero
+errors, with the same 16 existing warnings. Local log:
+`/private/tmp/1398-deletion-spool.log`. Remaining work includes retention commands,
+expiry scheduling, inventory availability overlays, upstream tombstone delivery,
+replica retry fencing and cleanup quotas.
+
 ## Follow-up after draft PR creation
 
 Draft PR #1401 contains the initial Syntropic137 checkpoint. Its pre-push

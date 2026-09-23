@@ -83,3 +83,53 @@ def test_configured_identity_is_persisted_even_if_override_is_later_removed(tmp_
 
     assert installation_identity(tmp_path, "my-installation") == "my-installation"
     assert installation_identity(tmp_path) == "my-installation"
+
+
+async def test_deletion_survives_restart_and_rejects_repeated_capture(tmp_path: Path) -> None:
+    from syn_domain.contexts.agent_sessions import TranscriptDeletedError
+
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    body = b"permanently removed transcript"
+    ref = await archive.put(body)
+    await archive.delete(ref)
+    assert not (tmp_path / ref.sha256).exists()
+    restarted = LocalSessionTranscriptArchive(tmp_path)
+    assert await restarted.get(ref) is None
+    with pytest.raises(TranscriptDeletedError):
+        await restarted.put(body)
+    await restarted.delete(ref)
+    other = await restarted.put(b"unrelated transcript")
+    assert await restarted.get(other) == b"unrelated transcript"
+
+
+async def test_tombstone_before_unlink_crash_remains_denied(tmp_path: Path) -> None:
+    from syn_domain.contexts.agent_sessions import TranscriptDeletedError
+
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(b"body")
+    # Simulate the durable intermediate state after marker fsync, before unlink.
+    (tmp_path / f".deleted-{ref.sha256}").touch()
+    assert await archive.get(ref) is None
+    with pytest.raises(TranscriptDeletedError):
+        await archive.put(b"body")
+    await archive.delete(ref)
+    assert not (tmp_path / ref.sha256).exists()
+
+
+async def test_concurrent_puts_cannot_restore_deleted_body(tmp_path: Path) -> None:
+    from syn_domain.contexts.agent_sessions import TranscriptDeletedError
+
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(b"body")
+    outcomes = await asyncio.gather(
+        *(LocalSessionTranscriptArchive(tmp_path).put(b"body") for _ in range(30)),
+        archive.delete(ref),
+        *(LocalSessionTranscriptArchive(tmp_path).put(b"body") for _ in range(30)),
+        return_exceptions=True,
+    )
+    assert all(
+        not isinstance(item, Exception) or isinstance(item, TranscriptDeletedError)
+        for item in outcomes
+    )
+    assert not (tmp_path / ref.sha256).exists()
+    assert await archive.get(ref) is None

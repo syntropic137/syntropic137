@@ -71,3 +71,16 @@ async def test_interrupted_page_retries_without_duplicate_evidence(
     assert await journal.watermark(run) == 2
     for entry, body in zip(entries, bodies, strict=True):
         assert (tmp_path / entry.archive_sha256).read_bytes() == body
+
+    # A replay after deletion advances the source cursor without restoring bytes
+    # or altering the immutable acquisition history.
+    from syn_domain.contexts.agent_sessions import ArchivedTranscript
+
+    removed = ArchivedTranscript(sha256=entries[0].archive_sha256, size=len(bodies[0]))
+    await archive.delete(removed)
+    reader.read.side_effect = list(bodies)
+    replay = await LocalSpoolDrain(capture).page(reader, run=run, spool_id="host-spool")
+    assert replay.captured == 1 and replay.deleted == 1
+    assert replay.next_after is None and replay.watermark == 2
+    assert await journal.watermark(run) == 2
+    assert await archive.get(removed) is None

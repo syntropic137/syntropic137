@@ -20,6 +20,10 @@ class TranscriptIntegrityError(Exception):
     """An archive object does not match its immutable reference."""
 
 
+class TranscriptDeletedError(Exception):
+    """A durable body tombstone prohibits capture from restoring these bytes."""
+
+
 class SessionTranscriptArchivePort(Protocol):
     async def put(self, body: bytes) -> ArchivedTranscript:
         """Acknowledge only after bytes are durable. Retrying is idempotent."""

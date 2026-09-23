@@ -116,6 +116,7 @@ from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
 from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
     ArchivedTranscript,
     SessionTranscriptArchivePort,
+    TranscriptDeletedError,
     TranscriptIntegrityError,
 )
 from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
@@ -295,6 +296,7 @@ __all__ = [
     "StoredTranscript",
     "TokenMetrics",
     "TokenUsageData",
+    "TranscriptDeletedError",
     "TranscriptIntegrityError",
     "import_phase_delegates",
     "model_from_rollout",

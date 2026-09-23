@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentic_isolation.harnesses import harness_for_exporter_agent
 
-from syn_domain.contexts.agent_sessions import LocalTranscriptCapture
+from syn_domain.contexts.agent_sessions import LocalTranscriptCapture, TranscriptDeletedError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -24,6 +24,7 @@ class SpoolDrainProgress:
     watermark: int
     next_after: int | None
     captured: int
+    deleted: int = 0
 
 
 class LocalSpoolDrain:
@@ -48,6 +49,7 @@ class LocalSpoolDrain:
         page = await reader.page(after, watermark)
         producer = "spool:" + hashlib.sha256(spool_id.encode()).hexdigest()
         entries = page.entries[: self._max_captures]
+        deleted = 0
         for entry in entries:
             if renew is not None:
                 await renew()
@@ -64,16 +66,22 @@ class LocalSpoolDrain:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            await self._capture.handle(
-                LocalTranscriptCapture(
-                    run=run,
-                    capture_id=hashlib.sha256(key.encode()).hexdigest(),
-                    producer_id=producer,
-                    harness=harness.value if harness is not None else f"unsupported:{entry.agent}",
-                    receipt_sequence=entry.sequence,
-                    content=body,
-                    content_format="envelope",
+            # Durable deletion wins over replay from retained workspace spools.
+            try:
+                await self._capture.handle(
+                    LocalTranscriptCapture(
+                        run=run,
+                        capture_id=hashlib.sha256(key.encode()).hexdigest(),
+                        producer_id=producer,
+                        harness=harness.value
+                        if harness is not None
+                        else f"unsupported:{entry.agent}",
+                        receipt_sequence=entry.sequence,
+                        content=body,
+                        content_format="envelope",
+                    )
                 )
-            )
+            except TranscriptDeletedError:
+                deleted += 1
         next_after = entries[-1].sequence if len(entries) < len(page.entries) else page.next_after
-        return SpoolDrainProgress(page.watermark, next_after, len(entries))
+        return SpoolDrainProgress(page.watermark, next_after, len(entries) - deleted, deleted)
