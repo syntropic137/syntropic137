@@ -22,10 +22,10 @@ from syn_api.types import (
     WorkflowError,
     WorkflowSummary,
 )
-from syn_domain.contexts.orchestration._shared.workflow_definition import is_phase_id
 
 # Imported from the context's public surface, not its internals (ADR-062).
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_domain.contexts.orchestration._shared.workflow_definition import is_phase_id
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (

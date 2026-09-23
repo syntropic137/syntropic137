@@ -293,7 +293,7 @@ class TestTheEndpointMatchesTheFileOnDisk:
         """
         declared = _declared_in_yaml()
 
-        assert len(declared) == 4, f"expected four phases on disk, found {len(declared)}"
+        assert len(declared) == 6, f"expected six phases on disk, found {len(declared)}"
         assert any(outputs for _, outputs in declared.values())
         assert [] in [inputs for inputs, _ in declared.values()], (
             "no phase declares an empty input list any more"
