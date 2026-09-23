@@ -6,18 +6,21 @@ Proposed
 
 ## Context
 
-Credential rotation does not work today. `@syntropic137/setup credentials rotate`
-is parsed, tested and referenced in help text, but the handler prints a warning
-and exits. It was disabled deliberately (npx#56), and the stated reason was:
+Credential rotation needs an architecture that changes server credentials,
+moves clients to the new values, verifies the cutover, and preserves a recovery
+path without restarting the application. Earlier setup work was paused after
+identifying this failure mode (syntropic137-npx#56):
 
 > Rotation updates `.env` and secret files but the event store password is baked
 > in at container init time, so after a stack restart the event store can no
 > longer authenticate to the database, breaking the system with no safe recovery
 > path.
 
-Disabling it was the right call. A rotation that bricks the event store is worse
-than no rotation. But the reasoning contains one claim that is wrong, and that
-error is why the feature stayed off rather than getting fixed.
+Pausing that implementation was correct: a rotation that bricks the event store
+is worse than no rotation. The quoted rationale nevertheless contains one false
+claim. The measurements below establish the recovery path and support the
+architecture decision independently of any command's current implementation
+status.
 
 ### What was measured
 

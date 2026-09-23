@@ -11,20 +11,21 @@
 
 # Syntropic137
 
-Running 10 parallel Claude Code agents in a terminal is about as far as you can go before it becomes unmanageable. Syntropic137 scales that to 100+ with workflow orchestration, full observability on every tool call and conversation, model routing across Haiku/Sonnet/Opus, and a self-hosted workflow marketplace. Your data stays yours.
+Scale coding agents past what a terminal can hold. Syntropic137 is multi-harness orchestration: run Claude Code and Codex across workflows, with every tool call and conversation captured. Self-hosted, so your data stays yours.
 
 **Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability. Every tool call, token, cost, conversation, and artifact is permanently captured in a queryable event store.
 
 - **Never lose agent work**: events, conversation logs, and artifacts are permanent and queryable. Analyze what agents do across sessions, workflows, repos, systems, and organizations. Enables compounding learning loops.
-- **Model routing**: assign Haiku or Sonnet to workflow phases that don't need Opus. Real cost savings across multi-phase pipelines without sacrificing quality where it matters.
+- **Harness and model routing**: every phase picks its own harness and model, so cheap phases run cheap and hard phases get the strong model. Real cost savings across multi-phase pipelines without sacrificing quality where it matters.
 - **Workflow marketplace**: publish and consume reusable workflows via the CLI. One command to install any published workflow. Build once, run anywhere.
 - **Artifact pipeline**: each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research, plan, code, review. Each phase builds on the last.
-- **Claude Code as a primitive**: agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code).
-- **Full observability**: token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
+- **Claude Code and Codex**: phases run either harness inside secure ephemeral containers, selected per phase with `agent.provider`. Both share the same workspace image, isolation, and event capture.
+- **Cross-model delegation**: a Claude phase can hand work to Codex and back. Have one model write and a different one review, so the reviewer is not marking its own homework.
+- **Full observability**: both harnesses feed the same event store with conversation logs, tool traces, token counts and errors, and git hooks capture all git-related events. Depth differs: [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) add task, subagent, todo and hook-level detail plus per-run cost on Claude phases. A Codex phase records its conversation, command executions, file changes and tokens, with no vendor cost.
 - **GitHub-native triggers**: integrated event triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Zero-config, no tunnel required. Agents respond in minutes so developers stay out of the loop.
 - **Security first**: isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges.
 - **Production-grade**: event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment.
-- **Workflow phases as Claude Code commands**: each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research, plan, implement, review).
+- **Workflow phases as commands**: each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research, plan, implement, review).
 
 ## vs. Alternatives
 
@@ -37,6 +38,9 @@ Running 10 parallel Claude Code agents in a terminal is about as far as you can 
 | Your data stays yours | Yes | Yes | No | Yes |
 | Open source | Yes | No | No | Yes |
 | One-command setup | Yes | Yes | No | No |
+| Run Claude Code and Codex in one pipeline | Yes | No | No | Manual |
+
+Claude Code and Codex are compared here as the bare CLIs you would drive by hand. Both are also supported harnesses: Syntropic137 runs them, it does not replace them.
 
 ## Self-Hosting (recommended)
 
@@ -154,13 +158,30 @@ syn control resume <execution-id>
 syn control cancel <execution-id>
 ```
 
-### Agents
+### Choosing a harness
 
-```bash
-syn agent list
-syn agent test --provider claude --prompt "Hello"
-syn agent chat --provider claude
+Harness selection is per phase, declared in the workflow YAML. There is no
+CLI flag or environment variable for it.
+
+```yaml
+phases:
+  - id: implement
+    agent:
+      provider: claude          # claude | codex
+      model: sonnet
+  - id: review
+    agent:
+      provider: codex           # a different model reviews the work
+      model: gpt-5.6-sol        # name a concrete model, see note below
+      sandbox: read-only        # codex honours this, claude does not yet
 ```
+
+Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
+with `agent.provider: codex` fails to provision.
+
+Name a concrete model id on codex phases. Codex does not report its model on
+the wire, so omitting `model` leaves the run unpriced rather than wrongly
+priced, and no cost lands in your reports.
 
 ### Artifacts
 

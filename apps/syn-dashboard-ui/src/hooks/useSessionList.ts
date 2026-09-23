@@ -83,11 +83,14 @@ export function useSessionList(): UseSessionListResult {
   const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(SESSION_SORT_CONFIG)
 
   const fetchPage = useCallback(
-    async (query: ListQuery): Promise<ListPage<SessionSummary>> => {
-      const response = await listSessions({
-        ...query,
-        workflow_id: workflowIdFilter || undefined,
-      })
+    async (query: ListQuery, signal?: AbortSignal): Promise<ListPage<SessionSummary>> => {
+      const response = await listSessions(
+        {
+          ...query,
+          workflow_id: workflowIdFilter || undefined,
+        },
+        signal,
+      )
       return {
         rows: (response.sessions ?? []).map(toSessionSummary),
         total: response.total,

@@ -37,7 +37,7 @@ from ci.fitness.conftest import load_exceptions, rel_path, repo_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
-from check_untyped_dicts import contains_untyped_mapping
+from check_untyped_dicts import contains_dict_shaped_state
 
 _CHECK_DIRS = [
     "packages/syn-domain/src",
@@ -101,11 +101,11 @@ class _BoundaryDictVisitor(ast.NodeVisitor):
             ann = arg.annotation
             if ann is None:
                 continue
-            if contains_untyped_mapping(ann, values=_OPAQUE_VALUES):
+            if contains_dict_shaped_state(ann, values=_OPAQUE_VALUES):
                 self.violations.append((class_name, func.name, f"param:{arg.arg}", arg.lineno))
 
         # Return type
-        if func.returns is not None and contains_untyped_mapping(
+        if func.returns is not None and contains_dict_shaped_state(
             func.returns, values=_OPAQUE_VALUES
         ):
             self.violations.append((class_name, func.name, "return", func.lineno))

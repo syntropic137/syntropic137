@@ -1,5 +1,6 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
+import { formatStarted } from "./format.js";
 import type { ControlResponse } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -12,14 +13,17 @@ const PAST_TENSE: Record<string, string> = {
   cancel: "cancelled",
 };
 
+/** The failure shape shared by every control action. */
+function formatControlFailure(action: string, data: ControlResponse): { content: string; isError: true } {
+  return {
+    content: `Failed to ${action} execution ${data.execution_id}: ${data.error ?? "unknown error"}`,
+    isError: true,
+  };
+}
+
 function formatControl(action: string, data: ControlResponse): { content: string; isError?: true } {
   const past = PAST_TENSE[action] ?? `${action}ed`;
-  if (!data.success) {
-    return {
-      content: `Failed to ${action} execution ${data.execution_id}: ${data.error ?? "unknown error"}`,
-      isError: true,
-    };
-  }
+  if (!data.success) return formatControlFailure(action, data);
   return {
     content: `Execution ${data.execution_id} ${past} successfully. State: **${data.state}**${data.message ? ` — ${data.message}` : ""}`,
   };
@@ -66,7 +70,17 @@ export async function synResumeExecution(
     {},
   );
   if (!result.ok) return formatError(result.error);
-  return formatControl("resume", result.data);
+  if (!result.data.success) return formatControlFailure("resume", result.data);
+
+  // Resuming restarts work, so it reports like the other start/activate tools:
+  // the execution ID alone names a different run on a different deployment
+  // (issue #1264). pause/cancel/inject stay on `formatControl` — they act on
+  // work the caller is already tracking.
+  return formatStarted(client, "Execution Resumed", [
+    ["Execution ID", result.data.execution_id],
+    ["State", result.data.state],
+    ...(result.data.message ? ([["Message", result.data.message]] as [string, string][]) : []),
+  ]);
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    CostField,
+    SessionCost,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
@@ -44,6 +47,7 @@ SELECT
     data->>'model' as agent_model,
     (data->>'num_turns')::int as num_turns,
     (data->>'tool_count')::int as tool_count,
+    data->>'workspace_id' as workspace_id,
     time as completed_at,
     execution_id,
     phase_id
@@ -74,6 +78,7 @@ SELECT
     MIN(time) as started_at,
     MAX(time) as last_observation,
     COUNT(*) as observation_count,
+    MAX(data->>'workspace_id') as workspace_id,
     MAX(execution_id) as execution_id,
     MAX(phase_id) as phase_id
 FROM agent_events
@@ -149,7 +154,11 @@ class SessionCostQueryService:
         """Get cost data for many sessions in a fixed number of round-trips.
 
         Same answers as calling ``get`` per id - it is the same code path - but
-        four queries for the whole set instead of four per session (#1114).
+        three or four queries per BATCH instead of four per session (#1114).
+        Three when every id was answered from session summaries, four when the
+        token-usage fallback is needed; and one batch per
+        ``MAX_SESSIONS_PER_QUERY`` ids rather than one for the whole set, which
+        is what bounds a single acquisition (#1338).
         Sessions with no cost data are absent from the mapping.
         """
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
@@ -247,9 +256,11 @@ class SessionCostQueryService:
         sc.token_cost_usd = cost
         sc.tool_calls = tool_counts.get(sid, 0)
         sc.turns = row["num_turns"] or 0  # type: ignore[index]
+        sc.record_measured(CostField.TURNS)
         sc.duration_ms = float(row["duration_ms_val"] or 0)  # type: ignore[index]
         sc.execution_id = row["execution_id"]  # type: ignore[index]
         sc.phase_id = row["phase_id"]  # type: ignore[index]
+        sc.workspace_id = row["workspace_id"]  # type: ignore[index]
         sc.started_at = started_map.get(sid)  # type: ignore[arg-type]
         sc.completed_at = row["completed_at"]  # type: ignore[index]
         sc.is_finalized = True
@@ -289,6 +300,7 @@ class SessionCostQueryService:
         sc.tool_calls = tool_counts.get(session_id, 0)
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
+        sc.workspace_id = totals.workspace_id
         sc.started_at = started_map.get(session_id) or totals.started_at  # type: ignore[assignment]
         sc.unpriced_observation_count = totals.unpriced_observation_count
         sc.cost_by_model = dict(totals.cost_by_model)

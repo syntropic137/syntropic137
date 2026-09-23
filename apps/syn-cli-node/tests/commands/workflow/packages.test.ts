@@ -58,6 +58,71 @@ describe("workflow packages", () => {
     expect(out).toContain("No packages installed yet.");
   });
 
+  describe("unsupported URL schemes (issue #1118)", () => {
+    // `syn workflow packages` used to answer "is this source remote?" with
+    // its own `src.includes("://")`, while resolver.ts's parseSource - the
+    // function `install` and `update` actually resolve a source with -
+    // answers it with a fixed list of four prefixes. Every scheme outside
+    // that list was therefore remote to the listing and local to the parser,
+    // so the row was never liveness-checked and never pruned. These pin the
+    // whole class, not just the `file://` example from the issue: any
+    // scheme parseSource does not recognise is a source install could never
+    // have cloned, so a dead row must not survive on the strength of its
+    // colon-slash-slash.
+    const unsupported: readonly [string, string][] = [
+      ["file-url-pkg", "file:///definitely/missing/syn1118"],
+      ["ftp-url-pkg", "ftp://example.com/missing-syn1118"],
+      ["s3-url-pkg", "s3://bucket/missing-syn1118"],
+      ["git-url-pkg", "git://example.com/missing-syn1118.git"],
+    ];
+
+    for (const [pkg, source] of unsupported) {
+      it(`prunes a dead ${source.split(":")[0]}:// source`, async () => {
+        install(pkg, source);
+        await packagesCommand.handler({ positionals: [], values: {} });
+
+        const out = stdout();
+        expect(out).not.toContain(pkg);
+        expect(out).toContain("No packages installed yet.");
+      });
+    }
+
+    it("prunes a dead local path that merely contains :// somewhere in it", async () => {
+      // The old predicate looked for `://` ANYWHERE, not as a prefix, so an
+      // absolute path that happens to contain those three characters was
+      // classified remote and exempted from the existence check. parseSource
+      // reads it for what it is: a path starting with `/`.
+      install("colon-path-pkg", "/tmp/syn1118-gone/weird://name");
+      await packagesCommand.handler({ positionals: [], values: {} });
+
+      const out = stdout();
+      expect(out).not.toContain("colon-path-pkg");
+      expect(out).toContain("No packages installed yet.");
+    });
+
+    // Guards the other direction: routing the question through parseSource
+    // must not start pruning sources that really are remote and really are
+    // still installable. These pass before and after the change - they are
+    // here so a future "simplification" of the filter cannot quietly delete
+    // the remote cases along with the divergence.
+    const stillListed: readonly [string, string][] = [
+      ["https-pkg", "https://github.com/acme/widgets.git"],
+      ["http-pkg", "http://example.com/widgets.git"],
+      ["scp-pkg", "git@github.com:acme/widgets.git"],
+      ["ssh-pkg", "ssh://git@github.com/acme/widgets.git"],
+      ["bare-pkg", "some-marketplace-plugin-syn1118"],
+    ];
+
+    for (const [pkg, source] of stillListed) {
+      it(`keeps ${source}, which has no local path to be missing`, async () => {
+        install(pkg, source);
+        await packagesCommand.handler({ positionals: [], values: {} });
+
+        expect(stdout()).toContain(pkg);
+      });
+    }
+  });
+
   describe("home-relative sources (issue #1066)", () => {
     // `~/pkg` only means something once it is expanded against a home
     // directory - the real $HOME the test happens to run under is not a

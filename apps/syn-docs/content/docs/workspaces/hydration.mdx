@@ -137,7 +137,7 @@ When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGEN
 @/workspace/repos/web-app/CLAUDE.md
 ```
 
-The agent loads these files automatically via Claude Code's standard context injection. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
+Each harness loads its own file automatically: Claude Code reads the synthesized `CLAUDE.md`, and Codex reads `AGENTS.md`. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
 
 If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are cloned - because none are configured, or because the phase set `clone_repos: false` - no synthesis happens and neither file is created.
 

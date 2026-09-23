@@ -10,28 +10,18 @@ from typing import Any
 
 import asyncpg
 
-
-def _strip_nul_bytes(obj: object) -> object:
-    """Recursively drop NUL (U+0000) chars from string values.
-
-    Postgres jsonb cannot store a NUL character ("\\u0000 cannot be converted to
-    text"), so any projection whose event payload carries one (e.g. raw agent
-    output captured as an artifact) would crash the write. Stripping at the
-    single serialize boundary protects every projection. Only real NUL bytes are
-    removed; a literal "\\u0000" text sequence is preserved.
-    """
-    if isinstance(obj, str):
-        return obj.replace("\x00", "") if "\x00" in obj else obj
-    if isinstance(obj, dict):
-        return {k: _strip_nul_bytes(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_strip_nul_bytes(v) for v in obj]
-    return obj
+from syn_adapters.postgres_text import pg_json
 
 
 def serialize(data: dict[str, Any]) -> str:
-    """Serialize data to JSON, handling datetime objects and NUL bytes."""
-    return json.dumps(_strip_nul_bytes(data), default=json_serializer)
+    """Serialize a projection record to JSON for its ``jsonb`` column.
+
+    Projection payloads carry agent output verbatim (an artifact summary, a
+    captured error message), so this is a boundary untrusted text crosses; see
+    :mod:`syn_adapters.postgres_text` for what that costs when it is not
+    guarded.
+    """
+    return pg_json(data)
 
 
 def deserialize(data: str | dict[str, Any]) -> dict[str, Any]:
@@ -47,6 +37,29 @@ def json_serializer(obj: object) -> str:
     if isinstance(obj, datetime):
         return obj.isoformat()
     raise TypeError(f"Type {type(obj)} not serializable")
+
+
+# Which JSON fields a projection is FILTERED on, and therefore indexed on.
+#
+# Every projection table is created with the same two indexes, on `id` and on
+# `updated_at` - which answer "give me this record" and "give me the newest",
+# and nothing else. A filter on a JSON field (`data->>'x' = $1`) has no index
+# to use and reads the whole table, so pushing a filter down to the store buys
+# nothing on its own: the scan just moves from Python into Postgres (#1253).
+#
+# An expression index is what makes the predicate cheap, and it must match the
+# predicate exactly - `(data->>'field')`, the same expression the query builder
+# writes. The GIN index some deployments carry on `data` does NOT serve this:
+# GIN answers containment and key existence, not a text comparison on an
+# extracted value.
+#
+# Add a field here when a query filters on it, not speculatively: an index is
+# paid for on every write.
+_FILTERED_FIELDS: dict[str, tuple[str, ...]] = {
+    # repo_correlation is read on every insights request, by repo
+    # (executions_by_repo) and by execution (repo_health).
+    "repo_correlation": ("repo_full_name", "execution_id"),
+}
 
 
 async def ensure_projection_table(
@@ -75,6 +88,12 @@ async def ensure_projection_table(
                 CREATE INDEX IF NOT EXISTS idx_{table_name}_updated_at
                 ON {table_name}(updated_at DESC)
             """)
+
+            for field in _FILTERED_FIELDS.get(projection, ()):
+                await conn.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_{table_name}_{field}
+                    ON {table_name} ((data->>'{field}'))
+                """)
         except asyncpg.exceptions.UniqueViolationError:
             # PostgreSQL creates a composite row type with the same name as
             # each table. Under asyncio concurrency, two coroutines can both

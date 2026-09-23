@@ -12,12 +12,13 @@ and CamelCase event type names.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
     DispatchContext,
+    DomainEvent,
     EventEnvelope,
     ProjectionCheckpoint,
     ProjectionCheckpointStore,
@@ -84,7 +85,7 @@ class _ObservationProjectionAdapter(CheckpointedProjection):
 
     async def handle_event(
         self,
-        envelope: EventEnvelope[Any],
+        envelope: EventEnvelope[DomainEvent],
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:

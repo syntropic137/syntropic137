@@ -27,7 +27,7 @@ Syntropic137 separates all data into two lanes, each optimized for its purpose:
 Every agent execution runs inside an **isolated Docker container**, a workspace. Workspaces use a two-phase security model:
 
 1. **Setup Phase**: Secrets (API keys, Git credentials) are briefly available to configure credential helpers. Raw tokens are cleared before the agent starts.
-2. **Agent Phase**: The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase. Network egress goes through an Envoy sidecar proxy.
+2. **Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only runtime secret. Other non-secret variables such as session and endpoint configuration are also present. A codex phase runs with an **empty** agent environment: its credential is staged to `~/.codex/auth.json` at mode 0600 during provisioning and the staged copy is deleted, so `CODEX_AUTH_JSON` itself never reaches the agent. That asymmetry is deliberate, and it is what keeps Anthropic credentials out of reach of a codex run. Git operations use cached credentials from the setup phase. Network egress goes through an Envoy sidecar proxy.
 
 This means the agent never sees raw GitHub tokens or other secrets. Even if an agent is compromised, credentials are already gone.
 
@@ -46,12 +46,17 @@ phases:
     name: Discovery
     order: 1
     prompt_file: phases/discovery.md
-    model: sonnet
+    agent:
+      provider: claude
+      model: sonnet
   - id: synthesis
     name: Synthesis
     order: 2
     prompt_file: phases/synthesis.md
-    model: opus
+    agent:
+      provider: codex
+      model: gpt-5.6-sol
+      sandbox: read-only
 ```
 
 Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
@@ -59,6 +64,17 @@ Phases execute sequentially. Each phase can reference the output of previous pha
 The `repos` list tells Syntropic137 which repositories to pre-clone into the workspace before the agent starts. See [Workspace Hydration](/docs/workspaces/hydration).
 
 Workflows can be packaged and distributed. See [Workflow Packages](/docs/guide/workflows).
+
+## Agent Harnesses
+
+Syntropic137 is not tied to a single agent vendor. Each phase declares which harness runs it, in the phase's `agent` block:
+
+- `provider: claude` runs the phase on Claude Code (`claude -p`). This is the default when no `agent` block is present.
+- `provider: codex` runs the phase on OpenAI Codex (`codex exec`).
+
+Both harnesses use the same workspace image, the same isolation model, the same token accounting, and the same tool-call timeline. They differ in what they can enforce and what telemetry they emit. Claude phases produce hook events, subagent tracking, and todo data. Codex phases produce none of those, and they are the only phases whose `sandbox` level is actually enforced.
+
+See [Choosing an Agent Harness](/docs/guide/workflows#choosing-an-agent-harness) for the full field reference and the caveats.
 
 ## Executions
 
@@ -112,6 +128,8 @@ A **session** is an agent's working period within an execution. It captures:
 - **Cost**: calculated from token usage and model pricing
 
 Sessions are the primary unit of observability. When you debug a failed execution or analyze costs, you're looking at session data.
+
+Codex sessions are thinner than claude sessions. Tokens and the tool timeline are captured for both, but codex does not report its model on the wire, so a codex phase that does not name a concrete model id in its `agent` block is recorded unpriced. Vendor cost is always null for codex.
 
 ## Artifacts
 

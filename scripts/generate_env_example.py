@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
+from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
@@ -427,6 +428,22 @@ def generate_env_example() -> str:
             "GIT IDENTITY FOR WORKSPACE COMMITS",
             prefix="SYN_GIT_",
             description="Git identity for agent commits. Prefer GitHub App for authentication.",
+        )
+    )
+
+    # Operator co-authorship (SYN_OPERATOR_* prefix). Forwarded into every
+    # workspace, where the image's prepare-commit-msg hook turns them into a
+    # Co-authored-by trailer. Undiscoverable here means undiscovered: the hook
+    # has shipped for months and never fired because nobody knew to set these.
+    lines.extend(
+        generate_settings_section(
+            OperatorSettings,
+            "OPERATOR ATTRIBUTION ON AGENT COMMITS",
+            prefix="SYN_OPERATOR_",
+            description=(
+                "Credits a human as co-author on every agent commit. Both are required; "
+                "the email must belong to the GitHub account that should get the credit."
+            ),
         )
     )
 

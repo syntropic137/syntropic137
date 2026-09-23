@@ -13,6 +13,7 @@ halfway is a restart that leaves zombies.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -63,6 +64,10 @@ class _StubAggregate:
         self._raises = raises
         self.running_phase_id = running_phase_id
         self.failed_with: object | None = None
+        # Nothing to salvage: these stubs exercise the closing of orphans, not
+        # the rescue of a stranded deliverable (#1300, covered separately in
+        # test_1300_restart_salvage_at_the_entry_point.py).
+        self.stranded_deliverable = None
 
     def fail_execution(self, command: object) -> None:
         if self._raises:
@@ -254,3 +259,64 @@ async def test_the_failure_names_the_phase_that_was_running(
     await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
 
     assert getattr(agg.failed_with, "failed_phase_id", "") == "implement"
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_salvage_is_still_counted_when_the_save_that_follows_it_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The partial-success case a refactor silently changed.
+
+    Salvaging and terminalising are two steps behind one `repository.save`.
+    When the salvage succeeds and the save then raises, the sweep must still
+    report the salvage: the recovery is what the operator is being told about,
+    and a count that forgets it understates what was recovered on exactly the
+    runs where that matters most.
+
+    The inline version incremented `salvaged` as soon as the salvage returned.
+    Extracting the body moved the increment after the save, so this case
+    reported zero for both. Found by cross-model review; no test covered it,
+    which is why the extraction looked behaviour-preserving.
+    """
+    rows = [_Summary("exec-1")]
+    aggregate = _StubAggregate("exec-1")
+    _, repository = _install(monkeypatch, rows, {"exec-1": aggregate})
+
+    async def _explode(_: object) -> None:
+        raise RuntimeError("the save after the salvage failed")
+
+    monkeypatch.setattr(repository, "save", _explode)
+    monkeypatch.setattr(
+        "syn_api.services.reconciliation._salvage_before_failing",
+        _salvaged_the_implement_phase,
+    )
+
+    # A handler attached directly, rather than the caplog fixture: this suite's
+    # logging configuration means caplog captures nothing here, and a fixture
+    # that silently records zero lines makes an assertion about log content
+    # pass or fail for reasons unrelated to the code.
+    said: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            said.append(record.getMessage())
+
+    handler = _Collect()
+    logger = logging.getLogger("syn_api.services.reconciliation")
+    logger.addHandler(handler)
+    try:
+        await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+    finally:
+        logger.removeHandler(handler)
+
+    assert said, "the sweep logged nothing, so this asserts on an empty string"
+    summary = "\n".join(said)
+    assert "1 had a finished phase whose deliverable was recovered" in summary, summary
+    assert "Reconciled 0 of 1" in summary, (
+        "the execution was not terminalised, so it must not be counted as failed"
+    )
+
+
+async def _salvaged_the_implement_phase(*_args: object, **_kwargs: object) -> str:
+    return "implement"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,12 +16,60 @@ from syn_domain.contexts.organization.slices.list_systems.projection import (
 )
 
 
+def _wanted(value: object) -> tuple[object, ...]:
+    """One filter value, or several meaning ANY of them.
+
+    Mirrors `_condition` in syn_adapters.projection_stores.postgres_query_builder,
+    which renders a collection as `= ANY($n)`. A fake that compared the list
+    itself would answer [] to a query the real store answers, and every handler
+    test filtering by more than one repo would pass for the wrong reason.
+    """
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(value)
+    return (value,)
+
+
+@dataclass(frozen=True)
+class AskFilter:
+    """One predicate of a read, normalised past the caller's choice of spelling.
+
+    `values` is always a tuple, so a test states what it expects once and does
+    not have to know whether the caller passed a bare string, a list or the set
+    comprehension the system-scoped handlers build.
+    """
+
+    field: str
+    values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Ask:
+    """One read the code under test performed, as the store saw it.
+
+    Recorded because some properties are about the QUESTION, not the answer.
+    "The whole correlation projection is never loaded to satisfy a filter" is
+    the point of #1253, and both spellings return the same executions, so a
+    test that only looked at the result would pass either way.
+    """
+
+    projection: str
+    filters: tuple[AskFilter, ...] = ()
+
+
 class FakeProjectionStore:
-    """In-memory projection store for testing."""
+    """In-memory projection store for testing, which remembers what it was asked.
+
+    `asks` records every `query`, `scans` every `get_all`. Together they let a
+    test assert that a read was pushed DOWN rather than done in Python, without
+    a bespoke spy subclass per test - which is what this replaced, and which
+    had to restate the whole store signature to record one field.
+    """
 
     def __init__(self) -> None:
         self._data: dict[str, dict[str, dict[str, Any]]] = {}
         self._positions: dict[str, int] = {}
+        self.asks: list[Ask] = []
+        self.scans: list[str] = []
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         self._data.setdefault(projection, {})[key] = data
@@ -29,6 +78,7 @@ class FakeProjectionStore:
         return self._data.get(projection, {}).get(key)
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
+        self.scans.append(projection)
         return list(self._data.get(projection, {}).values())
 
     async def delete(self, projection: str, key: str) -> None:
@@ -42,9 +92,20 @@ class FakeProjectionStore:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        self.asks.append(
+            Ask(
+                projection,
+                tuple(
+                    AskFilter(k, tuple(str(x) for x in _wanted(v)))
+                    for k, v in (filters or {}).items()
+                ),
+            )
+        )
         records = list(self._data.get(projection, {}).values())
         if filters:
-            records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
+            records = [
+                r for r in records if all(r.get(k) in _wanted(v) for k, v in filters.items())
+            ]
         if order_by:
             reverse = order_by.startswith("-")
             field = order_by.lstrip("-")

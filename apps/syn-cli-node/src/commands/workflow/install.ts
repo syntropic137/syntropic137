@@ -14,7 +14,6 @@ import { Table } from "../../output/table.js";
 import type { InstalledWorkflowRef, PackageFormat, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
 import {
   detectFormat,
-  isGitHubShorthand,
   isHomeRelative,
   loadInstalled,
   parseSource,
@@ -405,27 +404,38 @@ export const packagesCommand: CommandDef = {
   handler: async () => {
     const registry = loadInstalled();
 
-    // Filter out entries whose local source path no longer exists.
-    // Remote sources (URLs, git@, GitHub shorthand, marketplace bare names) are always shown.
-    // Reuses resolver.ts's isGitHubShorthand rather than a second, divergent
-    // check - this used its own regex (with a `#fragment` allowance nothing
-    // ever produces, since `source` is always the raw CLI argument and a ref
-    // is stored separately as `sourceRef`) that could disagree with the
-    // parser actually used to resolve the source.
+    // Filter out entries whose local source path no longer exists; a remote
+    // source has no local path to go missing, so it is always shown.
     //
-    // WHY parseSource here (issue #1066): `source` is the raw CLI argument
-    // (e.g. `~/foo`), stored verbatim so the table can display it and so
-    // re-expanding against a different $HOME later (a synced registry file,
-    // a container rebuild) stays correct. The liveness check must resolve it
-    // through the exact same function `install`/`update` use to turn that
-    // raw string into a filesystem path - parseSource's `expandHome` - rather
-    // than a second, ad-hoc `path.resolve`, which does not know `~` and
-    // silently drops every home-relative install from this list.
+    // parseSource answers BOTH questions this filter asks - is the source
+    // remote, and if not, which filesystem path does it mean - and it is the
+    // same function `install` and `update` resolve a source with. Asking it
+    // once is the whole point: every previous version of this filter asked
+    // one of those questions a second way and drifted from the parser.
+    //
+    // Issue #1045/#1066: a second GitHub-shorthand regex here (with a
+    // `#fragment` allowance nothing ever produces, since `source` is the raw
+    // CLI argument and a ref is stored separately as `sourceRef`), and an
+    // ad-hoc `path.resolve` that did not know `~` and so dropped every
+    // home-relative install from the list.
+    //
+    // Issue #1118: an inline `src.includes("://") || startsWith("git@") ||
+    // startsWith("ssh://")` remoteness test. parseSource recognises four URL
+    // prefixes; `includes("://")` matched any scheme anywhere, so `file://`,
+    // `ftp://`, `s3://` - and a local path with `://` in the middle of it -
+    // were remote to this listing and local to the parser. Dead rows install
+    // could never have cloned in the first place were exempted from the
+    // existence check and stayed listed forever.
+    //
+    // `isBarePluginName` stays a separate term. A bare marketplace name
+    // (`my-plugin`) is not a remote URL - parseSource rightly says so - it
+    // just resolves through the marketplace instead of the filesystem, so
+    // there is no local path to check. That is a different question, not a
+    // second opinion on this one.
     const liveInstallations = registry.installations.filter((r) => {
-      const src = r.source;
-      const isRemote = src.includes("://") || src.startsWith("git@") || src.startsWith("ssh://") || isBarePluginName(src) || isGitHubShorthand(src);
-      if (isRemote) return true;
-      return fs.existsSync(path.resolve(parseSource(src).resolved));
+      const { resolved, isRemote } = parseSource(r.source);
+      if (isRemote || isBarePluginName(r.source)) return true;
+      return fs.existsSync(path.resolve(resolved));
     });
 
     if (liveInstallations.length === 0) {

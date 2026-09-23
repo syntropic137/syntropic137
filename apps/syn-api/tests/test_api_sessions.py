@@ -88,8 +88,15 @@ async def test_start_and_list_sessions():
 
 
 async def test_complete_session():
-    """Start then complete a session."""
-    from syn_api.routes.sessions import complete_session, start_session
+    """Start then complete a session, and read the completion back (#1034).
+
+    ``complete_session()`` returned Ok while CompleteSessionHandler's body
+    was ``pass``, so asserting Ok alone passed against a handler that wrote
+    nothing. The session's status at the read path is what distinguishes
+    the two.
+    """
+    from syn_api._wiring import sync_published_events_to_projections
+    from syn_api.routes.sessions import complete_session, get_session, start_session
 
     start_result = await start_session(
         workflow_id="wf-test-789",
@@ -98,9 +105,83 @@ async def test_complete_session():
     assert isinstance(start_result, Ok)
     session_id = start_result.value
 
-    # CompleteSessionHandler is currently a stub (pass), so this should not error
+    before = await get_session(session_id)
+    assert isinstance(before, Ok)
+    assert before.value.status == "running"
+
     complete_result = await complete_session(session_id)
     assert isinstance(complete_result, Ok)
+    await sync_published_events_to_projections()
+
+    after = await get_session(session_id)
+    assert isinstance(after, Ok)
+    assert after.value.status == "completed"
+    assert after.value.completed_at is not None
+
+
+async def test_recorded_operation_reaches_the_session_read_path():
+    """An operation recorded through RecordOperationHandler must be visible
+    to the API that serves session detail (#1034).
+
+    ``operations`` is the assertion that matters, and it is the one the first
+    version of this test did not make: it checked ``total_tokens`` only, which
+    reaches the endpoint by a different route entirely (Lane 1 ->
+    SessionListProjection -> _lane1_tokens). So it passed with the operations
+    read path replaced by ``return []`` - green while the bug it is named for
+    was fully present.
+
+    ``toolu_record_op_1034`` is written by nothing else in this system, so the
+    row read back here can only be the one recorded above.
+    """
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.agent_sessions import (
+        RecordOperationCommand,
+        RecordOperationHandler,
+    )
+    from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+
+    start_result = await start_session(workflow_id="wf-record-op", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    before = await get_session(session_id)
+    assert isinstance(before, Ok)
+    assert before.value.total_tokens == 0
+    assert before.value.operations == []
+
+    await RecordOperationHandler(
+        repository=get_session_repo(), observations=get_session_observations()
+    ).handle(
+        RecordOperationCommand(
+            aggregate_id=session_id,
+            operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+            tool_name="Bash",
+            tool_use_id="toolu_record_op_1034",
+            tool_input={"command": "echo 1034"},
+            tool_output="ran",
+            duration_seconds=1.5,
+            input_tokens=4000,
+            output_tokens=321,
+            total_tokens=4321,
+        )
+    )
+    await sync_published_events_to_projections()
+
+    after = await get_session(session_id)
+    assert isinstance(after, Ok)
+    assert [op.tool_use_id for op in after.value.operations] == ["toolu_record_op_1034"]
+    operation = after.value.operations[0]
+    assert operation.tool_name == "Bash"
+    assert operation.operation_type == "tool_execution_completed"
+    assert operation.output_preview == "ran"
+    assert operation.duration_ms == 1500
+    # Tokens travel the other lane and must keep working while operations do.
+    assert after.value.total_tokens == 4321
 
 
 async def test_get_session_includes_lineage_fields():
@@ -191,3 +272,214 @@ async def test_get_session_running_duration_advances_between_reads():
     second_duration = second.value.duration_seconds
     assert second_duration is not None
     assert second_duration > first_duration
+
+
+async def test_session_detail_operations_come_only_from_the_lane2_timeline():
+    """``operations`` has exactly one source, and it is the Lane 2 timeline (#1034).
+
+    SessionSummary used to carry an operations list of its own that nothing
+    read. Recording a Lane 1 operation here and standing in for Lane 2 with a
+    single known row is what tells the two apart: if any Lane 1 copy were
+    still merged in, this session would report two operations, and the extra
+    one would be the totals roll-up the issue calls synthetic.
+    """
+    from datetime import UTC, datetime
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.projections.session_tools import ToolOperation
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.agent_sessions import (
+        RecordOperationCommand,
+        RecordOperationHandler,
+    )
+    from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
+
+    start_result = await start_session(workflow_id="wf-one-lane", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    await RecordOperationHandler(
+        repository=get_session_repo(), observations=get_session_observations()
+    ).handle(
+        RecordOperationCommand(
+            aggregate_id=session_id,
+            operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
+            tool_name="Bash",
+            tool_use_id="toolu_lane1_1034",
+            total_tokens=4321,
+            input_tokens=4000,
+            output_tokens=321,
+        )
+    )
+    await sync_published_events_to_projections()
+
+    class _StandInLane2:
+        async def get(self, _session_id: str) -> list[ToolOperation]:
+            return [
+                ToolOperation(
+                    observation_id="obs-lane2-1034",
+                    tool_name="Bash",
+                    tool_use_id="toolu_lane2_1034",
+                    operation_type="tool_execution_completed",
+                    timestamp=datetime.now(UTC),
+                    success=True,
+                    input_preview="echo lane2",
+                    output_preview="lane2",
+                    duration_ms=12,
+                )
+            ]
+
+    manager = get_projection_manager()
+    manager._ensure_initialized()
+    manager._projections["session_tools"] = _StandInLane2()
+
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    # Only what the timeline returned - the recorded operation is on the real
+    # timeline, which this stand-in has replaced, so it must not appear too.
+    assert [op.tool_use_id for op in detail.value.operations] == ["toolu_lane2_1034"]
+    # The Lane 1 operation is still real - it is where the tokens came from.
+    assert detail.value.total_tokens == 4321
+
+
+async def test_the_production_completion_path_reaches_the_session_read_path():
+    """The caller a real phase execution uses, end to end (#1034).
+
+    ``RecordOperationHandler`` was reachable only from tests. This drives
+    ``SessionLifecycleManager.complete_success`` - what WorkflowExecution
+    actually calls when a phase finishes - and asserts at the endpoint that
+    serves session detail. 4321/4000/321 is a split no default or sum of
+    defaults produces.
+    """
+    from syn_api._wiring import (
+        get_session_observations,
+        get_session_repo,
+        sync_published_events_to_projections,
+    )
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
+    )
+
+    start_result = await start_session(workflow_id="wf-prod-path", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    repo = get_session_repo()
+    manager = SessionLifecycleManager(
+        repository=repo,
+        session_id=session_id,
+        workflow_id="wf-prod-path",
+        execution_id="exec-prod-path",
+        phase_id="phase-1",
+        agent_provider="claude",
+        agent_model="claude-sonnet-4-20250514",
+        # WorkflowExecutionProcessor passes its observability writer here
+        # (WorkflowExecutionProcessor.py, `observability=self._observability_writer`).
+        # Omitting it is what made the first version of this test vacuous: with
+        # no lane there is no timeline row to miss, so the assertion below
+        # could not have failed however broken the write path was.
+        observability=get_session_observations(),
+    )
+    manager._session = await repo.get_by_id(session_id)
+
+    await manager.complete_success(
+        input_tokens=4000,
+        output_tokens=321,
+        cache_creation_tokens=0,
+        cache_read_tokens=0,
+        total_tokens=4321,
+        duration_seconds=1.5,
+        source="test-1034",
+    )
+    await sync_published_events_to_projections()
+
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    assert detail.value.status == "completed"
+    assert detail.value.total_tokens == 4321
+    assert detail.value.input_tokens == 4000
+    assert detail.value.output_tokens == 321
+
+    # The assertion this test exists for. `total_tokens` above reaches the
+    # endpoint through Lane 1 and says nothing about the timeline - it was
+    # already 4321 while `operations` was empty, which is the exact signature
+    # of #1034 and what this test used to stop at.
+    assert [op.operation_type for op in detail.value.operations] == ["session_completed"]
+    completion = detail.value.operations[0]
+    assert completion.success is True
+    assert completion.duration_ms == 1500
+
+
+async def test_the_production_path_reports_a_lost_timeline_row(caplog):
+    """A timeline write that fails is reported, not discarded (#1034).
+
+    The two writes `complete_success` makes go to different stores with no
+    transaction spanning them, so the domain write can commit while the
+    timeline write does not. That gap used to be caught and logged inside the
+    handler and nothing else - invisible to the caller, and so invisible at
+    exactly the moment it mattered. This drives the real caller with a lane
+    that refuses the write and asserts BOTH halves: the domain write survives,
+    and the divergence is announced against this execution and phase.
+    """
+    import logging
+
+    from syn_api._wiring import get_session_repo, sync_published_events_to_projections
+    from syn_api.routes.sessions import get_session, start_session
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
+    )
+
+    class _RefusingLane:
+        async def record_observation(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("timescale is down")
+
+    start_result = await start_session(workflow_id="wf-diverged", phase_id="phase-1")
+    assert isinstance(start_result, Ok)
+    session_id = start_result.value
+
+    repo = get_session_repo()
+    manager = SessionLifecycleManager(
+        repository=repo,
+        session_id=session_id,
+        workflow_id="wf-diverged",
+        execution_id="exec-diverged",
+        phase_id="phase-1",
+        agent_provider="claude",
+        agent_model="claude-sonnet-4-20250514",
+        observability=_RefusingLane(),
+    )
+    manager._session = await repo.get_by_id(session_id)
+
+    with caplog.at_level(logging.ERROR):
+        await manager.complete_success(
+            input_tokens=4000,
+            output_tokens=321,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            total_tokens=4321,
+            duration_seconds=1.5,
+            source="test-1034",
+        )
+    await sync_published_events_to_projections()
+
+    # Lane 2 being down must not cost us the domain write.
+    detail = await get_session(session_id)
+    assert isinstance(detail, Ok)
+    assert detail.value.status == "completed"
+    assert detail.value.total_tokens == 4321
+
+    # The divergence is announced, and names the run that lost the row -
+    # `exec-diverged` appears in no other message this path can emit.
+    reports = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.ERROR and "exec-diverged" in r.getMessage()
+    ]
+    assert reports, f"no divergence reported; saw {[r.getMessage() for r in caplog.records]}"
+    assert "timescale is down" in reports[0]

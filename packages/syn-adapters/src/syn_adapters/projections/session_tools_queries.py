@@ -9,7 +9,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projections.session_tools_dispatch import row_to_operation as row_to_operation
+from syn_adapters.projections.session_tools_dispatch import (
+    rows_to_operations,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.projections.session_tools import SessionToolsProjection
@@ -53,14 +57,16 @@ async def query_session_tools(
     params: list[Any] = [list(timeline_exclude)]
     param_idx = 2
 
+    # agent_events holds both ids in their sanitised form (AgentEvent's
+    # validator), so both filters have to ask for that form (#1241).
     if execution_id:
         conditions.append(f"execution_id = ${param_idx}")
-        params.append(execution_id)
+        params.append(pg_safe(execution_id))
         param_idx += 1
 
     if phase_id:
         conditions.append(f"phase_id = ${param_idx}")
-        params.append(phase_id)
+        params.append(pg_safe(phase_id))
         param_idx += 1
 
     if tool_name:
@@ -84,11 +90,7 @@ async def query_session_tools(
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql_query, *params)
-            return [
-                op
-                for row in rows
-                if (op := row_to_operation(row, subagent_tool_names, git_event_types)) is not None
-            ]
+            return rows_to_operations(rows, subagent_tool_names, git_event_types)
     except Exception as e:
         _logger.error("Failed to query tool operations: %s", e)
         return []

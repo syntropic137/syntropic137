@@ -19,6 +19,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     EventStreamProcessor,
     _extract_error_reason,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
+    VerdictStatus,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
     SubagentTracker,
 )
@@ -86,7 +89,7 @@ class TestEventStreamProcessor:
         result = await proc.process_stream(_lines_to_stream(), MockWorkspace())
         assert result.line_count == 0
         assert not result.interrupt_requested
-        assert result.agent_task_result is None
+        assert result.verdict.status is VerdictStatus.NOT_REPORTED
         assert result.conversation_lines == []
 
     @pytest.mark.asyncio
@@ -299,14 +302,16 @@ class TestEventStreamProcessor:
         result_line = json.dumps(
             {
                 "type": "result",
-                "result": 'Done. TASK_RESULT: {"success": true, "comments": "All good"}',
+                "result": (
+                    'Done. TASK_RESULT: {"success": true, "comments": "All good"}\nTASK_RESULT_END'
+                ),
                 "usage": {},
             }
         )
         result = await proc.process_stream(_lines_to_stream(result_line), MockWorkspace())
-        assert result.agent_task_result is not None
-        assert result.agent_task_result["success"] is True
-        assert result.agent_task_result["comments"] == "All good"
+        assert result.verdict.status is VerdictStatus.SUCCESS
+        assert result.verdict.comments == "All good"
+        assert not result.verdict.refuses_completion
 
     @pytest.mark.asyncio
     async def test_conversation_lines_collected(self) -> None:

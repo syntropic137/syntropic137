@@ -12,10 +12,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from syn_adapters.in_memory import InMemoryAdapterError, assert_test_only
+from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
     apply_sorting,
+    filter_values,
 )
 from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
@@ -50,16 +52,24 @@ class InMemoryProjectionStore:
         """Validate that we're in a test environment."""
         assert_test_only()
 
+    # WHAT A RECORD LOOKS LIKE ONCE STORED is this double's whole reason to
+    # exist, so it holds keys and payloads in the form its Postgres
+    # counterpart does - sanitised (`pg_safe`, via `save`) rather than as the
+    # caller spelled them. Storing the raw form would make this store
+    # SELF-consistent and production-inconsistent: a read with a hostile id
+    # would find its row here and find nothing in Postgres, so the one place
+    # the difference shows up is a passing test for a broken query (#1241).
+
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        self._data.setdefault(projection, {})[key] = data.copy()
+        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
         self._update_state(projection)
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
         """Get a single projection record by key."""
         if projection not in self._data:
             return None
-        return self._data[projection].get(key)
+        return self._data[projection].get(pg_safe(key))
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         """Get all records for a projection."""
@@ -68,7 +78,14 @@ class InMemoryProjectionStore:
         return list(self._data[projection].values())
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
-        """Count records, with the same equality semantics the Postgres store uses."""
+        """Count records, with the same equality semantics the Postgres store uses.
+
+        Including cardinality: `build_count_query` shares its WHERE builder
+        with `build_query`, so the Postgres count already answers a
+        collection-valued filter as ANY. Counting only scalars here would put
+        the count back out of step with the rows it counts, which is the one
+        thing that shared builder exists to prevent.
+        """
         records = self._data.get(projection)
         if not records:
             return 0
@@ -77,11 +94,15 @@ class InMemoryProjectionStore:
         return sum(
             1
             for record in records.values()
-            if all(str(record.get(key)) == value for key, value in filters.items())
+            if all(
+                str(record.get(key)) in {str(v) for v in filter_values(value)}
+                for key, value in filters.items()
+            )
         )
 
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""
+        key = pg_safe(key)
         if projection in self._data and key in self._data[projection]:
             del self._data[projection][key]
             self._update_state(projection)
@@ -107,6 +128,7 @@ class InMemoryProjectionStore:
         """Get all records whose key starts with the given prefix."""
         if projection not in self._data:
             return []
+        prefix = pg_safe(prefix)
         return [
             (key, data.copy())
             for key, data in self._data[projection].items()

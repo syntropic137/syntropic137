@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         SetupPhaseSecrets,
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
+    from syn_domain.contexts.agent_sessions import RolloutDocument
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.managed_workspace_ops import (
     interrupt_container,
 )
@@ -249,6 +251,18 @@ class ManagedWorkspace:
         Delegates to setup_phase.clear_secrets(). See that module for details.
         """
         await clear_secrets(self)
+
+    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
+        """The rollout codex wrote for this session, or None if it cannot be read.
+
+        Satisfies ``CodexRolloutPort``. Lives on the workspace because the file
+        is INSIDE this container and outlives nothing: once the workspace is
+        torn down the only copy of what model codex ran is gone (#1284).
+
+        Delegates to codex_rollout.read_codex_rollout(). See that module for
+        why the codex layout is not restated there.
+        """
+        return await read_codex_rollout(self, native_session_id)
 
     async def interrupt(self) -> bool:
         """Send SIGINT to the Claude CLI process inside the container.

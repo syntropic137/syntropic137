@@ -97,7 +97,7 @@ function makeExecution(index: number): FakeExecution {
     workflow_id: 'wf-1',
     workflow_name: `Run ${String(index).padStart(3, '0')}`,
     // Every status here is terminal, so nothing on screen is still moving and
-    // `useRefetchWhileRunning` never starts a 3s poll under the assertions.
+    // `listPollIntervalMs` returns no poll cadence under the assertions.
     status: index % 5 === 0 ? 'failed' : index % 17 === 0 ? 'cancelled' : 'completed',
     started_at: isoAgo(hoursAgo(index) * HOUR_MS),
     completed_at: null,

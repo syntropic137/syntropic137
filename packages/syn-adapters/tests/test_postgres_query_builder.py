@@ -9,6 +9,7 @@ import pytest
 
 from syn_adapters.projection_stores.postgres_query_builder import (
     _serialize_filter_value,
+    build_count_query,
     build_query,
 )
 
@@ -75,3 +76,47 @@ class TestBuildQuery:
         query, _ = build_query("workflows", limit=10, offset=20)
         assert "LIMIT 10" in query
         assert "OFFSET 20" in query
+
+
+@pytest.mark.unit
+class TestCollectionFilters:
+    """A filter value may be several values, and several means ANY of them.
+
+    Without this, a caller asking "which records match these twelve repos"
+    has two moves: twelve round trips, or load the table and filter in Python
+    — and the second is what every caller of repo_correlation did (#1253).
+    """
+
+    def test_list_becomes_any(self):
+        query, params = build_query(
+            "repo_correlation", filters={"repo_full_name": ["acme/api", "acme/web"]}
+        )
+        assert "data->>'repo_full_name' = ANY($1)" in query
+        assert params == [["acme/api", "acme/web"]]
+
+    def test_set_becomes_any(self):
+        query, params = build_query("repo_correlation", filters={"repo_full_name": {"acme/api"}})
+        assert "data->>'repo_full_name' = ANY($1)" in query
+        assert params == [["acme/api"]]
+
+    def test_members_are_serialized_like_scalars(self):
+        """Each member goes through JSONB text extraction, booleans included."""
+        _, params = build_query("workflows", filters={"is_archived": [False, True]})
+        assert params == [["false", "true"]]
+
+    def test_mixed_with_scalar_keeps_placeholder_order(self):
+        query, params = build_query(
+            "repo_correlation",
+            filters={"repo_full_name": ["acme/api"], "kind": "execution"},
+        )
+        assert "data->>'repo_full_name' = ANY($1)" in query
+        assert "data->>'kind' = $2" in query
+        assert params == [["acme/api"], "execution"]
+
+    def test_count_query_filters_the_same_way(self):
+        """The count must not drift from the query it counts."""
+        query, params = build_count_query(
+            "repo_correlation", filters={"repo_full_name": ["acme/api", "acme/web"]}
+        )
+        assert "data->>'repo_full_name' = ANY($1)" in query
+        assert params == [["acme/api", "acme/web"]]

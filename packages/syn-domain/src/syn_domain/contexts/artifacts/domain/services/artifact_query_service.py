@@ -227,11 +227,11 @@ class ArtifactQueryService:
             by_phase.setdefault(phase_id, []).append(artifact)
 
         # Same rank as the flat alias above, and for the same reason: row
-        # order is not a selector. `_tree_files` dedups by destination path
-        # first-wins, so this list's order decides which content survives a
-        # duplicated `source_path`. Ranking both readers identically is what
-        # stops a restart injecting one version at `<phase-id>.md` and a
-        # different one at `<phase-id>/<source_path>`.
+        # order is not a selector. `ArtifactCollector._injectable` dedups by
+        # destination path first-wins, so this list's order decides which
+        # content survives a duplicated `source_path`. Since #1149 it also
+        # takes the HEAD of this list as `<phase-id>.md`, so the ranking here
+        # is what makes the alias and the tree name the same artifact.
         return {
             phase_id: [
                 PhaseOutputFile(source_path=a.source_path, content=a.content)

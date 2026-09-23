@@ -29,6 +29,144 @@ different claims and the tree has to keep them apart.
 The claims are now made per phase, by the one caller that knows the answer. A
 phase that DOES clone gets exactly the bytes it got before - see
 ``test_open_pr_needs_no_working_tree`` for the frozen baseline that pins this.
+
+WHY "Completing Your Task" STATES THE DELIVERABLE UNCONDITIONALLY (#1221). The
+instruction to write ``artifacts/output/deliverable.md`` used to be step 4 of a
+four-step action sequence, and every field it asked for presupposed that the
+first three steps had happened: "what you actually changed", "your actual
+commit hashes", "the actual PR URL you created". A phase whose honest answer is
+"nothing needed doing" could satisfy none of them, and the sequence gave it no
+instruction at all for that case - so it reported nothing. `open_pr` did
+exactly this on 6 of 100 executions: it investigated, found the PR already
+open at the verified head, correctly declined to open a second one, and exited
+without writing. The execution then failed on `PhaseProducedNoDeclaredOutputError`
+(#1167) with the work intact and verification already passed.
+
+The requirement therefore comes BEFORE the coding/non-coding split, applies to
+both, and names the no-action outcome as one of four reportable ones. This is
+the phase's contract rather than its prompt, which is the half of #1221's
+"decide which" that does not have to wait on the frozen `workflows/` baseline -
+and being here it covers every phase of every workflow, not just the four
+copies of ``open_pr.md``.
+
+NOT a relaxation of #1167. That check still fails a phase that writes nothing,
+and must: it is what catches a phase that silently did nothing. This removes
+the reason a correct phase had to trip it, rather than teaching the check to
+look away.
+
+WHY THE RESULT BLOCK IS ONE COMPLETE FENCE PER OUTCOME (#1324). #1256 made
+``TASK_RESULT_END`` mandatory and this prompt was not updated to match, so the
+only fence carrying the terminator carried no JSON, and the two fences carrying
+JSON carried no terminator. An agent copying either one could not arrive at a
+complete block: the parts were in different fences and it had to assemble them.
+exec-138d516b91e8 wrote valid JSON, omitted the terminator and lost the run;
+three runs and $20.44 in forty minutes went the same way.
+
+So each outcome gets one fence holding the whole block - marker, literal JSON
+and terminator already on its own line - and the fences are the last instruction
+before the sign-off, because the rule they state is about the last thing in the
+reply. The consequence of dropping the terminator is stated immediately ABOVE
+them rather than in a paragraph below, since an agent that skims to the first
+code fence never reads what follows the examples.
+
+WHY THE JSON IS LITERAL, AND WHAT THAT COSTS. A first fix for #1324 kept the
+fences unparseable by making ``comments`` a ``<"...">`` slot, so that quoting
+the prompt could never be mistaken for obeying it. That reintroduces the defect
+it was meant to fix, one step later: an agent that copies the fence UNCHANGED
+has written no readable verdict and loses the run, which is the same lost run as
+before, now charged to faithful copying rather than to assembly.
+
+The two properties cannot both hold, and this is worth stating plainly because
+it is the first thing the next reader will try to fix. A fence that is copyable
+verbatim IS, by construction, byte-identical to a real report; `phase_verdict`
+is delimited rather than located, so it cannot tell a pasted block from a quoted
+one - there is nothing to tell apart. "Copyable verbatim" and "inert when
+quoted" are therefore mutually exclusive, and no wording recovers both.
+
+WHICH SIDE THIS TAKES, AND WHY IT IS SAFE. The literal side, because the two
+costs are not the same size and not the same kind:
+
+  - The slot charges EVERY agent on EVERY phase a substitution step, on the
+    common path where the work was done and only the report is left. That is
+    the step #1324 exists because agents demonstrably get wrong.
+  - Literal JSON charges only an agent that closes a SECOND complete block it
+    did not mean as its report. Under `phase_verdict`'s precedence
+    (FAILURE > SUCCESS) that resolves to FAILURE.
+
+Both are fail-closed, and that is the property that makes the trade safe rather
+than merely cheaper. Quoting this prompt can only move a verdict UP the
+precedence, toward refusal; it can never manufacture a completion, and it can
+never take back a reported failure - which is the whole of what #1256 exists to
+protect. The prompt therefore says outright that a closed block is a report
+wherever it sits and that only one may be written, since reducing how often that
+second block gets closed is the part still available to the emitter.
+
+WHY THE KEY IS NAMED AS A RULE AND NOT ONLY SHOWN (#1324, a third time).
+Literal fences fixed what an agent COPYING them produces and left untouched what
+an agent that never looks at them produces. exec-cd5e75eaeb63 finished its work,
+pushed its commit, then wrote a result schema of its own - ``{"status":
+"completed", "branch": ..., "pr": 1371}`` - and lost a $10.76 phase; every
+failing block observed after the fences went literal had that same shape.
+Nothing here contradicted it. ``success`` appeared only INSIDE two examples, and
+an example is a thing to copy, not a rule to check an invention against. So the
+key and the type of its value are now stated as a rule above the fences, in the
+negative form the failure actually took - never ``status``. `phase_verdict`
+reads that one shape now too, narrowly and visibly; this paragraph is the half
+that stops the drift spreading, and it deliberately does not mention the alias,
+because an alias agents are told about is simply the format.
+
+Pinned by test in `test_reported_failure_stays_a_failure.py`: that each fence
+copied VERBATIM is a verdict of the right polarity - the acceptance criterion of
+#1324 - and that the rendered prompt, read whole by the production reader, never
+yields SUCCESS.
+
+WHY THERE IS A FAILURE FENCE PER REASON AND NOT ONE WITH A SLOT IN IT (#1372).
+The block now carries `failure_reason`, which is what tells a task that could
+not be done apart from a platform that broke apart from a judgement not to ship
+- three different people act on those, and an operator opening the run is shown
+the word the phase wrote. A key stated only in prose is the shape that has already failed
+twice here: #1324 was an agent that never looked at the fences, and the fix was
+to state the rule AND hand out something copyable. One failure fence with the
+word left out would state the rule and hand out a block that reports no reason,
+so the common path - copy the fence, replace the comments - would write nothing
+into the field and the classification would stay exactly as blind as before.
+
+And it cannot be one fence with a `"task|platform|refused"` slot, which is the
+obvious third option: that is the `<...>` placeholder of two paragraphs above,
+spelled without the angle brackets. An agent that copies it verbatim writes a
+word no reader knows.
+
+So the rule above the fences is a table of the words, and there is one complete
+literal fence per OUTCOME - five now rather than two. Nothing about #1324's
+property changes: every fence is still copyable with no substitution but the
+`comments` sentence, every one still carries its own terminator, and a quotation
+of the section still settles as FAILURE. What the count buys is that the label
+an operator reads is written by an agent that only had to copy.
+
+AND THE FIFTH WORD IS THERE BECAUSE THE PROMPT ALREADY PROMISED IT (#1392).
+This text used to say that leaving the key out would be read as "could not
+tell". It was not, and it could not have been: an absent key is also what every
+phase wrote before the key existed, so absence has to keep meaning what it meant
+then - an ordinary reported failure - and an agent honestly following that
+instruction produced `correct_refusal`, which says the system WORKED. The exact
+opposite of what it meant. "I could not tell" is now a word an agent writes,
+`unknown`, and it reaches a genuinely unclassified record; the paragraph in the
+prompt says what actually happens to each, which is the only version of this
+that can stay true.
+
+THE FIELD IS FAIL-SOFT BY CONSTRUCTION, which is what makes handing out five
+blocks safe. A misspelled, invented or omitted reason costs the LABEL and never
+the run - `ReportedFailureReason.from_reported` resolves it to "no reason given"
+and the verdict stands exactly as it did. That is the opposite of the terminator,
+where the cost of getting it wrong is the whole phase, and it is why the two are
+allowed to be stated with different force.
+
+AND THE LABEL IS A REPORT, WHICH THE PROMPT SAYS IN AS MANY WORDS (#1392). The
+word an agent writes here is shown to whoever opens the run and is never summed
+into a failure number - see `ReportedFailureReason`. Telling agents otherwise
+would be both untrue and an invitation: a phase told that `platform` books an
+outage, or that `task` books none, has been handed a lever on the numbers that
+measure it.
 """
 
 from __future__ import annotations
@@ -106,6 +244,20 @@ You are an agent running in an ephemeral Docker workspace managed by Syntropic13
 
 ## Completing Your Task
 
+**The deliverable is not conditional on having acted.** `artifacts/output/` is
+how a phase reports, so it is written for every outcome:
+
+- **you did the work** - describe what you changed and where it is
+- **it was already done, or turned out not to be needed** - say so, and show
+  what you checked that established it
+- **you declined to act**, because acting would have been wrong - say why
+- **you could not act** - say what stopped you
+
+"Nothing needed doing" is a conclusion, and the evidence behind it is the
+deliverable. Reaching it and writing no file reports nothing at all: from
+outside it is indistinguishable from a phase that ran and produced nothing,
+and that fails the execution.
+
 ### For coding tasks (commits, PRs, code changes):
 
 Your primary deliverable is **code on GitHub**. The artifact is your summary.
@@ -114,9 +266,9 @@ Your primary deliverable is **code on GitHub**. The artifact is your summary.
 2. Make changes, commit with clear messages
 3. Push to GitHub, create PR if needed
 4. Write summary to `artifacts/output/deliverable.md` with:
-   - What you actually changed
-   - Your actual commit hashes
-   - The actual PR URL you created
+   - What you actually changed, or what you found already correct
+   - Your actual commit hashes, if you made any
+   - The actual PR URL - the one you opened, or the one that was already there
    - Brief executive summary
 
 ### For non-coding tasks (research, analysis, design, planning):
@@ -154,23 +306,92 @@ the previous phase failed - report this in your output.
 
 ## Task Result (REQUIRED)
 
-**The very last thing in your response must be a `TASK_RESULT` block.**
+**The very last thing in your response must be a `TASK_RESULT` block.** It is
+three parts - the marker, one JSON object, and `TASK_RESULT_END` on the line
+after it - and it is read as your result only when all three are there.
 
-If you completed the task successfully:
-```
-TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplished"}}
-```
+**The key that carries your outcome is named `success`, never `status`, and its
+value is the JSON boolean `true` or `false`** - not the quoted string `"true"`,
+not a number, and not a word like `completed`. Agents that invented their own
+key here have lost finished, pushed work: `success` is the field the
+orchestrator reads, and a block naming the outcome anything else is not
+guaranteed to be read at all.
 
-If you could NOT complete the task (blocked, missing access, error, etc.):
-```
-TASK_RESULT: {{"success": false, "comments": "Specific reason why — what was missing or what failed"}}
-```
+**When `success` is `false`, a second key says WHAT KIND of failure it was.**
+`failure_reason` is exactly one of four words - never a sentence, which is
+what `comments` is for:
 
-Examples of failure reasons:
+| `failure_reason` | what it means | what someone does about it |
+|---|---|---|
+| `task` | the request was wrong, impossible, or too big for one phase | rewrite the brief |
+| `platform` | the machinery broke - a missing credential, a tool that crashed, a workspace that was not what it claimed | fix the platform |
+| `refused` | neither: you could have done the work and judged you should not | read what you found |
+| `unknown` | you cannot honestly tell which of the three it was | somebody reads the run |
+
+Those four go to four different people, so the wrong word fetches the wrong one
+and the right one never hears. Write `unknown` rather than guessing: it is
+recorded as a failure nobody has classified, which is exactly what it is.
+
+What it is read as is what you SAID, recorded beside the outcome and shown to
+whoever opens the run - not as a finding about the platform. Leaving the key
+out is not the same as writing `unknown`: an omitted reason is read as an
+ordinary reported failure, which is what every report written before this key
+existed means, and it is the one thing here you cannot use to say "I could not
+tell".
+
+Your `comments` are specific. What a useful one looks like:
 - "GitHub App not installed on repo org/repo — cannot clone or push"
 - "Repository org/repo does not exist or is not accessible"
 - "Pull request #42 was not found"
 - "Required environment variable GH_TOKEN is not set"
+
+Write ONE complete block, for your outcome only. A complete block is read as
+your report wherever it sits, so do not copy out any of the others to explain
+the format - once it is closed it is a report and not a quotation, whatever the
+words around it say. Discussing the format in prose is free; closing a second
+block is not.
+
+Copy the ONE block below that matches your outcome - both lines - and replace
+the `comments` text with your own. **Write both lines. A block whose
+`TASK_RESULT_END` line is missing is failed as UNREADABLE instead of completed,
+so stopping after the JSON loses the run.**
+
+You completed the task - copy both lines:
+
+```
+TASK_RESULT: {{"success": true, "comments": "Brief summary of what was accomplished"}}
+TASK_RESULT_END
+```
+
+The REQUEST was the problem - wrong, impossible, or too big for one phase, so
+running it again unchanged fails the same way - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "task", "comments": "Specific reason why — what about the request could not be done"}}
+TASK_RESULT_END
+```
+
+The PLATFORM was the problem - you were blocked, lacked access, or hit an error
+in the machinery - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "platform", "comments": "Specific reason why — what was missing or what failed"}}
+TASK_RESULT_END
+```
+
+You could have done the work and judged you should NOT - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "refused", "comments": "Specific reason why — what you found and why you stopped"}}
+TASK_RESULT_END
+```
+
+It failed and you cannot honestly tell which of the three - copy both lines:
+
+```
+TASK_RESULT: {{"success": false, "failure_reason": "unknown", "comments": "Specific reason why — what happened, and what you could not establish about it"}}
+TASK_RESULT_END
+```
 
 This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
 

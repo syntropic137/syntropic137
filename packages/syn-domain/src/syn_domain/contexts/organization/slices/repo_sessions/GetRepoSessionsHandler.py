@@ -8,16 +8,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.organization._shared.projection_names import (
-    REPO_CORRELATION,
-    SESSION_SUMMARIES,
+from syn_domain.contexts.organization._shared.execution_correlation import (
+    executions_by_repo,
 )
+from syn_domain.contexts.organization._shared.projection_names import SESSION_SUMMARIES
 from syn_domain.contexts.organization.domain.read_models.repo_session import (
     RepoSessionRecord,
 )
 
 if TYPE_CHECKING:
-    from event_sourcing import ProjectionReadStore
+    from event_sourcing import ProjectionStore
 
     from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
         GetRepoSessionsQuery,
@@ -27,15 +27,14 @@ if TYPE_CHECKING:
 class GetRepoSessionsHandler:
     """Query handler: get agent sessions for a repo."""
 
-    def __init__(self, store: ProjectionReadStore) -> None:
+    def __init__(self, store: ProjectionStore) -> None:
         """Initialize with the shared ProjectionStore."""
         self._store = store
 
     async def _get_execution_ids_for_repo(self, repo_id: str, repo_full_name: str = "") -> set[str]:
         """Look up execution IDs correlated with a repo."""
-        correlations = await self._store.get_all(REPO_CORRELATION)
         match_key = repo_full_name or repo_id
-        return {c["execution_id"] for c in correlations if c.get("repo_full_name") == match_key}
+        return set(await executions_by_repo(self._store, [match_key]))
 
     async def handle(self, query: GetRepoSessionsQuery) -> list[RepoSessionRecord]:
         """Handle GetRepoSessionsQuery.

@@ -1571,6 +1571,22 @@ async def test_claude_separator_character_in_content_is_rewritten_not_joined(
     _assert_every_tool_block_is_represented(result.value.lines)
 
 
+# A claude line whose SECOND ``tool_use`` block carries the separator
+# character, in both columns. Shared by the pair of tests below because the
+# point of that pair is one input read at two boundaries: the value
+# ``_render_tool_columns`` computes, and the value the endpoint puts on the
+# wire. Two copies of the payload would let those drift apart and the pair
+# would stop being about one line.
+_SECOND_BLOCK_LINE = (
+    '{"type": "assistant", "message": {"role": "assistant", "content": ['
+    '{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", '
+    '"name": "Read", "input": {"file_path": "/a.py"}}, '
+    '{"type": "tool_use", "id": "toolu_01bbbbbbbbbbbbbbbbbbbbbb", '
+    f'"name": "Read {_SEP_CHAR} Bash", '
+    f'"input": {{"command": "echo left {_SEP_CHAR} right"}}}}]}}}}'
+)
+
+
 async def test_claude_separator_in_second_block_cannot_forge_a_boundary(
     mock_conversation_store,
 ):
@@ -1581,14 +1597,7 @@ async def test_claude_separator_in_second_block_cannot_forge_a_boundary(
     ``_join_column``: that mutation leaves the first block looking correct but
     lets the second block forge extra segments.
     """
-    mock_conversation_store.retrieve_session.return_value = [
-        '{"type": "assistant", "message": {"role": "assistant", "content": ['
-        '{"type": "tool_use", "id": "toolu_01aaaaaaaaaaaaaaaaaaaaaa", '
-        '"name": "Read", "input": {"file_path": "/a.py"}}, '
-        '{"type": "tool_use", "id": "toolu_01bbbbbbbbbbbbbbbbbbbbbb", '
-        f'"name": "Read {_SEP_CHAR} Bash", '
-        f'"input": {{"command": "echo left {_SEP_CHAR} right"}}}}]}}}}',
-    ]
+    mock_conversation_store.retrieve_session.return_value = [_SECOND_BLOCK_LINE]
 
     with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log
@@ -1602,6 +1611,74 @@ async def test_claude_separator_in_second_block_cannot_forge_a_boundary(
     assert line.content_preview is not None
     assert line.content_preview.split(_SEP) == ["/a.py", "echo left | right"]
     assert len(line.content_preview.split(_SEP)) == 2
+
+
+async def test_the_endpoint_copy_alters_no_column_the_domain_computed(
+    mock_conversation_store,
+):
+    """The response-model copy must reproduce these columns, not recompute them.
+
+    ``tool_name``/``content_preview`` are written twice. ``_render_tool_columns``
+    writes them into a ``ConversationLine``; the endpoint then hand-copies that
+    line into a ``ConversationLineResponse``, which is the model FastAPI
+    serializes and the only one any client sees. The test above pins the first
+    write. This pins the second, and deliberately pins nothing else.
+
+    It asserts a RELATION - the wire is what the domain computed - rather than
+    the literal strings, because a relation is the only assertion that can tell
+    the two writes apart. Break the computation or break the copy and the same
+    text arrives on the wire (``"/a.py ¦ echo left ¦ right"`` either way), so
+    every literal wire assertion catches both and names neither. Asserting the
+    copy's own job instead fails only when the copy is what broke: delete this
+    test and a copy-only defect passes the whole file, which is the gap #1165
+    was filed for.
+
+    The separator is in the SECOND block on purpose. Every other wire-level
+    test here drives a line with one entry, where a copy that rebuilt the
+    column from ``entries[:1]`` - or re-injected the raw separator anywhere
+    past the first segment - is indistinguishable from a faithful one.
+    """
+    # Non-vacuity, asserted on the INPUT, so nothing in the code under test can
+    # make it true: both separator characters sit in the second block, past the
+    # first boundary a copy has to survive to be exercised at all.
+    second_block = _SECOND_BLOCK_LINE.split("toolu_01bbbbbbbbbbbbbbbbbbbbbb")[1]
+    assert second_block.count(_SEP_CHAR) == _SECOND_BLOCK_LINE.count(_SEP_CHAR) == 2
+
+    mock_conversation_store.retrieve_session.return_value = [_SECOND_BLOCK_LINE]
+
+    mgr = AsyncMock()
+    mgr.store = AsyncMock()
+
+    with (
+        _patch_store(mock_conversation_store),
+        patch("syn_api._wiring.get_projection_mgr", return_value=mgr),
+        patch(
+            "syn_api.prefix_resolver.resolve_or_raise",
+            new=AsyncMock(return_value="claude-1"),
+        ),
+    ):
+        from syn_api.routes.conversations import (
+            get_conversation_log,
+            get_conversation_log_endpoint,
+        )
+
+        result = await get_conversation_log("claude-1")
+        response = await get_conversation_log_endpoint("claude-1")
+
+    assert isinstance(result, Ok)
+    computed = result.value.lines[0]
+    # Serialized the way FastAPI does it: a field the model declares but never
+    # emits reads back fine as an attribute.
+    dumped = response.model_dump()["lines"][0]
+
+    assert dumped["tool_name"] == computed.tool_name, (
+        f"the endpoint rewrote tool_name: {dumped['tool_name']!r} "
+        f"on the wire, {computed.tool_name!r} computed"
+    )
+    assert dumped["content_preview"] == computed.content_preview, (
+        f"the endpoint rewrote content_preview: {dumped['content_preview']!r} "
+        f"on the wire, {computed.content_preview!r} computed"
+    )
 
 
 async def test_get_conversation_metadata(mock_conversation_store):

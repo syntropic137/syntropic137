@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from syn_adapters.postgres_text import pg_safe
+
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
@@ -61,6 +63,15 @@ async def resolve_by_prefix(
     Returns:
         PrefixMatchResult with the match outcome.
     """
+    # A resolved id is handed straight to a reader that binds it in a WHERE
+    # clause, so what comes out of here must be the id AS STORED - the store
+    # sanitises a key on the way in, and a raw one on the way out matches
+    # nothing downstream while looking like a successful resolve (#1241). The
+    # prefix scan already returns stored keys; normalising the argument once,
+    # here, puts the exact-match path in the same space as the scan and as the
+    # store itself, rather than returning whatever the caller happened to type.
+    partial_id = pg_safe(partial_id)
+
     # Fast path: try exact match first
     exact = await store.get(namespace, partial_id)
     if exact is not None:
