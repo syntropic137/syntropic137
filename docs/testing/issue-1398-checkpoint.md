@@ -66,8 +66,14 @@ checks pass (20 tests); v1/v2 exporter-to-host transport passes (9 tests).
 Codex uses its native shell `CODEX_THREAD_ID`; no permission-granting or command
 rewrite hook was added. Claude supplies quoted parent context through its shell
 hook. The image exposes the shim outside the virtualenv so login-shell PATH
-changes do not hide it. Image rebuild and full-stack mixed-harness proof remain
-pending, as do descendant settlement and run-wide coverage closure.
+changes do not hide it. The supported image build completed at `aaa1da1`;
+installed-package native and mixed-harness tests passed, including the actual
+`syn-delegate` executable. PR #418 also contains `249abf2`, which adds the
+packaged-entrypoint conformance option. Local logs:
+`/private/tmp/1398-delegation-image-build.log` and
+`/private/tmp/1398-installed-native-tests.log`. Rebuilding/deploying the API and
+full-stack mixed-harness proof remain pending, as do descendant settlement and
+run-wide coverage closure.
 
 ## Follow-up after draft PR creation
 
