@@ -567,3 +567,23 @@ Failure logs and coverage evidence stay local:
 `/private/tmp/1398-sesh-hosted-failure.log`,
 `/private/tmp/1398-sesh-current-coverage.log` and
 `/private/tmp/1398-sesh-missing-lines.log`.
+
+## SeshMagic capture and MCP failure-path proof
+
+Published `6616ac5` and `db71072` in existing SeshMagic PR #55. Router tests now
+exercise deletion authorization before identity validation/storage, read/write
+tombstone responses, absent storage, backend failure redaction, normalized
+envelope size expansion, producer-scoped revision/manifest writes and ambiguous
+legacy IDs on metadata/raw reads. Full tests pass with PostgreSQL and loopback
+access; Clippy passes. The subsequent 100% coverage gate still failed (99.54%
+line coverage at `6616ac5`), so this is not a release-ready claim.
+
+Thirteen MCP tests pass, including missing inventory arguments, legacy search
+dispatch compatibility, and real HTTP invalid JSON, truncated body and >16 MiB
+response rejection without body disclosure. A fresh full coverage run for
+`db71072` is in progress at this checkpoint. Logs stay local:
+`/private/tmp/1398-sesh-capture-coverage.log`,
+`/private/tmp/1398-mcp-boundary-tests.log`,
+`/private/tmp/1398-mcp-boundary-clippy.log`, and
+`/private/tmp/1398-sesh-mcp-coverage.log`. Remaining uncovered PostgreSQL/error
+paths still require evidence; the 100% gate and all exclusions are unchanged.
