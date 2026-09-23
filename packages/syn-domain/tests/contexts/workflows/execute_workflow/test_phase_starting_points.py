@@ -26,14 +26,14 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+from syn_domain.contexts.orchestration.slices.execute_workflow.branch_observation import (
     PhaseStartingPoint,
     PhaseStartingPoints,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseRuntime
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
         GitWorkspace,
     )
 

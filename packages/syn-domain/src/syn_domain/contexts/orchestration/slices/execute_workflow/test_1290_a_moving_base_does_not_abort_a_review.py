@@ -135,8 +135,9 @@ async def _prompt_reaching_execution(workflow: str, phase_id: str) -> str:
             inputs: dict[str, str],
             execution_id: str,
             repos: list[RepositoryRef],
+            admitted: object | None = None,
         ) -> WorkflowExecutionResult:
-            del workflow_name, inputs, repos
+            del workflow_name, inputs, repos, admitted
             captured.extend(phases)
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,

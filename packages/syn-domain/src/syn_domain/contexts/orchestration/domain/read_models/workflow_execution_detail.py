@@ -9,6 +9,8 @@ from datetime import datetime
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    FailureClassification,
+    ReportedFailureReason,
 )
 
 
@@ -230,6 +232,32 @@ class WorkflowExecutionDetail:
     error_message: str | None = None
     """Error message if execution failed."""
 
+    failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
+    """What kind of failure ended this run, beside the `failed` status (#1357).
+
+    `PLATFORM` for the machinery breaking, `CORRECT_REFUSAL` for a phase that
+    reported `TASK_RESULT success=false` and was recorded faithfully - the
+    system working - and `UNCLASSIFIED` for a run that ended before anything
+    recorded the distinction, which is every failure predating the field and
+    every row written by a projection that had not caught up.
+
+    Carried here rather than derived at the API boundary because the numbers
+    are computed from the read model: a failure rate summed over `status =
+    failed` counts a correct refusal as a defect, and no amount of colour in
+    the UI can fix a total that was already wrong when it was summed.
+    """
+
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What the failing phase SAID caused it (#1372), `None` when it said nothing.
+
+    A REPORT, kept beside the measurement above and never merged into it
+    (#1392): the classification is what the platform observed and is what every
+    failure number is summed from, while this is one of a closed set of words
+    the run chose about itself. An operator reads it - "agent reported: task"
+    is the first thing worth knowing about a failed run - and no total counts
+    it.
+    """
+
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -262,6 +290,16 @@ class WorkflowExecutionDetail:
             completed_phases=data.get("completed_phases", 0),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
+            # Through `from_stored` for the reason it exists: a row written
+            # before this field, or by a writer that knows a member this reader
+            # does not, reads `UNCLASSIFIED` instead of raising (#1357).
+            failure_classification=FailureClassification.from_stored(
+                data.get("failure_classification")
+            ),
+            # The same coercion, for the same reason, one field over.
+            reported_failure_reason=ReportedFailureReason.from_stored(
+                data.get("reported_failure_reason")
+            ),
             repos=tuple(data.get("repos", [])),
         )
 
@@ -293,6 +331,10 @@ class WorkflowExecutionDetail:
             "completed_phases": self.completed_phases,
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
+            "failure_classification": self.failure_classification.value,
+            "reported_failure_reason": (
+                None if self.reported_failure_reason is None else self.reported_failure_reason.value
+            ),
             "repos": list(self.repos),
         }
 
