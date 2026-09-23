@@ -493,7 +493,7 @@ class TestTheVerdictSurvivesEveryHop:
         processor = _make_processor()
         processor._journal.append = AsyncMock()
         workspace = MagicMock()
-        processor._runtime.attach_workspace(
+        processor._runtimes.of("exec-0bac0e1ed2b2").attach_workspace(
             "verify",
             workspace=workspace,
             workspace_cm=AsyncMock(),
@@ -577,7 +577,7 @@ class TestTheVerdictSurvivesEveryHop:
             ".phase_workspace.ArtifactCollectionHandler",
             return_value=collection_handler,
         ):
-            await processor._workspaces.collect(
+            await processor._workspaces_for("exec-0bac0e1ed2b2", {}).collect(
                 collect_todo, phase, aggregate, [], PhaseOutputCache()
             )
 

@@ -220,7 +220,7 @@ async def _run_writing_nothing(clone: _Clone, *, says: str | None):
     artifacts = _KeepingArtifacts()
     processor = _make_processor(agent)
     processor._artifact_repo = artifacts  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
-    processor._runtime._starting_points = _StartingPointsOn(  # pyright: ignore[reportPrivateUsage]
+    processor._runtimes.of("exec-1300")._starting_points = _StartingPointsOn(  # pyright: ignore[reportPrivateUsage]
         cast("GitWorkspace", clone.workspace)
     )
 

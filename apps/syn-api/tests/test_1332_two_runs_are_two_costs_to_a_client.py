@@ -228,7 +228,7 @@ async def _run_that_died(
     await stream.save(aggregate)
     # A phase with no recorded start produces no result at all, so the runtime
     # has to be holding this one the way a real dispatch left it.
-    processor._runtime.begin(  # pyright: ignore[reportPrivateUsage]
+    processor._runtimes.of(execution_id).begin(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         session_manager=SessionLifecycleManager(
             repository=_NoRepo(),  # pyright: ignore[reportArgumentType]
@@ -299,13 +299,12 @@ async def _two_runs_that_died_on_the_same_phase() -> _Stream:
     """Both runs' agents returned, the stalled one first, and both then died."""
     stream = _Stream()
     processor = _a_processor(stream)
-    runtime = processor._runtime  # pyright: ignore[reportPrivateUsage]
-    runtime.record_agent_run(
+    processor._runtimes.of(STALLED_EXECUTION).record_agent_run(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         execution_id=STALLED_EXECUTION,
         result=_an_agent_that_spent(STALLED, execution_id=STALLED_EXECUTION),
     )
-    runtime.record_agent_run(
+    processor._runtimes.of(BUSY_EXECUTION).record_agent_run(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         execution_id=BUSY_EXECUTION,
         result=_an_agent_that_spent(BUSY, execution_id=BUSY_EXECUTION),

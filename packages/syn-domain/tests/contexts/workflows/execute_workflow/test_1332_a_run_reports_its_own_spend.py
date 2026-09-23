@@ -294,10 +294,10 @@ async def _fail(
     aggregate = _a_started_run(execution_id)
     await stream.save(aggregate)
     # A phase with no recorded start produces no result at all, so the runtime
-    # has to be holding this one the way a real dispatch left it. `_started_at`
-    # and the session manager are still keyed by phase alone - that is #1311,
-    # and it is why this is set immediately before the failure it belongs to.
-    processor._runtime.begin(  # pyright: ignore[reportPrivateUsage]
+    # has to be holding this one the way a real dispatch left it. Asked for by
+    # execution since #1311 gave each run its own runtime, which is also why
+    # the two runs below can no longer reach each other's `_started_at`.
+    processor._runtimes.of(execution_id).begin(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         session_manager=_a_session_for(execution_id),
         started_at=datetime.now(UTC),
@@ -333,13 +333,12 @@ def _two_runs_interleaved() -> tuple[WorkflowExecutionProcessor, _EventStore]:
         stream,
         processor._todo_projection,  # pyright: ignore[reportPrivateUsage]
     )
-    runtime = processor._runtime  # pyright: ignore[reportPrivateUsage]
-    runtime.record_agent_run(
+    processor._runtimes.of(STALLED_EXECUTION).record_agent_run(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         execution_id=STALLED_EXECUTION,
         result=_an_agent_that_spent(STALLED, execution_id=STALLED_EXECUTION),
     )
-    runtime.record_agent_run(
+    processor._runtimes.of(BUSY_EXECUTION).record_agent_run(  # pyright: ignore[reportPrivateUsage]
         PHASE_ID,
         execution_id=BUSY_EXECUTION,
         result=_an_agent_that_spent(BUSY, execution_id=BUSY_EXECUTION),
@@ -433,7 +432,7 @@ class TestACompletingRunLeavesAConcurrentRunItsCounts:
             processor._todo_projection,  # pyright: ignore[reportPrivateUsage]
         )
         # The busy run's agent has returned and the run has not reported yet.
-        processor._runtime.record_agent_run(  # pyright: ignore[reportPrivateUsage]
+        processor._runtimes.of(BUSY_EXECUTION).record_agent_run(  # pyright: ignore[reportPrivateUsage]
             PHASE_ID,
             execution_id=BUSY_EXECUTION,
             result=_an_agent_that_spent(BUSY, execution_id=BUSY_EXECUTION),

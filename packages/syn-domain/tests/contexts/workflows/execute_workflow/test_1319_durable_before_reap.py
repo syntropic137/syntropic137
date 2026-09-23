@@ -68,11 +68,11 @@ class _Timeline(list[str]):
         #: the reason.
         self.reap_contexts: list[str] = []
 
-    def watch(self, processor: WorkflowExecutionProcessor) -> None:
+    def watch(self, processor: WorkflowExecutionProcessor, execution_id: str) -> None:
         """Instrument the two ends that must not swap: the store, and the reap."""
         journal = processor._journal  # pyright: ignore[reportPrivateUsage]
         repository = journal._repository  # pyright: ignore[reportPrivateUsage]
-        runtime = processor._runtime  # pyright: ignore[reportPrivateUsage]
+        runtime = processor._runtimes.of(execution_id)  # pyright: ignore[reportPrivateUsage]
         original_save = repository.save
 
         async def watched_save(aggregate: object) -> None:
@@ -95,7 +95,7 @@ class _Timeline(list[str]):
 async def _run_a_failing_phase(timeline: _Timeline) -> str:
     """Run a one-phase workflow whose agent exits non-zero. Returns its status."""
     processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-    timeline.watch(processor)
+    timeline.watch(processor, "exec-1319-order")
     result = await processor.run(
         workflow_id="wf-1319-order",
         workflow_name="The failure outlives the container",
@@ -140,13 +140,13 @@ class TestTheEventIsOnTheStreamFirst:
         """
         timeline = _Timeline()
         processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-        timeline.watch(processor)
+        timeline.watch(processor, "exec-1319-report-down")
 
         async def report_that_is_down(_reason: str) -> None:
             timeline.append(REPORTED)
             raise ConnectionError("session repository is unreachable")
 
-        processor._runtime.report_failed = report_that_is_down  # type: ignore[method-assign]  # pyright: ignore[reportPrivateUsage]
+        processor._runtimes.of("exec-1319-report-down").report_failed = report_that_is_down  # type: ignore[method-assign]  # pyright: ignore[reportPrivateUsage]
 
         result = await processor.run(
             workflow_id="wf-1319-order",
@@ -186,7 +186,7 @@ class TestAReadModelOutageCannotBlockCleanup:
         caplog.set_level(logging.ERROR)
         timeline = _Timeline()
         processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-        timeline.watch(processor)
+        timeline.watch(processor, "exec-1319-projection-down")
 
         async def projection_that_is_down(_event_data: dict) -> None:
             raise ConnectionError("projection store is unreachable")
@@ -225,7 +225,7 @@ class TestAReadModelOutageCannotBlockCleanup:
         caplog.set_level(logging.ERROR)
         timeline = _Timeline()
         processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-        timeline.watch(processor)
+        timeline.watch(processor, "exec-1319-store-down")
 
         repository = processor._journal._repository  # pyright: ignore[reportPrivateUsage]
         permissive_save = repository.save
@@ -294,7 +294,7 @@ class TestACancelledShutdownStillReleasesTheWorkspace:
         """
         timeline = _Timeline()
         processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-        timeline.watch(processor)
+        timeline.watch(processor, "exec-1319-cancelled-append")
 
         repository = processor._journal._repository  # pyright: ignore[reportPrivateUsage]
         permissive_save = repository.save
@@ -342,7 +342,7 @@ class TestACancelledShutdownStillReleasesTheWorkspace:
         """
         timeline = _Timeline()
         processor = _make_processor(FakeAgentExecutionHandler.failed(exit_code=TIMED_OUT))
-        timeline.watch(processor)
+        timeline.watch(processor, "exec-1319-cancelled-agent")
 
         async def agent_cancelled_by_shutdown(*_args: object, **_kwargs: object) -> None:
             raise asyncio.CancelledError
