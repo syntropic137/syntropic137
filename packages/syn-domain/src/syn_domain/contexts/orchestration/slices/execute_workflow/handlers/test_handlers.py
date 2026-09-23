@@ -645,11 +645,16 @@ class TestHandlerRegistry:
 class TestDetectExitCode:
     """Tests for _detect_exit_code helper."""
 
-    def test_interrupt_does_not_return_1(self) -> None:
-        """interrupt_requested must NOT synthesise exit code 1.
+    def test_interrupt_with_no_observed_status_is_unknown(self) -> None:
+        """interrupt_requested must synthesise NO exit code - not 1, and not 0.
 
-        The processor (_handle_cancel_signal) owns the cancellation routing.
-        _detect_exit_code must only return the actual process exit code.
+        This asserted `== 0` until #1341. It was written to pin that
+        cancellation is not failure, and it still does; the 0 came along as the
+        way of saying so, and that was the defect. A cancelled process was asked
+        to stop, which says nothing about what it stopped WITH - so the status
+        here is unobserved exactly as it is on every other path, and 0 claimed a
+        clean exit for it. `_run_headless` tells a cancellation from an
+        unexplained exit by reading `interrupt_requested` itself.
         """
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
             _detect_exit_code,
@@ -665,7 +670,10 @@ class TestDetectExitCode:
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = None
-        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 0
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) is None, (
+            "a cancelled run whose exit status nobody observed has no status; "
+            "0 would claim it exited cleanly"
+        )
 
     def test_nonzero_stream_exit_code(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (

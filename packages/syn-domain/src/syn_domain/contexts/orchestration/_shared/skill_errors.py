@@ -148,3 +148,8 @@ class SkillInstallFailed(SkillError):
             f"installing skill {skill_name!r} for agent {agent!r} failed "
             f"(exit {exit_code}): {stderr.strip()[:500]}"
         )
+        #: Kept as a number, not only as prose in the message above (#1319).
+        #: This class already took the status and spent all of it on the
+        #: string, so a phase that died installing a skill reported no status
+        #: anywhere queryable. `exit_code_of` reads this attribute.
+        self.exit_code = exit_code

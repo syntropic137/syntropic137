@@ -74,7 +74,9 @@ def _attempt_is_settled(result: AgentExecutionResult) -> bool:
     non-zero and can carry a capacity reason: leave it to the retry decision
     and the phase restarts work an operator just stopped.
     """
-    return result.command.exit_code == 0 or result.stream_result.interrupt_requested
+    return result.stream_result.interrupt_requested or (
+        result.command is not None and result.command.exit_code == 0
+    )
 
 
 def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityCollector) -> bool:
