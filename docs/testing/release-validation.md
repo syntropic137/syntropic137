@@ -638,6 +638,7 @@ syn health
 ```
 
 - [ ] API connectivity confirmed
+- [ ] First line reports the running `syn-api` release; image tag and commit appear when the image was stamped
 - [ ] No version mismatch warnings
 
 ### Verify CLI version matches selfhost stack
@@ -696,11 +697,12 @@ syn health
 curl -s http://localhost:<port>/api/v1/health | jq .
 ```
 
-> **Neither of these reports webhook or polling state.** Measured 2026-08-27:
-> `syn health` prints only event-store and subscription lines, and
-> `/api/v1/health` returns exactly `{status, mode, subscription, codex_auth}`.
-> There is no webhook field to read. Use `/health` (no `/api/v1`) and you get the
-> SPA's HTML 200, which looks like a passing check and is not one.
+> **Neither of these reports webhook or polling state.** Verified 2026-09-23:
+> `syn health` prints build identity, status, and read-path details.
+> `/api/v1/health` returns `status`, `mode`, and `build`, plus optional
+> `degraded_reasons`, `subscription`, `codex_auth`, and `warnings` blocks. There
+> is no webhook field to read. Use `/health` (no `/api/v1`) and you get the SPA's
+> HTML 200, which looks like a passing check and is not one.
 >
 > Until a webhook-status field exists, determine the mode from the API logs
 > instead - the poller announces itself at startup:
