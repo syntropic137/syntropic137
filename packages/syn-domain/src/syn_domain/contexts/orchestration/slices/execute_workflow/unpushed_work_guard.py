@@ -109,6 +109,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git imp
     repositories,
     run_bounded,
 )
+from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -665,7 +666,12 @@ async def _quarantine(
             commit_count=work.commit_count,
             files=work.files,
             pushed_ref=None,
-            push_error=(pushed.stderr or pushed.stdout).strip() or "push exited non-zero",
+            push_error=describe_process_failure(
+                "The quarantine push",
+                exit_code=pushed.exit_code,
+                output=pushed.stderr or pushed.stdout,
+                timed_out=pushed.timed_out,
+            ),
         )
     else:
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)

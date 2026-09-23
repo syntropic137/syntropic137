@@ -550,7 +550,7 @@ def _render_quarantined_work(work: QuarantinedWork) -> list[str]:
         lines.append(f"    quarantined at {work.pushed_ref}")
         lines.append(f"    recover with: git fetch origin {work.pushed_ref}")
     else:
-        lines.append(f"    NOT RECOVERABLE: the quarantine push failed - {work.push_error}")
+        lines.append(f"    NOT RECOVERABLE: {work.push_error}")
     return lines
 
 

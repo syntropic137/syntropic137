@@ -238,7 +238,7 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
         )
 
     message = str(raised.value)
-    assert "exit code -11 (SIGSEGV)" in message
+    assert "was killed by SIGSEGV (exit -11)" in message
     assert "cygrpc.cpython-312-x86_64-linux-gnu.so" in message
     # The stderr that used to displace the status is still reported, alongside it.
     assert "Cloning into" in message
@@ -289,5 +289,5 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
         )
 
     message = str(raised.value)
-    assert "exit code -11 (SIGSEGV)" in message
+    assert "was killed by SIGSEGV (exit -11)" in message
     assert "Cloning into" in message

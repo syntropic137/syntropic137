@@ -103,7 +103,7 @@ async def test_the_handler_names_the_signal() -> None:
                 repos=[],
             )
 
-    assert "exit code -11 (SIGSEGV)" in str(excinfo.value)
+    assert "killed by SIGSEGV (exit -11)" in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
