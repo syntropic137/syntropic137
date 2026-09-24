@@ -116,7 +116,7 @@ class SessionSummaryResponse(BaseModel):
     Never an alias (ADR-067 D9): what the session asked for is
     ``requested_model``.
     """
-    requested_model: str | None = None
+    requested_model: str | None
     """The model the session REQUESTED (often an alias such as ``opus``), or null."""
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
@@ -234,13 +234,13 @@ class SessionResponse(BaseModel):
     phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
-    agent_model: ObservedModelId | None = None
+    agent_model: ObservedModelId | None
     """The model the harness REPORTED doing most of this session's work, or null.
 
     Never an alias (ADR-067 D9): what the session asked for is
     ``requested_model``.
     """
-    requested_model: str | None = None
+    requested_model: str | None
     """The model the session REQUESTED (often an alias such as ``opus``), or null."""
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None

@@ -83,7 +83,7 @@ class PhaseExecutionInfo(BaseModel):
     Never an alias such as ``opus``: that is what the phase asked for, and it
     is ``requested_model``. Null means nothing reported what ran.
     """
-    requested_model: str | None = None
+    requested_model: str | None
     """The model the phase REQUESTED (often an alias), or null if not recorded."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
