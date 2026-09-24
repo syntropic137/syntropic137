@@ -674,6 +674,12 @@ workspace-versions:
 check-pinned-image-channels:
     @uv run python scripts/check_pinned_image_channels.py
 
+# Every fixed (non-${VAR}) image in the compose files must pull anonymously.
+# quay.io/minio/minio withdrew public pulls on 2026-09-24 with no diff on our
+# side; only the post-merge smoke test noticed. Needs network, no credentials.
+check-compose-images-public:
+    @uv run python scripts/check_compose_images_public.py
+
 check-default-workspace-image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1008,7 +1014,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1070,7 +1076,8 @@ preflight-agent: check-agent-docs lint format-check typecheck validate-domain-ev
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
-    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   check-default-workspace-image, check-pinned-image-channels,"
+    @echo "   check-compose-images-public."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
