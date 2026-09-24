@@ -7,7 +7,7 @@ import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/com
 import { api, unwrap } from "../client/typed.js";
 import { print, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
-import { formatCost, formatTokens } from "../output/format.js";
+import { formatCost, formatCostModelKey, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 const SPARKLINE_CHARS = " ▁▂▃▄▅▆▇█";
@@ -88,7 +88,7 @@ const costCommand: CommandDef = {
       table.addColumn("Model", { style: CYAN });
       table.addColumn("Cost", { align: "right" });
       for (const [model, cost] of modelEntries) {
-        table.addRow(model, formatCost(cost));
+        table.addRow(formatCostModelKey(model), formatCost(cost));
       }
       table.print();
     }
