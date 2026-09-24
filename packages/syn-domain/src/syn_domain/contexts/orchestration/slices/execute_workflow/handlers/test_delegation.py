@@ -19,7 +19,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
     WorkspaceProvisionHandler,
     _auth_staging_for,
 )
-from syn_shared.agents import AgentProvider
+from syn_shared.agents import DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, AgentProvider, ModelAlias
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -78,17 +78,14 @@ def test_agent_config_carries_allow_delegation() -> None:
 # === Issue #788: codex phases must not inherit the claude default model ===
 
 
-def test_codex_phase_without_explicit_model_does_not_default_to_haiku() -> None:
-    """A codex phase that omits `model:` (the common/recommended case, see
-    workflows/examples/codex-demo.yaml) must not silently resolve to the
-    claude "haiku" default - that mispriced every codex phase with claude
-    haiku rates (#788).
+def test_codex_phase_without_explicit_model_gets_the_codex_default() -> None:
+    """A codex phase that omits `model:` must not resolve to a Claude default -
+    that mispriced every codex phase with claude haiku rates (#788).
 
-    It also must not resolve to a synthesized "codex" model string (the
-    original #788 fix's over-correction): that string then flowed into
-    `codex exec --model codex` (a nonexistent model) and got confidently
-    priced as GPT-5.6 via a pricing alias, despite the real model being
-    unknown. The honest state is `None` - unforced model, unpriced cost.
+    Nor to a synthesized "codex" string (the original #788 over-correction,
+    which became `codex exec --model codex`). It gets the codex default,
+    `gpt-sol`: a concrete, priced model that the command builder forces with
+    `--model gpt-6-sol`, so the requested model is the one that runs.
     """
     phase = PhaseDefinition(
         phase_id="p1",
@@ -98,12 +95,12 @@ def test_codex_phase_without_explicit_model_does_not_default_to_haiku() -> None:
         provider=AgentProvider.CODEX,
     )
     cfg = _build_agent_config_from_phase(phase)
-    assert cfg.model != "haiku"
-    assert cfg.model is None
+    assert cfg.model == DEFAULT_CODEX_MODEL
+    assert cfg.model not in set(ModelAlias)
 
 
-def test_claude_phase_without_explicit_model_still_defaults_to_haiku() -> None:
-    """The claude default model is unchanged for claude-provider phases."""
+def test_claude_phase_without_explicit_model_gets_the_claude_default() -> None:
+    """A claude phase stored without a model falls back to the static default."""
     phase = PhaseDefinition(
         phase_id="p1",
         name="p",
@@ -112,7 +109,7 @@ def test_claude_phase_without_explicit_model_still_defaults_to_haiku() -> None:
         provider=AgentProvider.CLAUDE,
     )
     cfg = _build_agent_config_from_phase(phase)
-    assert cfg.model == "haiku"
+    assert cfg.model == DEFAULT_CLAUDE_MODEL
 
 
 def test_codex_phase_explicit_model_override_is_preserved() -> None:

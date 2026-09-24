@@ -30,7 +30,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from syn_shared.agents import AgentRunner
+from syn_shared.agents import DEFAULT_CODEX_MODEL, AgentRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -230,13 +230,14 @@ class TestTheRuntimeHandsBackWhoRan:
 
 # ── the codex half ───────────────────────────────────────────────────────────
 
-#: What a codex phase actually asks for. `AgentConfiguration.model` defaults to
-#: the Claude alias "haiku", and `_is_codex_model` deliberately does not forward
-#: it to `codex exec`, so codex runs its ChatGPT-account default instead. That
-#: makes this the single most dangerous value in the file: it is in scope at
-#: collection time, and recording it would state that a claude model ran the
-#: phase whose only job is to be a DIFFERENT model from claude.
-REQUESTED_BY_A_CODEX_PHASE = "haiku"
+#: What a codex phase actually asks for: the codex default, the platform alias
+#: `gpt-sol`. That makes this the single most dangerous value in the file: it
+#: is in scope at collection time and it LOOKS like an observation, but it is a
+#: request, and an alias at that - codex was sent `gpt-6-sol`, and only the
+#: rollout can say what actually ran. (It used to be the Claude alias "haiku",
+#: which was worse still: recording it would have claimed a claude model ran the
+#: phase whose only job is to be a different model from claude.)
+REQUESTED_BY_A_CODEX_PHASE: str = DEFAULT_CODEX_MODEL
 CODEX_ANNOUNCED = "gpt-5.6-sol"
 CODEX_LATER = "gpt-5.6-codex"
 
@@ -324,7 +325,7 @@ class TestTheCodexStreamIsReadTheSameWay:
         """The golden `codex exec --json` capture, unedited, with nobody to ask.
 
         The stream itself establishes nothing, which is why the rollout read
-        below exists. It must not become "haiku", and it must not become the
+        below exists. It must not become the requested model, and it must not become the
         string "unknown" either - a sentinel that reads like a model id would
         flow onward as a value, which is the mistake that once priced
         unspecified codex phases as a real model (see `syn_shared/pricing`).

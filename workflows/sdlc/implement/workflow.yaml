@@ -106,7 +106,12 @@ phases:
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/verify.md
 
   - id: fix
@@ -151,7 +156,12 @@ phases:
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/reverify.md
 
   - id: open_pr

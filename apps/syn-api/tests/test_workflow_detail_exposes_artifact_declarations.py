@@ -38,6 +38,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import yaml
 
+from syn_shared.agents import PhaseModelDefaults
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -267,6 +269,7 @@ async def _install_sdlc_implement() -> None:
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repo(),
         event_publisher=get_publisher(),
+        model_defaults=PhaseModelDefaults(),
     )
     await handler.handle(build_command_from_definition(definition))
     await sync_published_events_to_projections()

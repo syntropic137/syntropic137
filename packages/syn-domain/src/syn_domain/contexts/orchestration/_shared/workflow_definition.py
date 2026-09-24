@@ -592,7 +592,8 @@ class PhaseFrontmatterSchema(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model: str | None = Field(
-        default=None, description="Model to use for this phase (e.g., 'sonnet', 'opus')."
+        default=None,
+        description="Model to use for this phase (e.g., 'opus', 'sonnet'; 'gpt-sol' on codex).",
     )
     allowed_tools: str | list[str] = Field(
         default_factory=list,

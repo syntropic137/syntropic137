@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from syn_api.types import Err, Ok
+from syn_shared.agents import DEFAULT_CLAUDE_MODEL
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -170,9 +171,11 @@ async def test_export_package_phase_without_optional_fields():
     assert isinstance(result, Ok)
 
     simple_md = result.value.files["phases/simple.md"]
-    # No frontmatter if no optional fields set
     assert "Do the thing." in simple_md
-    assert "model:" not in simple_md
+    # The model default is PERSISTED at install time, so the export carries the
+    # model the template will actually run - not an absence that would re-resolve
+    # under whatever default the importing deployment has.
+    assert f"model: {DEFAULT_CLAUDE_MODEL}" in simple_md
     assert "argument-hint:" not in simple_md
 
 
