@@ -91,8 +91,10 @@ export interface SessionSummary {
   agent_provider: string | null
   // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  agent_model_display: string | null
-  requested_model?: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  agent_model_display: string
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
   repos: string[]
   repos_display: string | null
   total_tokens: number
