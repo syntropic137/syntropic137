@@ -134,3 +134,46 @@ async def test_the_offline_seeder_persists_the_configured_defaults() -> None:
     models = await _stored_models("self-heal-pr")
     assert models
     assert set(models.values()) == {CLAUDE_SETTING}
+
+
+async def _create_then_switch_to_codex() -> None:
+    from syn_api.routes.workflows import create_workflow
+    from syn_api.routes.workflows.commands import update_phase_prompt
+
+    created = await create_workflow(
+        name="Switch",
+        workflow_id="switch",
+        phases=[{"phase_id": "p", "name": "P", "order": 1, "prompt_template": "x"}],
+    )
+    assert isinstance(created, Ok)
+    assert await _stored_models("switch") == {"p": CLAUDE_SETTING}
+
+    edited = await update_phase_prompt(
+        "switch", "p", prompt_template="y", provider=AgentProvider.CODEX
+    )
+    assert isinstance(edited, Ok)
+
+
+async def test_a_provider_switch_edit_stores_the_configured_codex_default() -> None:
+    """The phase-edit route applies the same rule as install."""
+    await _create_then_switch_to_codex()
+
+    assert await _stored_models("switch") == {"p": CODEX_SETTING}
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "TODO(#444): WorkflowPhaseUpdated is not wired into the projection "
+        "manager, so no phase edit reaches the detail projection export reads. "
+        "Strict, so this flips the day #444 is fixed."
+    ),
+)
+async def test_a_provider_switch_edit_reaches_the_export() -> None:
+    from syn_api.routes.workflows import export_workflow
+
+    await _create_then_switch_to_codex()
+
+    exported = await export_workflow("switch", fmt="package")
+    assert isinstance(exported, Ok)
+    assert f"model: {CODEX_SETTING}" in exported.value.files["phases/p.md"]

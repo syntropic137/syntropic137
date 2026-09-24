@@ -155,3 +155,16 @@ def test_blank_model_is_treated_as_unset(
     """
     assert config_cls(model=blank).model == DEFAULT_CLAUDE_MODEL
     assert config_cls(provider=AgentProvider.CODEX, model=blank).model == DEFAULT_CODEX_MODEL
+
+
+@pytest.mark.parametrize("config_cls", CONFIGS)
+def test_replace_drops_a_concrete_id_of_the_other_harness(
+    config_cls: type[SharedAgentConfiguration] | type[AggregateAgentConfiguration],
+) -> None:
+    """Aliases were not the whole class: a concrete id of the old provider's
+    family is just as unrunnable after a switch (review pass 2)."""
+    codex_config = config_cls(provider=AgentProvider.CODEX, model=ModelId.GPT_5_6_TERRA)
+    claude_config = config_cls(model=ModelId.CLAUDE_OPUS_5_5)
+
+    assert replace(codex_config, provider=AgentProvider.CLAUDE).model == DEFAULT_CLAUDE_MODEL
+    assert replace(claude_config, provider=AgentProvider.CODEX).model == DEFAULT_CODEX_MODEL

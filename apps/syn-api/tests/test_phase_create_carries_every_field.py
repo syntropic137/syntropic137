@@ -37,7 +37,13 @@ pytestmark = pytest.mark.unit
 #: Fields the create path deliberately does not accept from a caller. Each one
 #: needs a reason, because "not mapped" is exactly the bug this test exists to
 #: catch -- an empty exemption list is the healthy state.
-_NOT_CALLER_SETTABLE: dict[str, str] = {}
+_NOT_CALLER_SETTABLE: dict[str, str] = {
+    "model_defaulted": (
+        "provenance the install handler computes from the model it resolves; a "
+        "caller that could set it could make a declared model look defaulted "
+        "and have a later reinstall silently keep it"
+    ),
+}
 
 
 #: One distinctive, non-default value per field. The fixture is compared
@@ -93,7 +99,14 @@ def test_the_fixture_covers_every_field_on_the_model() -> None:
     was added -- which is the failure this whole file exists to prevent, one
     level up.
     """
-    assert set(_EVERY_FIELD) == set(PhaseDefinition.model_fields)
+    assert not set(_EVERY_FIELD) & set(_NOT_CALLER_SETTABLE)
+    assert set(_EVERY_FIELD) | set(_NOT_CALLER_SETTABLE) == set(PhaseDefinition.model_fields)
+
+
+def test_a_caller_cannot_set_what_is_not_caller_settable() -> None:
+    """Sending an exempt field must not reach the domain."""
+    (phase,) = _build_phase_defs([{**_EVERY_FIELD, "model_defaulted": True}])
+    assert phase.model_defaulted is False
 
 
 def test_every_field_a_caller_sends_survives_into_the_domain() -> None:

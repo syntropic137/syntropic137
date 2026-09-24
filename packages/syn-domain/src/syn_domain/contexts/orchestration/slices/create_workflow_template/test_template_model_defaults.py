@@ -208,3 +208,156 @@ class TestReinstallStaysIdempotent:
 
         assert outcome.changed is True
         assert await _models(repository, "wf") == [ModelAlias.HAIKU, CodexModelAlias.GPT_SOL]
+
+
+@pytest.mark.unit
+class TestProvenanceDecidesReinstallIdentity:
+    """Only a stored DEFAULT stands in for an undeclared model (review pass 2)."""
+
+    @pytest.mark.asyncio
+    async def test_install_records_which_models_were_defaulted(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        await _handler(repository, SETTING_A).handle(_command("wf", claude_model=ModelAlias.HAIKU))
+
+        aggregate = await repository.get_by_id("wf")
+        assert aggregate is not None
+        assert [p.model_defaulted for p in aggregate.phases] == [False, True]
+
+    @pytest.mark.asyncio
+    async def test_removing_a_declared_model_is_a_change(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        await _handler(repository, SETTING_A).handle(
+            _command("wf", claude_model=ModelAlias.HAIKU, version="1.0.0")
+        )
+
+        outcome = await _handler(repository, SETTING_A).handle(_command("wf", version="2.0.0"))
+
+        assert outcome.changed is True
+        aggregate = await repository.get_by_id("wf")
+        assert aggregate is not None
+        write = aggregate.phases[0]
+        assert (write.model, write.model_defaulted) == (ModelAlias.OPUS, True)
+
+    @pytest.mark.asyncio
+    async def test_removing_a_declared_model_under_the_same_version_is_refused(self) -> None:
+        """A change under an installed version is refused, not silently no-op'd."""
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
+            WorkflowTemplateVersionAlreadyInstalledError,
+        )
+
+        repository = InMemoryWorkflowRepository()
+        await _handler(repository, SETTING_A).handle(_command("wf", claude_model=ModelAlias.HAIKU))
+
+        with pytest.raises(WorkflowTemplateVersionAlreadyInstalledError):
+            await _handler(repository, SETTING_A).handle(_command("wf"))
+        assert await _models(repository, "wf") == [ModelAlias.HAIKU, CodexModelAlias.GPT_SOL]
+
+    @pytest.mark.asyncio
+    async def test_force_applies_the_removal(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        await _handler(repository, SETTING_A).handle(_command("wf", claude_model=ModelAlias.HAIKU))
+
+        forced = _command("wf").model_copy(update={"force": True})
+        outcome = await _handler(repository, SETTING_B).handle(forced)
+
+        # A real update is a new definition: every undeclared model resolves
+        # under TODAY's setting, the removed one and the never-declared one.
+        assert outcome.changed is True
+        assert await _models(repository, "wf") == [ModelAlias.SONNET, "gpt-some-other"]
+
+    @pytest.mark.asyncio
+    async def test_force_on_an_unchanged_undeclared_reinstall_is_still_a_no_op(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        await _handler(repository, SETTING_A).handle(_command("wf"))
+
+        forced = _command("wf").model_copy(update={"force": True})
+        outcome = await _handler(repository, SETTING_B).handle(forced)
+
+        assert outcome.changed is False
+        assert await _models(repository, "wf") == [ModelAlias.OPUS, CodexModelAlias.GPT_SOL]
+
+    @pytest.mark.asyncio
+    async def test_a_wrong_provider_alias_is_replaced_at_install(self) -> None:
+        repository = InMemoryWorkflowRepository()
+        handler = _handler(repository, SETTING_A)
+        await handler.handle(
+            _command("wf", claude_model=CodexModelAlias.GPT_SOL, codex_model=ModelAlias.OPUS)
+        )
+
+        assert await _models(repository, "wf") == [ModelAlias.OPUS, CodexModelAlias.GPT_SOL]
+        # ...and reinstalling the same package is still a no-op.
+        outcome = await handler.handle(
+            _command("wf", claude_model=CodexModelAlias.GPT_SOL, codex_model=ModelAlias.OPUS)
+        )
+        assert outcome.changed is False
+
+
+class _LegacyEvent:
+    """A stored event as the gRPC store hands it back: a plain payload."""
+
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    def model_dump(self) -> dict[str, object]:
+        return dict(self._data)
+
+
+@pytest.mark.unit
+class TestEventsWrittenBeforeProvenanceReplay:
+    def test_a_created_event_without_the_flag_replays_as_declared(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
+        )
+
+        aggregate = WorkflowTemplateAggregate()
+        aggregate._initialize("legacy")
+        aggregate.on_workflow_created(
+            _LegacyEvent(  # type: ignore[arg-type]
+                {
+                    "workflow_id": "legacy",
+                    "name": "Legacy",
+                    "workflow_type": "custom",
+                    "classification": "standard",
+                    "phases": [
+                        {"phase_id": "a", "name": "A", "order": 1, "model": "haiku"},
+                        {"phase_id": "b", "name": "B", "order": 2},
+                    ],
+                }
+            )
+        )
+
+        assert [(p.model, p.model_defaulted) for p in aggregate.phases] == [
+            (ModelAlias.HAIKU, False),
+            (None, False),
+        ]
+
+    def test_a_phase_updated_event_without_the_flag_leaves_it_unchanged(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
+        )
+
+        aggregate = WorkflowTemplateAggregate()
+        aggregate.create_workflow(_command("wf"))
+        aggregate._phases = _with_flag(aggregate.phases)
+
+        aggregate.on_phase_updated(
+            _LegacyEvent(  # type: ignore[arg-type]
+                {
+                    "workflow_id": "wf",
+                    "phase_id": "write",
+                    "prompt_template": "new",
+                    "model": "sonnet",
+                }
+            )
+        )
+
+        write = aggregate.phases[0]
+        assert (write.model, write.model_defaulted, write.prompt_template) == (
+            ModelAlias.SONNET,
+            True,
+            "new",
+        )
+
+
+def _with_flag(phases: list[PhaseDefinition]) -> list[PhaseDefinition]:
+    return [p.model_copy(update={"model_defaulted": True}) for p in phases]

@@ -323,14 +323,26 @@ def resolve_codex_model_alias(model: str) -> str:
     return model
 
 
+_CLAUDE_ALIASES: frozenset[str] = frozenset(ModelAlias)
+_CODEX_ALIASES: frozenset[str] = frozenset(CodexModelAlias)
+
+
 DEFAULT_CLAUDE_MODEL: str = ModelAlias.OPUS
 """Static fallback model for a Claude phase that names none.
 
-This is the LAST-RESORT value, used only when a stored template carries no
-model (templates created before defaults were persisted). New templates get
-their default at the create/update boundary from ``SYN_DEFAULT_CLAUDE_MODEL``
-and PERSIST it in the template event, so changing that setting never rewrites
-an existing template on replay. The domain never reads the environment.
+Used in two places. At install, only when the caller passes no settings
+(tests): production installs use ``SYN_DEFAULT_CLAUDE_MODEL`` and PERSIST the
+result in the template event, so changing that setting never rewrites an
+existing template on replay. The domain never reads the environment.
+
+And at EXECUTION, for templates stored before defaults were persisted, whose
+phases carry ``model=None``. THIS CHANGES WHAT THOSE TEMPLATES RUN, on
+purpose: a legacy claude phase that used to fall back to ``haiku`` now runs
+``opus``, and a legacy codex phase that used to leave the choice to codex now
+runs ``gpt-sol`` (``--model gpt-6-sol``). The owner approved this on
+2026-09-24; there is deliberately no migration pinning legacy phases to the
+old behaviour. Reinstalling such a template does not rewrite its stored
+``None`` either (see ``CreateWorkflowTemplateHandler``); a phase EDIT does.
 
 Was ``haiku`` (cheap for unattended runs) until 2026-09-24; the owner moved
 the default to ``opus`` so an unqualified phase gets the flagship model.
@@ -340,8 +352,9 @@ the default to ``opus`` so an unqualified phase gets the flagship model.
 DEFAULT_CODEX_MODEL: str = CodexModelAlias.GPT_SOL
 """Static fallback model for a codex phase that names none.
 
-Same persistence rule as ``DEFAULT_CLAUDE_MODEL``; the setting is
-``SYN_DEFAULT_CODEX_MODEL``.
+Same persistence and legacy rules as ``DEFAULT_CLAUDE_MODEL``, including the
+intended behaviour change for stored ``model=None`` codex phases; the setting
+is ``SYN_DEFAULT_CODEX_MODEL``.
 
 This used to be ``None`` (issue #788), and the reasoning there still holds for
 what it rejected: codex does not report its own model on the wire, so the
@@ -363,8 +376,8 @@ class PhaseModelDefaults:
 
     Built from settings by the application layer
     (``Settings.phase_model_defaults``) and handed to the template
-    create/update handler, which persists the result in the template event.
-    Constructing it bare gives the static fallbacks, for tests.
+    create/update and phase-edit handlers, which persist the result in the
+    template events. Constructing it bare gives the static fallbacks.
     """
 
     claude: str = DEFAULT_CLAUDE_MODEL
@@ -375,44 +388,97 @@ class PhaseModelDefaults:
         return self.codex if provider == AgentProvider.CODEX else self.claude
 
 
-_CLAUDE_ALIASES: frozenset[str] = frozenset(ModelAlias)
-_CODEX_ALIASES: frozenset[str] = frozenset(CodexModelAlias)
+CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
+    {
+        ModelId.CLAUDE_OPUS_5_5,
+        ModelId.CLAUDE_OPUS_5,
+        ModelId.CLAUDE_SONNET_5,
+        ModelId.CLAUDE_FABLE_5,
+        ModelId.CLAUDE_HAIKU_4_5,
+        ModelId.CLAUDE_OPUS_4_5,
+        ModelId.CLAUDE_SONNET_4_5,
+        ModelId.CLAUDE_OPUS_4,
+        ModelId.CLAUDE_SONNET_4,
+        ModelId.CLAUDE_SONNET_3_5,
+        ModelId.CLAUDE_HAIKU_3_5,
+        ModelId.CLAUDE_OPUS_3,
+        ModelId.CLAUDE_HAIKU_3,
+    }
+)
+"""Every ``ModelId`` only the Claude CLI can run."""
+
+CODEX_MODEL_IDS: frozenset[ModelId] = frozenset(
+    {
+        ModelId.GPT_6_SOL,
+        ModelId.GPT_5_6_SOL,
+        ModelId.GPT_5_6_TERRA,
+        ModelId.GPT_5_6_LUNA,
+        ModelId.GPT_5_6,
+    }
+)
+"""Every ``ModelId`` only codex can run. With ``CLAUDE_MODEL_IDS`` this
+partitions ``ModelId`` (pinned by a test), so a new member must pick a side."""
 
 
-def resolve_phase_model(provider: str, model: str | None) -> str | None:
-    """Normalise a phase's model for ``provider``, returning the value to store.
+def _is_codex_provider(provider: str | None) -> bool:
+    return provider == AgentProvider.CODEX
 
-    Both ``AgentConfiguration`` copies call this from ``__post_init__`` so the
-    rule lives in exactly one place. Four normalisations, in order:
 
-    1. Blank or whitespace-only means "unset". A workflow with ``model: ""``
-       used to be rescued by a caller-side ``phase_model or default``; without
-       that, an empty string would reach the CLI as ``--model ""``.
-    2. A Claude alias on a CODEX phase is dropped. Codex rejects Claude models
-       outright, and keeping one is what priced codex runs as Haiku (issue
-       #788). This also has to run on ALREADY-RESOLVED input:
-       ``dataclasses.replace(claude_config, provider=CODEX)`` re-enters the
-       constructor carrying the resolved ``"opus"``, which no longer looks
-       like a default to anything downstream.
-    3. Symmetrically, a codex alias on a NON-codex phase is dropped: the
-       Claude CLI cannot run ``gpt-sol``, and ``replace(codex_config,
-       provider=CLAUDE)`` would otherwise carry the resolved codex default
-       across.
-    4. An unset (or dropped) model gets the provider's static fallback:
-       ``DEFAULT_CODEX_MODEL`` for codex, ``DEFAULT_CLAUDE_MODEL`` otherwise.
+def model_is_for_provider(model: str, provider: str | None) -> bool | None:
+    """Whether ``provider``'s harness can run ``model``; ``None`` if unknown.
 
-    The static fallbacks only matter for templates stored before defaults
-    were persisted at the create/update boundary; see ``PhaseModelDefaults``.
-    An explicit non-Claude model is always preserved, so a codex phase that
-    names ``gpt-5.6`` keeps it.
+    Only the platform's own vocabulary is judged: the aliases and ``ModelId``
+    members. Any other string (an operator's setting, a slug newer than this
+    table) is ``None`` - it cannot be proven wrong, so it is kept rather than
+    replaced on a guess.
+    """
+    if model in _CLAUDE_ALIASES or model in CLAUDE_MODEL_IDS:
+        return not _is_codex_provider(provider)
+    if model in _CODEX_ALIASES or model in CODEX_MODEL_IDS:
+        return _is_codex_provider(provider)
+    return None
+
+
+def normalize_phase_model(
+    provider: str | None, model: str | None, defaults: PhaseModelDefaults
+) -> tuple[str, bool]:
+    """The model a phase stores for ``provider``, and whether it was defaulted.
+
+    The one rule both write boundaries (template install and phase edit) and
+    execution (``resolve_phase_model``) apply:
+
+    1. Blank or whitespace-only means "unset" - it must never reach a CLI as
+       ``--model ""``.
+    2. A model this provider's harness cannot run (a Claude alias or id on a
+       codex phase, a codex alias or id on a claude phase) is replaced. Keeping
+       one is what priced codex runs as Haiku (#788), and it also has to run on
+       ALREADY-RESOLVED input: a provider switch carries the old provider's
+       model across, which no longer looks like a default to anything.
+    3. An unset or replaced model gets ``defaults.for_provider(provider)``,
+       and the second element says so (``True``). That flag is the stored
+       provenance a reinstall uses to tell "the package never declared a
+       model" from "the package declared one and then removed it".
+
+    Unknown strings are kept (see ``model_is_for_provider``). ``provider=None``
+    is the claude default path.
     """
     normalised = model.strip() if model is not None else None
-    if not normalised:
-        normalised = None
-    if provider == AgentProvider.CODEX:
-        if normalised is None or normalised in _CLAUDE_ALIASES:
-            return DEFAULT_CODEX_MODEL
-        return normalised
-    if normalised is None or normalised in _CODEX_ALIASES:
-        return DEFAULT_CLAUDE_MODEL
-    return normalised
+    if not normalised or model_is_for_provider(normalised, provider) is False:
+        return defaults.for_provider(provider), True
+    return normalised, False
+
+
+_STATIC_DEFAULTS = PhaseModelDefaults()
+
+
+def resolve_phase_model(provider: str, model: str | None) -> str:
+    """Normalise a phase's model at EXECUTION, with the static fallbacks.
+
+    Both ``AgentConfiguration`` copies call this from ``__post_init__``. It is
+    ``normalize_phase_model`` with ``PhaseModelDefaults()``: the environment is
+    never read here, so the only phases that reach a fallback are ones stored
+    without a usable model (legacy ``None``, or a wrong-provider model from
+    before the write boundaries normalised). ``dataclasses.replace`` re-enters
+    the constructor, so a provider switch on a config is corrected too.
+    """
+    return normalize_phase_model(provider, model, _STATIC_DEFAULTS)[0]

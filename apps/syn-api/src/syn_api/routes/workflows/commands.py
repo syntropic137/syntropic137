@@ -687,6 +687,7 @@ async def update_phase_prompt(
     handler = UpdateWorkflowPhaseHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:

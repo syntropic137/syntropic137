@@ -109,3 +109,20 @@ class TestCodexAliasTranslation:
     def test_codex_aliases_are_not_claude_aliases(self) -> None:
         """A codex phase drops every ModelAlias, so overlap would drop gpt-sol."""
         assert not ({str(a) for a in CodexModelAlias} & {str(a) for a in ModelAlias})
+
+
+@pytest.mark.unit
+class TestModelFamilies:
+    def test_the_two_families_partition_model_id(self) -> None:
+        """A new ModelId must declare which harness runs it."""
+        from syn_shared.agents import CLAUDE_MODEL_IDS, CODEX_MODEL_IDS
+
+        assert not CLAUDE_MODEL_IDS & CODEX_MODEL_IDS
+        assert set(ModelId) == CLAUDE_MODEL_IDS | CODEX_MODEL_IDS
+
+    def test_unknown_strings_are_not_judged(self) -> None:
+        from syn_shared.agents import AgentProvider, model_is_for_provider
+
+        assert model_is_for_provider("gpt-future-slug", AgentProvider.CLAUDE) is None
+        assert model_is_for_provider(ModelId.GPT_6_SOL, AgentProvider.CLAUDE) is False
+        assert model_is_for_provider(ModelId.GPT_6_SOL, AgentProvider.CODEX) is True
