@@ -161,14 +161,10 @@ async def test_a_provider_switch_edit_stores_the_configured_codex_default() -> N
     assert await _stored_models("switch") == {"p": CODEX_SETTING}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "TODO(#444): WorkflowPhaseUpdated is not wired into the projection "
-        "manager, so no phase edit reaches the detail projection export reads. "
-        "Strict, so this flips the day #444 is fixed."
-    ),
-)
+# WorkflowPhaseUpdated is not wired into the projection manager, so no phase
+# edit reaches the detail projection that export reads. Strict, so this flips
+# the day #444 is fixed.
+@pytest.mark.xfail(strict=True, reason="TODO(#444): phase edits never reach the projection")
 async def test_a_provider_switch_edit_reaches_the_export() -> None:
     from syn_api.routes.workflows import export_workflow
 
