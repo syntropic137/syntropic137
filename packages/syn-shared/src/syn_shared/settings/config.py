@@ -667,7 +667,8 @@ class Settings(BaseSettings):
             "ON requires a durable Postgres (SYN_OBSERVABILITY_DB_URL); the "
             "feedback schema is applied idempotently at startup. "
             "Read at RUNTIME by the dashboard via /api/v1/features, so enabling "
-            "it is one .env line plus a restart - no rebuild."
+            "it is one .env line plus a restart - no rebuild. "
+            "Source installs need syn-api[feedback]; the supplied API image includes it."
         ),
     )
 
