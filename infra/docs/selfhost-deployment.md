@@ -134,6 +134,15 @@ SYN_GITHUB_APP_NAME=your-app-name
 > **Note**: Crown-jewel secrets (GitHub PEM, webhook secret, tunnel token)
 > are stored in `infra/.env` or resolved from 1Password — not as Docker secret files.
 
+For in-app feedback during testing, set `SYN_UI_FEEDBACK_ENABLED=true` in the
+root `.env` used by Compose, then restart the API. The supplied API image
+includes the optional feedback package. It uses the existing
+`SYN_OBSERVABILITY_DB_URL` PostgreSQL database and creates feedback tables on
+startup. With the flag unset, it creates no feedback tables and the dashboard
+does not load the widget. Source installs must add `syn-api[feedback]` before
+enabling the flag. Keep the database in your normal backup routine because
+feedback text, screenshots, and voice notes are stored there.
+
 ### Step 6: Deploy
 
 ```bash

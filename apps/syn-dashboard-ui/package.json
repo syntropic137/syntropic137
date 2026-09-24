@@ -17,6 +17,7 @@
   "dependencies": {
     "@nivo/calendar": "^0.99.0",
     "@nivo/core": "^0.99.0",
+    "@syn137/ui-feedback-react": "workspace:*",
     "clsx": "2.1.1",
     "html2canvas": "1.4.1",
     "lucide-react": "0.555.0",

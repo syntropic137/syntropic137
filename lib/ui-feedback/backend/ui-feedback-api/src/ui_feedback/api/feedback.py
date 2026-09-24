@@ -1,5 +1,6 @@
 """Feedback CRUD API endpoints."""
 
+from datetime import datetime  # noqa: TC003 - runtime-needed by FastAPI Query
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,6 +28,19 @@ async def list_feedback(
     feedback_type: str | None = Query(None, alias="type", description="Filter by type"),
     priority: str | None = Query(None, description="Filter by priority"),
     app_name: str | None = Query(None, alias="app", description="Filter by app name"),
+    route: str | None = Query(None, description="Filter by the page path feedback was left on"),
+    subject_kind: str | None = Query(
+        None, description="Filter by subject kind (execution, session, workflow, ...)"
+    ),
+    subject_id: str | None = Query(
+        None, description="Filter by the id of the object the page was about"
+    ),
+    created_after: datetime | None = Query(
+        None, description="Only feedback created at or after this instant (ISO 8601)"
+    ),
+    created_before: datetime | None = Query(
+        None, description="Only feedback created strictly before this instant (ISO 8601)"
+    ),
     search: str | None = Query(None, description="Search in comments"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, alias="limit", description="Items per page"),
@@ -40,6 +54,11 @@ async def list_feedback(
         feedback_type=feedback_type,
         priority=priority,
         app_name=app_name,
+        route=route,
+        subject_kind=subject_kind,
+        subject_id=subject_id,
+        created_after=created_after,
+        created_before=created_before,
         search=search,
         page=page,
         page_size=page_size,

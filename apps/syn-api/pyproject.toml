@@ -16,6 +16,9 @@ dependencies = [
     "agentic-logging",
 ]
 
+[project.optional-dependencies]
+feedback = ["ui-feedback-api"]
+
 [build-system]
 requires = ["uv_build>=0.9.13"]
 build-backend = "uv_build"

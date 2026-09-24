@@ -20,6 +20,7 @@ from syn_api.routes import (
     costs_router,
     events_router,
     executions_router,
+    features_router,
     github_router,
     insights_router,
     maintenance_router,
@@ -36,7 +37,7 @@ from syn_api.routes import (
     workflows_router,
 )
 from syn_api.strict_query import reject_unknown_query_params
-from syn_api.types import Err, HealthResponse, Ok, RootResponse
+from syn_api.types import Err, FeatureDisabledResponse, HealthResponse, Ok, RootResponse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -166,6 +167,32 @@ def create_app() -> FastAPI:
     app.include_router(repos_router)
     app.include_router(insights_router)
     app.include_router(maintenance_router)
+    app.include_router(features_router)
+
+    # ── UI feedback (ADR-016, #105) ────────────────────────────────────
+    # The standard API install stays independent of the feedback package.
+    # Images built with the feedback extra keep stable routes across flag changes.
+    from importlib.util import find_spec
+
+    from syn_shared.settings.config import get_settings
+
+    feedback_installed = find_spec("ui_feedback") is not None
+    if get_settings().syn_ui_feedback_enabled and not feedback_installed:
+        raise RuntimeError("UI feedback is enabled; install syn-api[feedback]")
+    if feedback_installed:
+        from ui_feedback.router import create_feedback_router
+
+        from syn_api.services import ui_feedback as ui_feedback_service
+
+        feedback_router, feedback_overrides = create_feedback_router(
+            ui_feedback_service.get_feedback_storage,
+            max_upload_bytes=ui_feedback_service.MAX_UPLOAD_BYTES,
+        )
+        app.dependency_overrides.update(feedback_overrides)
+        app.include_router(
+            feedback_router,
+            responses={404: {"model": FeatureDisabledResponse}},
+        )
 
     @app.get("/")
     async def root() -> RootResponse:

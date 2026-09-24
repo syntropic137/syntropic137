@@ -703,6 +703,39 @@ async def _shutdown_conversation_storage(state: LifecycleState) -> None:
         reset_conversation_storage()
 
 
+async def _init_ui_feedback(state: LifecycleState) -> None:  # noqa: ARG001
+    """Connect UI feedback storage and apply its schema (ADR-016, #105).
+
+    A no-op unless SYN_UI_FEEDBACK_ENABLED is true, which is what makes the
+    flag's OFF state genuinely inert for open-source users: no pool, and in
+    particular no feedback tables created in their database.
+
+    Degradable rather than critical - a deployment whose feedback storage is
+    unreachable should still serve executions. The feedback routes answer 503
+    until this succeeds.
+    """
+    from syn_shared.settings.config import get_settings
+
+    if not get_settings().syn_ui_feedback_enabled:
+        return
+
+    from syn_api.services import ui_feedback
+
+    await ui_feedback.connect()
+
+
+async def _shutdown_ui_feedback(state: LifecycleState) -> None:  # noqa: ARG001
+    """Release the UI feedback storage pool."""
+    from syn_shared.settings.config import get_settings
+
+    if not get_settings().syn_ui_feedback_enabled:
+        return
+
+    from syn_api.services import ui_feedback
+
+    await ui_feedback.disconnect()
+
+
 async def _init_subscriptions(state: LifecycleState) -> None:
     """Start subscription coordinator.
 
@@ -909,6 +942,12 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=_init_conversation_storage,
         recoverable=True,
         shutdown_fn=_shutdown_conversation_storage,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.UI_FEEDBACK,
+        init_fn=_init_ui_feedback,
+        recoverable=True,
+        shutdown_fn=_shutdown_ui_feedback,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,

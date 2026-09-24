@@ -43,6 +43,7 @@ COPY packages/syn-adapters/ ./packages/syn-adapters/
 
 # 7. API application (depends on adapters, domain, shared)
 COPY apps/syn-api/ ./apps/syn-api/
+COPY lib/ui-feedback/backend/ui-feedback-api/ ./lib/ui-feedback/backend/ui-feedback-api/
 
 # -----------------------------------------------------------------------------
 # Create virtual environment and install dependencies
@@ -59,7 +60,8 @@ RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
 RUN uv pip install ./packages/syn-tokens
 RUN uv pip install "./packages/syn-adapters[all]"
-RUN uv pip install ./apps/syn-api
+RUN uv pip install ./lib/ui-feedback/backend/ui-feedback-api
+RUN uv pip install "./apps/syn-api[feedback]"
 
 # =============================================================================
 # Runtime Stage
