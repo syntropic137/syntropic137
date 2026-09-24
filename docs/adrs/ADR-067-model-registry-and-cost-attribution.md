@@ -443,6 +443,10 @@ capability symlinks `~/.codex/sessions` into its spool and the transcript listin
 `find "$root"`, which does not follow a symlinked start path (0 files, exit 0, no error).
 Fixed with `find -H` in agentic-primitives (both harness sources), tested with a real
 shell and a real symlink.
+Delivery follows the documented chain: AgentParadise/agentic-primitives#429 (merged) ->
+the AP release PR (#430) -> a submodule bump here together with the release-built
+`PINNED_DIGESTS` (`check-pinned-image-channels` requires both to name the same commit).
+Until then a codex phase honestly reads `unknown (requested: gpt-sol)`.
 
 ## Consequences
 
