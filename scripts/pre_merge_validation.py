@@ -258,8 +258,8 @@ class PreMergeValidator:
         )
 
     async def check_agentic_packages_installed(self) -> ValidationResult:
-        """Check all agentic-primitives packages can be imported."""
-        logger.info("🔍 Checking agentic-primitives packages...")
+        """Check all agentic-workspace packages can be imported."""
+        logger.info("🔍 Checking agentic-workspace packages...")
 
         import_checks = "; ".join(
             [
@@ -272,15 +272,15 @@ class PreMergeValidator:
 
         success, output, duration = await self.run_command(
             ["uv", "run", "python", "-c", import_checks],
-            "agentic-primitives check",
+            "agentic-workspace check",
             timeout=60,
         )
 
         return ValidationResult(
-            name="agentic-primitives Packages",
+            name="agentic-workspace Packages",
             passed=success,
             duration_ms=duration,
-            message="agentic-primitives available ✅" if success else "Not installed ❌",
+            message="agentic-workspace available ✅" if success else "Not installed ❌",
             details="" if success else output,
         )
 

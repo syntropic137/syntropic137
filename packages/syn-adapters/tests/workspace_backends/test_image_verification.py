@@ -33,7 +33,7 @@ from syn_adapters.workspace_backends.image_verification import (
     verify_image,
 )
 from syn_shared.settings.image_verification import (
-    AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+    AGENTIC_WORKSPACE_IDENTITY_REGEXP,
     GITHUB_ACTIONS_OIDC_ISSUER,
     ImageVerificationSettings,
 )
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 MODULE = "syn_adapters.workspace_backends.image_verification"
 
 PINNED_REF = (
-    "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:"
+    "ghcr.io/agentparadise/agentic-workspace-buildfloor@sha256:"
     "d16a95f5745627b6d154bc7d0c879410b6a2ce61e7cb46118fa3b3bf852f8cb5"
 )
 LOCAL_REF = "agentic-workspace-claude-cli:dev"
@@ -64,7 +64,7 @@ def settings(**overrides: object) -> ImageVerificationSettings:
     defaults: dict[str, object] = {
         "enabled": True,
         "allow_local_images": False,
-        "certificate_identity_regexp": AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+        "certificate_identity_regexp": AGENTIC_WORKSPACE_IDENTITY_REGEXP,
         "certificate_oidc_issuer": GITHUB_ACTIONS_OIDC_ISSUER,
         "cosign_path": "cosign",
         "new_bundle_format": True,
@@ -389,7 +389,7 @@ class TestVerificationSucceeds:
         assert "--certificate-oidc-issuer" in command
         identity = command[command.index("--certificate-identity-regexp") + 1]
         issuer = command[command.index("--certificate-oidc-issuer") + 1]
-        assert identity == AGENTIC_PRIMITIVES_IDENTITY_REGEXP
+        assert identity == AGENTIC_WORKSPACE_IDENTITY_REGEXP
         assert issuer == GITHUB_ACTIONS_OIDC_ISSUER
         # The digest, not a tag: this is the reference that will be pulled.
         assert command[-1] == PINNED_REF

@@ -40,7 +40,7 @@ PHASE_COMPLETED = "phase_completed"
 # Error events
 ERROR = "error"
 
-# Git observability events (from agentic-primitives observability plugin)
+# Git observability events (from agentic-workspace observability plugin)
 # Emitted by post-commit, pre-push, post-merge, post-rewrite hooks and
 # PreToolUse/PostToolUse git command detection (agentic-primitives PR #82)
 GIT_COMMIT = "git_commit"

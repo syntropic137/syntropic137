@@ -64,7 +64,7 @@ to provisioning - repositories cloned outside the agent-writable mount and
 bound back in read-only, build caches and output somewhere writable,
 dependency commands run frozen - and it cannot be done from inside the
 workspace at all, so it lands with the container's creation, in
-agentic-primitives and the image, not here. This gate needs no change when it
+agentic-workspace and the image, not here. This gate needs no change when it
 does: `_write_protected` simply starts finding repositories.
 
 A COMMIT IS AN AUTHORING ACT AND IS ALWAYS WORK. No build tool writes one, so

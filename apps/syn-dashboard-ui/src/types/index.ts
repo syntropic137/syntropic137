@@ -468,7 +468,7 @@ export const SSE_EVENTS = {
   WORKSPACE_DESTROYED: 'workspace_destroyed',
   WORKSPACE_ERROR: 'workspace_error',
 
-  // Git observability events (agentic-primitives observability plugin)
+  // Git observability events (agentic-workspace observability plugin)
   GIT_COMMIT: 'git_commit',
   GIT_PUSH: 'git_push',
   GIT_BRANCH_CHANGED: 'git_branch_changed',

@@ -103,7 +103,7 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
 
 _SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
-# Baked delegation skills live in the agentic-primitives image under this root
+# Baked delegation skills live in the agentic-workspace image under this root
 # (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
 # installs the skill teaching its PRIMARY agent to hand off to the OTHER CLI.
 _DELEGATION_SKILL_ROOT = "/opt/agentic/plugins/delegation/skills"

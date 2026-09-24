@@ -80,7 +80,7 @@ class OperatorSettings(BaseSettings):
     Override via ``SYN_OPERATOR_*`` environment variables.
 
     These two values are forwarded into every workspace container, where the
-    ``prepare-commit-msg`` hook shipped by agentic-primitives appends a
+    ``prepare-commit-msg`` hook shipped by agentic-workspace appends a
     ``Co-authored-by`` trailer to the agent's commits. Without them the hook
     exits at its first guard and every agent commit is authored solely by the
     bot, so the sponsoring human earns no GitHub contribution for the work.
@@ -153,7 +153,7 @@ class OperatorSettings(BaseSettings):
     def attribution_env(self) -> dict[str, str]:
         """Environment for the workspace, or empty when not fully configured.
 
-        The keys are the names the agentic-primitives hook reads. They are
+        The keys are the names the agentic-workspace hook reads. They are
         deliberately NOT prefixed the way this class's own settings are: the
         hook is a separate artifact with its own published contract, and
         renaming these would silently disable attribution rather than fail.

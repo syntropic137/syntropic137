@@ -7,7 +7,7 @@ sessions (``$CODEX_HOME/sessions/...``, matched by session id) and how to read
 a file out of a container that may not be on this machine. Both are knowledge
 about a CLI and a transport, not about the domain, so per the boundary rule in
 AGENTS.md they belong on the far side of an interface - the workspace adapter
-already owns the transport and agentic-primitives already owns the layout.
+already owns the transport and agentic-workspace already owns the layout.
 
 WHAT DELIBERATELY STAYS ON THIS SIDE: what a rollout MEANS. The records come
 back as they were written and ``model_from_rollout`` reads them, so the field

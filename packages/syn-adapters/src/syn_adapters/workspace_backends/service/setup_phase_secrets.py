@@ -696,7 +696,7 @@ class SetupPhaseSecrets:
 # Minimal setup script for credentials that require secure injection.
 #
 # NOTE: Most configuration is now handled by the container's entrypoint.sh
-# (see: agentic-primitives/providers/workspaces/claude-cli/scripts/entrypoint.sh)
+# (see: agentic-workspace/workspace/entrypoint.sh)
 #
 # This script only handles:
 # 1. Git identity (in case container started without env vars)

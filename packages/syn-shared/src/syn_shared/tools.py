@@ -23,7 +23,7 @@ hand-maintained list of another program's interface drifts the moment that
 program ships; only the probe settles it.
 
 BOUNDARY: by the AGENTS.md test ("if it changes when Anthropic ships a new
-CLI version, it belongs in agentic-primitives") this vocabulary is harness
+CLI version, it belongs in agentic-workspace") this vocabulary is harness
 knowledge and belongs in the submodule beside the harness adapters. It is
 here because syn137 needs to VALIDATE at authoring time and the submodule
 exposes no such seam yet; #964 tracks moving it behind a harness port.

@@ -90,6 +90,7 @@ from syn_shared.settings.session_store import (
     usable_label,
 )
 from syn_shared.settings.workspace_images import (
+    DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
     PINNED_EXPORTER_VERSIONS,
     WorkspaceImageProvider,
@@ -595,7 +596,7 @@ def build_report(sources: EnvSources) -> DoctorReport:
             withheld_note="(set, not a usable identifier - value withheld)",
         )
 
-    provider = WorkspaceImageProvider.OMNI_AGENT
+    provider = DEFAULT_WORKSPACE_PROVIDER
     image_ref = f"{workspace_image_name(provider)}@{PINNED_DIGESTS[provider]}"
 
     return DoctorReport(

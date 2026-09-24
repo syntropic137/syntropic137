@@ -7,7 +7,9 @@ provider, and it does NOT for ``omni-agent``, whose Dockerfile omits the
 ``COPY scripts/git-hooks/`` on the reasoning that the hooks belong to the
 provider that owns the directory and that the entrypoint "skips a source
 directory that does not exist, so omitting them is a supported subtraction, not
-a breakage" (``providers/workspaces/omni-agent/Dockerfile:24-28``).
+a breakage" (agentic-primitives
+``providers/workspaces/omni-agent/Dockerfile:24-28``; in agentic-workspace the
+file is ``implementations/docker/images/omni-agent/Dockerfile``).
 
 The ownership claim is true. The consequence claim is not: operator attribution
 is not harness-specific, so the subtraction silently removed a cross-cutting
