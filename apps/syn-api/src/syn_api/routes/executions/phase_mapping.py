@@ -163,7 +163,7 @@ async def _phase_cost(
 
 async def load_configured_models(
     manager: ProjectionManager, workflow_id: str
-) -> dict[str, str | None]:
+) -> dict[str, str | None] | None:
     """Each phase's CONFIGURED model from the workflow definition, by phase id.
 
     Only a fallback for ``requested_model``, used when a phase has no usage
@@ -171,7 +171,8 @@ async def load_configured_models(
     before its first turn. It is the definition as it stands NOW, which is
     what the run requested unless the workflow was edited since, so it never
     stands in for the observed model. Fails soft: the definition is context,
-    not the run's truth.
+    not the run's truth. ``None`` means the definition could not be read,
+    ``{}`` that there is no definition to read.
     """
     try:
         workflow = await manager.workflow_detail.get_by_id(workflow_id)
@@ -182,7 +183,7 @@ async def load_configured_models(
         }
     except Exception:
         logger.debug("Failed to load workflow definition %s", workflow_id, exc_info=True)
-        return {}
+        return None
 
 
 async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None] | None:
