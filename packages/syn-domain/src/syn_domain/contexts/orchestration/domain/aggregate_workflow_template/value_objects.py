@@ -187,7 +187,9 @@ class PhaseDefinition(BaseModel):
     unchanged undeclared model (a no-op) from a declared model the package has
     since removed (a change). Events written before this field existed replay
     as False, which is correct for them: their model was either declared or
-    ``None``."""
+    ``None``. No production event ever persisted a defaulted model without
+    this flag - defaults were first persisted in the same change that added
+    it - so the False default cannot mislabel a real default."""
 
     provider: str | None = None
     """Per-phase agent provider override ('claude' or 'codex').

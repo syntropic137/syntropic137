@@ -125,11 +125,17 @@ def _normalise_model(
     """
     provider = command.provider if command.provider is not None else current.provider
     switched = _effective_provider(provider) != _effective_provider(current.provider)
-    if command.model is not None and command.model.strip():
+    supplied = command.model is not None and bool(command.model.strip())
+    if supplied:
         candidate: str | None = command.model
     elif switched and current.model_defaulted:
         candidate = None
     else:
         candidate = current.model
     model, was_defaulted = normalize_phase_model(provider, candidate, defaults)
+    if not supplied and not switched and not was_defaulted:
+        # The edit did not touch the model: keep its provenance. Re-judging the
+        # stored default as "declared" would make a later reinstall that omits
+        # the model look like a removal (codex review pass 3).
+        was_defaulted = current.model_defaulted
     return command.model_copy(update={"model": model, "model_defaulted": was_defaulted})

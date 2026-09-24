@@ -215,3 +215,33 @@ class TestLegacyAndPromptOnlyEdits:
         repository = await _installed(_phase(None, ModelAlias.HAIKU))
 
         assert await _edit(repository, model="  ") == (None, ModelAlias.HAIKU, False)
+
+
+class TestPromptOnlyEditKeepsProvenance:
+    """Codex review pass 3: an edit that does not touch the model must not
+    relabel a stored default as declared."""
+
+    async def test_the_default_flag_survives_a_prompt_only_edit(self) -> None:
+        repository = await _installed(_phase(None, None))
+
+        assert await _edit(repository) == (None, CONFIGURED.claude, True)
+
+    async def test_an_unchanged_reinstall_after_a_prompt_edit_is_a_no_op(self) -> None:
+        repository = await _installed(_phase(None, None))
+        await _edit(repository)
+
+        outcome = await CreateWorkflowTemplateHandler(
+            repository, InMemoryEventPublisher(), model_defaults=CONFIGURED
+        ).handle(
+            CreateWorkflowTemplateCommand(
+                aggregate_id="wf",
+                name="Edit",
+                workflow_type=WorkflowType.CUSTOM,
+                classification=WorkflowClassification.SIMPLE,
+                phases=[
+                    _phase(None, None).model_copy(update={"prompt_template": "new"}),
+                ],
+            )
+        )
+
+        assert outcome.changed is False
