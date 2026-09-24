@@ -29,9 +29,21 @@ _DIGEST = "sha256:" + "a" * 64
     ("ref", "registry", "repository", "tag", "digest"),
     [
         ("redis:7.2.5-alpine", "registry-1.docker.io", "library/redis", "7.2.5-alpine", None),
-        ("cloudflare/cloudflared:2026.2.0", "registry-1.docker.io", "cloudflare/cloudflared", "2026.2.0", None),
+        (
+            "cloudflare/cloudflared:2026.2.0",
+            "registry-1.docker.io",
+            "cloudflare/cloudflared",
+            "2026.2.0",
+            None,
+        ),
         ("docker.io/library/redis", "registry-1.docker.io", "library/redis", None, None),
-        (f"quay.io/minio/minio:RELEASE.X@{_DIGEST}", "quay.io", "minio/minio", "RELEASE.X", _DIGEST),
+        (
+            f"quay.io/minio/minio:RELEASE.X@{_DIGEST}",
+            "quay.io",
+            "minio/minio",
+            "RELEASE.X",
+            _DIGEST,
+        ),
         (f"ghcr.io/syntropic137/minio@{_DIGEST}", "ghcr.io", "syntropic137/minio", None, _DIGEST),
         ("localhost:5000/foo:1", "localhost:5000", "foo", "1", None),
     ],
