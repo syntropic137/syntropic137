@@ -4,7 +4,7 @@ This document describes how to work with Claude commands, tools, and hooks (prim
 
 ## Overview
 
-Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-primitives/`). The workflow supports:
+Syn137 uses primitives from the `agentic-primitives` library. Since 2026-09 (#1417) it is **no longer vendored as a submodule**: the workspace dependency moved to `lib/agentic-workspace`, and AP stays only as the primitives and claude-plugin marketplace. Where this guide says `lib/agentic-primitives/`, use a separate clone instead (for example `git clone https://github.com/AgentParadise/agentic-primitives ../agentic-primitives`) and substitute its path. `git submodule update --remote lib/agentic-primitives` no longer applies; use `git -C ../agentic-primitives pull`. The workflow supports:
 
 1. **Syncing shared primitives** from `agentic-primitives` → Syn137
 2. **Creating repo-specific commands** that stay only in Syn137

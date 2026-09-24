@@ -5,11 +5,11 @@ description: "How to configure workspace images: custom images, environment vari
 
 ## Choosing a Workspace Image
 
-The default workspace image is `omni-agent-workspace`, pinned by digest in `syn-shared`. It hosts both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change.
+The default workspace image is `agentic-workspace-buildfloor`, pinned by digest in `syn-shared`. It is the omni-agent image (both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change) plus a native build floor: a C toolchain, rustup, pnpm and bun.
 
 ```bash
 # Override via environment variable
-SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/omni-agent-workspace@sha256:<digest>
+SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-buildfloor@sha256:<digest>
 ```
 
 To use a custom or locally-built image:
@@ -19,8 +19,10 @@ To use a custom or locally-built image:
 cd lib/agentic-workspace
 uv run scripts/build-provider.py omni-agent --tag my-workspace:latest
 
-# Point syn137 at it
+# Point syn137 at it. A local image has no signature, so it must be
+# allowed explicitly and must already exist on the Docker host.
 SYN_WORKSPACE_DOCKER_IMAGE=my-workspace:latest
+SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true
 ```
 
 ## Environment Variables
