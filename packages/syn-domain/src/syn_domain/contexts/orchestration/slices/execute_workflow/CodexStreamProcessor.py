@@ -50,6 +50,7 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -473,6 +474,9 @@ class CodexStreamProcessor:
         #: reads totals mid-run waits on this. Flushed in a `finally`, so a
         #: cancel, a parser error or a failed rollout read never loses rows.
         self._pending_turn_usage: list[_TurnUsage] = []
+        #: Strong references to shielded flush tasks, so one that outlives a
+        #: cancelled await is not garbage-collected mid-write.
+        self._flush_tasks: set[asyncio.Task[Exception | None]] = set()
 
     async def process_stream(
         self,
@@ -493,6 +497,12 @@ class CodexStreamProcessor:
     async def _flush_turn_usage(self, *, raise_errors: bool) -> None:
         """Write every held usage row, stamped with the model known now.
 
+        The rows are handed to ONE task that owns them, and that task is
+        awaited through `asyncio.shield`: a cancel that lands mid-flush (the
+        second cancel of a cancelled run, say) cancels this await but not the
+        writes, so every row is still written, and written exactly once -
+        nothing is left pending for a later flush to write again.
+
         Each row is attempted even if an earlier one fails, so one writer
         error cannot lose the rest. On the normal path the first error is
         re-raised once every row has been tried, keeping writer faults as
@@ -502,6 +512,18 @@ class CodexStreamProcessor:
         """
         self._collector.note_observed_model(self._announced_model)
         pending, self._pending_turn_usage = self._pending_turn_usage, []
+        if not pending:
+            return
+        writes = asyncio.create_task(self._write_turn_usage(pending, self._announced_model))
+        self._flush_tasks.add(writes)
+        writes.add_done_callback(self._flush_tasks.discard)
+        first_error = await asyncio.shield(writes)
+        if first_error is not None and raise_errors:
+            raise first_error
+
+    async def _write_turn_usage(
+        self, pending: list[_TurnUsage], model: str | None
+    ) -> Exception | None:
         first_error: Exception | None = None
         for turn in pending:
             try:
@@ -510,13 +532,12 @@ class CodexStreamProcessor:
                     turn.billable_output,
                     cache_creation=0,
                     cache_read=turn.cache_read,
-                    model=self._announced_model,
+                    model=model,
                 )
             except Exception as err:
                 logger.exception("Failed to record codex token usage (phase=%s)", self._phase_id)
                 first_error = first_error or err
-        if first_error is not None and raise_errors:
-            raise first_error
+        return first_error
 
     async def _process_stream(
         self,

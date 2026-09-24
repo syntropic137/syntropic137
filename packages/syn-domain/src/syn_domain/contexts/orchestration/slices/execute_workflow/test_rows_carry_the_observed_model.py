@@ -115,6 +115,33 @@ class _RecordingWriter:
         return self.of(ObservationType.TOKEN_USAGE)
 
 
+@dataclass
+class _BlockingWriter(_RecordingWriter):
+    """Blocks the FIRST token_usage write until released."""
+
+    first_write_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: ObservationType | str,
+        data: object,
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        if (
+            observation_type == ObservationType.TOKEN_USAGE
+            and not self.first_write_started.is_set()
+        ):
+            self.first_write_started.set()
+            await self.release.wait()
+        await super().record_observation(
+            session_id, observation_type, data, execution_id, phase_id, workspace_id
+        )
+
+
 class _Workspace:
     async def interrupt(self) -> bool:
         return True
@@ -397,6 +424,31 @@ class TestCodexRows:
             await task
 
         assert [r.input_tokens for r in writer.usage] == [10, 20]
+
+    async def test_a_cancel_during_the_flush_writes_every_row_exactly_once(self) -> None:
+        """A second cancel landing while the held rows are being written must
+        neither strand the rows not yet written nor write any twice."""
+        writer = _BlockingWriter()
+        processor, _ = _codex(writer, _Rollout(CODEX_REPORTED))
+
+        task = asyncio.create_task(
+            processor.process_stream(
+                _stream(_thread_started(), _turn(10), _turn(20), _turn(30)), _Workspace()
+            )
+        )
+        await writer.first_write_started.wait()
+        task.cancel()
+        writer.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # The shielded flush finishes in the background after the cancel.
+        for _ in range(50):
+            if len(writer.usage) == 3:
+                break
+            await asyncio.sleep(0)
+
+        assert sorted(r.input_tokens or 0 for r in writer.usage) == [10, 20, 30]
+        assert {r.model for r in writer.usage} == {CODEX_REPORTED}
 
     async def test_a_failed_row_write_does_not_lose_the_rest(self) -> None:
         """Every held row is attempted; the writer's fault is still raised."""

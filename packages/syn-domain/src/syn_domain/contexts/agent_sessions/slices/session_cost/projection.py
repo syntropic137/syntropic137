@@ -360,6 +360,15 @@ class SessionCostProjection:
         if data.get("total_cost_usd") is not None:
             session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
             session_cost.token_cost_usd = session_cost.total_cost_usd
+            # The breakdown follows the summary too, keyed as the SQL path keys
+            # a summary row (`recorded.cost_key`). Keeping the per-turn estimate
+            # here made a replayed session's parts disagree with its total, and
+            # with what the SQL read path reports for the same rows.
+            session_cost.cost_by_model = (
+                {summary_model.cost_key: session_cost.total_cost_usd}
+                if session_cost.total_cost_usd
+                else {}
+            )
 
         session_cost.completed_at = _parse_timestamp(event_data.get("timestamp"))
         session_cost.is_finalized = bool(data.get("totals_are_authoritative", True))

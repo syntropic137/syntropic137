@@ -21,6 +21,7 @@ what makes a replayed projection and a live query report the same thing - and:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -48,7 +49,6 @@ from syn_shared.observed_model import UNKNOWN_MODEL_KEY
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from decimal import Decimal
 
     import asyncpg
 
@@ -317,3 +317,37 @@ class TestReplayAndQueryAgree:
         assert summary.cost_by_model == grouped.cost_by_model
         assert phases.models_by_phase[_PHASE] == grouped.cost_by_model
         assert UNATTRIBUTED_MODEL == UNKNOWN_MODEL_KEY
+
+
+class TestSummaryAfterTurns:
+    async def test_replay_attributes_the_summary_cost_as_the_sql_path_does(self) -> None:
+        """Turn rows estimate one cost; the summary reports another. The
+        breakdown must follow the summary, as the SQL path (which reads only
+        the summary row) does - never keep the superseded turn estimate."""
+        projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+        base = {"session_id": _SESSION, "execution_id": _EXECUTION, "phase_id": _PHASE}
+        await projection.on_agent_observation(
+            {**base, "event_type": "token_usage", "data": reported(1000)}
+        )
+        await projection.on_session_summary(
+            {
+                **base,
+                "data": {
+                    "total_cost_usd": 0.5,
+                    "total_input_tokens": 1000,
+                    "total_output_tokens": 100,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "num_turns": 1,
+                    "duration_ms": 10,
+                    "model": REPORTED,
+                    "requested_model": ALIAS,
+                    "totals_are_authoritative": True,
+                },
+            }
+        )
+        saved = await projection.get_session_cost(_SESSION)
+        assert saved is not None
+
+        assert saved.total_cost_usd == Decimal("0.5")
+        assert saved.cost_by_model == {REPORTED: Decimal("0.5")}
