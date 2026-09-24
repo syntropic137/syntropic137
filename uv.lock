@@ -1346,7 +1346,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1398,7 +1398,7 @@ provides-extras = ["postgres", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1436,7 +1436,7 @@ provides-extras = ["feedback"]
 
 [[package]]
 name = "syn-collector"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1476,7 +1476,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
@@ -1497,7 +1497,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-perf"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-perf" }
 dependencies = [
     { name = "rich" },
@@ -1525,7 +1525,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "pydantic" },
@@ -1544,7 +1544,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-tokens"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "packages/syn-tokens" }
 dependencies = [
     { name = "pydantic" },
@@ -1561,7 +1561,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.30.0b2"
+version = "0.30.0b3"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },
