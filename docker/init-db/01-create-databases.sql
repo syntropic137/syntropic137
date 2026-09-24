@@ -112,8 +112,10 @@ CREATE TABLE IF NOT EXISTS public.session_conversations (
     started_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
 
-    -- Agent metadata
+    -- Agent metadata (ADR-067): model = what the harness reported (or NULL),
+    -- requested_model = what the phase declared, often an alias.
     model TEXT,
+    requested_model TEXT,
     success BOOLEAN,
 
     created_at TIMESTAMPTZ DEFAULT NOW()
