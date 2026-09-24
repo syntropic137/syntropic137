@@ -50,7 +50,6 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -72,6 +71,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     StreamResult,
     api_error_label,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
 )
@@ -466,17 +466,9 @@ class CodexStreamProcessor:
         self._delegation_attempts: int = 0
         self._delegation_successes: int = 0
 
-        #: Per-turn usage HELD until the model is known (ADR-067). Codex never
-        #: names its model on stdout; the rollout read at end-of-stream is the
-        #: first moment it is known, so a row written live could only say
-        #: "unknown" about a model that is about to be learned. The in-memory
-        #: accumulator (`self._tokens`) is still fed live, so nothing that
-        #: reads totals mid-run waits on this. Flushed in a `finally`, so a
-        #: cancel, a parser error or a failed rollout read never loses rows.
-        self._pending_turn_usage: list[_TurnUsage] = []
-        #: Strong references to shielded flush tasks, so one that outlives a
-        #: cancelled await is not garbage-collected mid-write.
-        self._flush_tasks: set[asyncio.Task[Exception | None]] = set()
+        #: Per-turn usage rows HELD until the model is known (ADR-067 D9); the
+        #: live accumulator (`self._tokens`) is still fed per turn.
+        self._held_rows = HeldTokenRows(collector, phase_id)
 
     async def process_stream(
         self,
@@ -492,52 +484,7 @@ class CodexStreamProcessor:
         try:
             return await self._process_stream(stream, workspace)
         finally:
-            await self._flush_turn_usage(raise_errors=False)
-
-    async def _flush_turn_usage(self, *, raise_errors: bool) -> None:
-        """Write every held usage row, stamped with the model known now.
-
-        The rows are handed to ONE task that owns them, and that task is
-        awaited through `asyncio.shield`: a cancel that lands mid-flush (the
-        second cancel of a cancelled run, say) cancels this await but not the
-        writes, so every row is still written, and written exactly once -
-        nothing is left pending for a later flush to write again.
-
-        Each row is attempted even if an earlier one fails, so one writer
-        error cannot lose the rest. On the normal path the first error is
-        re-raised once every row has been tried, keeping writer faults as
-        visible as they were when rows were written live; on the `finally`
-        path they are logged instead, because an exception is either already
-        propagating or the rows were flushed already.
-        """
-        self._collector.note_observed_model(self._announced_model)
-        pending, self._pending_turn_usage = self._pending_turn_usage, []
-        if not pending:
-            return
-        writes = asyncio.create_task(self._write_turn_usage(pending, self._announced_model))
-        self._flush_tasks.add(writes)
-        writes.add_done_callback(self._flush_tasks.discard)
-        first_error = await asyncio.shield(writes)
-        if first_error is not None and raise_errors:
-            raise first_error
-
-    async def _write_turn_usage(
-        self, pending: list[_TurnUsage], model: str | None
-    ) -> Exception | None:
-        first_error: Exception | None = None
-        for turn in pending:
-            try:
-                await self._collector.record_token_usage(
-                    turn.fresh_input,
-                    turn.billable_output,
-                    cache_creation=0,
-                    cache_read=turn.cache_read,
-                    model=model,
-                )
-            except Exception as err:
-                logger.exception("Failed to record codex token usage (phase=%s)", self._phase_id)
-                first_error = first_error or err
-        return first_error
+            await self._held_rows.flush(self._announced_model, raise_errors=False)
 
     async def _process_stream(
         self,
@@ -589,7 +536,7 @@ class CodexStreamProcessor:
             )
 
         await self._name_the_model_from_disk()
-        await self._flush_turn_usage(raise_errors=True)
+        await self._held_rows.flush(self._announced_model, raise_errors=True)
 
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
@@ -1077,5 +1024,5 @@ class CodexStreamProcessor:
             0,
             turn_usage.cache_read,
         )
-        # Held, not written: see `_pending_turn_usage`.
-        self._pending_turn_usage.append(turn_usage)
+        # Held, not written: see `held_token_rows`.
+        self._held_rows.hold(turn_usage)
