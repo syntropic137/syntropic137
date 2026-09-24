@@ -1802,6 +1802,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Features
+         * @description Report which optional features are enabled on this deployment.
+         */
+        get: operations["get_features_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stats
+         * @description Get aggregate statistics for feedback items.
+         */
+        get: operations["get_stats_feedback_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Feedback
+         * @description List all feedback items with optional filtering.
+         */
+        get: operations["list_feedback_feedback_get"];
+        put?: never;
+        /**
+         * Create Feedback
+         * @description Create a new feedback item.
+         */
+        post: operations["create_feedback_feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feedback
+         * @description Get a single feedback item with media metadata.
+         */
+        get: operations["get_feedback_feedback__feedback_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Feedback
+         * @description Delete a feedback item and all associated media.
+         */
+        delete: operations["delete_feedback_feedback__feedback_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Feedback
+         * @description Update a feedback item (status, priority, assignment, notes).
+         */
+        patch: operations["update_feedback_feedback__feedback_id__patch"];
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Media
+         * @description Upload a media file (screenshot or voice note).
+         */
+        post: operations["upload_media_feedback__feedback_id__media_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media/{media_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Media
+         * @description Download a media file.
+         */
+        get: operations["get_media_feedback__feedback_id__media__media_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Media
+         * @description Delete a media file.
+         */
+        delete: operations["delete_media_feedback__feedback_id__media__media_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -2019,6 +2155,12 @@ export interface components {
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
             /** File */
             file: string;
+        };
+        /** Body_upload_media_feedback__feedback_id__media_post */
+        Body_upload_media_feedback__feedback_id__media_post: {
+            /** File */
+            file: string;
+            media_type: components["schemas"]["MediaType"];
         };
         /**
          * BranchObservationInfo
@@ -2560,7 +2702,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -3155,6 +3297,372 @@ export interface components {
             last_seen: string;
         };
         /**
+         * FeatureDisabledDetail
+         * @description Why a flag-gated route refuses to run.
+         */
+        FeatureDisabledDetail: {
+            /**
+             * Feature
+             * @description The feature flag that governs this route.
+             */
+            feature: string;
+            /**
+             * Reason
+             * @description Human-readable explanation.
+             */
+            reason: string;
+            /**
+             * Enable With
+             * @description The setting that enables the feature, when one exists.
+             */
+            enable_with?: string | null;
+        };
+        /**
+         * FeatureDisabledResponse
+         * @description Response from an installed route while its feature is disabled.
+         */
+        FeatureDisabledResponse: {
+            detail: components["schemas"]["FeatureDisabledDetail"];
+        };
+        /**
+         * FeaturesResponse
+         * @description Which optional features this deployment has switched on.
+         */
+        FeaturesResponse: {
+            /**
+             * Ui Feedback
+             * @description In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). When false the routes answer 404 and the dashboard never loads the widget.
+             * @default false
+             */
+            ui_feedback: boolean;
+        };
+        /**
+         * FeedbackCreate
+         * @description Request model for creating feedback.
+         */
+        FeedbackCreate: {
+            /**
+             * Url
+             * @description URL where feedback was created
+             */
+            url: string;
+            /**
+             * Route
+             * @description React Router path if available
+             */
+            route?: string | null;
+            /**
+             * Viewport Width
+             * @description Viewport width in pixels
+             */
+            viewport_width?: number | null;
+            /**
+             * Viewport Height
+             * @description Viewport height in pixels
+             */
+            viewport_height?: number | null;
+            /**
+             * Click X
+             * @description X coordinate of click
+             */
+            click_x?: number | null;
+            /**
+             * Click Y
+             * @description Y coordinate of click
+             */
+            click_y?: number | null;
+            /**
+             * Css Selector
+             * @description CSS selector of clicked element
+             */
+            css_selector?: string | null;
+            /**
+             * Xpath
+             * @description XPath of clicked element
+             */
+            xpath?: string | null;
+            /**
+             * Component Name
+             * @description React component name
+             */
+            component_name?: string | null;
+            /** @description Kind of domain object the page was about (execution, session, ...) */
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /**
+             * Subject Id
+             * @description Id of the domain object the page was about
+             */
+            subject_id?: string | null;
+            /**
+             * @description Type of feedback
+             * @default bug
+             */
+            feedback_type: components["schemas"]["FeedbackType"];
+            /**
+             * Comment
+             * @description User's comment
+             */
+            comment?: string | null;
+            /**
+             * @description Priority level
+             * @default medium
+             */
+            priority: components["schemas"]["Priority"];
+            /**
+             * App Name
+             * @description Name of the application
+             */
+            app_name: string;
+            /**
+             * App Version
+             * @description Version of the application
+             */
+            app_version?: string | null;
+            /**
+             * User Agent
+             * @description Browser user agent
+             */
+            user_agent?: string | null;
+            /**
+             * Environment
+             * @description Environment name (development, staging, production)
+             */
+            environment?: string | null;
+            /**
+             * Git Commit
+             * @description Git commit hash
+             */
+            git_commit?: string | null;
+            /**
+             * Git Branch
+             * @description Git branch name
+             */
+            git_branch?: string | null;
+            /**
+             * Hostname
+             * @description Hostname where the app is running
+             */
+            hostname?: string | null;
+        };
+        /**
+         * FeedbackItem
+         * @description Response model for a feedback item (without media).
+         */
+        FeedbackItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+        };
+        /**
+         * FeedbackItemWithMedia
+         * @description Response model for a feedback item with media metadata.
+         */
+        FeedbackItemWithMedia: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+            /**
+             * Media
+             * @default []
+             */
+            media: components["schemas"]["MediaSummary"][];
+        };
+        /**
+         * FeedbackList
+         * @description Response model for listing feedback items.
+         */
+        FeedbackList: {
+            /** Items */
+            items: components["schemas"]["FeedbackItem"][];
+            /** Total */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+        };
+        /**
+         * FeedbackStats
+         * @description Aggregate statistics for feedback items.
+         */
+        FeedbackStats: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            by_status?: components["schemas"]["StatusCount"];
+            by_type?: components["schemas"]["TypeCount"];
+            by_priority?: components["schemas"]["PriorityCount"];
+            /** By App */
+            by_app?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * FeedbackType
+         * @description Type of feedback.
+         * @enum {string}
+         */
+        FeedbackType: "bug" | "feature" | "ui_ux" | "performance" | "question" | "other";
+        /**
+         * FeedbackUpdate
+         * @description Request model for updating feedback.
+         */
+        FeedbackUpdate: {
+            /** @description New status */
+            status?: components["schemas"]["Status"] | null;
+            /** @description New priority */
+            priority?: components["schemas"]["Priority"] | null;
+            /**
+             * Assigned To
+             * @description Assignee
+             */
+            assigned_to?: string | null;
+            /**
+             * Resolution Notes
+             * @description Notes about resolution
+             */
+            resolution_notes?: string | null;
+            /**
+             * Comment
+             * @description Updated comment
+             */
+            comment?: string | null;
+        };
+        /**
          * GitEventData
          * @description Structured git event data from observability hooks.
          *
@@ -3496,6 +4004,66 @@ export interface components {
              */
             actor: string;
         };
+        /**
+         * MediaItem
+         * @description Response model for a media item.
+         */
+        MediaItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Feedback Id
+             * Format: uuid
+             */
+            feedback_id: string;
+            media_type: components["schemas"]["MediaType"];
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /** External Url */
+            external_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaSummary
+         * @description Summary of a media item (without binary data).
+         */
+        MediaSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaType
+         * @description Type of media attachment.
+         * @enum {string}
+         */
+        MediaType: "screenshot" | "voice_note";
         /**
          * MetricsResponse
          * @description Aggregated metrics response.
@@ -3912,6 +4480,38 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * Priority
+         * @description Feedback priority level.
+         * @enum {string}
+         */
+        Priority: "low" | "medium" | "high" | "critical";
+        /**
+         * PriorityCount
+         * @description Count of items by priority.
+         */
+        PriorityCount: {
+            /**
+             * Low
+             * @default 0
+             */
+            low: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * High
+             * @default 0
+             */
+            high: number;
+            /**
+             * Critical
+             * @default 0
+             */
+            critical: number;
         };
         /**
          * ProjectionLag
@@ -5164,6 +5764,53 @@ export interface components {
             state: string;
         };
         /**
+         * Status
+         * @description Feedback ticket status.
+         * @enum {string}
+         */
+        Status: "open" | "in_progress" | "resolved" | "closed" | "wont_fix";
+        /**
+         * StatusCount
+         * @description Count of items by status.
+         */
+        StatusCount: {
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /**
+             * In Progress
+             * @default 0
+             */
+            in_progress: number;
+            /**
+             * Resolved
+             * @default 0
+             */
+            resolved: number;
+            /**
+             * Closed
+             * @default 0
+             */
+            closed: number;
+            /**
+             * Wont Fix
+             * @default 0
+             */
+            wont_fix: number;
+        };
+        /**
+         * SubjectKind
+         * @description The kind of domain object a page was about when feedback was left.
+         *
+         *     One pair of columns (kind + id) rather than one column per entity: the
+         *     host app decides what its pages are about, and a new page type needs no
+         *     migration, no filter and no branch here.
+         * @enum {string}
+         */
+        SubjectKind: "execution" | "session" | "workflow" | "artifact" | "trigger";
+        /**
          * SubscriptionHealth
          * @description The read-path block of ``GET /health``: is the subscription up, and is it behind.
          *
@@ -5811,6 +6458,42 @@ export interface components {
             fire_count: number;
             /** Created At */
             created_at?: string | null;
+        };
+        /**
+         * TypeCount
+         * @description Count of items by type.
+         */
+        TypeCount: {
+            /**
+             * Bug
+             * @default 0
+             */
+            bug: number;
+            /**
+             * Feature
+             * @default 0
+             */
+            feature: number;
+            /**
+             * Ui Ux
+             * @default 0
+             */
+            ui_ux: number;
+            /**
+             * Performance
+             * @default 0
+             */
+            performance: number;
+            /**
+             * Question
+             * @default 0
+             */
+            question: number;
+            /**
+             * Other
+             * @default 0
+             */
+            other: number;
         };
         /** UpdateArtifactRequest */
         UpdateArtifactRequest: {
@@ -9404,6 +10087,422 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_features_features_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesResponse"];
+                };
+            };
+        };
+    };
+    get_stats_feedback_stats_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by app name */
+                app?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackStats"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_feedback_feedback_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by status */
+                status?: string | null;
+                /** @description Filter by type */
+                type?: string | null;
+                /** @description Filter by priority */
+                priority?: string | null;
+                /** @description Filter by app name */
+                app?: string | null;
+                /** @description Filter by the page path feedback was left on */
+                route?: string | null;
+                /** @description Filter by subject kind (execution, session, workflow, ...) */
+                subject_kind?: string | null;
+                /** @description Filter by the id of the object the page was about */
+                subject_id?: string | null;
+                /** @description Only feedback created at or after this instant (ISO 8601) */
+                created_after?: string | null;
+                /** @description Only feedback created strictly before this instant (ISO 8601) */
+                created_before?: string | null;
+                /** @description Search in comments */
+                search?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+                /** @description Field to order by */
+                order_by?: string;
+                /** @description Order descending */
+                desc?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_feedback_feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feedback_feedback__feedback_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItemWithMedia"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_feedback_feedback__feedback_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_feedback_feedback__feedback_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_media_feedback__feedback_id__media_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_media_feedback__feedback_id__media_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_media_feedback__feedback_id__media__media_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_feedback__feedback_id__media__media_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
                 };
             };
             /** @description Validation Error */

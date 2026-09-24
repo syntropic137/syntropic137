@@ -135,6 +135,7 @@ services:
       SYN_API_HOST: "0.0.0.0"
       # ADR-030: Use explicit database URLs
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      SYN_UI_FEEDBACK_ENABLED: ${SYN_UI_FEEDBACK_ENABLED:-false}
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0

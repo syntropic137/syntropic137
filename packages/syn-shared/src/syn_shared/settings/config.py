@@ -654,6 +654,25 @@ class Settings(BaseSettings):
         return GitHubAppSettings()
 
     # =========================================================================
+    # UI FEEDBACK (#105, ADR-016) - in-app feedback capture
+    # =========================================================================
+
+    syn_ui_feedback_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the in-app UI feedback module (ADR-016). "
+            "OFF (the default) is the open-source posture: the feedback tables "
+            "are never created, /feedback answers 404 'feature disabled', and "
+            "the dashboard never loads the widget chunk. "
+            "ON requires a durable Postgres (SYN_OBSERVABILITY_DB_URL); the "
+            "feedback schema is applied idempotently at startup. "
+            "Read at RUNTIME by the dashboard via /api/v1/features, so enabling "
+            "it is one .env line plus a restart - no rebuild. "
+            "Source installs need syn-api[feedback]; the supplied API image includes it."
+        ),
+    )
+
+    # =========================================================================
     # POLLING (ISS-386) - GitHub Events API hybrid ingestion
     # =========================================================================
 

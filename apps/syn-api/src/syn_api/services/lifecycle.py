@@ -30,6 +30,7 @@ from syn_api.build_info import get_build_info
 from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -909,6 +910,12 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=_init_conversation_storage,
         recoverable=True,
         shutdown_fn=_shutdown_conversation_storage,
+    ),
+    _ServiceEntry(
+        reason=DegradedReason.UI_FEEDBACK,
+        init_fn=init_ui_feedback,
+        recoverable=True,
+        shutdown_fn=shutdown_ui_feedback,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,

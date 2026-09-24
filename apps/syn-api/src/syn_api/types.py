@@ -2709,3 +2709,43 @@ class SetMaintenanceModeRequest(BaseModel):
         max_length=200,
         description="Who is pausing. Free text - the deploy script sends its own name.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Runtime feature flags (#105, ADR-016)
+# ---------------------------------------------------------------------------
+
+
+class FeaturesResponse(BaseModel):
+    """Which optional features this deployment has switched on."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ui_feedback: bool = Field(
+        default=False,
+        description=(
+            "In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). "
+            "When false the routes answer 404 and the dashboard never loads the widget."
+        ),
+    )
+
+
+class FeatureDisabledDetail(BaseModel):
+    """Why a flag-gated route refuses to run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    feature: str = Field(description="The feature flag that governs this route.")
+    reason: str = Field(description="Human-readable explanation.")
+    enable_with: str | None = Field(
+        default=None,
+        description="The setting that enables the feature, when one exists.",
+    )
+
+
+class FeatureDisabledResponse(BaseModel):
+    """Response from an installed route while its feature is disabled."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: FeatureDisabledDetail

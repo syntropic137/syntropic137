@@ -33,6 +33,18 @@ export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
 export type MediaType = 'screenshot' | 'voice_note';
 
+export type SubjectKind =
+  | 'execution'
+  | 'session'
+  | 'workflow'
+  | 'artifact'
+  | 'trigger';
+
+export interface FeedbackSubject {
+  kind: SubjectKind;
+  id: string;
+}
+
 export type WidgetPosition =
   | 'bottom-right'
   | 'bottom-left'
@@ -102,6 +114,8 @@ export interface FeedbackCreate {
   css_selector?: string;
   xpath?: string;
   component_name?: string;
+  subject_kind?: SubjectKind;
+  subject_id?: string;
   feedback_type?: FeedbackType;
   comment?: string;
   priority?: Priority;
@@ -133,6 +147,8 @@ export interface FeedbackItem {
   css_selector?: string;
   xpath?: string;
   component_name?: string;
+  subject_kind?: SubjectKind;
+  subject_id?: string;
   feedback_type: FeedbackType;
   comment?: string;
   status: Status;
@@ -188,6 +204,7 @@ export interface FeedbackProviderConfig {
   gitCommit?: string;
   gitBranch?: string;
   hostname?: string;
+  subject?: FeedbackSubject | null;
 }
 
 // =====================================================

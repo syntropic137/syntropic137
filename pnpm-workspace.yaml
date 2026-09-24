@@ -3,6 +3,9 @@ packages:
   - apps/syn-docs
   - apps/syn-cli-node
   - packages/openclaw-plugin
+  # Vendored in-tree (ADR-016), not a submodule - the dashboard consumes it
+  # as a workspace package so the widget source and its host move together.
+  - lib/ui-feedback/packages/ui-feedback-react
 
 # Build scripts pnpm 11+ requires explicit approval for. Both are standard
 # native-binary installs: esbuild fetches its platform binary (vite/tsx), sharp
