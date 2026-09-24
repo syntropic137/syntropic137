@@ -438,15 +438,17 @@ class TestCodexRows:
         )
         await writer.first_write_started.wait()
         task.cancel()
+        # The writer stays blocked PAST the cancel: the run must not finish
+        # (and so must not hand its rows to a loop that may be torn down)
+        # until every held row is written.
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not task.done()
         writer.release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
-        # The shielded flush finishes in the background after the cancel.
-        for _ in range(50):
-            if len(writer.usage) == 3:
-                break
-            await asyncio.sleep(0)
 
+        # Checked the moment the run returns, with no grace period.
         assert sorted(r.input_tokens or 0 for r in writer.usage) == [10, 20, 30]
         assert {r.model for r in writer.usage} == {CODEX_REPORTED}
 

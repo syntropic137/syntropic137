@@ -59,11 +59,12 @@ class HeldTokenRows:
     async def flush(self, model: str | None, *, raise_errors: bool) -> None:
         """Write every held row, stamped with ``model``.
 
-        The rows are handed to ONE task that owns them, awaited through
-        ``asyncio.shield``: a cancel landing mid-flush (the second cancel of a
-        cancelled run, say) cancels this await but not the writes, so every row
-        is still written, exactly once - nothing is left pending for a later
-        flush to write again.
+        The rows are handed to ONE task that owns them, and this await rides
+        out any cancel until that task is done, then re-raises the cancel. So a
+        cancel landing mid-flush (the second cancel of a cancelled run, say)
+        neither interrupts the writes nor lets the run return while they are
+        still in flight - where loop teardown could kill them. Every row is
+        written exactly once; nothing is left pending for a later flush.
 
         Each row is attempted even if an earlier one fails. With
         ``raise_errors`` the first writer error is re-raised once every row
@@ -77,7 +78,7 @@ class HeldTokenRows:
         writes = asyncio.create_task(self._write(pending, model))
         self._tasks.add(writes)
         writes.add_done_callback(self._tasks.discard)
-        first_error = await asyncio.shield(writes)
+        first_error = await _await_through_cancellation(writes)
         if first_error is not None and raise_errors:
             raise first_error
 
@@ -96,3 +97,24 @@ class HeldTokenRows:
                 logger.exception("Failed to record codex token usage (phase=%s)", self._phase_id)
                 first_error = first_error or err
         return first_error
+
+
+async def _await_through_cancellation[T](task: asyncio.Task[T]) -> T:
+    """Await ``task`` to completion even if cancelled meanwhile, then re-raise.
+
+    ``asyncio.shield`` alone protects the task but lets the CALLER return on
+    cancel, leaving the task to finish unowned - and a loop torn down right
+    after cancels it. Waiting here keeps ownership until the work is done.
+    """
+    cancelled = False
+    while True:
+        try:
+            result = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.done():
+                raise
+            cancelled = True
+            continue
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
