@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
 
 from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_MODEL_COLUMNS,
     CANONICAL_SESSION_USAGE_CTE,
     CANONICAL_USAGE_EVENT_FILTER,
     price_canonical_row,
@@ -54,14 +55,14 @@ _TOTALS_QUERY = f"""
 WITH {_SCOPED_EVENTS},
 {CANONICAL_SESSION_USAGE_CTE}
 SELECT
-    model,
+    {CANONICAL_MODEL_COLUMNS},
     SUM(vendor_cost_usd) AS vendor_cost_usd,
     SUM(input_tokens) AS input_tokens,
     SUM(output_tokens) AS output_tokens,
     SUM(cache_creation_tokens) AS cache_creation_tokens,
     SUM(cache_read_tokens) AS cache_read_tokens
 FROM canonical_usage
-GROUP BY model, (vendor_cost_usd IS NULL)
+GROUP BY {CANONICAL_MODEL_COLUMNS}, (vendor_cost_usd IS NULL)
 """
 
 # Counts every session the canonical source knows about, including ones that
