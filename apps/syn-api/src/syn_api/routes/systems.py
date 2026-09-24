@@ -15,6 +15,7 @@ from syn_api._wiring import (
     ensure_connected,
     sync_published_events_to_projections,
 )
+from syn_api.model_identity import cost_by_observed_model_text
 from syn_api.types import (
     CostOutlierResponse,
     CreateSystemRequest,
@@ -464,7 +465,12 @@ async def get_system_cost_endpoint(system_id: str) -> SystemCostResponse:
     result = await get_system_cost(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    return SystemCostResponse(**result.value)
+    # An alias key from a legacy read model is folded into the unknown bucket
+    # (ADR-067 D9) rather than failing the response.
+    data = result.value
+    return SystemCostResponse(
+        **{**data, "cost_by_model": cost_by_observed_model_text(data.get("cost_by_model"))}
+    )
 
 
 @router.get("/{system_id}/activity")
