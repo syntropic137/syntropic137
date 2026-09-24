@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
+from syn_api.model_identity import cost_by_observed_model
 from syn_api.types import (
     Err,
     ExecutionDetail,
@@ -42,6 +43,7 @@ from .phase_mapping import (
     _load_agent_session_ids,
     _map_phase_detail,
     _map_phase_to_response,
+    load_configured_models,
 )
 
 if TYPE_CHECKING:
@@ -488,7 +490,7 @@ async def _enrich_costs(
         # breakdown that named only codex, and the difference was invisible.
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
-            phase.cost_by_model = dict(phase_models)
+            phase.cost_by_model = cost_by_observed_model(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(
@@ -507,7 +509,11 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     agent_sessions = await _load_agent_session_ids(execution_id)
-    phases = [await _map_phase_detail(p, manager, agent_sessions) for p in detail.phases]
+    configured_models = await load_configured_models(manager, detail.workflow_id)
+    phases = [
+        await _map_phase_detail(p, manager, agent_sessions, configured_models)
+        for p in detail.phases
+    ]
     # Folded from the phases this response already carries, so the header total
     # and the timeline below it are the same numbers by construction.
     duration = _DurationTotal.over(p.duration_seconds for p in phases)

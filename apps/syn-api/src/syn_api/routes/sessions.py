@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from syn_api._wiring import (
     ensure_connected,
@@ -30,6 +30,12 @@ from syn_api.list_query import (
     WindowBound,
     parse_statuses,
     resolve_page_size,
+)
+from syn_api.model_identity import (
+    CostModelKey,
+    ObservedModelId,
+    cost_by_observed_model,
+    observed_model_of,
 )
 from syn_api.types import (
     Err,
@@ -50,11 +56,11 @@ from syn_shared.display import (
     compute_duration_seconds,
     format_cost,
     format_duration_seconds,
-    format_model_compact,
     format_phase,
     format_repos,
     format_tokens,
 )
+from syn_shared.observed_model import format_observed_model
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
@@ -104,8 +110,14 @@ class SessionSummaryResponse(BaseModel):
     phase_display: str | None = None
     status: str
     agent_provider: str | None
-    agent_model: str | None = None
-    agent_model_display: str | None = None
+    agent_model: ObservedModelId | None = None
+    """The model the harness REPORTED doing most of this session's work, or null.
+
+    Never an alias (ADR-067 D9): what the session asked for is
+    ``requested_model``.
+    """
+    requested_model: str | None = None
+    """The model the session REQUESTED (often an alias such as ``opus``), or null."""
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
     input_tokens: int = 0
@@ -127,6 +139,15 @@ class SessionSummaryResponse(BaseModel):
     duration_display: str = "\u2014"
     started_at: str | None = None
     completed_at: str | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def agent_model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``agent_model``."""
+        return format_observed_model(self.agent_model, self.requested_model)
 
 
 class SessionListResponse(BaseModel):
@@ -213,8 +234,14 @@ class SessionResponse(BaseModel):
     phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
-    agent_model: str | None
-    agent_model_display: str | None = None
+    agent_model: ObservedModelId | None = None
+    """The model the harness REPORTED doing most of this session's work, or null.
+
+    Never an alias (ADR-067 D9): what the session asked for is
+    ``requested_model``.
+    """
+    requested_model: str | None = None
+    """The model the session REQUESTED (often an alias such as ``opus``), or null."""
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
     status: str
@@ -238,7 +265,7 @@ class SessionResponse(BaseModel):
     free. Clients render "unpriced" (or ">=$X (partial)") off this field rather
     than printing a dollar figure they cannot back up (issue #890).
     """
-    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
@@ -246,6 +273,15 @@ class SessionResponse(BaseModel):
     duration_display: str = "\u2014"
     error_message: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def agent_model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``agent_model``."""
+        return format_observed_model(self.agent_model, self.requested_model)
 
 
 # =============================================================================
@@ -282,6 +318,8 @@ class _SummaryEnrichment:
     unpriced_observation_count: int = 0
     """Observations Lane 2 could not price; non-zero means the cost is partial."""
     agent_model: str | None = None
+    """REPORTED model, or None. Never an alias (ADR-067 D9)."""
+    requested_model: str | None = None
     duration_seconds: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -293,10 +331,14 @@ class _SummaryEnrichment:
 def _enrichment_from_cost(cost: SessionCost) -> _SummaryEnrichment:
     """Build enrichment from a session_cost projection record."""
     duration_ms = cost.duration_ms
+    # A cost record stored before ADR-067 may name the alias as its model: it
+    # is served as the request it was, never as what ran.
+    recorded = observed_model_of(cost.agent_model, cost.requested_model)
     return _SummaryEnrichment(
         total_cost_usd=cost.total_cost_usd,
         unpriced_observation_count=cost.unpriced_observation_count,
-        agent_model=cost.agent_model,
+        agent_model=recorded.observed,
+        requested_model=recorded.requested,
         duration_seconds=(duration_ms / 1000.0) if duration_ms else None,
         input_tokens=cost.input_tokens,
         output_tokens=cost.output_tokens,
@@ -502,6 +544,8 @@ class _CostData:
     unpriced_observation_count: int = 0
     """Observations Lane 2 could not price; non-zero means the cost is partial."""
     agent_model: str | None = None
+    """REPORTED model, or None. Never an alias (ADR-067 D9)."""
+    requested_model: str | None = None
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     duration_seconds: float | None = None
 
@@ -555,6 +599,7 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
     if cost is None:
         return _lane1_tokens(session)
 
+    recorded = observed_model_of(cost.agent_model, cost.requested_model)
     return _CostData(
         input_tokens=cost.input_tokens,
         output_tokens=cost.output_tokens,
@@ -567,8 +612,9 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
         # the most-viewed cost surface, and without the count it renders a
         # confident dollar figure for work nobody could price (#890).
         unpriced_observation_count=cost.unpriced_observation_count,
-        agent_model=cost.agent_model,
-        cost_by_model=cost.cost_by_model,
+        agent_model=recorded.observed,
+        requested_model=recorded.requested,
+        cost_by_model=cost_by_observed_model(cost.cost_by_model),
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
     )
 
@@ -640,6 +686,7 @@ async def get_session(
             total_cost_usd=cd.total_cost_usd,
             unpriced_observation_count=cd.unpriced_observation_count,
             agent_model=cd.agent_model,
+            requested_model=cd.requested_model,
             cost_by_model=dict(cd.cost_by_model),
             operations=operations,
             started_at=session.started_at,
@@ -693,7 +740,7 @@ def _build_session_summary_response(
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
-        agent_model_display=format_model_compact(info.agent_model),
+        requested_model=info.requested_model,
         repos=list(s.repos),
         repos_display=format_repos(s.repos),
         input_tokens=input_tokens,
@@ -854,7 +901,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,
-        agent_model_display=format_model_compact(detail.agent_model),
+        requested_model=detail.requested_model,
         repos=list(detail.repos),
         repos_display=format_repos(detail.repos),
         status=detail.status,

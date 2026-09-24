@@ -31,6 +31,7 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     read_agent_session_ids,
 )
+from syn_api.model_identity import cost_by_observed_model, observed_model_of
 from syn_api.types import (
     BranchObservationInfo,
     PhaseExecution,
@@ -45,6 +46,8 @@ from .models import (
 from .phase_activity import summarize_phase_activity
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
@@ -107,6 +110,9 @@ class _SessionCostData(NamedTuple):
     cache_creation: int
     cache_read: int
     agent_model: str | None
+    """What the harness REPORTED, or None. Never an alias (ADR-067 D9)."""
+    requested_model: str | None
+    """What the session asked for, as its usage rows recorded it."""
     cost_by_model: dict[str, Decimal]
 
 
@@ -117,6 +123,7 @@ async def _load_session_cost(
     cache_creation = phase.cache_creation_tokens
     cache_read = phase.cache_read_tokens
     agent_model: str | None = None
+    requested_model: str | None = None
     cost_by_model: dict[str, Decimal] = {}
     try:
         sc = await manager.session_cost.get_session_cost(session_id)
@@ -124,11 +131,39 @@ async def _load_session_cost(
             if cache_creation == 0 and cache_read == 0:
                 cache_creation = sc.cache_creation_tokens
                 cache_read = sc.cache_read_tokens
-            agent_model = sc.agent_model
-            cost_by_model = dict(sc.cost_by_model)
+            # A cost record stored before ADR-067 may still name the alias as
+            # its model; it is served as the request it was, not as what ran.
+            recorded = observed_model_of(sc.agent_model, sc.requested_model)
+            agent_model = recorded.observed
+            requested_model = recorded.requested
+            cost_by_model = cost_by_observed_model(sc.cost_by_model)
     except Exception:
         logger.debug("Failed to load session cost for %s", session_id, exc_info=True)
-    return _SessionCostData(cache_creation, cache_read, agent_model, cost_by_model)
+    return _SessionCostData(cache_creation, cache_read, agent_model, requested_model, cost_by_model)
+
+
+async def load_configured_models(
+    manager: ProjectionManager, workflow_id: str
+) -> dict[str, str | None]:
+    """Each phase's CONFIGURED model from the workflow definition, by phase id.
+
+    Only a fallback for ``requested_model``, used when a phase has no usage
+    row saying what it asked for - a phase still pending, or one that ended
+    before its first turn. It is the definition as it stands NOW, which is
+    what the run requested unless the workflow was edited since, so it never
+    stands in for the observed model. Fails soft: the definition is context,
+    not the run's truth.
+    """
+    try:
+        workflow = await manager.workflow_detail.get_by_id(workflow_id)
+        if workflow is None:
+            return {}
+        return {
+            p.id: p.model if isinstance(p.model, str) and p.model else None for p in workflow.phases
+        }
+    except Exception:
+        logger.debug("Failed to load workflow definition %s", workflow_id, exc_info=True)
+        return {}
 
 
 async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None] | None:
@@ -189,6 +224,7 @@ async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
     agent_sessions: dict[str, list[str] | None] | None,
+    configured_models: Mapping[str, str | None] | None = None,
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution.
 
@@ -204,7 +240,8 @@ async def _map_phase_detail(
     if phase.session_id:
         sc = await _load_session_cost(manager, phase.session_id, phase)
     else:
-        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, {})
+        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, None, {})
+    requested_model = sc.requested_model or (configured_models or {}).get(phase.workflow_phase_id)
 
     duration_seconds = resolve_duration_seconds(
         phase.status,
@@ -232,6 +269,7 @@ async def _map_phase_detail(
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
+        requested_model=requested_model,
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
@@ -318,6 +356,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,
+        requested_model=phase.requested_model,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
         # Same model, passed through rather than rebuilt: this constructor is
         # the hop that has dropped a field twice (#891, #1176), and a phase
