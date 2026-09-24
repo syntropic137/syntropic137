@@ -142,6 +142,25 @@ async def _load_session_cost(
     return _SessionCostData(cache_creation, cache_read, agent_model, requested_model, cost_by_model)
 
 
+async def _phase_cost(
+    manager: ProjectionManager,
+    phase: PhaseExecutionDetail,
+    configured_models: Mapping[str, str | None] | None,
+) -> _SessionCostData:
+    """The phase's Lane 2 cost enrichment, its request filled from the definition.
+
+    The configured model stands in for ``requested_model`` only when no usage
+    row recorded one - never for the observed model.
+    """
+    if phase.session_id:
+        sc = await _load_session_cost(manager, phase.session_id, phase)
+    else:
+        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, None, {})
+    if sc.requested_model is None and configured_models:
+        sc = sc._replace(requested_model=configured_models.get(phase.workflow_phase_id))
+    return sc
+
+
 async def load_configured_models(
     manager: ProjectionManager, workflow_id: str
 ) -> dict[str, str | None]:
@@ -237,11 +256,7 @@ async def _map_phase_detail(
     # makes, and it must not arrive as an idle phase either.
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else None
 
-    if phase.session_id:
-        sc = await _load_session_cost(manager, phase.session_id, phase)
-    else:
-        sc = _SessionCostData(phase.cache_creation_tokens, phase.cache_read_tokens, None, None, {})
-    requested_model = sc.requested_model or (configured_models or {}).get(phase.workflow_phase_id)
+    sc = await _phase_cost(manager, phase, configured_models)
 
     duration_seconds = resolve_duration_seconds(
         phase.status,
@@ -269,7 +284,7 @@ async def _map_phase_detail(
         started_at=_parse_dt(phase.started_at),
         completed_at=_parse_dt(phase.completed_at),
         model=sc.agent_model,
-        requested_model=requested_model,
+        requested_model=sc.requested_model,
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
