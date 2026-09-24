@@ -131,6 +131,26 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # date; there is no single date for the whole table, because pins move
 # independently.
 #
+# BOTH pins below were taken on 2026-09-24 from the release-branch build run
+# 36040151207 of agentic-primitives 6b9f81e (release PR #425), and both carry
+# agentic.image.channel=release and revision 6b9f81e on linux/amd64 AND
+# linux/arm64. cosign verify passes for each against
+# AGENTIC_PRIMITIVES_IDENTITY_REGEXP.
+#
+# omni-agent       omni-agent manifest 1.7.0. Verified by running OUT OF THIS
+#                  DIGEST on both architectures: "2.1.281 (Claude Code)",
+#                  "codex-cli 0.156.1", "apss-session-exporter 0.5.0". This is
+#                  the image that knows the new defaults: claude-code 2.1.280+
+#                  resolves the `opus` alias to claude-opus-5-5, and codex
+#                  0.156.1 is the first CLI whose catalog carries gpt-6-sol
+#                  (the target of the `gpt-sol` alias). An older image fails
+#                  every codex phase that takes the default model.
+# claude-cli       claude-cli manifest 2.1.4, CLIs unchanged (claude 2.1.126,
+#                  codex 0.144.6). Re-pinned only because every pin must come
+#                  from the one revision the submodule ships
+#                  (scripts/check_pinned_image_channels.py).
+#
+#                  Previous pins, for the record:
 # claude-cli       built from agentic-primitives d31c88a, which carries the
 #                  capability runtime, the entrypoint `exec` fix (so the agent
 #                  process is PID 1 and honours `docker stop -t`) and the
@@ -216,10 +236,10 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:ecf6cce91d190332bcbf1a10a0fff84984f7646c467b62a0466f61983a42641e"
+            "sha256:a0ec2333a0e8d9169eda5ce8faf147a67a55b93368d04ba9285338cd207c9341"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:29b76b43753292ab50de77921b4cd2750446ea2896cb25f8ee0bfa162d537ad0"
+            "sha256:898aeef61dd057546ef0db7a84467c7d05cb8bb71452a4a3bfd9789343eb912a"
         ),
     }
 )

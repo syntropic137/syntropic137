@@ -47,7 +47,7 @@ dev = [
 
 [[package]]
 name = "agentic-isolation"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "lib/agentic-primitives/lib/python/agentic_isolation" }
 dependencies = [
     { name = "pydantic" },
@@ -55,6 +55,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-session-store", marker = "extra == 'dev'", editable = "lib/agentic-primitives/lib/python/agentic_session_store" },
     { name = "docker", marker = "extra == 'docker'", specifier = ">=7.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.3.0" },
     { name = "pydantic", specifier = "==2.13.4" },
