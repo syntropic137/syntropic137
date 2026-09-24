@@ -254,6 +254,16 @@ anywhere. That is the point of this path, and it is why
 [section 5, step 4](#step-4-recreate-branch-by-build-path) must not run
 `docker compose pull` after it.
 
+For a beta that updates the whole app stack, build all six images in the
+`release-local` matrix below from one committed checkout, using
+`--platform linux/amd64 --load` in place of its multi-architecture `--push`.
+Transfer all six tags in one `docker save | zstd | ssh 'zstd -d | docker load'`
+stream. Verify every tag on the host, then change the five running app image
+pins (`token-injector`, `sidecar-proxy`, `syn-collector`, `syn-api`,
+`syn-gateway`) together after pausing admission and draining executions.
+`syn-dashboard-ui` is built from the same commit for consistency; the running
+gateway serves the dashboard. This path uses no npm or GHCR publish.
+
 ### (b) Registry - for reproducibility, or a host you cannot reach
 
 ```bash

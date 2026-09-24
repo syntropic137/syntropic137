@@ -93,7 +93,7 @@
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-016](ADR-016-ui-feedback-module.md) | UI Feedback Module | Proposed |
+| [ADR-016](ADR-016-ui-feedback-module.md) | UI Feedback Module | Accepted |
 | [ADR-044](ADR-044-cli-first-agent-native-interface.md) | CLI-First, Agent-Native Interface Design | Accepted |
 | [ADR-053](ADR-053-plugin-schema-generation-strategy.md) | Plugin Schema Generation Strategy | Accepted |
 | [ADR-064](ADR-064-observability-monitor-ui.md) | Observability Monitor UI for Sessions and Executions | Proposed |
