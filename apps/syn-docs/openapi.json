@@ -7485,6 +7485,17 @@
             ],
             "title": "Model"
           },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
           "success": {
             "anyOf": [
               {
@@ -7506,11 +7517,18 @@
               }
             ],
             "title": "Size Bytes"
+          },
+          "model_display": {
+            "type": "string",
+            "title": "Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
-          "session_id"
+          "session_id",
+          "model_display"
         ],
         "title": "ConversationMetadataResponse",
         "description": "Conversation index metadata."
@@ -10876,6 +10894,26 @@
         "title": "MetricsResponse",
         "description": "Aggregated metrics response."
       },
+      "ModelCostEntry": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "cost_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cost Usd",
+            "default": "0"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "ModelCostEntry",
+        "description": "One model's share of a cost total."
+      },
       "OperationInfo": {
         "properties": {
           "operation_id": {
@@ -11573,6 +11611,17 @@
             ],
             "title": "Model"
           },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
           "cost_by_model": {
             "additionalProperties": {
               "type": "string"
@@ -11628,6 +11677,12 @@
           },
           "activity": {
             "$ref": "#/components/schemas/PhaseActivityInfo"
+          },
+          "model_display": {
+            "type": "string",
+            "title": "Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11639,7 +11694,9 @@
           "output_tokens",
           "cache_creation_tokens",
           "cache_read_tokens",
-          "total_tokens"
+          "total_tokens",
+          "requested_model",
+          "model_display"
         ],
         "title": "PhaseExecutionInfo"
       },
@@ -13162,7 +13219,7 @@
             ],
             "title": "Agent Model"
           },
-          "agent_model_display": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -13171,7 +13228,7 @@
                 "type": "null"
               }
             ],
-            "title": "Agent Model Display"
+            "title": "Requested Model"
           },
           "repos": {
             "items": {
@@ -13340,6 +13397,12 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Metadata"
+          },
+          "agent_model_display": {
+            "type": "string",
+            "title": "Agent Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -13350,7 +13413,9 @@
           "milestone_id",
           "agent_provider",
           "agent_model",
-          "status"
+          "requested_model",
+          "status",
+          "agent_model_display"
         ],
         "title": "SessionResponse",
         "description": "Detailed session response.\n\nDisplay fields (``*_display``) are produced server-side so all clients\nshare identical human-readable output. Raw fields remain for programmatic\nconsumers.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
@@ -13464,7 +13529,7 @@
             ],
             "title": "Agent Model"
           },
-          "agent_model_display": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -13473,7 +13538,7 @@
                 "type": "null"
               }
             ],
-            "title": "Agent Model Display"
+            "title": "Requested Model"
           },
           "repos": {
             "items": {
@@ -13576,6 +13641,12 @@
               }
             ],
             "title": "Completed At"
+          },
+          "agent_model_display": {
+            "type": "string",
+            "title": "Agent Model Display",
+            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -13584,7 +13655,9 @@
           "workflow_id",
           "phase_id",
           "status",
-          "agent_provider"
+          "agent_provider",
+          "requested_model",
+          "agent_model_display"
         ],
         "title": "SessionSummaryResponse",
         "description": "Summary of an agent session.\n\nDisplay fields (``*_display``) are produced server-side so all clients\n(dashboard, CLI, future UIs) share identical human-readable output. Raw\nfields remain for programmatic consumers; both are always present.\n\nTimestamps stay ISO 8601 UTC. Locale and relative-time formatting is the\nclient's job (it knows the viewer's time zone and when the response is\nactually rendered).\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
@@ -15690,8 +15763,7 @@
           },
           "top_models": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ModelCostEntry"
             },
             "type": "array",
             "title": "Top Models"
