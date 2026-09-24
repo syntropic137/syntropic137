@@ -344,7 +344,13 @@ async def test_enabled_round_trip_through_the_api():
             # served from the authenticated dashboard origin.
             rejected = client.post(
                 f"/feedback/{feedback_id}/media",
-                files={"file": ("malicious.svg", io.BytesIO(b"<svg onload='alert(1)'/>"), "image/svg+xml")},
+                files={
+                    "file": (
+                        "malicious.svg",
+                        io.BytesIO(b"<svg onload='alert(1)'/>"),
+                        "image/svg+xml",
+                    )
+                },
                 data={"media_type": "screenshot"},
             )
             assert rejected.status_code == 400
