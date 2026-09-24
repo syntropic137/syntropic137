@@ -148,7 +148,10 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 # claude-cli       claude-cli manifest 2.1.4, CLIs unchanged (claude 2.1.126,
 #                  codex 0.144.6). Re-pinned only because every pin must come
 #                  from the one revision the submodule ships
-#                  (scripts/check_pinned_image_channels.py).
+#                  (scripts/check_pinned_image_channels.py). Its codex
+#                  0.144.6 predates gpt-6-sol, so a codex phase on the default
+#                  model cannot run in this image; codex phases belong on
+#                  omni-agent (the DEFAULT_WORKSPACE_IMAGE).
 #
 #                  Previous pins, for the record:
 # claude-cli       built from agentic-primitives d31c88a, which carries the
