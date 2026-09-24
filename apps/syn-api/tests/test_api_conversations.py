@@ -1054,7 +1054,7 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
     """End-to-end regression guard against issue #1067 using a real recording.
 
     Runs the full, unmodified ``v2.0.74_claude-sonnet-4-5_multi-tool.jsonl``
-    recording (agentic-primitives fixture) through the pipeline and asserts
+    recording (agentic-workspace fixture) through the pipeline and asserts
     every tool_use/tool_result line - not just hand-picked ones - gets a
     non-null tool_name or content_preview. Before this fix, all of these
     rendered as (None, None): the exact defect from the issue.
@@ -1065,8 +1065,9 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
         pathlib.Path(__file__).parents[3]
         / "lib"
         / "agentic-workspace"
-        / "providers"
-        / "workspaces"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"
@@ -1841,8 +1842,9 @@ async def test_endpoint_response_survives_a_real_recorded_piped_command(
         pathlib.Path(__file__).parents[3]
         / "lib"
         / "agentic-workspace"
-        / "providers"
-        / "workspaces"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"

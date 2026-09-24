@@ -27,14 +27,19 @@ from syn_shared.settings.workspace_images import (
     workspace_image_ref,
 )
 
-_PROVIDERS_DIR = (
-    Path(__file__).resolve().parents[3] / "lib" / "agentic-workspace" / "providers" / "workspaces"
+_IMAGES_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "lib"
+    / "agentic-workspace"
+    / "implementations"
+    / "docker"
+    / "images"
 )
 
 
 def _manifest_image_tag(provider: WorkspaceImageProvider) -> str | None:
     """Read ``image.tag`` from a provider manifest without a YAML dependency."""
-    manifest = _PROVIDERS_DIR / provider.value / "manifest.yaml"
+    manifest = _IMAGES_DIR / provider.value / "manifest.yaml"
     if not manifest.is_file():
         return None
     in_image_block = False

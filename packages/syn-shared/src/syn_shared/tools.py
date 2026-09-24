@@ -14,7 +14,7 @@ still yields the grant. `test_tool_vocabulary_matches_the_cli.py` is that
 probe, automated against the pinned image.
 
 This USED to cite `defaults.allowed_tools` in the omni-agent image manifest
-(`providers/workspaces/omni-agent/manifest.yaml`). That source was wrong in
+(`implementations/docker/images/omni-agent/manifest.yaml`). That source was wrong in
 both directions and is no longer trusted (#1207): it listed `LS`, `MultiEdit`,
 `TodoRead` and `TodoWrite`, none of which the CLI grants - `--tools LS` yields
 `tools: []`, so a phase declaring one ran with NO tools rather than with the

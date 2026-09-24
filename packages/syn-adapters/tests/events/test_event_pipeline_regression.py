@@ -29,8 +29,9 @@ RECORDINGS_DIR = (
     _SYN_ROOT
     / "lib"
     / "agentic-workspace"
-    / "providers"
-    / "workspaces"
+    / "implementations"
+    / "docker"
+    / "images"
     / "claude-cli"
     / "fixtures"
     / "recordings"

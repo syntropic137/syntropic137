@@ -84,6 +84,30 @@ generated `.env.example` now reference the new immutable indexes. The focused
 workspace settings, image-name, signature verification, and skill-install
 semantics suites pass: 91 tests.
 
+## Workspace layout consolidation, 2026-09-23
+
+Agentic Workspace PR #11 merged as commit
+`1041f9a8f28f9c6f943e8d11a9a83006c6e33c29`. Docker image sources now live
+under `implementations/docker/images`; `providers/workspaces` no longer exists.
+Syntropic test fixture, manifest, hook, and API transcript paths now use the
+new layout. The Workspace v0.1.2 release workflow run `35946295402` built,
+tested, published, and signed both multi-arch images:
+
+- `agentic-workspace-claude-cli@sha256:cfe9993e683e31e3ef88af3b440d2bf37779d21855ba176f626e3d695c16f08c`
+- `omni-agent-workspace@sha256:f8bea9bd82c24493a8225ebbced2094069c65fc94e72533b9abed2f655becd07`
+
+Local `cosign verify` accepted both digests for the v0.1.2 Workspace release
+identity and GitHub Actions issuer. Syntropic now pins those digests and the
+matching Workspace source commit. The affected recorded-transcript tests, the
+broader shared/adapters suites, `preflight-agent`, and 750 architecture tests
+passed locally. One stale async-process test mock was corrected after the
+broader suite exposed it.
+
+Full `just preflight` then passed. It pulled the new default Omni digest and
+ran Claude Code `2.1.250`, Codex CLI `0.150.1`, and Skills CLI `1.7.0` through
+the image entrypoint. Its provenance gate confirmed both pinned images are
+release-channel builds from `1041f9a8f28f`, matching the Workspace gitlink.
+
 ## Remaining gates
 
 1. Make Agentic Workspace public after its disclosure gate so public

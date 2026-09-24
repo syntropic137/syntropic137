@@ -179,14 +179,14 @@ def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
     )
     upstream = (
         repo_root
-        / "lib/agentic-workspace/providers/workspaces/claude-cli/scripts/git-hooks"
+        / "lib/agentic-workspace/implementations/docker/images/claude-cli/scripts/git-hooks"
         / HOOK_FILENAME
     )
     if not upstream.is_file():
-        pytest.skip("agentic-primitives submodule not checked out")
+        pytest.skip("agentic-workspace submodule not checked out")
 
     assert upstream.read_bytes() == attribution_hook_source(), (
-        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-primitives "
+        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-workspace "
         f"owns this file; re-mirror it rather than editing the copy here."
     )
 

@@ -27,6 +27,7 @@ async def test_claude_stream_uses_devnull_stdin_and_yields_output() -> None:
     process.stdout = MagicMock()
     process.stdout.readline = AsyncMock(side_effect=[b'{"type":"result"}\n', b""])
     process.returncode = 0
+    process.wait = AsyncMock(return_value=0)
 
     with patch(
         "asyncio.create_subprocess_exec",

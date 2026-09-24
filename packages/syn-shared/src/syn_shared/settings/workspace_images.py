@@ -216,10 +216,10 @@ def workspace_image_name(provider: WorkspaceImageProvider) -> str:
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:69ab1e0d125bccbf46ba9d509140ca2a9b5e74c14dad1844ce0ac50a37d46b3a"
+            "sha256:cfe9993e683e31e3ef88af3b440d2bf37779d21855ba176f626e3d695c16f08c"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:862668c9d9ae034e04082edc970769e95a79ac2613ceb0f3dbcaf9772f5591a5"
+            "sha256:f8bea9bd82c24493a8225ebbced2094069c65fc94e72533b9abed2f655becd07"
         ),
     }
 )
