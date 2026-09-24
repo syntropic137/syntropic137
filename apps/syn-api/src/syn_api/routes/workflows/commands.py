@@ -29,6 +29,7 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -295,6 +296,7 @@ async def create_workflow(
     handler = CreateWorkflowTemplateHandler(
         repository=repository,
         event_publisher=publisher,
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     try:
@@ -824,6 +826,7 @@ async def create_workflow_from_yaml(
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repo(),
         event_publisher=get_publisher(),
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     # Domain-invariant failures (invalid fields, empty phases) raise ValueError;

@@ -367,9 +367,10 @@ class AgentConfiguration:
 
     provider: str = AgentProvider.CLAUDE  # + codex, openai (mock in tests)
     # Declared default is None = "caller named no model". __post_init__ then
-    # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex stays
-    # None because codex does not report its own model on the wire and a
-    # synthesized value would price every codex run as Haiku (issue #788).
+    # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex gets
+    # DEFAULT_CODEX_MODEL (a concrete priced model the platform forces with
+    # --model, never a Claude alias - issue #788). Both are static fallbacks
+    # for templates stored before defaults were persisted at install time.
     # Resolution lives here, not in a caller, so EVERY construction path gets
     # it - a caller-side default only covered phases built from YAML.
     model: str | None = None  # CLI alias - auto-resolves to latest version

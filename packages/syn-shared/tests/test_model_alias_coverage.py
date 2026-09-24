@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_shared.agents import ModelAlias, ModelId, resolve_phase_model
+from syn_shared.agents import DEFAULT_CODEX_MODEL, ModelAlias, ModelId, resolve_phase_model
 from syn_shared.pricing import MODEL_ALIASES, MODEL_PRICING_TABLE, resolve_model_pricing
 
 
@@ -59,6 +59,10 @@ class TestEveryAliasIsPriced:
 class TestAliasesAreClaudeOnly:
     """Every ModelAlias is a Claude alias, and codex must drop all of them.
 
+    "Drop" means replace with the codex default (``gpt-sol``), never keep:
+    codex cannot run a Claude model, and keeping one priced codex runs as
+    Haiku (#788).
+
     `_CLAUDE_ALIASES` derives from the ModelAlias enum, so this holds
     automatically - the test exists to keep it that way. If an OpenAI alias is
     ever added to ModelAlias, this fails and forces the drop-rule to be
@@ -67,7 +71,7 @@ class TestAliasesAreClaudeOnly:
 
     @pytest.mark.parametrize("alias", [a.value for a in ModelAlias])
     def test_codex_phase_drops_every_claude_alias(self, alias: str) -> None:
-        assert resolve_phase_model("codex", alias) is None
+        assert resolve_phase_model("codex", alias) == DEFAULT_CODEX_MODEL
 
     @pytest.mark.parametrize("alias", [a.value for a in ModelAlias])
     def test_claude_phase_preserves_every_alias(self, alias: str) -> None:

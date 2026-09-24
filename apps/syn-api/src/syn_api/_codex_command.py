@@ -16,16 +16,17 @@ from syn_shared.agents import (
     ModelAlias,
     PhaseSandbox,
     UnsupportedPhaseSandboxError,
+    resolve_codex_model_alias,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# Claude CLI model aliases (the AgentConfiguration.model default is "haiku").
-# Codex rejects these ("model not supported when using Codex with a ChatGPT
-# account"), so we must NOT forward a Claude model to `codex exec` - codex uses
-# its own account default instead. TODO(#780): resolve/validate a real codex
-# model for accurate cost labelling on codex phases.
+# Claude CLI model aliases. Codex rejects these ("model not supported when
+# using Codex with a ChatGPT account"), so we must NOT forward a Claude model
+# to `codex exec`. The domain already replaces them with the codex default
+# (`resolve_phase_model`); this is the last line of defence for a config built
+# some other way.
 _CLAUDE_MODEL_ALIASES = frozenset(ModelAlias)
 
 
@@ -114,9 +115,11 @@ def _build_codex_command(
 ) -> list[str]:
     """Build the Codex CLI command for agent execution.
 
-    A codex phase inherits the domain default model ("haiku", a Claude alias)
-    unless the YAML sets one. We only forward `--model` when it is a genuine
-    codex/OpenAI model id; otherwise codex selects its ChatGPT-account default.
+    We only forward `--model` when it is a genuine codex/OpenAI model id;
+    otherwise codex selects its ChatGPT-account default. A platform codex alias
+    (``gpt-sol``) is translated to its concrete slug HERE, right before
+    ``--model``, because codex has no alias feature and would reject it. The
+    stored phase model stays the alias.
 
     The sandbox level comes from the phase, never from a constant here. It was
     hardcoded to ``danger-full-access`` for every codex phase, which is how a
@@ -132,6 +135,6 @@ def _build_codex_command(
         "--skip-git-repo-check",
     ]
     if _is_codex_model(model):
-        cmd.extend(["--model", model])
+        cmd.extend(["--model", resolve_codex_model_alias(model)])
     cmd.append(prompt)
     return cmd

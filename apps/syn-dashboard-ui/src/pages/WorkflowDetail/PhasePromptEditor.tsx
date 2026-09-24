@@ -55,7 +55,7 @@ function ConfigFields({ provider, model, timeout, tools, onChange }: {
         </select>
       </div>
       {providerUsesModelField(selectedProvider) && (
-        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. sonnet, opus" className={inputClass} /></div>
+        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. opus, sonnet, gpt-sol" className={inputClass} /></div>
       )}
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Timeout (seconds)</label><input type="number" value={timeout} onChange={(e) => onChange('editedTimeout', e.target.value)} placeholder="300" className={inputClass} /></div>
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Allowed Tools</label><input type="text" value={tools} onChange={(e) => onChange('editedTools', e.target.value)} placeholder="Bash, Read, Write" className={inputClass} /></div>

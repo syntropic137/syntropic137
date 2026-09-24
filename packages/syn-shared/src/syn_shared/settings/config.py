@@ -17,6 +17,13 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syn_shared.agents import (
+    DEFAULT_CLAUDE_MODEL,
+    DEFAULT_CODEX_MODEL,
+    CodexModelAlias,
+    ModelAlias,
+    PhaseModelDefaults,
+)
 from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
@@ -337,6 +344,68 @@ class Settings(BaseSettings):
         # every producer. `parsed` exists only to prove the text is a JSON
         # object; the bytes we hand downstream stay the caller's.
         return SecretStr(raw)
+
+    syn_default_claude_model: str = Field(
+        default=DEFAULT_CLAUDE_MODEL,
+        min_length=1,
+        description=(
+            "Model a Claude phase gets when its workflow declares no `model:`. "
+            "Applied when a workflow template is created or reinstalled and "
+            "PERSISTED in the template, so changing this affects only templates "
+            "installed afterwards, never existing ones. A Claude CLI alias "
+            "(opus, sonnet, haiku, fable) or a concrete Claude model id."
+        ),
+    )
+
+    syn_default_codex_model: str = Field(
+        default=DEFAULT_CODEX_MODEL,
+        min_length=1,
+        description=(
+            "Model a codex phase gets when its workflow declares no `model:`. "
+            "Same persistence rule as SYN_DEFAULT_CLAUDE_MODEL. A platform "
+            "codex alias (gpt-sol -> gpt-6-sol) or a concrete codex model slug. "
+            "Claude aliases are rejected: codex cannot run them."
+        ),
+    )
+
+    @field_validator("syn_default_claude_model", "syn_default_codex_model", mode="after")
+    @classmethod
+    def _strip_default_model(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            msg = "a default model must not be blank"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("syn_default_codex_model", mode="after")
+    @classmethod
+    def _codex_default_is_not_claude(cls, value: str) -> str:
+        if value in frozenset(ModelAlias) or value.lower().startswith("claude"):
+            msg = (
+                f"SYN_DEFAULT_CODEX_MODEL={value!r} is a Claude model; codex cannot "
+                f"run it. Use a codex model such as {CodexModelAlias.GPT_SOL!r}."
+            )
+            raise ValueError(msg)
+        return value
+
+    @field_validator("syn_default_claude_model", mode="after")
+    @classmethod
+    def _claude_default_is_not_codex(cls, value: str) -> str:
+        if value in frozenset(CodexModelAlias):
+            msg = (
+                f"SYN_DEFAULT_CLAUDE_MODEL={value!r} is a codex alias; the Claude "
+                f"CLI cannot run it. Use a Claude alias such as {ModelAlias.OPUS!r}."
+            )
+            raise ValueError(msg)
+        return value
+
+    @property
+    def phase_model_defaults(self) -> PhaseModelDefaults:
+        """Per-provider defaults for the template create/update boundary."""
+        return PhaseModelDefaults(
+            claude=self.syn_default_claude_model,
+            codex=self.syn_default_codex_model,
+        )
 
     default_agent_timeout_seconds: int = Field(
         default=300,

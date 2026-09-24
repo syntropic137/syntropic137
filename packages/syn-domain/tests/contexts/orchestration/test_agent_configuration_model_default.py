@@ -1,5 +1,9 @@
 """Per-provider model defaulting on AgentConfiguration (issue #788).
 
+These are the STATIC fallbacks (opus / gpt-sol), reached only by templates
+stored without a model. New templates persist their default at install time;
+see test_template_model_defaults.py.
+
 Codex phases must never inherit a Claude alias. The first fix at
 `_build_agent_config_from_phase` only covered configs built from a YAML
 phase, leaving `model = "haiku"` as the declared default on both value
@@ -20,7 +24,16 @@ from syn_domain.contexts.orchestration._shared.ExecutionValueObjects import (
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration as AggregateAgentConfiguration,
 )
-from syn_shared.agents import DEFAULT_CLAUDE_MODEL, AgentProvider, ModelAlias, ModelId
+from syn_shared.agents import (
+    DEFAULT_CLAUDE_MODEL,
+    DEFAULT_CODEX_MODEL,
+    AgentProvider,
+    CodexModelAlias,
+    ModelAlias,
+    ModelId,
+)
+
+pytestmark = pytest.mark.unit
 
 # Both copies are kept in sync by hand; every case runs against both so a
 # drifting copy fails loudly instead of silently keeping the old default.
@@ -28,13 +41,14 @@ CONFIGS = [SharedAgentConfiguration, AggregateAgentConfiguration]
 
 
 @pytest.mark.parametrize("config_cls", CONFIGS)
-def test_codex_without_explicit_model_stays_unknown(
+def test_codex_without_explicit_model_gets_the_codex_default(
     config_cls: type[SharedAgentConfiguration] | type[AggregateAgentConfiguration],
 ) -> None:
-    """A codex config built directly - not via a YAML phase - must not be Haiku."""
+    """A codex config built directly gets gpt-sol - never a Claude alias."""
     config = config_cls(provider=AgentProvider.CODEX)
 
-    assert config.model is None
+    assert config.model == DEFAULT_CODEX_MODEL
+    assert config.model == CodexModelAlias.GPT_SOL
 
 
 @pytest.mark.parametrize("config_cls", CONFIGS)
@@ -51,12 +65,12 @@ def test_codex_keeps_an_explicit_model(
 def test_claude_without_explicit_model_gets_the_shared_default(
     config_cls: type[SharedAgentConfiguration] | type[AggregateAgentConfiguration],
 ) -> None:
-    """Back-compat: an unqualified Claude phase still runs the cheap default."""
+    """An unqualified Claude phase runs the static default, opus."""
     config = config_cls()
 
     assert config.provider == AgentProvider.CLAUDE
     assert config.model == DEFAULT_CLAUDE_MODEL
-    assert config.model == ModelAlias.HAIKU
+    assert config.model == ModelAlias.OPUS
 
 
 @pytest.mark.parametrize("config_cls", CONFIGS)
@@ -64,9 +78,9 @@ def test_claude_keeps_an_explicit_model(
     config_cls: type[SharedAgentConfiguration] | type[AggregateAgentConfiguration],
 ) -> None:
     """An explicit Claude alias is not clobbered by the default."""
-    config = config_cls(model=ModelAlias.OPUS)
+    config = config_cls(model=ModelAlias.SONNET)
 
-    assert config.model == ModelAlias.OPUS
+    assert config.model == ModelAlias.SONNET
 
 
 @pytest.mark.parametrize("config_cls", CONFIGS)
@@ -78,15 +92,15 @@ def test_replace_onto_codex_drops_the_resolved_claude_model(
     Second-pass review finding: `__post_init__` cannot tell a defaulted
     "haiku" from an explicitly chosen one, so switching a Claude config to
     codex via `dataclasses.replace` carried Haiku across and recreated the
-    exact #788 bug. Resolution now drops Claude aliases on codex phases
-    whether they arrived as a default or explicitly.
+    exact #788 bug. Resolution now replaces Claude aliases on codex phases
+    with the codex default, whether they arrived as a default or explicitly.
     """
     claude_config = config_cls()
     assert claude_config.model == DEFAULT_CLAUDE_MODEL
 
     codex_config = replace(claude_config, provider=AgentProvider.CODEX)
 
-    assert codex_config.model is None
+    assert codex_config.model == DEFAULT_CODEX_MODEL
 
 
 @pytest.mark.parametrize("config_cls", CONFIGS)
@@ -103,7 +117,11 @@ def test_replace_onto_codex_keeps_a_real_codex_model(
 def test_replace_back_to_claude_restores_the_default(
     config_cls: type[SharedAgentConfiguration] | type[AggregateAgentConfiguration],
 ) -> None:
-    """Going codex -> claude with no model resolves the Claude default again."""
+    """Going codex -> claude drops the resolved codex default for the Claude one.
+
+    The codex config carries the RESOLVED ``gpt-sol``, which the Claude CLI
+    cannot run, so it must not survive the provider switch.
+    """
     codex_config = config_cls(provider=AgentProvider.CODEX)
 
     claude_config = replace(codex_config, provider=AgentProvider.CLAUDE)
@@ -136,4 +154,4 @@ def test_blank_model_is_treated_as_unset(
     them past, since `__post_init__` only defaulted None.
     """
     assert config_cls(model=blank).model == DEFAULT_CLAUDE_MODEL
-    assert config_cls(provider=AgentProvider.CODEX, model=blank).model is None
+    assert config_cls(provider=AgentProvider.CODEX, model=blank).model == DEFAULT_CODEX_MODEL

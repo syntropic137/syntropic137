@@ -39,6 +39,7 @@ async def _seed_trigger_workflows(dry_run: bool) -> bool:
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
+    from syn_shared.settings import get_settings
 
     if not TRIGGER_WORKFLOWS_DIR.exists():
         print(f"  ⚠ Trigger workflows directory not found: {TRIGGER_WORKFLOWS_DIR}")
@@ -47,6 +48,7 @@ async def _seed_trigger_workflows(dry_run: bool) -> bool:
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repository(),
         event_publisher=get_event_publisher(),
+        model_defaults=get_settings().phase_model_defaults,
     )
     seeder = WorkflowSeeder(handler)
 

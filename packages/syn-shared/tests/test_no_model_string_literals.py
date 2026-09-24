@@ -6,8 +6,8 @@ the CLI command builder, and the phase defaults each grew their own copy of
 Haiku in two places at once (#788).
 
 Every model alias and canonical id now lives in ``syn_shared.agents``
-(``ModelAlias`` / ``ModelId``) and is referenced from there. This test fails
-if a new bare literal shows up in production code.
+(``ModelAlias`` / ``CodexModelAlias`` / ``ModelId``) and is referenced from
+there. This test fails if a new bare literal shows up in production code.
 
 Scope note: this checks STRING LITERALS via the AST, so comments and
 docstrings that mention a model by name are fine - it is the executable
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from syn_shared.agents import ModelAlias, ModelId
+from syn_shared.agents import CodexModelAlias, ModelAlias, ModelId
 
 # The repo root is four parents up from packages/syn-shared/tests/<file>.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,7 +42,9 @@ _DEFINING_FILES = frozenset(
     }
 )
 
-_FORBIDDEN = frozenset({str(m) for m in ModelAlias} | {str(m) for m in ModelId})
+_FORBIDDEN = frozenset(
+    {str(m) for m in ModelAlias} | {str(m) for m in CodexModelAlias} | {str(m) for m in ModelId}
+)
 
 
 def _docstring_nodes(tree: ast.Module) -> set[int]:

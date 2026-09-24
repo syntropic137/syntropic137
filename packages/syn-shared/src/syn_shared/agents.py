@@ -9,6 +9,7 @@ layers. `StrEnum` members compare equal to their string value, so a loose
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -267,7 +268,10 @@ class ModelId(StrEnum):
     fallback.
     """
 
-    # --- Current generation (ADR-067 phase 0, verified 2026-08-16) ---
+    # --- Current generation (verified 2026-09-24) ---
+    CLAUDE_OPUS_5_5 = "claude-opus-5-5"
+    GPT_6_SOL = "gpt-6-sol"
+    # --- ADR-067 phase 0 generation (verified 2026-08-16) ---
     CLAUDE_OPUS_5 = "claude-opus-5"
     CLAUDE_SONNET_5 = "claude-sonnet-5"
     CLAUDE_FABLE_5 = "claude-fable-5"
@@ -288,49 +292,117 @@ class ModelId(StrEnum):
     CLAUDE_HAIKU_3 = "claude-3-haiku-20240307"
 
 
-DEFAULT_CLAUDE_MODEL: str = ModelAlias.HAIKU
-"""Model a Claude phase runs under when the workflow does not name one.
+class CodexModelAlias(StrEnum):
+    """Short model names a workflow author may write on a CODEX phase.
 
-Haiku keeps unattended/test workflows cheap. This default applies ONLY to
-Claude providers: codex does not report its own model on the wire, so a codex
-phase without an explicit ``model:`` stays ``None`` (honestly unknown) rather
-than inheriting a Claude alias. Synthesizing one is what made every codex run
-show up as Haiku in Cost-by-Model - issue #788.
+    Codex has no alias feature of its own: ``codex exec --model`` takes a
+    concrete slug. These are the platform's aliases, translated to a
+    ``ModelId`` by ``resolve_codex_model_alias`` right before ``--model``
+    (``syn_api._codex_command``) and by ``MODEL_ALIASES`` for pricing. The
+    stored/declared value stays the alias, mirroring how ``opus`` is stored
+    for a Claude phase, so a generation swap is one line here.
 
-Do not "fix" that by synthesizing the string ``"codex"`` either. An earlier
-attempt did, and it propagated as a genuine model id: ``codex exec --model
-codex`` names a nonexistent model, and ``resolve_model_pricing("codex")``
-confidently returned GPT-5.6 rates for a model we never ran. A confidently
-wrong price is invisible in a dashboard; an absent one is at least visibly
-missing. ``None`` means "codex ran model-unforced; leave it unpriced until
-the real model is known."
+    Deliberately NOT members of ``ModelAlias``: that enum is Claude-only, and a
+    codex phase drops every member of it (issue #788).
+    """
 
-Resolution happens in ``AgentConfiguration.__post_init__`` (both copies), NOT
-in callers - a caller-side default only covers the paths that caller owns,
-which is how the Haiku default survived the first fix.
+    GPT_SOL = "gpt-sol"
+
+
+CODEX_MODEL_ALIAS_TARGETS: dict[CodexModelAlias, ModelId] = {
+    CodexModelAlias.GPT_SOL: ModelId.GPT_6_SOL,
+}
+"""What each codex alias runs as today. One entry per ``CodexModelAlias``."""
+
+
+def resolve_codex_model_alias(model: str) -> str:
+    """Return the concrete codex slug for ``model``; non-aliases pass through."""
+    for alias, target in CODEX_MODEL_ALIAS_TARGETS.items():
+        if model == alias:
+            return target
+    return model
+
+
+DEFAULT_CLAUDE_MODEL: str = ModelAlias.OPUS
+"""Static fallback model for a Claude phase that names none.
+
+This is the LAST-RESORT value, used only when a stored template carries no
+model (templates created before defaults were persisted). New templates get
+their default at the create/update boundary from ``SYN_DEFAULT_CLAUDE_MODEL``
+and PERSIST it in the template event, so changing that setting never rewrites
+an existing template on replay. The domain never reads the environment.
+
+Was ``haiku`` (cheap for unattended runs) until 2026-09-24; the owner moved
+the default to ``opus`` so an unqualified phase gets the flagship model.
 """
 
 
+DEFAULT_CODEX_MODEL: str = CodexModelAlias.GPT_SOL
+"""Static fallback model for a codex phase that names none.
+
+Same persistence rule as ``DEFAULT_CLAUDE_MODEL``; the setting is
+``SYN_DEFAULT_CODEX_MODEL``.
+
+This used to be ``None`` (issue #788), and the reasoning there still holds for
+what it rejected: codex does not report its own model on the wire, so the
+platform must never SYNTHESIZE a guess at what codex picked. Two guesses were
+tried and both were wrong - inheriting the Claude default priced every codex
+run as Haiku, and synthesizing the provider name ``"codex"`` produced
+``codex exec --model codex`` and GPT-5.6 rates for a model never run.
+
+``gpt-sol`` is not a guess. It is a concrete, priced model that the platform
+now FORCES with ``--model gpt-6-sol``, so the requested model is the model that
+runs, and the price attached to it is the price of that model. The observed
+model (read from the codex rollout, #1284) still wins wherever it exists.
+"""
+
+
+@dataclass(frozen=True)
+class PhaseModelDefaults:
+    """The per-provider model a phase gets when it declares none.
+
+    Built from settings by the application layer
+    (``Settings.phase_model_defaults``) and handed to the template
+    create/update handler, which persists the result in the template event.
+    Constructing it bare gives the static fallbacks, for tests.
+    """
+
+    claude: str = DEFAULT_CLAUDE_MODEL
+    codex: str = DEFAULT_CODEX_MODEL
+
+    def for_provider(self, provider: str | None) -> str:
+        """Default model for ``provider``. ``None`` means the claude default path."""
+        return self.codex if provider == AgentProvider.CODEX else self.claude
+
+
 _CLAUDE_ALIASES: frozenset[str] = frozenset(ModelAlias)
+_CODEX_ALIASES: frozenset[str] = frozenset(CodexModelAlias)
 
 
 def resolve_phase_model(provider: str, model: str | None) -> str | None:
     """Normalise a phase's model for ``provider``, returning the value to store.
 
     Both ``AgentConfiguration`` copies call this from ``__post_init__`` so the
-    rule lives in exactly one place. Three normalisations, in order:
+    rule lives in exactly one place. Four normalisations, in order:
 
     1. Blank or whitespace-only means "unset". A workflow with ``model: ""``
        used to be rescued by a caller-side ``phase_model or default``; without
        that, an empty string would reach the CLI as ``--model ""``.
-    2. A Claude alias on a CODEX phase is dropped to ``None``. Codex rejects
-       Claude models outright, and keeping one is what prices codex runs as
-       Haiku (issue #788). This also has to run on ALREADY-RESOLVED input:
+    2. A Claude alias on a CODEX phase is dropped. Codex rejects Claude models
+       outright, and keeping one is what priced codex runs as Haiku (issue
+       #788). This also has to run on ALREADY-RESOLVED input:
        ``dataclasses.replace(claude_config, provider=CODEX)`` re-enters the
-       constructor carrying the resolved ``"haiku"``, which no longer looks
+       constructor carrying the resolved ``"opus"``, which no longer looks
        like a default to anything downstream.
-    3. An unset model on a non-codex provider gets ``DEFAULT_CLAUDE_MODEL``.
+    3. Symmetrically, a codex alias on a NON-codex phase is dropped: the
+       Claude CLI cannot run ``gpt-sol``, and ``replace(codex_config,
+       provider=CLAUDE)`` would otherwise carry the resolved codex default
+       across.
+    4. An unset (or dropped) model gets the provider's static fallback:
+       ``DEFAULT_CODEX_MODEL`` for codex, ``DEFAULT_CLAUDE_MODEL`` otherwise.
 
+    The static fallbacks only matter for templates stored before defaults
+    were persisted at the create/update boundary; see ``PhaseModelDefaults``.
     An explicit non-Claude model is always preserved, so a codex phase that
     names ``gpt-5.6`` keeps it.
     """
@@ -338,5 +410,9 @@ def resolve_phase_model(provider: str, model: str | None) -> str | None:
     if not normalised:
         normalised = None
     if provider == AgentProvider.CODEX:
-        return None if normalised in _CLAUDE_ALIASES else normalised
-    return normalised if normalised is not None else DEFAULT_CLAUDE_MODEL
+        if normalised is None or normalised in _CLAUDE_ALIASES:
+            return DEFAULT_CODEX_MODEL
+        return normalised
+    if normalised is None or normalised in _CODEX_ALIASES:
+        return DEFAULT_CLAUDE_MODEL
+    return normalised
