@@ -23,7 +23,7 @@ components for:
 
 ## Decision
 
-**We will use `agentic-logging` from the `agentic-primitives` submodule** as our
+**We will use `agentic-logging` from the `agentic-workspace` submodule** (moved from `agentic-primitives`, 2026-09, see #1417) as our
 centralized logging solution.
 
 This provides:
@@ -70,7 +70,7 @@ LOG_LEVEL_SYN_DASHBOARD=DEBUG
 LOG_LEVEL_SYN_ADAPTERS=INFO
 LOG_LEVEL_EVENT_SUBSCRIPTION=DEBUG
 
-# Session correlation (automatically set by agentic-primitives hooks)
+# Session correlation (automatically set by agentic-workspace hooks)
 AGENTIC_SESSION_ID=session-abc123
 ```
 
@@ -100,7 +100,7 @@ AGENTIC_SESSION_ID=session-abc123
 
 Build our own logging system tailored to Syn137.
 
-**Rejected**: Duplicates effort already done in agentic-primitives. Using the
+**Rejected**: Duplicates effort already done in agentic-workspace. Using the
 submodule keeps things consistent across the ecosystem.
 
 ### 2. Standard Python Logging Only
@@ -129,7 +129,7 @@ Use a third-party logging library.
 
 ### Negative
 
-- Submodule dependency on agentic-primitives
+- Submodule dependency on agentic-workspace
 - Small learning curve for environment variable configuration
 - Migration needed for existing `logging.getLogger()` calls
 
@@ -145,4 +145,4 @@ Components that have been updated to use `agentic_logging`:
 ## References
 
 - [agentic-primitives ADR-014](../../lib/agentic-primitives/docs/adrs/014-centralized-agentic-logging.md) - Original logging design
-- [agentic_logging README](../../lib/agentic-primitives/lib/python/agentic_logging/README.md) - Detailed usage guide
+- [agentic_logging README](../../lib/agentic-workspace/lib/python/agentic_logging/README.md) - Detailed usage guide

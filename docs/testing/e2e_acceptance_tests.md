@@ -131,7 +131,7 @@ LIMIT 10;
 **Agentic SDK (F8-F12):**
 - `ANTHROPIC_API_KEY` environment variable set (for live agent tests)
 - `uv pip install syn-adapters[claude-agentic]` for claude-agent-sdk
-- `agentic-primitives` submodule initialized
+- `agentic-workspace` submodule initialized
 
 **Quick Setup:**
 ```bash
@@ -1196,7 +1196,7 @@ asyncio.run(test())
 
 ## Feature 9: Workspace & Hook Integration ⭐ NEW
 
-> **Requires:** `agentic-primitives` submodule initialized
+> **Requires:** `agentic-workspace` submodule initialized
 
 ### F9.1 LocalWorkspace Creation
 
@@ -1240,7 +1240,7 @@ config = WorkspaceConfig(
     base_dir=Path("/tmp/test-workspace"),
     workflow_id="wf-1",
     phase_id="p-1",
-    hooks_source=Path("lib/agentic-primitives/examples/settings.json"),
+    hooks_source=Path("lib/agentic-workspace/examples/settings.json"),
 )
 
 async with await LocalWorkspace.create(config) as ws:
@@ -2447,7 +2447,7 @@ docker exec syn-db psql -U syn -d syn -c \
 |---|---------------------|--------|
 | 17.4.1 | settings.json includes `attribution.commits = false` | ⬜ |
 | 17.4.2 | settings.json includes `attribution.pullRequests = false` | ⬜ |
-| 17.4.3 | Settings copied from agentic-primitives | ⬜ |
+| 17.4.3 | Settings copied from agentic-workspace | ⬜ |
 | 17.4.4 | Commit in workflow has no Co-Authored-By trailer | ⬜ |
 | 17.4.5 | PR description has no Claude attribution | ⬜ |
 
@@ -3037,7 +3037,7 @@ _Add any observations, recommendations, or follow-up items here._
 - **Phase Counting Fix:** Removed duplicate `ctx.phase_results.append()` call
 - **Artifact Collection Fix:** Unified output directory across agent-runner and adapters
 - **Session Persistence:** AgentSessionAggregate now created/completed in container mode
-- **Git Attribution:** Settings copied from agentic-primitives with attribution disabled
+- **Git Attribution:** Settings copied from agentic-workspace with attribution disabled
 - **Analytics Streaming:** Real-time hook event streaming via sidecar (P2)
 - **Stale Cleanup:** Background job to mark stuck executions as failed (P2)
 - **Test Count:** Increased from 424 to 484 criteria

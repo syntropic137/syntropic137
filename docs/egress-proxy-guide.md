@@ -88,7 +88,7 @@
 #### Step 1: Create Proxy Container (1 hour)
 
 ```dockerfile
-# lib/agentic-primitives/providers/workspaces/egress-proxy/Dockerfile
+# lib/agentic-workspace/implementations/docker/images/egress-proxy/Dockerfile
 FROM mitmproxy/mitmproxy:latest
 
 # Add allowlist configuration
@@ -102,7 +102,7 @@ ENTRYPOINT ["mitmdump", \
 ```
 
 ```python
-# lib/agentic-primitives/providers/workspaces/egress-proxy/allowlist.py
+# lib/agentic-workspace/implementations/docker/images/egress-proxy/allowlist.py
 from mitmproxy import http
 
 ALLOWED_HOSTS = {
@@ -134,7 +134,7 @@ def request(flow: http.HTTPFlow) -> None:
 #### Step 2: Add Docker Compose Setup (1 hour)
 
 ```yaml
-# lib/agentic-primitives/providers/workspaces/claude-cli/docker-compose.egress.yaml
+# lib/agentic-workspace/implementations/docker/images/claude-cli/docker-compose.egress.yaml
 services:
   egress-proxy:
     build: ../egress-proxy
@@ -324,7 +324,7 @@ async def test_disallowed_hosts():
 **Use mitmproxy with separate container:**
 ```bash
 # 1. Build proxy
-cd lib/agentic-primitives/providers/workspaces/egress-proxy
+cd lib/agentic-workspace/implementations/docker/images/egress-proxy
 docker build -t syn-egress-proxy .
 
 # 2. Start proxy

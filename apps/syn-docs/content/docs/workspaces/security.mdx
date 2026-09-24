@@ -51,10 +51,12 @@ Only the explicitly configured OTel export (to your own collector) sends data ou
 
 ### Image Signing
 
-Every published image is signed with [cosign](https://github.com/sigstore/cosign) using keyless OIDC (Sigstore). Verify signatures:
+Every published image is signed with [cosign](https://github.com/sigstore/cosign) using keyless OIDC (Sigstore), only from agentic-workspace's protected `release` branch. Verify signatures by digest, never by a mutable tag:
 
 ```bash
-cosign verify ghcr.io/agentparadise/agentic-workspace-claude-cli:latest
+cosign verify ghcr.io/agentparadise/agentic-workspace-claude@sha256:<digest> \
+  --certificate-identity-regexp '^https://github.com/AgentParadise/agentic-workspace/\.github/workflows/release-images\.yml@refs/heads/release$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 ### SLSA Provenance + SBOM

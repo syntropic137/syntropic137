@@ -9,7 +9,7 @@ Accepted (Revised)
 ## Context
 
 The Syntropic137 needs a scalable architecture that:
-1. Integrates two external dependencies as git submodules (`agentic-primitives`, `event-sourcing-platform`)
+1. Integrates two external dependencies as git submodules (`agentic-workspace`, `event-sourcing-platform`)
 2. Supports composable workflow phases with clear boundaries
 3. Enables parallel agent development for new features
 4. Uses event sourcing for all state changes
@@ -28,7 +28,7 @@ We organize using `apps/` and `packages/` directories with **minimal nesting**. 
 ```
 syntropic137/
 ├── lib/                              # Git submodules (external dependencies)
-│   ├── agentic-primitives/           # Composable agent building blocks
+│   ├── agentic-workspace/            # Composable agent building blocks
 │   └── event-sourcing-platform/      # Event sourcing infrastructure + VSA tool
 │
 ├── apps/                             # Deployable applications
@@ -203,6 +203,6 @@ Initial implementation stores artifacts inline in PostgreSQL:
 
 ## References
 - [Event Sourcing Platform](https://github.com/NeuralEmpowerment/event-sourcing-platform)
-- [Agentic Primitives](https://github.com/syntropic137/agentic-primitives)
+- [Agentic Workspace](https://github.com/AgentParadise/agentic-workspace)
 - [uv Workspaces](https://docs.astral.sh/uv/concepts/workspaces/)
 - [Understanding Event Sourcing](https://leanpub.com/understanding-eventsourcing) - Processor/Todo pattern

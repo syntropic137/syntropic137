@@ -16,7 +16,7 @@ To use a custom or locally-built image:
 
 ```bash
 # Build locally
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 uv run scripts/build-provider.py omni-agent --tag my-workspace:latest
 
 # Point syn137 at it
@@ -100,7 +100,7 @@ Plugins are loaded from `/opt/agentic/plugins/` at container startup. The entryp
 
 ### Plugin Environment Variables
 
-Plugins can declare required environment variables in their `plugin.json`. The orchestrator auto-forwards these from the workspace configuration. See [ADR-033](https://github.com/AgentParadise/agentic-primitives/blob/main/docs/adrs/033-plugin-native-workspace-images.md) for the plugin specification.
+Plugins can declare required environment variables in their `plugin.json`. The orchestrator auto-forwards these from the workspace configuration. See [ADR-033](https://github.com/AgentParadise/agentic-workspace/blob/main/docs/adrs/033-plugin-native-workspace-images.md) for the plugin specification (moved from agentic-primitives, 2026-09, see #1417).
 
 ## Workspace Directory Structure
 

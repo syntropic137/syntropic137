@@ -30,7 +30,7 @@ Use these checks to determine what's already configured:
 ### Files & Configuration
 - **`.env` exists and has values**: `test -f .env && grep -q '=' .env` — application config (API keys, GitHub creds, logging)
 - **`infra/.env` exists**: `test -f infra/.env` — infrastructure config only (Compose, resource limits, tunnel). Needed for selfhost only
-- **Git submodules initialized**: `test -d lib/agentic-primitives/.git && test -d lib/event-sourcing-platform/.git`
+- **Git submodules initialized**: `test -d lib/agentic-workspace/.git && test -d lib/event-sourcing-platform/.git`
 - **Python deps installed**: `uv sync --dry-run 2>&1 | grep -q 'Already'` or check `.venv/` exists
 
 ### Services & Runtime

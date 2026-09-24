@@ -151,7 +151,7 @@ class MockAssistantMessage:
 - Portable: Can be shared across test modules
 - SDK-agnostic: Works even if SDK types aren't exported
 
-**Consider for agentic-primitives**: These mock patterns could become canonical test fixtures that all Syn137 packages share.
+**Consider for agentic-workspace** (moved from agentic-primitives, 2026-09): These mock patterns could become canonical test fixtures that all Syn137 packages share.
 
 ### Fast Development Mode (from event-sourcing-platform)
 

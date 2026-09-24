@@ -3649,7 +3649,7 @@ Map each fix to the Docker image it ships in:
 ### Initialize submodules
 
 The Docker build context requires submodule contents (event-sourcing-platform,
-agentic-primitives). If working in a worktree or fresh clone:
+agentic-workspace). If working in a worktree or fresh clone:
 
 ```bash
 git submodule update --init --recursive

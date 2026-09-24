@@ -16,7 +16,7 @@ running, a smee.io tunnel, a real GitHub repo with failing CI, and real API call
 This is slow, expensive, and fragile.
 
 The codebase already has **agent session recording/replay** (SessionRecorder /
-SessionPlayer in agentic-primitives, RecordingEventStreamAdapter in syn-adapters;
+SessionPlayer in agentic-workspace (moved from agentic-primitives, 2026-09), RecordingEventStreamAdapter in syn-adapters;
 see ADR-033). What's missing is **webhook recording** and an **offline dev mode**
 that lets the full stack run without Docker or external services.
 
@@ -49,7 +49,7 @@ A new `uses_in_memory_stores` property on `Settings` returns `True` for both
 
 An ASGI middleware (`WebhookRecorderMiddleware`) captures incoming GitHub webhooks
 to JSONL files when `SYN_RECORD_WEBHOOKS=true`. Each file follows the same JSONL
-convention as SessionRecorder from agentic-primitives:
+convention as SessionRecorder from agentic-workspace (moved from agentic-primitives, 2026-09):
 
 - **Metadata header** on line 1 (timestamp, event type, source).
 - **Event lines** with `_offset_ms` for timing replay.

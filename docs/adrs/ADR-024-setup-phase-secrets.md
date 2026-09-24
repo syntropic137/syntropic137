@@ -586,7 +586,7 @@ Neither is in scope for this change. They become required if/when the platform s
 
 ### Where the responsibility lives
 
-The proxy ACL change is a deployment-config change (`docker/docker-compose.yaml`). It does not introduce any new platform code path. The existing `WorkspaceDockerProvider.create()` in `agentic-primitives` already issues `docker run`; that call's implicit pull was being rejected at the proxy layer. Once the proxy permits the call, the existing code path works without modification.
+The proxy ACL change is a deployment-config change (`docker/docker-compose.yaml`). It does not introduce any new platform code path. The existing `WorkspaceDockerProvider.create()` in `agentic-workspace` (moved from agentic-primitives, 2026-09) already issues `docker run`; that call's implicit pull was being rejected at the proxy layer. Once the proxy permits the call, the existing code path works without modification.
 
 The Syn137 HTTP API surface (`syn-api`) is unchanged. There is no new endpoint and no new external-facing capability — this change only unblocks an internal call from the platform process to the Docker daemon.
 

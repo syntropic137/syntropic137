@@ -30,7 +30,7 @@ This violated our core principle: **"Observability is not optional - this system
 
 We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
 
-1. **Creating `ObservabilityPort` protocol** in `agentic-primitives` - the interface all observability implementations must follow
+1. **Creating `ObservabilityPort` protocol** in `agentic-workspace` - the interface all observability implementations must follow
 2. **Creating unified `WorkflowExecutor`** that **REQUIRES** `ObservabilityPort` in its constructor (not optional!)
 3. **Creating `create_workflow_executor()` factory** that auto-wires `TimescaleObservability`
 4. **Adding `NullObservability`** with safety guard that throws if used outside test environment
@@ -39,7 +39,7 @@ We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     agentic-primitives                          │
+│                     agentic-workspace                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  agentic_observability                                          │
 │   ├── ObservabilityPort (Protocol)                              │
@@ -95,7 +95,7 @@ We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
 ### Files Created
 
 ```
-lib/agentic-primitives/lib/python/agentic_observability/
+lib/agentic-workspace/lib/python/agentic_observability/
 ├── agentic_observability/
 │   ├── __init__.py          # Exports
 │   ├── protocol.py          # ObservabilityPort, ObservationType, ObservationContext

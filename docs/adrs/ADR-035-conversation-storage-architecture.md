@@ -50,12 +50,12 @@ Each data type has fundamentally different:
 
 ## Decision
 
-### 1. Clean Interface from agentic-primitives
+### 1. Clean Interface from agentic-workspace
 
-The `agentic-primitives` library provides a **clean abstraction** for Syn137 to consume. Syn137 doesn't need to understand Claude CLI internals:
+The `agentic-workspace` library provides a **clean abstraction** for Syn137 to consume. Syn137 doesn't need to understand Claude CLI internals:
 
 ```python
-# In agentic-primitives (Claude CLI specific for now)
+# In agentic-workspace (Claude CLI specific for now)
 class SessionOutputStream:
     """Stream of structured outputs from an agent session.
 
@@ -165,9 +165,9 @@ GROUP BY execution_id, workflow_id;
 
 ## Implementation
 
-### Phase 1: Capture in agentic-primitives (Claude CLI)
+### Phase 1: Capture in agentic-workspace (Claude CLI)
 
-Add to `agentic-primitives/lib/python/agentic_isolation/`:
+Add to `lib/agentic-workspace/lib/python/agentic_isolation/`:
 
 ```
 agentic_isolation/
