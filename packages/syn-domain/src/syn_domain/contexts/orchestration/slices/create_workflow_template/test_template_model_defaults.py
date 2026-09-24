@@ -15,6 +15,8 @@ cached object.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -293,13 +295,17 @@ class TestProvenanceDecidesReinstallIdentity:
 
 
 class _LegacyEvent:
-    """A stored event as the gRPC store hands it back: a plain payload."""
+    """A stored event as the gRPC store hands it back: a plain JSON payload.
 
-    def __init__(self, data: dict[str, object]) -> None:
-        self._data = data
+    Written as raw JSON on purpose: the point is a payload that predates
+    ``model_defaulted``, and JSON is the form it is actually stored in.
+    """
 
-    def model_dump(self) -> dict[str, object]:
-        return dict(self._data)
+    def __init__(self, raw: str) -> None:
+        self._raw = raw
+
+    def model_dump(self) -> object:
+        return json.loads(self._raw)
 
 
 @pytest.mark.unit
@@ -313,16 +319,10 @@ class TestEventsWrittenBeforeProvenanceReplay:
         aggregate._initialize("legacy")
         aggregate.on_workflow_created(
             _LegacyEvent(  # type: ignore[arg-type]
-                {
-                    "workflow_id": "legacy",
-                    "name": "Legacy",
-                    "workflow_type": "custom",
+                """{"workflow_id": "legacy", "name": "Legacy", "workflow_type": "custom",
                     "classification": "standard",
-                    "phases": [
-                        {"phase_id": "a", "name": "A", "order": 1, "model": "haiku"},
-                        {"phase_id": "b", "name": "B", "order": 2},
-                    ],
-                }
+                    "phases": [{"phase_id": "a", "name": "A", "order": 1, "model": "haiku"},
+                               {"phase_id": "b", "name": "B", "order": 2}]}"""
             )
         )
 
@@ -342,12 +342,8 @@ class TestEventsWrittenBeforeProvenanceReplay:
 
         aggregate.on_phase_updated(
             _LegacyEvent(  # type: ignore[arg-type]
-                {
-                    "workflow_id": "wf",
-                    "phase_id": "write",
-                    "prompt_template": "new",
-                    "model": "sonnet",
-                }
+                """{"workflow_id": "wf", "phase_id": "write", "prompt_template": "new",
+                    "model": "sonnet"}"""
             )
         )
 
