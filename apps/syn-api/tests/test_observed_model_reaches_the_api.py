@@ -292,9 +292,9 @@ async def test_a_legacy_session_summary_does_not_500_on_the_alias() -> None:
 
 @dataclass
 class _ConversationStore:
-    meta: dict[str, object]
+    meta: dict[str, str | None]
 
-    async def get_session_metadata(self, session_id: str) -> dict[str, object]:
+    async def get_session_metadata(self, session_id: str) -> dict[str, str | None]:
         return self.meta
 
 
@@ -314,7 +314,7 @@ class _ConversationStore:
     ids=["legacy-unclassified", "legacy-classified", "claude", "codex"],
 )
 async def test_conversation_metadata_names_the_model_that_ran(
-    meta: dict[str, object],
+    meta: dict[str, str | None],
     model: str | None,
     requested: str,
     display: str,
