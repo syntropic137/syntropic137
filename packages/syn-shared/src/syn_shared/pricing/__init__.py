@@ -16,7 +16,7 @@ To update pricing when a vendor ships or reprices a model:
 1. Add/update entries in ``MODEL_PRICING_TABLE`` below
 2. Run ``just qa`` to verify all consumers still pass
 
-ADR-067 replaces step 1 with generation from the agentic-workspace model
+ADR-067 replaces step 1 with generation from the agentic-primitives model
 registry; until that lands this table is hand-maintained and its rates were
 verified 2026-08-16.
 """
