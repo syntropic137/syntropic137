@@ -385,6 +385,65 @@ change agent behaviour mid-flight with no release on our side; a workflow that w
 yesterday breaks and nothing in this repo changed. The digest record (5) makes that
 diagnosable and the pin (6) makes it preventable.
 
+### D9. Observed vs requested model (added 2026-09-24)
+
+D2 said the observation `model` must never be an alias. Until this amendment every leader
+session still wrote the REQUESTED alias there (`ObservabilityCollector` was built with
+`phase.agent_config.model`), so every run-time surface - phase cards, session views,
+`cost_by_model`, conversations - showed `opus` / `gpt-sol` as "the model". That proves
+nothing: an alias is a pointer and where it points moves (defect 2 above). The owner
+requirement is the proof itself: show that `opus` ran as `claude-opus-5-5`, not
+`claude-opus-5`, and `gpt-sol` as `gpt-6-sol`, not `gpt-5.6-sol`.
+
+**Rule.** Aliases appear only on workflow DEFINITION surfaces (templates, phase
+definitions, the definition editor). Every run-time surface shows the model the harness
+REPORTED, or explicitly `unknown`, with the alias carried separately as `requested_model`.
+
+**Lane.** Lane 2. Which model a harness ran is telemetry, like its tokens; no aggregate
+decides anything on it. `SessionStartedEvent.agent_model` (Lane 1, written before the
+harness runs) is immutable history and keeps meaning "requested"; it is not renamed.
+`ArtifactCreatedEvent.agent_model` already carried the observed model and is unchanged.
+
+**Write side.** `token_usage`, `session_summary` and `session_error` observations carry
+`model` (reported id or null, never an alias) and `requested_model` (declared value or
+null). The `requested_model` KEY is always present on new rows; its presence is how
+readers tell the two writer eras apart.
+- Claude: the `system/init` line announces the model before any usage row; each usage row
+  uses its own assistant `message.model`.
+- Codex: stdout never names the model (#788); it is read from the rollout
+  (`turn_context.payload.model`) at end-of-stream (#1284). Per-turn usage rows are
+  buffered and flushed after that read, in a `finally`, so no row is lost to a
+  cancellation or a failed read.
+
+**Read side, and replay safety.** One pure function, `syn_shared.observed_model.
+split_recorded_model`, is the only reader of those two fields, for the in-memory
+projections and the SQL row mappers alike. Rows without the `requested_model` key are
+pre-D9: a `model` in the FROZEN `LEGACY_REQUESTED_ALIASES` set was the request and nothing
+observed what ran; any other value (delegate imports, explicit pins) is kept as observed.
+The set is frozen, not derived from the live alias enums, so adding an alias can never
+reclassify history. No backfill: past alias runs honestly read `unknown (requested: opus)`.
+
+**Cost.** `cost_by_model` is keyed by the reported id; unreported cost goes to
+`UNKNOWN_MODEL_KEY` (`"unattributed-model"`, the bucket that already existed for
+summaries naming no model). Unreported rows are still PRICED at the requested model's
+rate, exactly as they were before D9, so no historical total changes; the attribution is
+what changes, never the amount. This deliberately stops short of D4's "unpriced" for
+this case: pricing unreported rows as unpriced would zero every pre-D9 run, which is a
+bigger lie in the other direction. Once #1415 is deployed, an unreported model on a new
+run is a capture fault and is visible as the unknown bucket.
+
+**API.** Run-time `model` / `agent_model` fields hold the reported id or null, beside
+`requested_model` and a backend-formatted `*_display` (`claude-opus-5-5`, or
+`unknown (requested: gpt-sol)`), rendered verbatim by CLI and dashboard. A response-model
+type rejects an alias in any run-time model field or `cost_by_model` key, and a meta-test
+fails when a new run-time model field is added without it.
+
+**#1415.** Codex phases on session-store workspaces never found their rollout: the
+capability symlinks `~/.codex/sessions` into its spool and the transcript listing ran
+`find "$root"`, which does not follow a symlinked start path (0 files, exit 0, no error).
+Fixed with `find -H` in agentic-primitives (both harness sources), tested with a real
+shell and a real symlink.
+
 ## Consequences
 
 **Positive**
