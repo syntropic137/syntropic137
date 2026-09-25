@@ -69,6 +69,9 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
     from syn_adapters.session_inventory.runtime import InventoryWork
     from syn_adapters.session_inventory.transcript_access import InstallationTranscriptAccess
+    from syn_adapters.session_inventory.transcript_conversation import (
+        AgenticTranscriptConversation,
+    )
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
@@ -155,6 +158,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
         SessionTranscriptArchivePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.TranscriptConversationPort import (
+        TranscriptConversationPort,
     )
     from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
         InventoryWorkPort,
@@ -357,6 +363,7 @@ if TYPE_CHECKING:
         jobs: PostgresSessionInventoryJobs,
         archive: LocalSessionTranscriptArchive,
         native: AgenticNativeSessionEvidence,
+        conversation: AgenticTranscriptConversation,
         catalog: PostgresCaptureCatalog,
         spools: PostgresCaptureSpools,
         access: InstallationTranscriptAccess,
@@ -381,6 +388,7 @@ if TYPE_CHECKING:
         _jobs: SessionInventoryJobPort = jobs
         _archive: SessionTranscriptArchivePort = archive
         _native: NativeSessionEvidencePort = native
+        _conversation: TranscriptConversationPort = conversation
         _catalog: SessionCaptureCatalogPort = catalog
         _spools: SessionCaptureSpoolPort = spools
         _access: SessionTranscriptAccessPort = access
