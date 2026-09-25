@@ -23,7 +23,7 @@ which runs the same policy on a worker thread.
    can move between the verify call and the pull, and cosign would be attesting
    to a digest that is not necessarily the one Docker resolves. Pin the digest.
 
-3. **Reference with no registry host** (``agentic-workspace-claude-cli:dev``,
+3. **Reference with no registry host** (``agentic-workspace-claude:dev``,
    ``myorg/image:latest``, ``ubuntu@sha256:...``)
    Rejected unless local images are explicitly enabled by configuration.
 

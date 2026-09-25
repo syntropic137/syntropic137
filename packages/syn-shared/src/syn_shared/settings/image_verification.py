@@ -1,10 +1,11 @@
 """Container image signature verification settings (cosign keyless / Sigstore).
 
-agentic-primitives signs every published workspace image with cosign keyless
-OIDC at build time (``.github/workflows/build-workspace-images.yml``, the
-"Sign image with cosign" step). Until this module existed nothing on the
-Syntropic137 side checked those signatures, which made them evidence nobody
-read.
+The publisher signs every workspace image with cosign keyless OIDC at build
+time. That is agentic-workspace as of 2026-09-25
+(``.github/workflows/release-images.yml``), and was agentic-primitives before
+it (``.github/workflows/build-workspace-images.yml``). Until this module
+existed nothing on the Syntropic137 side checked those signatures, which made
+them evidence nobody read.
 
 Keyless verification is only meaningful with identity constraints. A bare
 ``cosign verify`` with no ``--certificate-identity`` and no
@@ -17,8 +18,8 @@ off the publishing workflow, not guessed:
 - The certificate identity (the SAN on the Fulcio cert) for a GitHub Actions
   keyless signature is the workflow reference:
   ``https://github.com/<owner>/<repo>/<workflow path>@<git ref>``.
-  For this publisher that is
-  ``https://github.com/AgentParadise/agentic-primitives/.github/workflows/build-workspace-images.yml@refs/heads/main``.
+  For the current publisher that is
+  ``https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml@refs/heads/release``.
 
 The default is a regexp rather than an exact identity for two reasons:
 
@@ -162,7 +163,7 @@ class ImageVerificationSettings(BaseSettings):
         default=False,
         description=(
             "Allow running an image reference that carries no registry host "
-            "(for example 'agentic-workspace-claude-cli:dev'). OFF by default: "
+            "(for example 'agentic-workspace-claude:dev'). OFF by default: "
             "reference syntax is not proof an image is local, because Docker "
             "pulls 'myorg/image:latest' and 'ubuntu@sha256:...' from Docker Hub "
             "when they are not already present. When ON, such a reference is "
