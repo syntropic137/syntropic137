@@ -20,10 +20,24 @@ def _jsonl(*rows: object) -> bytes:
 # Fixture rows are harness data handed to agentic-primitives, not parsed here.
 _CODEX = _jsonl(
     {"type": "session_meta", "payload": {"id": "s", "instructions": "x" * 50_000}},
-    {"type": "response_item", "payload": {"type": "message", "role": "developer", "content": "no"}},
     {
         "type": "response_item",
-        "payload": {"type": "message", "role": "user", "content": [{"text": "Spawn a child"}]},
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"text": "<environment_context>"}],
+        },
+    },
+    {
+        "type": "event_msg",
+        "payload": {
+            "type": "item_completed",
+            "item": {
+                "type": "UserMessage",
+                "id": "u",
+                "content": [{"type": "text", "text": "Spawn a child"}],
+            },
+        },
     },
 )
 
