@@ -172,14 +172,14 @@ def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
     # makes this test SKIP rather than fail, which is the same fail-open shape
     # the hook itself is a victim of - and it happened while writing this test.
     here = Path(__file__).resolve()
-    repo_root = next((p for p in here.parents if (p / "lib/agentic-primitives").is_dir()), None)
+    repo_root = next((p for p in here.parents if (p / "lib/agentic-workspace").is_dir()), None)
     assert repo_root is not None, (
         "could not locate the repository root from this test file; the drift "
         "guard must not silently skip"
     )
     upstream = (
         repo_root
-        / "lib/agentic-primitives/providers/workspaces/claude-cli/scripts/git-hooks"
+        / "lib/agentic-workspace/implementations/docker/images/claude-cli/scripts/git-hooks"
         / HOOK_FILENAME
     )
     if not upstream.is_file():

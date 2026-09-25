@@ -1064,9 +1064,10 @@ async def test_claude_real_recorded_multi_tool_transcript_has_no_blank_tool_rows
     fixture_path = (
         pathlib.Path(__file__).parents[3]
         / "lib"
-        / "agentic-primitives"
-        / "providers"
-        / "workspaces"
+        / "agentic-workspace"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"
@@ -1840,9 +1841,10 @@ async def test_endpoint_response_survives_a_real_recorded_piped_command(
     fixture_path = (
         pathlib.Path(__file__).parents[3]
         / "lib"
-        / "agentic-primitives"
-        / "providers"
-        / "workspaces"
+        / "agentic-workspace"
+        / "implementations"
+        / "docker"
+        / "images"
         / "claude-cli"
         / "fixtures"
         / "recordings"

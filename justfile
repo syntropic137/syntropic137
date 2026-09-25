@@ -47,7 +47,7 @@ onboard-dev *flags:
     echo ""
 
     # 1. Submodules
-    if [ ! -d lib/agentic-primitives/.git ] || [ ! -d lib/event-sourcing-platform/.git ]; then
+    if [ ! -d lib/agentic-workspace/.git ] || [ ! -d lib/event-sourcing-platform/.git ]; then
         echo "📦 Initializing git submodules..."
         just submodules-init
     else
@@ -642,14 +642,14 @@ replay-webhooks *args:
 
 # --- Workspace ---
 
-# Build the Claude workspace Docker image using agentic-primitives
+# Build the Claude workspace Docker image using agentic-workspace
 # This uses the fully-tested claude-cli provider from the submodule
 workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "🔨 Building workspace image from agentic-primitives..."
-    cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli
-    echo "✅ Image built: agentic-workspace-claude-cli:latest"
+    echo "🔨 Building workspace image from agentic-workspace..."
+    cd lib/agentic-workspace && uv run scripts/build-provider.py claude-cli
+    echo "✅ Image built: agentic-workspace-claude:latest"
 
 # List all workspace image versions
 workspace-versions:
@@ -1251,7 +1251,7 @@ check-submodules:
     # ci.yml's submodule-check asserts these files exist, so a gitlink that is
     # correct but points at a commit without them still fails CI. Keep both
     # invariants or the mapping is a false claim of equivalence.
-    for required in lib/agentic-primitives/README.md lib/event-sourcing-platform/README.md; do
+    for required in lib/agentic-workspace/README.md lib/event-sourcing-platform/README.md; do
         if [ ! -f "$required" ]; then
             echo "❌ $required is missing; ci.yml's submodule-check requires it"
             exit 1
@@ -2284,14 +2284,14 @@ _webhook-stop:
     @-pkill -f "smee-client" 2>/dev/null || true
 
 # Check if workspace image exists AND matches current submodule commit
-# Poka-yoke: Automatically rebuilds if agentic-primitives was updated
+# Poka-yoke: Automatically rebuilds if agentic-workspace was updated
 _workspace-check:
     #!/usr/bin/env bash
     set -euo pipefail
     IMAGE="agentic-workspace-claude-cli:latest"
 
     # Auto-init submodules if not yet initialized (worktree-safe)
-    if [ ! -f lib/agentic-primitives/.git ] && [ ! -d lib/agentic-primitives/.git ]; then
+    if [ ! -f lib/agentic-workspace/.git ] && [ ! -d lib/agentic-workspace/.git ]; then
         echo "📦 Submodules not initialized — initializing..."
         just submodules-init
     fi
@@ -2304,11 +2304,11 @@ _workspace-check:
     fi
 
     # Get current submodule commit (short hash)
-    SUBMODULE_COMMIT=$(cd lib/agentic-primitives && git rev-parse HEAD 2>/dev/null | cut -c1-12)
+    SUBMODULE_COMMIT=$(cd lib/agentic-workspace && git rev-parse HEAD 2>/dev/null | cut -c1-12)
 
     # Check for uncommitted changes in submodule (dirty state)
     SUBMODULE_DIRTY=""
-    if [ -n "$(cd lib/agentic-primitives && git status --porcelain 2>/dev/null)" ]; then
+    if [ -n "$(cd lib/agentic-workspace && git status --porcelain 2>/dev/null)" ]; then
         SUBMODULE_DIRTY="-dirty"
     fi
 
@@ -2318,11 +2318,11 @@ _workspace-check:
     # Compare - rebuild if mismatch OR if submodule is dirty
     if [ -n "$SUBMODULE_DIRTY" ]; then
         echo "⚠️  Workspace submodule has uncommitted changes"
-        echo "   Rebuilding to include latest agentic-primitives changes..."
+        echo "   Rebuilding to include latest agentic-workspace changes..."
         just workspace-build
     elif [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
         echo "⚠️  Workspace image is stale (image: ${IMAGE_COMMIT:-none}, submodule: $SUBMODULE_COMMIT)"
-        echo "   Rebuilding to include latest agentic-primitives changes..."
+        echo "   Rebuilding to include latest agentic-workspace changes..."
         just workspace-build
     fi
 
