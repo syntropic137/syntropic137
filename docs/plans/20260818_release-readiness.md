@@ -1,12 +1,12 @@
 # Release readiness plan: skills + omni + central session storage
 
 **Date:** 2026-08-18
-**Repo:** `/Users/neural/Code/Syntropic137/syntropic137`   **Branch:** `main`
+**Repo:** `<repo-root>`   **Branch:** `main`
 **Goal:** get `main` into a state worth running pre-release validation against,
 then cut a release.
 
 Context and evidence for every claim below:
-`/Users/neural/Code/Syntropic137/syntropic137/docs/handoffs/20260818-handoff_skills-integration.md`.
+`<repo-root>/docs/handoffs/20260818-handoff_skills-integration.md`.
 
 ## The shape of it
 
@@ -156,7 +156,7 @@ explicitly rather than by omission:
 ## Phase 4: pre-release validation
 
 Use the **pre-release** mode in
-`/Users/neural/Code/Syntropic137/syntropic137/docs/testing/release-validation.md`:
+`<repo-root>/docs/testing/release-validation.md`:
 on-demand env (ADR-060), port `<slot>8137`, images built from the working tree.
 Do not validate on the dev stack; dev images are locally built and may carry
 uncommitted changes, so results there do not validate release quality.
