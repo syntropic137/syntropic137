@@ -114,21 +114,25 @@ function printInventoryItems(page: InventoryPage): void {
   for (const item of page.items) printInventoryItem(item, page);
 }
 
+function printCaptureItem(item: InventoryPage["items"][number], page: InventoryPage): void {
+  if (!("availability" in item)) throw new CLIError("Invalid capture inventory page");
+  // Match each receipt by the hash it actually carries: archived bytes locally,
+  // the APSS source-content hash at a replica. The two are never comparable.
+  const current = item.destination === "local"
+    ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
+    : page.body_overrides?.find(state => state.source_content_hash != null && state.source_content_hash === item.transcript_revision)?.status;
+  print(`${item.node.harness ?? ""}\t${item.node.local_id}\t${item.destination}: recorded=${item.availability}; current=${current ?? "unchecked"}`);
+  const hashes = page.capture_hashes?.[page.items.indexOf(item)];
+  if (item.archived_byte_hash) print(`Archived bytes SHA-256: ${item.archived_byte_hash}`);
+  if (hashes?.source_content_hash) print(`Source content hash: ${hashes.source_content_hash}`);
+}
+
 function printInventoryItem(item: InventoryPage["items"][number], page: InventoryPage): void {
   if (page.kind === "node") {
     if (!("ref" in item)) throw new CLIError("Invalid node inventory page");
     print(`${item.ref.kind}\t${item.ref.harness ?? ""}\t${item.ref.local_id}`);
   } else if (page.kind === "capture") {
-    if (!("availability" in item)) throw new CLIError("Invalid capture inventory page");
-    // Match each receipt by the hash it actually carries: archived bytes locally,
-    // the APSS source-content hash at a replica. The two are never comparable.
-    const current = item.destination === "local"
-      ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
-      : page.body_overrides?.find(state => state.source_content_hash != null && state.source_content_hash === item.transcript_revision)?.status;
-    print(`${item.node.harness ?? ""}\t${item.node.local_id}\t${item.destination}: recorded=${item.availability}; current=${current ?? "unchecked"}`);
-    const hashes = page.capture_hashes?.[page.items.indexOf(item)];
-    if (item.archived_byte_hash) print(`Archived bytes SHA-256: ${item.archived_byte_hash}`);
-    if (hashes?.source_content_hash) print(`Source content hash: ${hashes.source_content_hash}`);
+    printCaptureItem(item, page);
   } else {
     print(JSON.stringify(item));
   }
