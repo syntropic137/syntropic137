@@ -106,8 +106,10 @@ _SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 #: Waits BETWEEN attempts of one `skills add`, so there is one more attempt
 #: than there are entries. Only a local signal death is retried (#1046): a
-#: negative status is the orchestrator's own `docker` client dying, so the
-#: install very likely never ran, and `skills add -y` is idempotent if it did.
+#: negative status means the API's own spawned child was killed by a signal,
+#: so the install very likely never ran, and `skills add -y` is idempotent if
+#: it did. The root cause (grpc fork handlers under uvloop's fork()) is fixed
+#: by GRPC_ENABLE_FORK_SUPPORT=false in the syn-api image; this is the backstop.
 #: A positive exit is the installer refusing, and still fails fast.
 _SKILL_INSTALL_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
 
@@ -134,7 +136,7 @@ CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
 def _is_local_signal_death(exit_code: int, timed_out: bool) -> bool:
-    """True when the local `docker` client was killed by a signal (#1046)."""
+    """True when the API's spawned child was killed by a signal (#1046)."""
     return exit_code < 0 and exit_code != _NO_STATUS_SENTINEL and not timed_out
 
 
@@ -143,8 +145,8 @@ async def _install_skill(
 ) -> None:
     """Run `skills add` for one skill, retrying only a local signal death.
 
-    The `docker exec` transport intermittently dies of SIGSEGV on the API side
-    (#1046, #1295). Every exec rolls that dice, so without a retry a phase that
+    The spawned `docker exec` child could die of SIGSEGV before exec (#1046,
+    #1295). Every exec rolls that dice, so without a retry a phase that
     declares N skills fails N times as often as one that declares one.
     """
     attempts = len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS) + 1
@@ -158,7 +160,7 @@ async def _install_skill(
             return
         if attempt < attempts and _is_local_signal_death(result.exit_code, result.timed_out):
             logger.warning(
-                "installing skill %r: local docker client died (exit %d), retry %d/%d (#1046)",
+                "installing skill %r: spawned child died (exit %d), retry %d/%d (#1046)",
                 skill_name,
                 result.exit_code,
                 attempt,
