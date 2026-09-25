@@ -18,12 +18,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# Every class here runs against mocks. Unmarked, most of them were selected by
+# no CI job (`pytest -m unit` / `-m integration`), which is how a stale
+# assertion from before #1034 survived here failing unseen.
+pytestmark = pytest.mark.unit
+
 # =============================================================================
 # Test: Workflow Execution Events
 # =============================================================================
 
 
-@pytest.mark.unit
 class TestWorkflowExecutionEventProjectionConsistency:
     """Test that all workflow execution events are emitted AND projected correctly."""
 
@@ -422,7 +426,12 @@ class TestSessionListProjectionHandlesAllEvents:
 
     @pytest.mark.asyncio
     async def test_projection_handles_operation_recorded(self, mock_store: AsyncMock) -> None:
-        """REGRESSION: Projection must handle OperationRecorded to store operations."""
+        """OperationRecorded accumulates the session's totals and nothing else.
+
+        The per-operation trace is Lane 2 telemetry served by
+        SessionToolsProjection (#1034); this projection must not keep a second
+        copy, so ``operations`` is left exactly as it was.
+        """
         from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
             SessionListProjection,
         )
@@ -462,9 +471,7 @@ class TestSessionListProjectionHandlesAllEvents:
         assert saved_data["output_tokens"] == 200
         assert saved_data["cache_creation_tokens"] == 5000
         assert saved_data["cache_read_tokens"] == 12000
-        assert len(saved_data["operations"]) == 1
-        assert saved_data["operations"][0]["input_tokens"] == 100
-        assert saved_data["operations"][0]["output_tokens"] == 200
+        assert saved_data["operations"] == []
 
 
 # =============================================================================

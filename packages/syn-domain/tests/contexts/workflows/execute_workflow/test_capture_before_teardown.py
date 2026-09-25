@@ -65,6 +65,7 @@ class _WorkspaceCm:
 
 
 class _Capture:
+    qualified_session_identities = None
     """Records when it was asked, and exercises the executor it was given."""
 
     def __init__(self, log: list[str]) -> None:

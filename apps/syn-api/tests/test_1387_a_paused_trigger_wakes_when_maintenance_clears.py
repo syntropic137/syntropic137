@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import TYPE_CHECKING, NamedTuple
+from unittest.mock import AsyncMock
 
 import pytest
 from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, ExpectedVersion
@@ -57,6 +58,15 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _isolate_inventory_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These cases exercise admission's live boundary. Inventory has a separate
+    # lifecycle test and real-Postgres pipeline tests; it needs no database here.
+    runtime = AsyncMock()
+    monkeypatch.setattr("syn_api._wiring_inventory.get_inventory_runtime", lambda: runtime)
+
 
 _PATIENCE = 5.0
 #: Loop turns the racy store spends inside its head snapshot. Any number large

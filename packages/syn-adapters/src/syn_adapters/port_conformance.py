@@ -52,6 +52,37 @@ if TYPE_CHECKING:
         PostgresMaintenanceAdapter,
         RedisMaintenanceAdapter,
     )
+    from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
+    from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
+    from syn_adapters.session_inventory.capture_outboxes import (
+        CaptureOutboxPort,
+        ExporterCaptureOutboxes,
+    )
+    from syn_adapters.session_inventory.docker_recovery import DockerSpoolRecovery
+    from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
+    from syn_adapters.session_inventory.history_receipts import (
+        PostgresBackfillReceipts,
+        PostgresHistoryBackfillQueue,
+    )
+    from syn_adapters.session_inventory.history_source import PostgresHistoricalEvidenceSource
+    from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
+    from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
+    from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
+    from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
+    from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
+    from syn_adapters.session_inventory.postgres_spools import PostgresCaptureSpools
+    from syn_adapters.session_inventory.recovery_worker import SpoolRecoveryPort, SpoolReleasePort
+    from syn_adapters.session_inventory.replication_supervisor import (
+        InventoryReplicationWorkPort,
+        ReplicationSupervisor,
+    )
+    from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
+    from syn_adapters.session_inventory.runtime import InventoryWork
+    from syn_adapters.session_inventory.spool_release import (
+        CaptureSpoolRetention,
+        SpoolVolumePort,
+    )
+    from syn_adapters.session_inventory.transcript_access import InstallationTranscriptAccess
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
@@ -105,8 +136,55 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptPort
+    from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
+        HistoricalEvidenceSourcePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
+        HistoryBackfillQueuePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.NativeSessionEvidencePort import (
+        NativeSessionEvidencePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionStorePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionCaptureCatalogPort import (
+        SessionCaptureCatalogPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionCaptureSpoolPort import (
+        SessionCaptureSpoolPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
+        SessionEvidenceReadPort,
+        SessionEvidenceWritePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
+        SessionInventoryJobPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
+        SessionInventoryReadPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
+        SessionInventoryWritePort,
+    )
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import (
+        SessionSettlementPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionTranscriptAccessPort import (
+        SessionTranscriptAccessPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
+        SessionTranscriptArchivePort,
+    )
+    from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
+        InventoryWorkPort,
+    )
+    from syn_domain.contexts.agent_sessions.slices.replicate_session_inventory.projection import (
+        InventoryReplicationDispatchPort,
     )
     from syn_domain.contexts.artifacts.domain.services import ArtifactQueryService
     from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
@@ -296,3 +374,56 @@ if TYPE_CHECKING:
         _postgres: MaintenancePort = postgres
         _redis: MaintenancePort = redis
         _memory: MaintenancePort = memory
+
+    def _session_inventory(
+        evidence: PostgresSessionEvidence,
+        inventory: PostgresSessionInventory,
+        jobs: PostgresSessionInventoryJobs,
+        archive: LocalSessionTranscriptArchive,
+        native: AgenticNativeSessionEvidence,
+        catalog: PostgresCaptureCatalog,
+        spools: PostgresCaptureSpools,
+        access: InstallationTranscriptAccess,
+        recovery: DockerSpoolRecovery,
+        work: InventoryWork,
+        supervisor: ReplicationSupervisor,
+        inventory_replication: InventoryReplicationWorker,
+        capture_delivery: CaptureDeliveryWorker,
+        session_store: HttpSessionStore,
+        history_source: PostgresHistoricalEvidenceSource,
+        history_receipts: PostgresBackfillReceipts,
+        history_queue: PostgresHistoryBackfillQueue,
+        settlements: PostgresSettlementDeadlines,
+        spool_release: CaptureSpoolRetention,
+        outboxes: ExporterCaptureOutboxes,
+    ) -> None:
+        """Workflow-run session discovery and local capture (#1398).
+
+        Mirrors ``session_inventory.runtime.create_inventory_runtime``: each
+        pairing is an adapter that function hands to a domain handler typed
+        with the port. Both replication lanes are listed because the
+        supervisor runs them through the same port.
+        """
+        _evidence_read: SessionEvidenceReadPort = evidence
+        _evidence_write: SessionEvidenceWritePort = evidence
+        _inventory_read: SessionInventoryReadPort = inventory
+        _inventory_write: SessionInventoryWritePort = inventory
+        _jobs: SessionInventoryJobPort = jobs
+        _archive: SessionTranscriptArchivePort = archive
+        _native: NativeSessionEvidencePort = native
+        _catalog: SessionCaptureCatalogPort = catalog
+        _spools: SessionCaptureSpoolPort = spools
+        _access: SessionTranscriptAccessPort = access
+        _recovery: SpoolRecoveryPort = recovery
+        _volumes: SpoolVolumePort = recovery
+        _release: SpoolReleasePort = spool_release
+        _outboxes: CaptureOutboxPort = outboxes
+        _work: InventoryWorkPort = work
+        _dispatch: InventoryReplicationDispatchPort = supervisor
+        _inventory_lane: InventoryReplicationWorkPort = inventory_replication
+        _capture_lane: InventoryReplicationWorkPort = capture_delivery
+        _qualified: QualifiedSessionStorePort = session_store
+        _history_source: HistoricalEvidenceSourcePort = history_source
+        _history_receipts: BackfillReceiptPort = history_receipts
+        _history_queue: HistoryBackfillQueuePort = history_queue
+        _settlements: SessionSettlementPort = settlements

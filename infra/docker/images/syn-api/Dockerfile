@@ -17,6 +17,9 @@ WORKDIR /app
 # Copy root pyproject.toml and uv.lock for dependency resolution
 COPY pyproject.toml uv.lock ./
 
+# Shared inventory contract from the pinned APSS submodule.
+COPY lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/ ./lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/
+
 # -----------------------------------------------------------------------------
 # Copy local dependencies (order matters for layer caching)
 # -----------------------------------------------------------------------------
@@ -131,6 +134,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -u 1000 syn && \
     mkdir -p /app/logs && \
+    mkdir -p /app/data/session-inventory && \
     chown -R syn:syn /app
 
 USER syn

@@ -9,7 +9,9 @@ import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTok
 import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { costByModelKeyLabel } from '../../utils/modelLabels'
+import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
+import './SessionInventory.css'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
   const entries = Object.entries(costByModel)
@@ -233,7 +235,16 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
         <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
           {phases.map((phase, idx) => (
             <div key={phase.workflow_phase_id} className="flex items-stretch">
-              <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
+              <div className="phase-with-inventory">
+                <PhaseCard phase={phase} tone={phaseTone(phase, execution)} now={now} />
+                <Link
+                  className="phase-inventory-link"
+                  to={sessionInventoryHref(execution.workflow_execution_id, phase.workflow_phase_id)}
+                  aria-label={`Sessions for phase ${phase.name}`}
+                >
+                  Sessions
+                </Link>
+              </div>
               {idx < phases.length - 1 && (
                 <div className="mx-2 h-px w-8 self-center bg-[var(--color-border)]" />
               )}

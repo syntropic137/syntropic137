@@ -183,6 +183,7 @@ class IsolationConfig:
     # Identity
     execution_id: str
     workspace_id: str
+    capture_session_id: str | None = None
 
     # Context (optional)
     workflow_id: str | None = None

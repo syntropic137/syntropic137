@@ -1,0 +1,326 @@
+CREATE TABLE IF NOT EXISTS session_capture_catalog (
+    source_instance_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    capture_id TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id, producer_id, capture_id)
+);
+
+CREATE INDEX IF NOT EXISTS session_capture_catalog_revision_idx
+    ON session_capture_catalog (
+        source_instance_id, (payload->'run'->>'execution_id'),
+        (payload->>'harness'), (payload->>'native_id'),
+        (payload->'archive'->>'sha256'), producer_id, capture_id
+    );
+
+CREATE TABLE IF NOT EXISTS session_capture_delivery_jobs (
+    destination_id TEXT NOT NULL,
+    source_instance_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    capture_id TEXT NOT NULL,
+    queued BOOLEAN NOT NULL DEFAULT FALSE,
+    lease_token BIGINT NOT NULL DEFAULT 0,
+    leased_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    retry_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    PRIMARY KEY (destination_id, source_instance_id, producer_id, capture_id),
+    FOREIGN KEY (source_instance_id,producer_id,capture_id)
+        REFERENCES session_capture_catalog(source_instance_id,producer_id,capture_id)
+);
+CREATE INDEX IF NOT EXISTS session_capture_delivery_pending
+    ON session_capture_delivery_jobs(destination_id,source_instance_id,retry_at)
+    WHERE NOT queued;
+
+CREATE TABLE IF NOT EXISTS session_inventory_heads (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    snapshot_id UUID,
+    evidence_watermark BIGINT NOT NULL DEFAULT -1,
+    PRIMARY KEY (source_instance_id, execution_id)
+);
+CREATE TABLE IF NOT EXISTS session_inventory_snapshots (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    snapshot_id UUID NOT NULL,
+    metadata JSONB NOT NULL,
+    published BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id, execution_id, snapshot_id)
+);
+CREATE TABLE IF NOT EXISTS session_inventory_items (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    snapshot_id UUID NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('node','membership','edge','capture','gap','retraction','binding')),
+    ordinal BIGINT NOT NULL CHECK (ordinal >= 0),
+    payload JSONB NOT NULL,
+    PRIMARY KEY (source_instance_id, execution_id, snapshot_id, kind, ordinal),
+    FOREIGN KEY (source_instance_id, execution_id, snapshot_id)
+        REFERENCES session_inventory_snapshots (source_instance_id, execution_id, snapshot_id)
+);
+CREATE TABLE IF NOT EXISTS session_evidence_watermarks (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    watermark BIGINT NOT NULL DEFAULT 0,
+    dispatched_watermark BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (source_instance_id, execution_id),
+    CHECK (dispatched_watermark <= watermark)
+);
+CREATE INDEX IF NOT EXISTS session_evidence_pending_idx
+    ON session_evidence_watermarks (source_instance_id, execution_id)
+    WHERE watermark > dispatched_watermark;
+CREATE TABLE IF NOT EXISTS session_evidence_batches (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    sequence BIGINT NOT NULL,
+    producer_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    PRIMARY KEY (source_instance_id, execution_id, sequence),
+    UNIQUE (source_instance_id, execution_id, producer_id, batch_id)
+);
+CREATE TABLE IF NOT EXISTS session_inventory_jobs (
+    job_id TEXT PRIMARY KEY,
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    global_position BIGINT NOT NULL,
+    stage TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    lease_token BIGINT NOT NULL DEFAULT 0,
+    leased_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    retry_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity'
+);
+CREATE INDEX IF NOT EXISTS session_inventory_jobs_prefix_idx
+    ON session_inventory_jobs (source_instance_id, job_id text_pattern_ops);
+CREATE INDEX IF NOT EXISTS session_inventory_jobs_run_idx
+    ON session_inventory_jobs (source_instance_id, execution_id, global_position DESC);
+CREATE INDEX IF NOT EXISTS session_inventory_jobs_pending_idx
+    ON session_inventory_jobs (retry_at, global_position)
+    WHERE stage IN ('pending','publishing');
+CREATE TABLE IF NOT EXISTS session_capture_spools (
+    source_instance_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    after_sequence BIGINT NOT NULL DEFAULT 0 CHECK (after_sequence >= 0),
+    watermark BIGINT CHECK (watermark >= after_sequence),
+    lease_token BIGINT NOT NULL DEFAULT 0,
+    leased_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    retry_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    PRIMARY KEY (source_instance_id,session_id)
+);
+-- Allocate one source-wide sequence namespace for the canonical replication producer.
+CREATE TABLE IF NOT EXISTS session_inventory_replication_sequences (
+    source_instance_id TEXT PRIMARY KEY,
+    high_watermark BIGINT NOT NULL CHECK (high_watermark >= 0)
+);
+-- Publication order is local truth, retained even while optional replication is disabled.
+CREATE TABLE IF NOT EXISTS session_inventory_publications (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    snapshot_id UUID NOT NULL,
+    parent_snapshot_id UUID,
+    revision_sequence BIGINT NOT NULL CHECK (revision_sequence > 0),
+    first_record_sequence BIGINT NOT NULL CHECK (first_record_sequence > 0),
+    record_high_watermark BIGINT NOT NULL CHECK (record_high_watermark >= 0),
+    published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id, execution_id, snapshot_id),
+    UNIQUE (source_instance_id, execution_id, revision_sequence),
+    FOREIGN KEY (source_instance_id, execution_id, snapshot_id)
+        REFERENCES session_inventory_snapshots (source_instance_id, execution_id, snapshot_id),
+    FOREIGN KEY (source_instance_id, execution_id, parent_snapshot_id)
+        REFERENCES session_inventory_publications (source_instance_id, execution_id, snapshot_id),
+    CHECK ((revision_sequence = 1) = (parent_snapshot_id IS NULL))
+);
+CREATE TABLE IF NOT EXISTS session_inventory_replication_jobs (
+    destination_id TEXT NOT NULL,
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    snapshot_id UUID NOT NULL,
+    next_offset BIGINT NOT NULL DEFAULT 0 CHECK (next_offset >= 0),
+    queued BOOLEAN NOT NULL DEFAULT FALSE,
+    lease_token BIGINT NOT NULL DEFAULT 0,
+    leased_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    retry_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+    PRIMARY KEY (destination_id,source_instance_id,execution_id,snapshot_id),
+    FOREIGN KEY (source_instance_id,execution_id,snapshot_id)
+        REFERENCES session_inventory_publications(source_instance_id,execution_id,snapshot_id)
+);
+CREATE INDEX IF NOT EXISTS session_inventory_replication_pending_idx
+    ON session_inventory_replication_jobs(destination_id,source_instance_id,retry_at)
+    WHERE NOT queued;
+
+-- Receipt polling has its own lease; queued means local exporter durability only.
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS receipt_recorded BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS receipt_lease_token BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS receipt_poll_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity';
+CREATE INDEX IF NOT EXISTS session_capture_receipt_pending
+    ON session_capture_delivery_jobs(destination_id,source_instance_id,receipt_poll_at)
+    WHERE queued AND NOT receipt_recorded;
+
+-- Object-level revocation applies to every capture sharing these exact bytes.
+CREATE TABLE IF NOT EXISTS session_transcript_revocations (
+    source_instance_id TEXT NOT NULL,
+    archive_sha256 TEXT NOT NULL CHECK (archive_sha256 ~ '^[a-f0-9]{64}$'),
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id, archive_sha256)
+);
+
+-- Child changes use their own sequence domain, never the envelope cursor.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_after_sequence
+    BIGINT NOT NULL DEFAULT 0 CHECK (child_after_sequence >= 0);
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS child_watermark
+    BIGINT CHECK (child_watermark >= child_after_sequence);
+
+-- One checkpoint per acquisition stream. Repeated healthy polls do not create
+-- evidence batches or wake reconciliation; sequence fences still advance.
+CREATE TABLE IF NOT EXISTS session_acquisition_heads (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    evidence_sequence BIGINT NOT NULL CHECK (evidence_sequence >= 1),
+    payload JSONB NOT NULL,
+    PRIMARY KEY (source_instance_id,execution_id,producer_id,stream_id)
+);
+CREATE INDEX IF NOT EXISTS session_evidence_acquisition_latest
+    ON session_evidence_batches (
+        source_instance_id,execution_id,producer_id,
+        (payload->'evidence'->'acquisition_statuses'->0->>'stream_id'),
+        ((payload->'evidence'->'acquisition_statuses'->0->>'sequence')::bigint) DESC
+    ) WHERE jsonb_array_length(payload->'evidence'->'acquisition_statuses')=1;
+
+
+-- Bodies may expire; catalog and inventory revisions retain discoverability.
+CREATE TABLE IF NOT EXISTS session_body_deletions (
+    source_instance_id TEXT NOT NULL,
+    archive_sha256 TEXT NOT NULL,
+    archive JSONB NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ,
+    PRIMARY KEY(source_instance_id,archive_sha256)
+);
+CREATE INDEX IF NOT EXISTS session_body_deletions_pending
+    ON session_body_deletions(source_instance_id,requested_at,archive_sha256)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS session_capture_retention_age
+    ON session_capture_catalog(source_instance_id,created_at,producer_id,capture_id);
+
+ALTER TABLE session_capture_delivery_jobs
+    ADD COLUMN IF NOT EXISTS cancelled BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE session_body_deletions ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    producer_id TEXT NOT NULL,
+    capture_id TEXT NOT NULL,
+    PRIMARY KEY(source_instance_id,destination_id,producer_id,capture_id)
+);
+CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
+    ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));
+
+-- Row 8 (#1398): hashed query columns for membership narrowing, cross-page node
+-- lookup and keyset paging. Digests keep btree tuples bounded for opaque IDs.
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS node_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS peer_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS phase_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS attempt_key TEXT;
+-- Rows written before these columns existed are backfilled by ensure_ready().
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS keys_indexed BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS session_inventory_items_unindexed
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, kind, ordinal)
+    WHERE NOT keys_indexed;
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_phase_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, phase_key, attempt_key, ordinal)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_attempt_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, attempt_key, ordinal)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_node_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key, phase_key, attempt_key)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_node_key_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key)
+    WHERE kind = 'node';
+-- Bounded coverage settlement (#1364): the first terminal fact per run and the
+-- recorded clock observation at or after which its deadline fact is appended.
+CREATE TABLE IF NOT EXISTS session_settlement_deadlines (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    due_at TIMESTAMPTZ NOT NULL,
+    payload JSONB NOT NULL,
+    settled BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY(source_instance_id,execution_id)
+);
+CREATE INDEX IF NOT EXISTS session_settlement_deadlines_due
+    ON session_settlement_deadlines(source_instance_id,due_at,execution_id)
+    WHERE NOT settled;
+-- Latest recorded clock observation (a to-do watermark, monotonic). Deadline
+-- release compares against this, never the wall clock.
+CREATE TABLE IF NOT EXISTS session_settlement_clock (
+    source_instance_id TEXT PRIMARY KEY,
+    observed_at TIMESTAMPTZ NOT NULL
+);
+
+-- Rows 10/11 (#1398): why a body left the archive. An owner deletion or
+-- retraction is not retention; both withhold the body from the moment of request.
+ALTER TABLE session_body_deletions ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL
+    DEFAULT 'retention_age'
+    CHECK (reason IN ('retention_age','retention_quota','deletion','retraction'));
+CREATE INDEX IF NOT EXISTS session_body_deletions_content_hash
+    ON session_body_deletions(source_instance_id,content_hash) WHERE content_hash IS NOT NULL;
+
+-- Staged spool bytes are released only after a complete traversal archived them
+-- (release_reason='archived') or retention recorded a gap first ('expired').
+-- release_reason is durable intent; released_at acknowledges volume removal.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS registered_at
+    TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS drained_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS staged_bytes BIGINT NOT NULL
+    DEFAULT 0 CHECK (staged_bytes >= 0);
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS release_reason TEXT
+    CHECK (release_reason IN ('archived','expired'));
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS session_capture_spools_retained
+    ON session_capture_spools(source_instance_id,registered_at,session_id)
+    WHERE released_at IS NULL;
+
+-- Review pass 1 (#1398): the APSS source-content hash is durable before an
+-- envelope can reach the exporter, so replica deletion never depends on local
+-- bytes still existing. Deletion checkpoints distinguish queued from
+-- authoritatively acknowledged.
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT
+    CHECK (content_hash ~ '^sha256:[a-f0-9]{64}$');
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS content_hash TEXT;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledged
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledgements
+    INTEGER NOT NULL DEFAULT 0 CHECK (acknowledgements >= 0);
+CREATE INDEX IF NOT EXISTS session_capture_deletion_unacknowledged
+    ON session_capture_deletion_checkpoints(source_instance_id,destination_id)
+    WHERE NOT acknowledged;
+
+-- Review pass 2 (#1398): per-capture exporter outboxes. outbox_drained means the
+-- capture's own outbox was emptied (delivered, rejected or discarded).
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS outbox_drained
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS drain_at
+    TIMESTAMPTZ NOT NULL DEFAULT '-infinity';
+CREATE INDEX IF NOT EXISTS session_capture_outbox_pending
+    ON session_capture_delivery_jobs(destination_id,source_instance_id,drain_at)
+    WHERE queued AND NOT outbox_drained;
+CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    retired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id,destination_id)
+);
+
+-- One terminal notion (#1398): a terminal execution settles every spool of the
+-- run, so a session killed before its own SessionCompleted is not left live.
+CREATE INDEX IF NOT EXISTS session_capture_spools_run_unsettled
+    ON session_capture_spools(source_instance_id,(payload->'run'->>'execution_id'))
+    WHERE settled_at IS NULL;

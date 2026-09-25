@@ -149,6 +149,7 @@ class WorkspaceService:
         config: WorkspaceServiceConfig | None = None,
         token_service: object | None = None,
         environment: dict[str, str] | None = None,
+        capture_source_instance_id: str | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -186,6 +187,7 @@ class WorkspaceService:
             config=config,
             token_service=token_service,
             environment=environment,
+            capture_source_instance_id=capture_source_instance_id,
         )
 
     @classmethod
@@ -194,6 +196,7 @@ class WorkspaceService:
         config: WorkspaceServiceConfig | None = None,
         token_service: object | None = None,
         environment: dict[str, str] | None = None,
+        capture_source_instance_id: str | None = None,
     ) -> WorkspaceService:
         """Internal: Create WorkspaceService with Docker backend."""
         from agentic_isolation import SecurityConfig
@@ -241,6 +244,7 @@ class WorkspaceService:
         isolation = AgenticIsolationAdapter(
             default_image=cfg.image,
             security=security,
+            capture_source_instance_id=capture_source_instance_id,
         )
         event_stream = AgenticEventStreamAdapter()
         event_stream.set_provider(isolation._provider)
@@ -382,6 +386,7 @@ class WorkspaceService:
         workflow_id: str | None,
         phase_id: str | None,
         extra_environment: dict[str, str] | None,
+        capture_session_id: str | None = None,
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -412,6 +417,7 @@ class WorkspaceService:
             workflow_id=workflow_id,
             phase_id=phase_id,
             extra_environment=extra_environment,
+            capture_session_id=capture_session_id,
         )
 
         return aggregate, isolation_config
@@ -427,6 +433,7 @@ class WorkspaceService:
         inject_tokens: bool = False,
         token_types: list[TokenType] | None = None,
         extra_environment: dict[str, str] | None = None,
+        capture_session_id: str | None = None,
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -455,6 +462,7 @@ class WorkspaceService:
             workflow_id,
             phase_id,
             extra_environment,
+            capture_session_id,
         )
 
         isolation_handle: IsolationHandle | None = None

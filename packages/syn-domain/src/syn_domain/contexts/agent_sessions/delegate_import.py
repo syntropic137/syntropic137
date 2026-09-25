@@ -52,6 +52,9 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+    )
     from syn_domain.contexts.agent_sessions.transcript_usage import UsageResult
 
 __all__ = [
@@ -287,6 +290,23 @@ def _refusal_if_leader_unknown(
     return None
 
 
+async def _resolve_captured_usage(
+    store: SessionStorePort,
+    harness_id: str,
+    identities: Sequence[QualifiedSessionIdentity] | None,
+) -> UsageResult:
+    """Use explicit capture identity when supplied; ambiguity must never fall back."""
+    if identities is None:
+        return await resolve_delegate_usage(store, harness_id)
+    matches = tuple(identity for identity in identities if identity.local_id == harness_id)
+    if matches and all(identity == matches[0] for identity in matches):
+        return await resolve_delegate_usage(store, harness_id, identity=matches[0])
+    return UnpricedUsage(
+        "capture has missing or ambiguous qualified identity",
+        retry=RetryDisposition.PERMANENT,
+    )
+
+
 async def import_phase_delegates(
     store: SessionStorePort,
     recorder: DelegateUsageRecorder,
@@ -298,6 +318,7 @@ async def import_phase_delegates(
     workspace_id: str | None = None,
     attempts_remaining: int,
     ledger: ImportLedgerPort | None = None,
+    qualified_session_identities: Sequence[QualifiedSessionIdentity] | None = None,
 ) -> DelegateImport:
     """Price every captured session except the leader's.
 
@@ -323,7 +344,7 @@ async def import_phase_delegates(
         if harness_id == leader_native_session_id:
             continue
 
-        usage = await resolve_delegate_usage(store, harness_id)
+        usage = await _resolve_captured_usage(store, harness_id, qualified_session_identities)
         if _is_retryable(usage) and attempts_remaining > 0:
             # Held back rather than written as a zero. Writing it now would
             # finalise a delegate the very next attempt could have priced.

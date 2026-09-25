@@ -82,6 +82,11 @@ NOT_FORWARDED: dict[str, str] = {
     "SYN_WORKSPACE_CONTAINER_DIR": (
         "pinned: the in-container mount point of the workspaces volume. Set SYN_INSTALL_DIR to move the host side."
     ),
+    "SYN_SESSION_INVENTORY_ARCHIVE_DIR": (
+        "pinned: the in-container mount point of the session_inventory_data "
+        "volume, so captured transcripts outlive the container. Pointing it "
+        "anywhere else would write them to the container's ephemeral layer."
+    ),
     "SYN_WORKSPACE_HOST_DIR": (
         "pinned: derived from SYN_INSTALL_DIR so it always matches the bind mount. Set SYN_INSTALL_DIR instead."
     ),

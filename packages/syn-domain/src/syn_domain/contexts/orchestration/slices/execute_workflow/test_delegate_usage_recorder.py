@@ -111,6 +111,7 @@ class TestARefusalLeavesADurableSignal:
         )
 
         class _Capture:
+            qualified_session_identities = None
             agent_session_ids = ("s-a", "s-b")
 
         class _Store:

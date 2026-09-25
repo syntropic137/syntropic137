@@ -390,6 +390,195 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/session-inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory */
+        get: operations["get_session_inventory_executions__execution_id__session_inventory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Inventory Page
+         * @description Keyset page of one pinned revision, narrowed to a phase/attempt membership in SQL.
+         *
+         *     Omit ``cursor`` for the first page, then pass ``next_cursor`` unchanged with
+         *     the same revision, section and filters. A mismatched cursor is rejected; a
+         *     cursor whose revision is no longer retained gets 410 with ``restart``.
+         */
+        get: operations["get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/nodes/{node_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Inventory Node
+         * @description Resolve an edge endpoint on another page. Keys outside this revision stay opaque.
+         */
+        get: operations["get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Session Inventory */
+        post: operations["refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/session-inventory/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill All Session Inventories
+         * @description Queue every known execution. The live inventory worker drains the durable list.
+         */
+        post: operations["backfill_all_session_inventories_session_inventory_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/session-inventory-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory Job */
+        get: operations["get_session_inventory_job_session_inventory_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Transcript Revision
+         * @description Serve one exact archived revision after current whole-object authorization.
+         *
+         *     Bytes are returned exactly as archived (source redaction only). Deleted,
+         *     expired, missing and oversized bodies are explicit statuses, never content.
+         *     The shared deletion fence spans authorization, the read and rendering of the
+         *     response, so a deletion request either waits for this handoff or is seen.
+         */
+        get: operations["get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Transcript Deletion
+         * @description Local erasure and replica propagation state of an existing tombstone.
+         */
+        get: operations["get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get"];
+        put?: never;
+        /**
+         * Delete Local Transcript Revision
+         * @description Durably tombstone exact bytes, then erase them asynchronously.
+         *
+         *     Idempotent: repeating the request returns the existing tombstone. The body is
+         *     withheld from the moment of the request for every run sharing the object.
+         *     Deletion propagates to the configured replica; retries, replays and
+         *     re-uploads cannot restore the bytes. Session history stays discoverable.
+         */
+        post: operations["delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/revocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Local Transcript Revision
+         * @description Withhold reads of exact bytes for every sharing run; bytes are retained.
+         */
+        post: operations["revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -2157,6 +2346,11 @@ export interface components {
             /** System Id */
             system_id: string;
         };
+        /**
+         * BodyAvailability
+         * @enum {string}
+         */
+        BodyAvailability: "present" | "pending" | "missing" | "expired" | "unknown";
         /** Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post */
         Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
             /** File */
@@ -2250,6 +2444,47 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason?: string | null;
+        };
+        /** CaptureReceipt */
+        CaptureReceipt: {
+            node: components["schemas"]["InventoryNodeRef"];
+            availability: components["schemas"]["BodyAvailability"];
+            /** Receipt Sequence */
+            receipt_sequence: number;
+            evidence: components["schemas"]["EvidenceReference"];
+            /**
+             * Destination
+             * @default local
+             * @enum {string}
+             */
+            destination: "local" | "remote";
+            /** Transcript Revision */
+            transcript_revision?: string | null;
+            /** Archived Byte Hash */
+            archived_byte_hash?: string | null;
+        };
+        /**
+         * CaptureRevisionHashes
+         * @description Names the representation behind each hash one capture receipt carries.
+         *
+         *     ``transcript_revision`` is not self-describing: a local receipt stores the
+         *     archived byte SHA-256 there, a remote receipt the APSS original-content hash.
+         *     ``transcript_revision_kind`` says which, or ``unqualified`` when the value
+         *     matches neither known form. Never compare hashes of different kinds.
+         */
+        CaptureRevisionHashes: {
+            /** Transcript Revision Kind */
+            transcript_revision_kind?: ("archived_bytes_sha256" | "source_content_hash" | "unqualified") | null;
+            /**
+             * Archived Bytes Sha256
+             * @description SHA-256 of the exact archived bytes; the local transcript read key.
+             */
+            archived_bytes_sha256?: string | null;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash reported by a replica receipt.
+             */
+            source_content_hash?: string | null;
         };
         /**
          * CaptureStatusEntry
@@ -2559,6 +2794,11 @@ export interface components {
              */
             executed_at: string;
         };
+        /**
+         * CoverageState
+         * @enum {string}
+         */
+        CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -2760,6 +3000,32 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * EvidenceClass
+         * @enum {string}
+         */
+        EvidenceClass: "registered" | "corroborated" | "candidate" | "conflicting";
+        /** EvidenceReference */
+        EvidenceReference: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Producer Id */
+            producer_id: string;
+            /** Source Revision */
+            source_revision: string;
+            /** Locator */
+            locator: string;
+            /** Extractor Version */
+            extractor_version: string;
+        };
+        /**
+         * EvidenceRetraction
+         * @description An explicit producer correction; it cannot revoke another producer's facts.
+         */
+        EvidenceRetraction: {
+            target: components["schemas"]["EvidenceReference"];
+            evidence: components["schemas"]["EvidenceReference"];
         };
         /**
          * ExecuteWorkflowRequest
@@ -3961,6 +4227,19 @@ export interface components {
             };
         };
         /**
+         * IdentityBinding
+         * @description A platform session or registered invocation represents native transcript work.
+         */
+        IdentityBinding: {
+            owner: components["schemas"]["InventoryNodeRef"];
+            transcript: components["schemas"]["InventoryNodeRef"];
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
          * InjectRequest
          * @description Request to inject context into an execution.
          */
@@ -3987,6 +4266,215 @@ export interface components {
             required: boolean;
             /** Default */
             default?: string | null;
+        };
+        /** InventoryCounts */
+        InventoryCounts: {
+            /** Node */
+            node: number;
+            /** Membership */
+            membership: number;
+            /** Edge */
+            edge: number;
+            /** Capture */
+            capture: number;
+            /** Gap */
+            gap: number;
+            /**
+             * Retraction
+             * @default 0
+             */
+            retraction: number;
+            /**
+             * Binding
+             * @default 0
+             */
+            binding: number;
+            /** Namespaces */
+            namespaces?: components["schemas"]["InventoryNamespaceCount"][] | null;
+        };
+        /** InventoryCoverage */
+        InventoryCoverage: {
+            state: components["schemas"]["CoverageState"];
+            /** Contract Id */
+            contract_id?: string | null;
+            /** Expected Count */
+            expected_count?: number | null;
+            /**
+             * Missing Keys
+             * @default []
+             */
+            missing_keys: string[];
+        };
+        /**
+         * InventoryFilter
+         * @description Membership narrowing. Unset fields match every phase or attempt.
+         *
+         *     A filter never changes what a node is; it selects nodes with at least one
+         *     matching membership, the edges and bindings touching them, their captures,
+         *     run-level or touching gaps, and every retraction (retractions are not
+         *     node-scoped).
+         */
+        InventoryFilter: {
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+        };
+        /** InventoryGap */
+        InventoryGap: {
+            /**
+             * Reason
+             * @description Why the inventory is incomplete or uncertain here. Resolver reasons: invocation_running, invocation_launch_failed, invocation_transport_failed_before_announce, conflicting_invocation_lifecycle, conflicting_invocation_context, unverified_invocation_context, conflicting_parentage, lineage_cycle, unresolved_parentage, conflicting_source_evidence, conflicting_native_binding, expected_body_unavailable, invocation_unsettled_at_seal, capture_unsettled_at_seal, child_context_unresolved_at_seal, parentage_unresolved_at_seal, no_host_registration; plus invocation_<outcome> for other abnormal process outcomes and producer-specific acquisition reasons.
+             * @example invocation_running
+             * @example invocation_launch_failed
+             * @example invocation_transport_failed_before_announce
+             * @example conflicting_invocation_lifecycle
+             * @example conflicting_invocation_context
+             * @example unverified_invocation_context
+             * @example conflicting_parentage
+             * @example lineage_cycle
+             * @example unresolved_parentage
+             * @example conflicting_source_evidence
+             * @example conflicting_native_binding
+             * @example expected_body_unavailable
+             * @example invocation_unsettled_at_seal
+             * @example capture_unsettled_at_seal
+             * @example child_context_unresolved_at_seal
+             * @example parentage_unresolved_at_seal
+             * @example no_host_registration
+             */
+            reason: string;
+            /**
+             * Node Keys
+             * @default []
+             */
+            node_keys: string[];
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+        };
+        /**
+         * InventoryItemKeys
+         * @description Qualified node keys an item references, so a foreign endpoint is resolvable.
+         */
+        InventoryItemKeys: {
+            /** Node Key */
+            node_key?: string | null;
+            /** Peer Key */
+            peer_key?: string | null;
+        };
+        /**
+         * InventoryNamespaceCount
+         * @description Distinct nodes in one identity namespace. Transcripts are split per harness.
+         */
+        InventoryNamespaceCount: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
+        };
+        /** InventoryNode */
+        InventoryNode: {
+            ref: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
+         * InventoryNodeRef
+         * @description A reference never changes the native ID or its source-content hash.
+         */
+        InventoryNodeRef: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Local Id */
+            local_id: string;
+            /** Harness */
+            harness?: string | null;
+        };
+        /** InventorySnapshot */
+        InventorySnapshot: {
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /** Revision */
+            revision: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            coverage: components["schemas"]["InventoryCoverage"];
+            counts: components["schemas"]["InventoryCounts"];
+        };
+        /** LineageEdge */
+        LineageEdge: {
+            parent: components["schemas"]["InventoryNodeRef"];
+            child: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "spawn" | "resume" | "fork";
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+            /** Parent Segment */
+            parent_segment?: string | null;
+            /** Child Segment */
+            child_segment?: string | null;
+        };
+        /**
+         * LocalTranscriptResponse
+         * @description Exact archive bytes, base64 encoded without parsing provider content.
+         *
+         *     Redaction policy: the body is served exactly as archived. Any redaction was
+         *     applied by the capturing source before archival; the server neither redacts,
+         *     rewrites nor slices bytes, and never serves a partial range as the revision.
+         */
+        LocalTranscriptResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "present" | "not_captured" | "missing" | "expired" | "deleted" | "too_large";
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
+            archive_sha256: string;
+            /** Content Format */
+            content_format?: ("native" | "envelope") | null;
+            /**
+             * Size
+             * @description Archived byte length.
+             */
+            size?: number | null;
+            /**
+             * Redaction
+             * @description Only source-applied redaction; the server serves archived bytes unchanged.
+             * @default source
+             * @constant
+             */
+            redaction: "source";
+            /** Content Base64 */
+            content_base64?: string | null;
         };
         /**
          * MaintenanceModeResponse
@@ -4081,6 +4569,20 @@ export interface components {
          * @enum {string}
          */
         MediaType: "screenshot" | "voice_note";
+        /** Membership */
+        Membership: {
+            node: components["schemas"]["InventoryNodeRef"];
+            run: components["schemas"]["RunIdentity"];
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
         /**
          * MetricsResponse
          * @description Aggregated metrics response.
@@ -5221,6 +5723,13 @@ export interface components {
              */
             readonly version_status: "installed" | "unavailable";
         };
+        /** RunIdentity */
+        RunIdentity: {
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Execution Id */
+            execution_id: string;
+        };
         /**
          * SSEHealthResponse
          * @description Health status of the SSE subsystem.
@@ -5335,6 +5844,231 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+        };
+        /**
+         * SessionHistoryBackfillSummary
+         * @description Receipts are reused across retries, so a resumed backfill reports the same total.
+         */
+        SessionHistoryBackfillSummary: {
+            /** Receipts */
+            receipts: number;
+            /** Materialized */
+            materialized: number;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+        };
+        /** SessionInventoryBackfillRequest */
+        SessionInventoryBackfillRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /**
+         * SessionInventoryBackfillResponse
+         * @description Durably queued per-execution backfills; the live inventory worker drains them.
+         */
+        SessionInventoryBackfillResponse: {
+            /** Executions */
+            executions: number;
+            /** Enqueued */
+            enqueued: number;
+        };
+        /**
+         * SessionInventoryCursorError
+         * @description Why a continuation cursor was refused. ``restart`` means re-read the head.
+         */
+        SessionInventoryCursorError: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "cursor_invalid" | "cursor_mismatch" | "cursor_expired";
+            /** Message */
+            message: string;
+            /**
+             * Mismatched
+             * @default []
+             */
+            mismatched: ("scope" | "revision" | "section" | "filters")[];
+            /** Restart */
+            restart: boolean;
+            /** Restart Snapshot Id */
+            restart_snapshot_id?: string | null;
+        };
+        /** SessionInventoryCursorErrorResponse */
+        SessionInventoryCursorErrorResponse: {
+            detail: components["schemas"]["SessionInventoryCursorError"];
+        };
+        /** SessionInventoryJobResponse */
+        SessionInventoryJobResponse: {
+            /** Job Id */
+            job_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "pending" | "publishing" | "completed" | "failed";
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Revision */
+            revision: string | null;
+            /** Failure Code */
+            failure_code: string | null;
+        };
+        /**
+         * SessionInventoryNamespace
+         * @description Distinct sessions in one identity namespace (``platform``, ``invocation``,
+         *     ``transcript:<harness>``). A native transcript id is only meaningful inside
+         *     its harness namespace; it is never a platform session id.
+         */
+        SessionInventoryNamespace: {
+            /** Namespace */
+            namespace: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
+        };
+        /**
+         * SessionInventoryNodeResponse
+         * @description A node-by-key lookup within one revision. Unknown keys disclose nothing.
+         */
+        SessionInventoryNodeResponse: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Node Key */
+            node_key: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "resolved" | "unresolved";
+            node?: components["schemas"]["InventoryNode"] | null;
+        };
+        /**
+         * SessionInventoryPageResponse
+         * @description One keyset page of a pinned revision plus current local restrictions.
+         *
+         *     ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
+         *     edge endpoint on another page resolves through the node lookup route.
+         *     ``next_cursor`` is opaque and bound to this run, revision, section and filters.
+         *     Absent body overrides are unchecked. On capture pages ``capture_hashes[i]``
+         *     names the hash representations of ``items[i]``.
+         */
+        SessionInventoryPageResponse: {
+            snapshot: components["schemas"]["InventorySnapshot"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            filters: components["schemas"]["InventoryFilter"];
+            /** Items */
+            items: (components["schemas"]["InventoryNode"] | components["schemas"]["Membership"] | components["schemas"]["LineageEdge"] | components["schemas"]["CaptureReceipt"] | components["schemas"]["InventoryGap"] | components["schemas"]["EvidenceRetraction"] | components["schemas"]["IdentityBinding"])[];
+            /** Item Keys */
+            item_keys: components["schemas"]["InventoryItemKeys"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Body Overrides
+             * @default []
+             */
+            body_overrides: components["schemas"]["TranscriptBodyState"][];
+            /**
+             * Capture Hashes
+             * @default []
+             */
+            capture_hashes: components["schemas"]["CaptureRevisionHashes"][];
+        };
+        /** SessionInventoryRefreshRequest */
+        SessionInventoryRefreshRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Include History
+             * @default false
+             */
+            include_history: boolean;
+        };
+        /** SessionInventoryRefreshResponse */
+        SessionInventoryRefreshResponse: {
+            /** Job Id */
+            job_id: string;
+            history?: components["schemas"]["SessionHistoryBackfillSummary"] | null;
+        };
+        /**
+         * SessionInventoryResponse
+         * @description Published inventory and observed reconstruction progress, without read side effects.
+         */
+        SessionInventoryResponse: {
+            run: components["schemas"]["RunIdentity"];
+            snapshot: components["schemas"]["InventorySnapshot"] | null;
+            /**
+             * Reconstruction Status
+             * @enum {string}
+             */
+            reconstruction_status: "not_started" | "pending" | "running" | "current" | "failed";
+            /** Observed Evidence Watermark */
+            observed_evidence_watermark: number;
+            /** Later Evidence Pending */
+            later_evidence_pending: boolean;
+            /** Job Id */
+            job_id?: string | null;
+            summary: components["schemas"]["SessionInventorySummary"];
+        };
+        /**
+         * SessionInventorySummary
+         * @description Server-derived counts, completeness and display text every client shows verbatim.
+         *
+         *     ``complete`` is the single completeness verdict: the published coverage
+         *     contract is ``reconciled`` AND that revision is current. Every other
+         *     coverage state (open, unknown, missing, unsupported, conflicting) or a
+         *     pending/failed reconstruction is incomplete. Count fields are None when no
+         *     revision is published, and the namespace split is None on revisions built
+         *     before it was recorded.
+         */
+        SessionInventorySummary: {
+            /** Complete */
+            complete: boolean;
+            /**
+             * Coverage State
+             * @enum {string}
+             */
+            coverage_state: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+            /** Coverage Display */
+            coverage_display: string;
+            /** Revision */
+            revision: string | null;
+            /** Distinct Sessions */
+            distinct_sessions: number | null;
+            /** Platform Sessions */
+            platform_sessions: number | null;
+            /** Invocations */
+            invocations: number | null;
+            /** Native Transcripts */
+            native_transcripts: number | null;
+            /** Gaps */
+            gaps: number | null;
+            /** Namespaces */
+            namespaces: components["schemas"]["SessionInventoryNamespace"][] | null;
+            /** Counts Display */
+            counts_display: string;
+            /**
+             * Remote Replication
+             * @enum {string}
+             */
+            remote_replication: "enabled" | "disabled";
+            /** Follow Up Command */
+            follow_up_command: string;
         };
         /**
          * SessionListResponse
@@ -6289,6 +7023,150 @@ export interface components {
             total_executions: number;
             /** Executions */
             executions?: components["schemas"]["ToolTimelineEntry"][];
+        };
+        /**
+         * TranscriptBodyState
+         * @description A current restriction overlaid on an immutable inventory page.
+         *
+         *     Each hash names its representation. ``archive_sha256`` is the SHA-256 of the
+         *     exact archived bytes (a local receipt's ``archived_byte_hash``).
+         *     ``source_content_hash`` is the APSS original-content hash a remote receipt
+         *     reports as its ``transcript_revision``; it is absent until known.
+         */
+        TranscriptBodyState: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
+            archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash of the same revision, when recorded.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Status
+             * @description expired: retention removed the body. deleted: an owner deleted or retracted it. withheld: access was revoked while bytes are retained.
+             * @enum {string}
+             */
+            status: "expired" | "deleted" | "withheld";
+        };
+        /**
+         * TranscriptDeletion
+         * @description A durable body tombstone. Catalog and inventory history remain discoverable.
+         */
+        TranscriptDeletion: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes this tombstone covers.
+             */
+            archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash used to delete replicated envelopes.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "retention_age" | "retention_quota" | "deletion" | "retraction";
+            /**
+             * Local Status
+             * @enum {string}
+             */
+            local_status: "pending" | "deleted";
+            /**
+             * Requested At
+             * @description ISO 8601 UTC time the tombstone was recorded.
+             */
+            requested_at: string;
+            /**
+             * Deleted At
+             * @description ISO 8601 UTC time local bytes were erased.
+             */
+            deleted_at?: string | null;
+            /**
+             * Replication
+             * @enum {string}
+             */
+            replication: "disabled" | "propagate" | "not_applicable";
+            /**
+             * Replicas
+             * @default []
+             */
+            replicas: components["schemas"]["TranscriptDeletionReplica"][];
+        };
+        /**
+         * TranscriptDeletionReplica
+         * @description Propagation of one body deletion to one configured replication destination.
+         */
+        TranscriptDeletionReplica: {
+            /**
+             * Destination Id
+             * @description Server-derived opaque destination identity.
+             */
+            destination_id: string;
+            /**
+             * Status
+             * @description pending: not yet handed to the exporter. queued: durably queued, not yet acknowledged. propagated: the replica acknowledged deletion. unresolvable: a legacy delivery recorded no content hash to delete by.
+             * @enum {string}
+             */
+            status: "pending" | "queued" | "propagated" | "unresolvable";
+        };
+        /** TranscriptDeletionRequest */
+        TranscriptDeletionRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+            /**
+             * Reason
+             * @default deletion
+             * @enum {string}
+             */
+            reason: "deletion" | "retraction";
+        };
+        /**
+         * TranscriptDeletionResponse
+         * @description Durable tombstone for exact bytes shared by every membership of the object.
+         *
+         *     ``created`` is false when a tombstone already existed; the original reason
+         *     is kept. Session history remains discoverable with a deleted body state.
+         */
+        TranscriptDeletionResponse: {
+            deletion: components["schemas"]["TranscriptDeletion"];
+            /** Created */
+            created: boolean;
+        };
+        /**
+         * TranscriptIdentityRequest
+         * @description Qualified native identity of one archived revision in the addressed run.
+         */
+        TranscriptIdentityRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+        };
+        /**
+         * TranscriptRevocationResponse
+         * @description Access to the exact bytes is withheld; stored bytes are retained.
+         */
+        TranscriptRevocationResponse: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes.
+             */
+            archive_sha256: string;
+            /**
+             * Status
+             * @default withheld
+             * @constant
+             */
+            status: "withheld";
+            /** Created */
+            created: boolean;
         };
         /**
          * TriggerActionResponse
@@ -7523,6 +8401,367 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_executions__execution_id__session_inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get: {
+        parameters: {
+            query?: {
+                phase_id?: string | null;
+                attempt_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryPageResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                node_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryNodeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_all_session_inventories_session_inventory_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryBackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryBackfillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_job_session_inventory_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalTranscriptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptIdentityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptRevocationResponse"];
                 };
             };
             /** @description Validation Error */

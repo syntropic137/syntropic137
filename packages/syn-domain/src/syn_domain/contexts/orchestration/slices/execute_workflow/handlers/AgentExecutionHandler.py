@@ -245,11 +245,22 @@ class AgentExecutionResult:
     what lets those consumers run before the completion is decided, which is
     where the transcript recorder sits.
 
+    `launch_failed` records that the agent process never started, which the
+    invocation lifecycle reports as its own outcome (#1398).
+
     `usage` is what the phase spent and is always real, cancelled or not: a run
     killed after an hour of tool calls did not cost nothing (#1164).
     """
 
-    __slots__ = ("command", "exit_code", "stream_result", "subagents", "tokens", "usage")
+    __slots__ = (
+        "command",
+        "exit_code",
+        "launch_failed",
+        "stream_result",
+        "subagents",
+        "tokens",
+        "usage",
+    )
 
     def __init__(
         self,
@@ -260,6 +271,7 @@ class AgentExecutionResult:
         *,
         exit_code: int | None = None,
         usage: FinalUsage | None = None,
+        launch_failed: bool = False,
     ) -> None:
         self.stream_result = stream_result
         self.tokens = tokens
@@ -270,6 +282,7 @@ class AgentExecutionResult:
         # from disagreeing matters more than saving the caller an argument.
         self.exit_code = command.exit_code if command is not None else exit_code
         self.usage = usage if usage is not None else FinalUsage.resolve(stream_result, tokens)
+        self.launch_failed = launch_failed
 
 
 class AgentExecutionHandler:
@@ -494,6 +507,7 @@ class AgentExecutionHandler:
                 command=None,
                 exit_code=None,
                 usage=usage,
+                launch_failed=launch.launch_failed,
             )
 
         command = AgentExecutionCompletedCommand(
@@ -517,4 +531,5 @@ class AgentExecutionHandler:
             subagents=subagents,
             command=command,
             usage=usage,
+            launch_failed=launch.launch_failed,
         )

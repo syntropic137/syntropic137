@@ -63,6 +63,7 @@ members = ["apps/*", "packages/*"]
 exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/syn-pulse-ui", "packages/openclaw-plugin"]
 
 [tool.uv.sources]
+apss-session-capture = { path = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" }
 syn-api = { workspace = true }
 syn-collector = { workspace = true }
 syn-domain = { workspace = true }

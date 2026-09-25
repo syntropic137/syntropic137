@@ -115,6 +115,17 @@ wheels = [
 ]
 
 [[package]]
+name = "apss-session-capture"
+version = "2.1.0"
+source = { directory = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.10,<3" }]
+
+[[package]]
 name = "argon2-cffi"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1353,6 +1364,7 @@ dependencies = [
     { name = "agentic-events" },
     { name = "agentic-isolation" },
     { name = "agentic-logging" },
+    { name = "apss-session-capture" },
     { name = "cryptography" },
     { name = "event-sourcing-python", extra = ["grpc"] },
     { name = "httpx" },
@@ -1381,6 +1393,7 @@ requires-dist = [
     { name = "agentic-events", editable = "lib/agentic-primitives/lib/python/agentic_events" },
     { name = "agentic-isolation", editable = "lib/agentic-primitives/lib/python/agentic_isolation" },
     { name = "agentic-logging", editable = "lib/agentic-primitives/lib/python/agentic_logging" },
+    { name = "apss-session-capture", directory = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" },
     { name = "asyncpg", marker = "extra == 'all'", specifier = ">=0.30.0" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
     { name = "cryptography", specifier = ">=46.0.5" },

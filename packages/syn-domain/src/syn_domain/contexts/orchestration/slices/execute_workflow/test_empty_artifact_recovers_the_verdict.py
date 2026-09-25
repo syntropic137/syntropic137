@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -501,6 +502,17 @@ class TestTheVerdictSurvivesEveryHop:
             claude_cmd=["agent"],
             delivers_repo_changes=True,
         )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.test_agent_attempts import (
+            started_session_manager,
+        )
+
+        processor._runtimes.of("exec-0bac0e1ed2b2").begin(
+            "verify",
+            session_manager=await started_session_manager(
+                execution_id="exec-0bac0e1ed2b2", phase_id="verify"
+            ),
+            started_at=datetime.now(UTC),
+        )
 
         aggregate = WorkflowExecutionAggregate()
         aggregate._handle_command(
@@ -515,6 +527,10 @@ class TestTheVerdictSurvivesEveryHop:
         agent_result = MagicMock()
         agent_result.stream_result.last_agent_message = SAID
         agent_result.stream_result.interrupt_requested = False
+        # The invocation is now durably registered, so its outcome is recorded:
+        # these are read for it and must be real values, not truthy mocks.
+        agent_result.stream_result.leader_native_session_id = None
+        agent_result.launch_failed = False
         agent_result.command = AgentExecutionCompletedCommand(
             execution_id="exec-0bac0e1ed2b2",
             phase_id="verify",

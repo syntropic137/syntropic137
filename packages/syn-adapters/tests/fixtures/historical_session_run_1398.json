@@ -1,0 +1,162 @@
+{
+ "_about": "Anonymized historical run (#1398 rows 12-13). IDs, URLs and bodies are synthetic stand-ins with the shapes a pre-inventory run left behind: capture verdicts without durable IDs, a delegate billing ledger, and catalogued local archives with no journaled evidence.",
+ "execution_id": "historical-run",
+ "capture_observations": [
+  {
+   "session_id": "phase-plan-session",
+   "phase_id": "plan",
+   "data": {
+    "schema_version": 2,
+    "state": "captured",
+    "needs_backfill": false,
+    "reason": null,
+    "store_url": "http://store.invalid",
+    "origin_environment": "selfhost",
+    "origin_deployment": "anon",
+    "counters": {
+     "uploaded": 4
+    },
+    "agent_session_ids": [
+     "root-a",
+     "agent-b",
+     "orphan-z",
+     "codex-delegate-1"
+    ],
+    "expected_store_url": "http://store.invalid",
+    "expected_deployment": "anon",
+    "expected_sessions": true,
+    "partition": "p-1"
+   }
+  },
+  {
+   "session_id": "phase-plan-session",
+   "phase_id": "plan",
+   "data": {
+    "schema_version": 2,
+    "state": "captured",
+    "needs_backfill": false,
+    "reason": null,
+    "store_url": "http://store.invalid",
+    "origin_environment": "selfhost",
+    "origin_deployment": "anon",
+    "counters": {
+     "uploaded": 4
+    },
+    "agent_session_ids": [
+     "root-a",
+     "agent-b",
+     "orphan-z",
+     "codex-delegate-1"
+    ],
+    "expected_store_url": "http://store.invalid",
+    "expected_deployment": "anon",
+    "expected_sessions": true,
+    "partition": "p-1"
+   }
+  },
+  {
+   "session_id": "phase-build-session",
+   "phase_id": "build",
+   "data": {
+    "schema_version": 1,
+    "state": "captured",
+    "needs_backfill": false,
+    "reason": null,
+    "store_url": "http://store.invalid",
+    "origin_environment": "selfhost",
+    "origin_deployment": "anon",
+    "counters": {
+     "uploaded": 0
+    },
+    "expected_store_url": "http://store.invalid",
+    "expected_deployment": "anon",
+    "expected_sessions": true,
+    "partition": "p-1"
+   }
+  },
+  {
+   "session_id": "phase-review-session",
+   "phase_id": "review",
+   "data": {
+    "schema_version": 2,
+    "state": "captured",
+    "needs_backfill": false,
+    "reason": null,
+    "store_url": "http://store.invalid",
+    "origin_environment": "selfhost",
+    "origin_deployment": "anon",
+    "counters": {
+     "uploaded": 0
+    },
+    "agent_session_ids": [],
+    "expected_store_url": "http://store.invalid",
+    "expected_deployment": "anon",
+    "expected_sessions": true,
+    "partition": "p-1"
+   }
+  }
+ ],
+ "archives": [
+  {
+   "capture_id": "cap-root",
+   "harness": "claude",
+   "content_format": "native",
+   "lines": [
+    "{\"sessionId\":\"root-a\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Agent\",\"id\":\"call-1\"}]}}",
+    "{\"sessionId\":\"root-a\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call-1\"}]},\"toolUseResult\":{\"agentId\":\"b\"}}"
+   ]
+  },
+  {
+   "capture_id": "cap-child",
+   "harness": "claude",
+   "content_format": "native",
+   "lines": [
+    "{\"sessionId\":\"root-a\",\"agentId\":\"b\",\"isSidechain\":true,\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}]}}"
+   ]
+  },
+  {
+   "capture_id": "cap-codex",
+   "harness": "codex",
+   "content_format": "native",
+   "lines": [
+    "{\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-delegate-1\",\"session_id\":\"codex-delegate-1\"}}"
+   ]
+  },
+  {
+   "capture_id": "cap-other",
+   "harness": "other-harness",
+   "content_format": "native",
+   "lines": [
+    "{\"opaque\":1}"
+   ]
+  },
+  {
+   "capture_id": "cap-expired",
+   "harness": "claude",
+   "content_format": "native",
+   "catalogued_native_id": "lost-c",
+   "expired": true,
+   "lines": [
+    "{\"sessionId\":\"lost-c\"}"
+   ]
+  }
+ ],
+ "delegate_ledger": [
+  "codex-delegate-1",
+  "unknown-delegate-9"
+ ],
+ "token_usage": [
+  {
+   "session_id": "phase-plan-session",
+   "input_tokens": 1200,
+   "output_tokens": 300,
+   "model": "claude-sonnet-5"
+  },
+  {
+   "delegate": "codex-delegate-1",
+   "input_tokens": 800,
+   "output_tokens": 90,
+   "model": "gpt-5"
+  }
+ ]
+}

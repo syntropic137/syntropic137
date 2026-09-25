@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.polling import PollingSettings
+    from syn_shared.settings.session_inventory import SessionInventorySettings
     from syn_shared.settings.session_store import SessionStoreSettings
     from syn_shared.settings.storage import StorageSettings
     from syn_shared.settings.workspace import (
@@ -659,6 +660,13 @@ class Settings(BaseSettings):
     # =========================================================================
     # CENTRAL SESSION STORE (SeshMagic capture) - opt-in, default OFF
     # =========================================================================
+
+    @property
+    def session_inventory(self) -> SessionInventorySettings:
+        """Durable local inventory, independent of optional remote replication."""
+        from syn_shared.settings.session_inventory import SessionInventorySettings
+
+        return SessionInventorySettings()
 
     @property
     def session_store(self) -> SessionStoreSettings:

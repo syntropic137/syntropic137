@@ -274,6 +274,7 @@ async def import_delegates_for_phase(
             DelegateUsageRecorder(writer),
             leader_native_session_id=leader_native_session_id,
             captured_session_ids=captured_ids,
+            qualified_session_identities=capture.qualified_session_identities,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,

@@ -411,6 +411,9 @@ allowed_prefixes = [
 # neither CI run could see the other. Not a relaxed ratchet - a false positive
 # on the same shape already excepted one line up.
 "packages/syn-adapters/src/syn_adapters/workspace_backends/service/codex_rollout.py:_exec_fn_for.exec_fn.param:env" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1268" }
+# Same external ExecFn contract as codex_rollout above. This callback receives
+# process environment entries, not an event payload; arbitrary names are valid.
+"packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py:DockerSpoolRecovery.open.execute.param:env" = { annotation = "dict[str, str] | None", verdict = "string-keyed", issue = "#1398" }
 "packages/syn-domain/src/syn_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py:TriggerRuleAggregate._parse_trigger_config.param:config_raw" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_run.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_dedup_check_suite.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }

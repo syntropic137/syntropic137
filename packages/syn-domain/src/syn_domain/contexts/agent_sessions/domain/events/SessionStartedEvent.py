@@ -22,6 +22,7 @@ class SessionStartedEvent(DomainEvent):
     # Context
     workflow_id: str
     execution_id: str | None = None  # Links session to a specific workflow execution/run
+    capture_profile: str | None = None
     phase_id: str
     milestone_id: str | None = None
 

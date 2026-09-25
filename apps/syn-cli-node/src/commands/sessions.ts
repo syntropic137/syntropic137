@@ -22,8 +22,9 @@ type SessionDetail = components["schemas"]["SessionResponse"];
 
 const listCommand: CommandDef = {
   name: "list",
-  description: "List agent sessions",
+  description: "List platform sessions. For every session of a run (native transcripts, lineage, gaps, coverage) use `syn execution sessions <execution-id>`",
   options: {
+    execution: { type: "string", description: "Filter platform sessions by execution ID (complete run inventory: `syn execution sessions <execution-id>`)" },
     workflow: { type: "string", short: "w", description: "Filter by workflow ID" },
     status: { type: "string", short: "s", description: "Filter by status" },
     limit: { type: "string", short: "n", description: "Max results", default: "50" },
@@ -37,6 +38,7 @@ const listCommand: CommandDef = {
       params: {
         query: {
           workflow_id: workflow ?? null,
+          execution_id: (parsed.values["execution"] as string | undefined) ?? null,
           status: status ?? null,
           limit: parseInt(limitStr, 10),
         },

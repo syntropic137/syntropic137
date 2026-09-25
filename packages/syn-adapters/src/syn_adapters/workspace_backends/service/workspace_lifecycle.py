@@ -92,6 +92,7 @@ def build_isolation_config(
     workflow_id: str | None,
     phase_id: str | None,
     extra_environment: dict[str, str] | None,
+    capture_session_id: str | None = None,
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -124,6 +125,7 @@ def build_isolation_config(
         )
 
     return IsolationConfig(
+        capture_session_id=capture_session_id,
         execution_id=execution_id,
         workspace_id=workspace_id,
         workflow_id=workflow_id,

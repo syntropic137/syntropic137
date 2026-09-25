@@ -27,6 +27,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
+from syn_api.services import inventory_lifecycle
 from syn_api.services.admission_announcement import announce_admission_if_open
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
@@ -520,7 +521,9 @@ async def _init_durable_stores() -> Result[None, LifecycleError]:
     except Exception:
         logger.warning("Shared DB pool init failed — dedup will use Redis fallback", exc_info=True)
 
-    return await _init_import_ledger()
+    if isinstance(ledger := await _init_import_ledger(), Err):
+        return ledger
+    return await inventory_lifecycle.initialize_session_inventory()
 
 
 async def _init_import_ledger() -> Result[None, LifecycleError]:
@@ -730,6 +733,7 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     # boundary. Continuing past a failed start would announce into a store
     # nothing is listening to live and report the API healthy while doing it.
     await coordinator.start()
+    await inventory_lifecycle.start_inventory_clock(coordinator)
     # Only assign to state after coordinator starts successfully,
     # so a partial failure doesn't orphan the dispatcher.
     state.workflow_dispatcher = workflow_dispatcher
@@ -741,6 +745,7 @@ async def _init_subscriptions(state: LifecycleState) -> None:
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
+    await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()
         state.workflow_dispatcher = None

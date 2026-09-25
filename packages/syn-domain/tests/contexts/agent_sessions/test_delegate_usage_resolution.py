@@ -235,3 +235,31 @@ async def test_a_failed_lookup_is_transient_not_permanent() -> None:
 
     assert isinstance(result, UnpricedUsage)
     assert result.retry is RetryDisposition.TRANSIENT
+
+
+@pytest.mark.asyncio
+async def test_qualified_usage_never_falls_back_to_bare_identity() -> None:
+    from unittest.mock import AsyncMock
+
+    from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
+        QualifiedSessionIdentity,
+        QualifiedSessionStorePort,
+    )
+
+    identity = QualifiedSessionIdentity(
+        kind="transcript", source_instance_id="source", harness="codex", local_id="native"
+    )
+    store = AsyncMock(spec=QualifiedSessionStorePort)
+    store.fetch_session = AsyncMock()
+    store.fetch_qualified_session.return_value = None
+    result = await resolve_delegate_usage(store, "native", identity=identity)
+    assert isinstance(result, UnpricedUsage)
+    assert result.retry == RetryDisposition.MISSING
+    store.fetch_qualified_session.assert_awaited_once_with(identity)
+    store.fetch_session.assert_not_called()
+    store.reset_mock()
+    result = await resolve_delegate_usage(store, "another", identity=identity)
+    assert isinstance(result, UnpricedUsage)
+    assert result.retry == RetryDisposition.PERMANENT
+    store.fetch_qualified_session.assert_not_called()
+    store.fetch_session.assert_not_called()

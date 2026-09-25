@@ -45,6 +45,10 @@ if TYPE_CHECKING:
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_domain.contexts.agent_sessions import InventoryReconciliationProcessManager
+    from syn_domain.contexts.agent_sessions.slices.replicate_session_inventory.projection import (
+        InventoryReplicationProcessManager,
+    )
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
         _ExecutionService,
@@ -410,6 +414,8 @@ def create_coordinator_service(
     pool: asyncpg.Pool | None = None,
     budget_checker: _BudgetChecker | None = None,
     max_dispatches_per_hour: int = 50,
+    inventory_process_manager: InventoryReconciliationProcessManager | None = None,
+    inventory_replication_manager: InventoryReplicationProcessManager | None = None,
 ) -> CoordinatorSubscriptionService:
     """Factory to create the coordinator subscription service.
 
@@ -565,6 +571,11 @@ def create_coordinator_service(
             ToolCallCountsProjection(pool=pool),  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         ],
     )
+
+    if inventory_process_manager is not None:
+        projections.append(inventory_process_manager)
+    if inventory_replication_manager is not None:
+        projections.append(inventory_replication_manager)
 
     return CoordinatorSubscriptionService(
         event_store=event_store,

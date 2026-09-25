@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
@@ -159,10 +160,10 @@ async def _run_phase(
     workspace: MagicMock,
     session_mgr: SessionLifecycleManager,
     processor: type[_ConsumingStreamProcessor] = _ConsumingStreamProcessor,
-) -> None:
+) -> AgentExecutionResult:
     """Run one phase through the real handler, reporting into ``session_mgr``."""
     with patch(_PROCESSOR_PATH, processor):
-        await AgentExecutionHandler(controller=None).handle(
+        return await AgentExecutionHandler(controller=None).handle(
             todo=TodoItem(
                 execution_id="exec-1",
                 action=TodoAction.RUN_AGENT,
@@ -368,3 +369,40 @@ async def test_a_cancelled_phase_keeps_the_launch_its_agent_earned() -> None:
     )
 
     assert _launch_of(session_mgr) is AgentLaunch.LAUNCHED
+
+
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("exec_failed", "launch_failed"),
+        ("agent_exited_127", "failed"),
+        ("transport_silent", "failed"),
+        ("agent_silent_127", "failed"),
+    ],
+)
+async def test_invocation_outcome_requires_positive_exec_failure_proof(
+    case: str, expected: str
+) -> None:
+    from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
+        _invocation_outcome,
+    )
+
+    manager = _session_manager()
+    await manager.start()
+    await manager.prepare_invocation("claude")
+
+    def lines(wrapper: str) -> list[str]:
+        if case == "exec_failed":
+            return [_announced(wrapper), _exec_failed(wrapper)]
+        if case == "agent_silent_127":
+            return [_announced(wrapper)]
+        if case == "agent_exited_127":
+            return [_announced(wrapper), '{"type":"result"}']
+        return []
+
+    result = await _run_phase(_workspace(lines=lines, exit_code=127), manager)
+    outcome = _invocation_outcome(result)
+    await manager.finish_invocation(native_session_id=None, status=outcome)
+    assert manager.session is not None
+    assert manager.session.invocations[0].status.value == expected
+    assert result.launch_failed is (case == "exec_failed")
