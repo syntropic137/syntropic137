@@ -20,12 +20,20 @@ off the publishing workflow, not guessed:
   For this publisher that is
   ``https://github.com/AgentParadise/agentic-primitives/.github/workflows/build-workspace-images.yml@refs/heads/main``.
 
-The default is a regexp rather than an exact identity for one reason: the
-publishing branch is planned to move from ``main`` to a protected ``release``
-branch. The regexp admits exactly those two refs of exactly that workflow in
-exactly that repository, so the branch move does not require an emergency
-config change while still naming the signer precisely. It does not admit any
-other workflow, repository, or ref.
+The default is a regexp rather than an exact identity for two reasons:
+
+1. The agentic-primitives publishing branch moved from ``main`` to a protected
+   ``release`` branch, so that identity admits either ref of that one workflow.
+2. Publishing is moving repository, from agentic-primitives to
+   agentic-workspace. During that cutover the default admits BOTH publishers,
+   because a running deployment pins digests built by the old one while the
+   pins move separately. Admitting only the new publisher would make every
+   already-pinned image fail closed for a reason unrelated to its
+   trustworthiness.
+
+Both alternatives name one workflow in one repository, anchored end to end.
+Neither admits any other workflow, repository, or ref. See
+``WORKSPACE_IMAGE_IDENTITY_REGEXP`` for when to drop the old publisher.
 
 Environment Variables:
     SYN_IMAGE_VERIFY_* - signature verification configuration
@@ -45,6 +53,42 @@ AGENTIC_PRIMITIVES_IDENTITY_REGEXP = (
     r"^https://github\.com/AgentParadise/agentic-primitives"
     r"/\.github/workflows/build-workspace-images\.yml"
     r"@refs/heads/(main|release)$"
+)
+
+#: Certificate identity (SAN) regexp for the agentic-workspace image publisher,
+#: which is taking over publishing from agentic-primitives.
+#:
+#: Narrower than the agentic-primitives identity above in one deliberate way:
+#: it admits ``refs/heads/release`` ONLY. agentic-workspace's
+#: ``release-images.yml`` publishes exclusively on a push to the protected
+#: ``release`` branch - not main, not tags, not workflow_dispatch - so
+#: admitting any other ref would accept a signature that workflow cannot
+#: legitimately produce.
+AGENTIC_WORKSPACE_IDENTITY_REGEXP = (
+    r"^https://github\.com/AgentParadise/agentic-workspace"
+    r"/\.github/workflows/release-images\.yml"
+    r"@refs/heads/release$"
+)
+
+#: The identity constraint actually applied by default: either publisher.
+#:
+#: Both are admitted on purpose, and only for the duration of the cutover. A
+#: running deployment pins digests built by agentic-primitives; the pins move
+#: to agentic-workspace digests in a separate change. If this admitted only
+#: the new publisher, shipping the code would make every already-pinned image
+#: fail verification and fail closed, taking workspaces down for a reason that
+#: has nothing to do with the images being untrustworthy.
+#:
+#: Remove AGENTIC_PRIMITIVES_IDENTITY_REGEXP from this alternation once no
+#: PINNED_DIGESTS entry refers to an agentic-primitives-built image. Leaving
+#: it in place permanently would keep trusting a publisher that no longer
+#: needs to be trusted, which is exactly the drift this constraint exists to
+#: prevent.
+#:
+#: Each alternative keeps its own anchors, so the combined pattern still
+#: matches a whole SAN rather than a substring of one.
+WORKSPACE_IMAGE_IDENTITY_REGEXP = (
+    f"(?:{AGENTIC_PRIMITIVES_IDENTITY_REGEXP}|{AGENTIC_WORKSPACE_IDENTITY_REGEXP})"
 )
 
 #: Lowest cosign major version accepted by the verifier probe.
@@ -84,7 +128,7 @@ class ImageVerificationSettings(BaseSettings):
     )
 
     certificate_identity_regexp: str = Field(
-        default=AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+        default=WORKSPACE_IMAGE_IDENTITY_REGEXP,
         description=(
             "Regexp matched against the signing certificate identity (SAN). "
             "For GitHub Actions keyless signing this is the workflow reference "
