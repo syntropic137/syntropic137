@@ -76,7 +76,7 @@ it("refresh schedules management work with the caller key and reports its durabl
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { refresh: true, "idempotency-key": "retry", json: true } });
   const request = fetchMock.mock.calls[0]![0] as Request;
   expect(request.method).toBe("POST");
-  expect(await request.json()).toEqual({ idempotency_key: "retry" });
+  expect(await request.json()).toEqual({ idempotency_key: "retry", include_history: false });
   expect(JSON.parse(output()).refresh.job_id).toBe(job.job_id);
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });

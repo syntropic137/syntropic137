@@ -67,6 +67,20 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 _IMAGE = "syn-inventory-integration-event-store:local"
+
+# Evidence watermarks count appended batches, so each target is derived from the
+# events the test emits rather than hard-coded. HostSessionEvidenceProjector writes
+# one batch per SessionStarted and per registered invocation, and two per launched
+# or terminal invocation (identity plus the separate lifecycle stream, #1398).
+_STARTED_BATCHES = 1
+_REGISTERED_BATCHES = 1
+_LIFECYCLE_BATCHES = 2
+_LIVE_INVOCATION_BATCHES = (
+    _STARTED_BATCHES  # start()
+    + _REGISTERED_BATCHES  # prepare_invocation()
+    + _LIFECYCLE_BATCHES  # mark_launched()
+    + _LIFECYCLE_BATCHES  # finish_invocation(COMPLETED)
+)
 _ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -124,18 +138,25 @@ def inventory_stack() -> Iterator[InventoryStack]:
 
 
 async def _wait_current(runtime: InventoryRuntime, run: RunIdentity, watermark: int) -> None:
-    async with asyncio.timeout(20):
-        while True:
-            head = await runtime.inventory.head(run)
-            job = await runtime.jobs.latest(run)
-            if (
-                head is not None
-                and head.evidence_watermark == watermark
-                and job is not None
-                and job.state.stage is ReconciliationStage.COMPLETED
-            ):
-                return
-            await asyncio.sleep(0.05)
+    head = job = None
+    try:
+        async with asyncio.timeout(20):
+            while True:
+                head = await runtime.inventory.head(run)
+                job = await runtime.jobs.latest(run)
+                if (
+                    head is not None
+                    and head.evidence_watermark == watermark
+                    and job is not None
+                    and job.state.stage is ReconciliationStage.COMPLETED
+                ):
+                    return
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        watermark_seen = None if head is None else head.evidence_watermark
+        raise AssertionError(
+            f"inventory never reached watermark {watermark}: head={watermark_seen} job={job!r}"
+        ) from None
 
 
 def _batch(run: RunIdentity, identity: str) -> EvidenceBatch:
@@ -240,7 +261,8 @@ async def test_live_clock_recovers_pending_inventory_after_full_runtime_restart(
         )
         await coordinator.start()
         await runtime.clock.start()
-        await _wait_current(runtime, run, 1)
+        after_catch_up = _STARTED_BATCHES
+        await _wait_current(runtime, run, after_catch_up)
         first = await runtime.inventory.head(run)
         assert first is not None
         memberships = await runtime.inventory.page(run, first.snapshot_id, "membership")
@@ -250,7 +272,8 @@ async def test_live_clock_recovers_pending_inventory_after_full_runtime_restart(
         assert first.counts.node == 1
         assert first.coverage.state == "unknown"
         await _register_live_invocation(client, run)
-        await _wait_current(runtime, run, 5)
+        after_live = after_catch_up + _LIVE_INVOCATION_BATCHES
+        await _wait_current(runtime, run, after_live)
         controlled = await runtime.inventory.head(run)
         assert controlled is not None
         assert controlled.counts.node == 4
@@ -270,7 +293,7 @@ async def test_live_clock_recovers_pending_inventory_after_full_runtime_restart(
         )  # type: ignore[arg-type]
         await coordinator.start()
         await runtime.clock.start()
-        await _wait_current(runtime, run, 6)
+        await _wait_current(runtime, run, after_live + 1)
         latest = await runtime.inventory.head(run)
         assert latest is not None
         assert latest.counts.node == 5

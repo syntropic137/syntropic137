@@ -53,7 +53,8 @@ export const executionSessionsCommand: CommandDef = {
       if (cursor) throw new CLIError("refresh cannot be combined with a historical cursor");
       const scheduled = unwrap(await api.POST("/executions/{execution_id}/session-inventory/reconcile", {
         params: { path: { execution_id: execution } },
-        body: { idempotency_key: String(values["idempotency-key"] ?? randomUUID()) },
+        // The CLI refresh stays live-only; historical backfill is an explicit API call.
+        body: { idempotency_key: String(values["idempotency-key"] ?? randomUUID()), include_history: false },
       }), "Failed to schedule inventory refresh");
       refresh = unwrap(await api.GET("/session-inventory-jobs/{job_id}", {
         params: { path: { job_id: scheduled.job_id } },
