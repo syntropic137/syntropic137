@@ -18,6 +18,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryNode,
     LineageEdge,
     Membership,
+    ResolvedInventory,
     RunIdentity,
 )
 
@@ -33,6 +34,14 @@ InventoryItem = (
 ItemKind = Literal["node", "membership", "edge", "capture", "gap", "retraction", "binding"]
 
 
+class InventoryNamespaceCount(InventoryModel):
+    """Distinct nodes in one identity namespace. Transcripts are split per harness."""
+
+    kind: Literal["platform", "invocation", "transcript"]
+    harness: Identifier | None = None
+    count: int = Field(ge=0)
+
+
 class InventoryCounts(InventoryModel):
     node: int = Field(ge=0)
     membership: int = Field(ge=0)
@@ -41,6 +50,35 @@ class InventoryCounts(InventoryModel):
     gap: int = Field(ge=0)
     retraction: int = Field(default=0, ge=0)
     binding: int = Field(default=0, ge=0)
+    namespaces: tuple[InventoryNamespaceCount, ...] | None = None
+    """Distinct node counts per identity namespace; None on snapshots built before #1398 D."""
+
+
+_NAMESPACE_ORDER = {"platform": 0, "invocation": 1, "transcript": 2}
+
+
+def inventory_counts(resolved: ResolvedInventory) -> InventoryCounts:
+    """The one place a snapshot's declared counts are derived from its resolved content."""
+    tally: dict[tuple[Literal["platform", "invocation", "transcript"], str | None], int] = {}
+    for node in resolved.nodes:
+        slot = (node.ref.kind, node.ref.harness)
+        tally[slot] = tally.get(slot, 0) + 1
+    namespaces = tuple(
+        InventoryNamespaceCount(kind=kind, harness=harness, count=count)
+        for (kind, harness), count in sorted(
+            tally.items(), key=lambda entry: (_NAMESPACE_ORDER[entry[0][0]], entry[0][1] or "")
+        )
+    )
+    return InventoryCounts(
+        node=len(resolved.nodes),
+        binding=len(resolved.bindings),
+        membership=len(resolved.memberships),
+        edge=len(resolved.edges),
+        capture=len(resolved.captures),
+        gap=len(resolved.gaps),
+        retraction=len(resolved.retractions),
+        namespaces=namespaces,
+    )
 
 
 class InventorySnapshot(InventoryModel):

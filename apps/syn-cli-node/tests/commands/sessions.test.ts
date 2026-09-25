@@ -112,6 +112,24 @@ describe("sessions commands", () => {
     expect(url.searchParams.get("execution_id")).toBe("run-123");
   });
 
+  it("list stays a platform-session view: one /sessions request, no inventory reads, same totals", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({
+      sessions: [{ id: "sess-plat-0001", status: "completed", agent_model_display: "m", total_tokens_display: "1.0k", total_cost_display: "$0.01", started_at: "2026-01-01T00:00:00Z" }],
+      total: 1,
+    }));
+    await sessionsGroup.getCommand("list")!.handler({ positionals: [], values: { execution: "run-123" } });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
+    expect(url.pathname).not.toContain("session-inventory");
+    expect(stdout()).toContain("$0.01");
+  });
+
+  it("list help points to the complete run inventory command", () => {
+    const list = sessionsGroup.getCommand("list")!;
+    expect(list.description).toContain("syn execution sessions <execution-id>");
+    expect(list.options?.["execution"]?.description).toContain("syn execution sessions");
+  });
+
   it("show renders session detail", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({

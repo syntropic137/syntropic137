@@ -120,11 +120,13 @@ from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
     InventoryFilter,
     InventoryItem,
     InventoryItemKeys,
+    InventoryNamespaceCount,
     InventoryPage,
     InventoryQueryPage,
     InventorySnapshot,
     ItemKind,
     SessionInventoryReadPort,
+    inventory_counts,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
     InventoryNotFound,
@@ -253,6 +255,7 @@ __all__ = [
     "CompleteSessionCommand",
     "CompleteSessionHandler",
     "CostCalculator",
+    "CoverageState",
     "EvidenceBatch",
     "EvidenceClass",
     "EvidencePage",
@@ -277,6 +280,7 @@ __all__ = [
     "InventoryJob",
     "InventoryJobLease",
     "InventoryLeaseLost",
+    "InventoryNamespaceCount",
     "InventoryNode",
     "InventoryNodeRef",
     "InventoryNotFound",
@@ -353,6 +357,7 @@ __all__ = [
     "TranscriptDeletedError",
     "TranscriptIntegrityError",
     "import_phase_delegates",
+    "inventory_counts",
     "model_from_rollout",
     "pick_primary_model",
     "price_canonical_row",
@@ -384,6 +389,7 @@ from .domain.read_models.session_evidence import (
 )
 from .domain.read_models.session_inventory import (
     BodyAvailability,
+    CoverageState,
     EvidenceClass,
     EvidenceReference,
     InventoryNodeRef,

@@ -41,3 +41,89 @@ it("rejects invalid bounds before network access", async () => {
   expect(result.isError).toBe(true);
   expect(mockFetch).not.toHaveBeenCalled();
 });
+
+const pageBody = (kind: string, ids: string[], next: string | null) => ({
+  snapshot: { snapshot_id: snapshot, revision: "rev", coverage: { state: "open", missing_keys: [] }, counts: { node: 3, gap: 1 } },
+  kind, filters: {}, item_keys: [], body_overrides: [], next_cursor: next,
+  items: kind === "gap" ? ids.map(reason => ({ reason, node_keys: [], evidence_ids: [] }))
+    : ids.map(local_id => ({ ref: { kind: "platform", source_instance_id: "s", local_id }, evidence: [] })),
+});
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+it("forwards phase and attempt filters on page reads", async () => {
+  mockFetch.mockResolvedValue(json(pageBody("node", [], null)));
+  await synGetSessionInventory(client, { execution_id: "run", snapshot_id: snapshot, phase_id: "phase one", attempt_id: "a-1" });
+  const url = new URL(mockFetch.mock.calls[0]![0] as string);
+  expect(url.searchParams.get("phase_id")).toBe("phase one");
+  expect(url.searchParams.get("attempt_id")).toBe("a-1");
+});
+
+it.each([
+  [{ phase_id: " " }, "phase_id"],
+  [{ attempt_id: "x".repeat(2049) }, "attempt_id"],
+  [{ node_key: "not-hex" }, "node_key"],
+])("rejects invalid selectors %j before network access", async (extra, message) => {
+  const result = await synGetSessionInventory(client, { execution_id: "run", snapshot_id: snapshot, ...extra });
+  expect(result.isError).toBe(true);
+  expect(result.content).toContain(message);
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it("requires a snapshot for filters instead of guessing the head", async () => {
+  const result = await synGetSessionInventory(client, { execution_id: "run", phase_id: "p" });
+  expect(result.isError).toBe(true);
+  expect(mockFetch).not.toHaveBeenCalled();
+});
+
+it("resolves a cross-page node key within the pinned snapshot", async () => {
+  const key = "c".repeat(64);
+  mockFetch.mockResolvedValue(json({ snapshot_id: snapshot, node_key: key, status: "unresolved", node: null }));
+  const result = await synGetSessionInventory(client, { execution_id: "run", snapshot_id: snapshot, node_key: key });
+  expect(JSON.parse(result.content).status).toBe("unresolved");
+  expect(mockFetch.mock.calls[0]![0]).toBe(`https://deployment.example/api/v1/executions/run/session-inventory/${snapshot}/nodes/${key}`);
+});
+
+it("all mode reads every page of every section from one revision and keeps gaps", async () => {
+  const status = { snapshot: { snapshot_id: snapshot, revision: "rev" }, reconstruction_status: "current", later_evidence_pending: false, summary: { complete: false } };
+  mockFetch.mockImplementation(async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/session-inventory")) return json(status);
+    const kind = url.pathname.split("/").pop()!;
+    if (kind === "node") return json(url.searchParams.get("cursor") === "c1" ? pageBody("node", ["two"], null) : pageBody("node", ["one"], "c1"));
+    if (kind === "gap") return json(pageBody("gap", ["capture_pending"], null));
+    return json(pageBody(kind, [], null));
+  });
+  const result = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true })).content);
+  expect(result.sections.node.items.map((n: { ref: { local_id: string } }) => n.ref.local_id)).toEqual(["one", "two"]);
+  expect(result.sections.node.truncated).toBe(false);
+  expect(result.gaps).toEqual([{ reason: "capture_pending", node_keys: [], evidence_ids: [] }]);
+  expect(result.summary).toEqual({ complete: false });
+  expect(Object.keys(result.sections).sort()).toEqual(["binding", "capture", "edge", "gap", "membership", "node", "retraction"]);
+  const pageUrls = mockFetch.mock.calls.slice(1).map(c => new URL(c[0] as string));
+  expect(pageUrls.every(u => u.pathname.includes(snapshot))).toBe(true);
+});
+
+it("all mode rejects a response from another revision", async () => {
+  mockFetch.mockResolvedValueOnce(json({ snapshot: { snapshot_id: snapshot }, summary: {} }))
+    .mockResolvedValueOnce(json({ ...pageBody("node", [], null), snapshot: { snapshot_id: "22222222-2222-4222-8222-222222222222" } }));
+  const result = await synGetSessionInventory(client, { execution_id: "run", all: true, kind: "node" });
+  expect(result.isError).toBe(true);
+  expect(result.content).toContain("another revision");
+});
+
+it("all mode without a published revision reports none rather than an empty inventory", async () => {
+  mockFetch.mockResolvedValueOnce(json({ snapshot: null, reconstruction_status: "pending", later_evidence_pending: false, summary: { complete: false } }));
+  const result = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true })).content);
+  expect(result.snapshot_id).toBeNull();
+  expect(result.gaps).toBeNull();
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+});
+
+it("surfaces structured cursor errors with their restart instructions", async () => {
+  mockFetch.mockResolvedValue(json({ detail: { code: "cursor_expired", message: "gone", mismatched: [], restart: true, restart_snapshot_id: snapshot } }, 410));
+  const result = await synGetSessionInventory(client, { execution_id: "run", snapshot_id: snapshot, cursor: "old" });
+  expect(result.isError).toBe(true);
+  expect(result.content).toContain("410");
+  expect(result.content).toContain("cursor_expired");
+  expect(result.content).toContain(snapshot);
+});

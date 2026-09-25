@@ -8,13 +8,21 @@ const snapshot = {
   resolver_version: "test/1", evidence_watermark: 3,
   coverage: { state: "unknown" }, counts: { node: 2, gap: 1 },
 };
-const status = { run, snapshot, reconstruction_status: "current", later_evidence_pending: false };
-const page = (id: string, next: string | null) => ({
-  snapshot, kind: "node", filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
-  items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }], next_cursor: next,
+const summary = {
+  complete: false, coverage_state: "unknown", coverage_display: "unknown: no completeness contract for this run",
+  revision: "revision", distinct_sessions: 2, platform_sessions: 0, invocations: 0, native_transcripts: 2, gaps: 1,
+  namespaces: [], counts_display: "0 platform sessions, 2 native transcripts (fake 2), 0 invocations, 1 gap",
+  remote_replication: "enabled", follow_up_command: "syn execution sessions execution --all",
+};
+const status = { run, snapshot, reconstruction_status: "current", later_evidence_pending: false, observed_evidence_watermark: 3, summary };
+const page = (id: string, next: string | null, kind = "node") => ({
+  snapshot, kind, filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
+  items: kind === "node" ? [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }] : [],
+  next_cursor: next,
 });
-const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const output = () => vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
+const urls = () => fetchMock.mock.calls.map(c => new URL((c[0] as Request).url));
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -23,21 +31,72 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it("streams all pages from the original revision with full native IDs", async () => {
+it("streams every page of one section from the original revision with full native IDs", async () => {
   fetchMock.mockResolvedValueOnce(response(status))
     .mockResolvedValueOnce(response(page("native-one-full-id", "server-cursor-1")))
     .mockResolvedValueOnce(response(page("native-two-full-id", null)));
-  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true, limit: "1" } });
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, kind: "node", json: true, limit: "1" } });
   const result = JSON.parse(output());
   expect(result.pages).toHaveLength(2);
   expect(result.pages[1].items[0].ref.local_id).toBe("native-two-full-id");
   expect(result.next_cursor).toBeNull();
-  const urls = fetchMock.mock.calls.map(c => new URL((c[0] as Request).url));
-  expect(urls[1]!.pathname).toContain(snapshot.snapshot_id);
-  expect(urls[2]!.pathname).toContain(snapshot.snapshot_id);
-  expect(urls[1]!.searchParams.get("cursor")).toBeNull();
-  expect(urls[2]!.searchParams.get("cursor")).toBe("server-cursor-1");
-  expect(urls[2]!.searchParams.get("after")).toBeNull();
+  expect(result.gaps).toBeNull(); // gap section not read: never an empty-looking list
+  const [, first, second] = urls();
+  expect(first!.pathname).toContain(snapshot.snapshot_id);
+  expect(second!.pathname).toContain(snapshot.snapshot_id);
+  expect(first!.searchParams.get("cursor")).toBeNull();
+  expect(second!.searchParams.get("cursor")).toBe("server-cursor-1");
+  expect(second!.searchParams.get("after")).toBeNull();
+});
+
+it("--all traverses every section and reports revision, counts, coverage, gaps and summary", async () => {
+  const gap = { reason: "unlinked_native_transcript", node_keys: ["k".repeat(64)], evidence_ids: [] };
+  fetchMock.mockImplementation(async (request: Request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/session-inventory")) return response(status);
+    const kind = url.pathname.split("/").pop()!;
+    if (kind === "node" && !url.searchParams.get("cursor")) return response(page("native-a", "n2"));
+    if (kind === "node") return response(page("native-b", null));
+    if (kind === "gap") return response({ ...page("", null, "gap"), items: [gap], item_keys: [{}] });
+    return response(page("", null, kind));
+  });
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true } });
+  const result = JSON.parse(output());
+  const kinds = urls().slice(1).map(url => url.pathname.split("/").pop());
+  expect(kinds).toEqual(["node", "node", "membership", "edge", "capture", "gap", "binding", "retraction"]);
+  expect(result.revision).toBe("revision");
+  expect(result.snapshot_id).toBe(snapshot.snapshot_id);
+  expect(result.counts).toEqual(snapshot.counts);
+  expect(result.coverage).toEqual({ state: "unknown" });
+  expect(result.summary).toEqual(summary);
+  expect(result.gaps).toEqual([gap]);
+  expect(result.complete).toBe(false);
+  expect(result.next_cursor).toBeNull();
+});
+
+it("maps --phase/--attempt to API filters and binds them into the continuation cursor", async () => {
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("native", "server-next")));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, phase: "phase-plan", attempt: "attempt-1" } });
+  const pageUrl = urls()[1]!;
+  expect(pageUrl.searchParams.get("phase_id")).toBe("phase-plan");
+  expect(pageUrl.searchParams.get("attempt_id")).toBe("attempt-1");
+  const result = JSON.parse(output());
+  expect(result.filters).toEqual({ phase_id: "phase-plan", attempt_id: "attempt-1" });
+  const cursor = result.next_cursor as string;
+  expect(JSON.parse(Buffer.from(cursor, "base64url").toString())).toMatchObject({ phase: "phase-plan", attempt: "attempt-1", server: "server-next" });
+  fetchMock.mockReset();
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, phase: "phase-build" } })).rejects.toThrow("other --phase/--attempt");
+  expect(fetchMock).not.toHaveBeenCalled();
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("native-next", null)));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
+  const continued = urls()[1]!;
+  expect(continued.searchParams.get("phase_id")).toBe("phase-plan");
+  expect(continued.searchParams.get("cursor")).toBe("server-next");
+});
+
+it("rejects blank filters before network access", async () => {
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { phase: " " } })).rejects.toThrow("Invalid --phase");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it("rejects a cursor from another installation before requesting a page", async () => {
@@ -50,21 +109,45 @@ it("rejects a cursor from another installation before requesting a page", async 
 it("shows pending without inventing an empty published inventory", async () => {
   fetchMock.mockResolvedValueOnce(response({ ...status, snapshot: null, reconstruction_status: "pending" }));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true } });
-  expect(JSON.parse(output()).status.snapshot).toBeNull();
+  const result = JSON.parse(output());
+  expect(result.status.snapshot).toBeNull();
+  expect(result.revision).toBeNull();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("require-complete rejects unknown coverage after printing valid data", async () => {
-  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("native", null)));
-  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not reconciled");
-  expect(JSON.parse(output()).pages).toHaveLength(1);
+for (const state of ["unknown", "open", "missing", "unsupported", "conflicting"]) {
+  it(`require-complete fails on ${state} coverage after printing valid data`, async () => {
+    const partial = { ...status, snapshot: { ...snapshot, coverage: { state } }, summary: { ...summary, coverage_state: state, complete: false } };
+    fetchMock.mockResolvedValueOnce(response(partial)).mockResolvedValueOnce(response(page("native", null)));
+    await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow(`coverage ${state}`);
+    expect(JSON.parse(output()).pages).toHaveLength(1);
+  });
+}
+
+it("require-complete passes only on the server's complete verdict for the current head", async () => {
+  const reconciled = { ...status, snapshot: { ...snapshot, coverage: { state: "reconciled" } }, summary: { ...summary, coverage_state: "reconciled", complete: true } };
+  fetchMock.mockResolvedValueOnce(response(reconciled)).mockResolvedValueOnce(response(page("native", null)));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } });
+  expect(JSON.parse(output()).complete).toBe(true);
+  // Reconciled but newer evidence pending: the server says incomplete, and the CLI obeys.
+  fetchMock.mockResolvedValueOnce(response({ ...reconciled, reconstruction_status: "pending", summary: { ...reconciled.summary, complete: false } }))
+    .mockResolvedValueOnce(response(page("native", null)));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { "require-complete": true } })).rejects.toThrow("not complete");
+});
+
+it("surfaces an expired cursor with its restart hint", async () => {
+  const cursor = Buffer.from(JSON.stringify({ source: "installation", execution: "execution", snapshot: snapshot.snapshot_id, server: "old" })).toString("base64url");
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({
+    detail: { code: "cursor_expired", message: "Pinned inventory revision is no longer available; restart from the head", restart: true, mismatched: [] },
+  }, 410));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor } })).rejects.toThrow(/cursor_expired.*rerun without --cursor/);
 });
 
 it("rejects nonadvancing pagination instead of looping", async () => {
   fetchMock.mockResolvedValueOnce(response(status))
     .mockResolvedValueOnce(response(page("native", "same")))
     .mockResolvedValueOnce(response(page("native", "same")));
-  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true } })).rejects.toThrow("did not advance");
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, kind: "node" } })).rejects.toThrow("did not advance");
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });
 
@@ -96,7 +179,7 @@ it("preserves capture restrictions and binds continuation cursors to the section
   vi.mocked(process.stdout.write).mockClear();
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({ ...capturePage, next_cursor: null }));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
-  const continued = new URL((fetchMock.mock.calls[1]![0] as Request).url);
+  const continued = urls()[1]!;
   expect(continued.pathname).toMatch(/\/capture$/);
   expect(continued.searchParams.get("cursor")).toBe("server-capture");
 });
@@ -105,12 +188,47 @@ it("prints historical capture availability separately from current expiry", asyn
   const hash = "a".repeat(64);
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({
     snapshot, kind: "capture", filters: {}, item_keys: [], next_cursor: null,
-    items: [{ node: { harness: "codex", local_id: "native" }, destination: "local", availability: "present", archived_byte_hash: hash }],
+    items: [{ node: { kind: "transcript", source_instance_id: "installation", harness: "codex", local_id: "native" }, destination: "local", availability: "present", archived_byte_hash: hash }],
     body_overrides: [{ archive_sha256: hash, status: "expired" }],
   }));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "capture" } });
-  expect(output()).toContain("recorded=present; current=expired");
+  expect(output()).toContain("transcript:codex/native\tlocal: recorded=present; current=expired");
   expect(output()).toContain(hash);
+});
+
+it("human --all output groups by phase/attempt with full IDs, parent, local and replication state", async () => {
+  const leader = { kind: "transcript", source_instance_id: "installation", harness: "claude", local_id: "claude-leader-full-id" };
+  const child = { kind: "transcript", source_instance_id: "installation", harness: "claude", local_id: "claude-child-full-id" };
+  const platform = { kind: "platform", source_instance_id: "installation", local_id: "sess-platform-full-id" };
+  const [L, C, P] = ["l", "c", "p"].map(c => c.repeat(64));
+  const pages: Record<string, unknown> = {
+    node: { items: [{ ref: leader }, { ref: child }, { ref: platform }], item_keys: [{ node_key: L }, { node_key: C }, { node_key: P }] },
+    membership: { items: [{ node: leader, run, phase_id: "phase-plan", attempt_id: "attempt-1", confidence: "registered", evidence: [] },
+      { node: platform, run, phase_id: "phase-plan", attempt_id: "attempt-1", confidence: "registered", evidence: [] }], item_keys: [{ node_key: L }, { node_key: P }] },
+    edge: { items: [{ parent: leader, child, relation: "spawn", confidence: "corroborated", evidence: [] }], item_keys: [{ node_key: L, peer_key: C }] },
+    capture: { items: [{ node: leader, availability: "present", destination: "local", archived_byte_hash: "a".repeat(64), receipt_sequence: 1 }], item_keys: [{ node_key: L }],
+      body_overrides: [] },
+    gap: { items: [{ reason: "unlinked_native_transcript", node_keys: [C] }], item_keys: [{}] },
+    binding: { items: [{ owner: platform, transcript: leader, confidence: "registered", evidence: [] }], item_keys: [{ node_key: P, peer_key: L }] },
+    retraction: { items: [], item_keys: [] },
+  };
+  fetchMock.mockImplementation(async (request: Request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/session-inventory")) return response({ ...status, summary: { ...summary, remote_replication: "disabled" } });
+    const kind = url.pathname.split("/").pop()!;
+    return response({ snapshot, kind, filters: {}, next_cursor: null, body_overrides: [], ...(pages[kind] as object) });
+  });
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true } });
+  const text = output();
+  expect(text).toContain("Coverage: unknown: no completeness contract for this run");
+  expect(text).toContain(summary.counts_display);
+  expect(text).toContain("Phase phase-plan / attempt attempt-1");
+  expect(text).toContain("transcript:claude/claude-leader-full-id");
+  expect(text).toContain("platform/sess-platform-full-id");
+  expect(text).toContain("represents: platform/sess-platform-full-id");
+  expect(text).toContain("local: present; replication: remote replication disabled");
+  expect(text).toMatch(/Unlinked \(no phase membership\)\n {2}transcript:claude\/claude-child-full-id\n.*\n {4}parent: transcript:claude\/claude-leader-full-id \(spawn, corroborated\)/);
+  expect(text).toContain("unlinked_native_transcript: transcript:claude/claude-child-full-id");
 });
 
 it("rejects unsupported sections before network access", async () => {
@@ -134,7 +252,7 @@ it("continues node cursors without requiring a section field", async () => {
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("legacy-next", null)));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
   expect(JSON.parse(output()).pages[0].items[0].ref.local_id).toBe("legacy-next");
-  const url = new URL((fetchMock.mock.calls[1]![0] as Request).url);
+  const url = urls()[1]!;
   expect(url.pathname).toMatch(/\/node$/);
   expect(url.searchParams.get("cursor")).toBe("server-node");
 });

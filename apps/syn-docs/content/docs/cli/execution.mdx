@@ -25,7 +25,7 @@ syn execution list [options]
 
 ## `syn execution sessions`
 
-Read the reconstructed session inventory for a workflow run
+List every session of a workflow run: platform sessions, invocations and native transcripts, with lineage, gaps and coverage
 
 ```bash
 syn execution sessions <execution-id> [options]
@@ -43,12 +43,14 @@ syn execution sessions <execution-id> [options]
 |------|------|---------|-------------|
 | `--refresh` | `boolean` | --- | Schedule durable local reconstruction and report its job |
 | `--idempotency-key` | `text` | --- | Reuse a refresh request key when retrying |
-| `--json` | `boolean` | --- | Print metadata and revision-pinned pages as JSON |
-| `--kind` | `text` | --- | Inventory section: node, membership, edge, capture, gap, binding, retraction (default node) |
-| `--all` | `boolean` | --- | Read every page of the selected section from one revision |
+| `--json` | `boolean` | --- | Print summary, revision, counts, coverage, gaps, pages and next cursor as JSON |
+| `--kind` | `text` | --- | Inventory section: node, membership, edge, capture, gap, binding, retraction (default node; --all reads every section) |
+| `--all` | `boolean` | --- | Read every page of every section (or of --kind) from one pinned revision |
+| `--phase` | `text` | --- | Only sessions with a membership in this phase ID |
+| `--attempt` | `text` | --- | Only sessions with a membership in this attempt ID |
 | `--limit` | `text` | `100` | Items per page (1 to 500) |
 | `--cursor` | `text` | --- | Continue a previously returned inventory cursor |
-| `--require-complete` | `boolean` | --- | Fail unless coverage is reconciled and current |
+| `--require-complete` | `boolean` | --- | Exit nonzero unless coverage is reconciled and the revision is current |
 
 ---
 
