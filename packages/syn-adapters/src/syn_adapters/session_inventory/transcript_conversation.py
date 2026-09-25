@@ -11,7 +11,11 @@ from syn_domain.contexts.agent_sessions import TranscriptConversation, Transcrip
 
 class AgenticTranscriptConversation:
     def conversation(
-        self, harness: str, content: bytes, content_format: Literal["native", "envelope"]
+        self,
+        harness: str,
+        content: bytes,
+        content_format: Literal["native", "envelope"],
+        native_id: str | None = None,
     ) -> TranscriptConversation:
         plugin = get_harness(harness)
         if not isinstance(plugin, ConversationHarnessPlugin):
@@ -20,9 +24,9 @@ class AgenticTranscriptConversation:
             )
         reader = plugin.conversation_reader()
         result = (
-            reader.conversation_envelope(content)
+            reader.conversation_envelope(content, native_id)
             if content_format == "envelope"
-            else reader.conversation(content)
+            else reader.conversation(content, native_id)
         )
         return TranscriptConversation(
             supported=True,

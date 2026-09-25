@@ -63,3 +63,16 @@ def test_unknown_harness_is_explicitly_unsupported() -> None:
     assert not result.supported
     assert result.messages == ()
     assert result.issues == ("unsupported_harness_conversation",)
+
+
+def test_captured_identity_selects_whose_turns_are_shown() -> None:
+    side = {"type": "user", "sessionId": "s", "isSidechain": True, "agentId": "b"}
+    content = _jsonl(
+        {**side, "message": {"role": "user", "content": "child task"}},
+        {"type": "user", "sessionId": "s", "message": {"role": "user", "content": "root turn"}},
+    )
+    adapter = AgenticTranscriptConversation()
+    root = adapter.conversation("claude", content, "native", "s")
+    child = adapter.conversation("claude", content, "native", "agent-b")
+    assert [m.text for m in root.messages] == ["root turn"]
+    assert [m.text for m in child.messages] == ["child task"]

@@ -67,7 +67,9 @@ class ReadLocalTranscriptHandler:
             deleted = await self._archive.is_deleted(capture.archive)
             return LocalTranscriptRead(status="expired" if deleted else "missing", capture=capture)
         preview = (
-            self._conversation.conversation(capture.harness, body, capture.content_format)
+            self._conversation.conversation(
+                capture.harness, body, capture.content_format, capture.native_id
+            )
             if self._conversation is not None
             else None
         )

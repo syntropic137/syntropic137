@@ -101,7 +101,7 @@ async def test_present_body_is_previewed_through_the_port_only_after_authorizati
     result = await ReadLocalTranscriptHandler(catalog, archive, access, conversation=port).handle(
         run, identity, "a" * 64
     )
-    port.conversation.assert_called_once_with("h", b"exact", "envelope")
+    port.conversation.assert_called_once_with("h", b"exact", "envelope", "native")
     assert result.conversation == preview
     access.require_read.side_effect = PermissionError("denied")
     port.conversation.reset_mock()
