@@ -8,7 +8,7 @@ import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import { print, printError, printDim } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
-import { formatCost, formatCostWithCoverage, formatDuration, formatTimestamp, formatTokens, formatBreakdown } from "../output/format.js";
+import { formatCost, formatCostModelKey, formatCostWithCoverage, formatDuration, formatTimestamp, formatTokens, formatBreakdown } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 
@@ -30,12 +30,12 @@ const summaryCommand: CommandDef = {
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(d.total_tokens)}`);
     print(`  ${style("Tool Calls:", BOLD)} ${d.total_tool_calls}`);
 
-    const topModels = (d.top_models ?? []) as Record<string, string>[];
+    const topModels = d.top_models ?? [];
     if (topModels.length > 0) {
       const table = new Table({ title: "Top Models" });
       table.addColumn("Model", { style: CYAN });
       table.addColumn("Cost", { align: "right" });
-      for (const e of topModels) table.addRow(e["model"] ?? "unknown", e["cost"] ?? "$0");
+      for (const e of topModels) table.addRow(formatCostModelKey(e.model), formatCost(e.cost_usd ?? "0"));
       table.print();
     }
 
@@ -117,7 +117,7 @@ const sessionDetailCommand: CommandDef = {
     print(`  ${style("Duration:", BOLD)} ${formatDuration(s.duration_ms)}`);
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(s.started_at)}`);
 
-    if (s.cost_by_model && Object.keys(s.cost_by_model).length > 0) print(formatBreakdown(s.cost_by_model, "Cost by Model", safeCost));
+    if (s.cost_by_model && Object.keys(s.cost_by_model).length > 0) print(formatBreakdown(s.cost_by_model, "Cost by Model", safeCost, formatCostModelKey));
     if (s.cost_by_tool && Object.keys(s.cost_by_tool).length > 0) print(formatBreakdown(s.cost_by_tool, "Cost by Tool", safeCost));
   },
 };
@@ -175,7 +175,7 @@ const executionDetailCommand: CommandDef = {
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(e.started_at)}`);
 
     if (e.cost_by_phase && Object.keys(e.cost_by_phase).length > 0) print(formatBreakdown(e.cost_by_phase, "Cost by Phase", safeCost));
-    if (e.cost_by_model && Object.keys(e.cost_by_model).length > 0) print(formatBreakdown(e.cost_by_model, "Cost by Model", safeCost));
+    if (e.cost_by_model && Object.keys(e.cost_by_model).length > 0) print(formatBreakdown(e.cost_by_model, "Cost by Model", safeCost, formatCostModelKey));
     if (e.cost_by_tool && Object.keys(e.cost_by_tool).length > 0) print(formatBreakdown(e.cost_by_tool, "Cost by Tool", safeCost));
   },
 };

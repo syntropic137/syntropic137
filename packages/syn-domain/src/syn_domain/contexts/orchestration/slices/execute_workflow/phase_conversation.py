@@ -32,10 +32,15 @@ async def record_phase_conversation(
     execution_id: str,
     phase_id: str,
     workflow_id: str,
-    model: str | None,
+    requested_model: str | None,
     started_at: datetime,
 ) -> None:
-    """Persist the phase's conversation lines alongside its totals."""
+    """Persist the phase's conversation lines alongside its totals.
+
+    Stored AFTER the stream ended, so the model the harness announced is
+    known here and is what is filed as ``model``; the phase's declared model
+    (often an alias) travels separately as ``requested_model`` (ADR-067).
+    """
     recorder = ConversationRecorder(storage)
     await recorder.store(
         session_id=session_id,
@@ -43,7 +48,8 @@ async def record_phase_conversation(
         execution_id=execution_id,
         phase_id=phase_id,
         workflow_id=workflow_id,
-        model=model,
+        model=result.stream_result.announced_model,
+        requested_model=requested_model,
         input_tokens=result.tokens.input_tokens,
         output_tokens=result.tokens.output_tokens,
         started_at=started_at,

@@ -34,9 +34,11 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
+from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -676,7 +678,7 @@ class ArtifactSummary(BaseModel):
     #: phases" is asked. None on either means not reported, never "as
     #: configured".
     agent_provider: str | None = None
-    agent_model: str | None = None
+    agent_model: ObservedModelId | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1121,8 +1123,14 @@ class PhaseExecution(BaseModel):
     duration_seconds: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    model: str | None = None
-    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this phase, or None (ADR-067 D9).
+
+    Never an alias: what the phase asked for is ``requested_model``.
+    """
+    requested_model: str | None = None
+    """The model the phase REQUESTED (often an alias such as ``opus``), or None."""
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -1168,6 +1176,15 @@ class PhaseExecution(BaseModel):
     dataclass, which is the shape `_map_phase_detail` still holds and this
     model no longer does.
     """
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 class ExecutionDetailFull(BaseModel):
@@ -1309,13 +1326,25 @@ class SessionDetail(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
-    agent_model: str | None = None
-    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
+    agent_model: ObservedModelId | None = None
+    """The model the harness REPORTED doing most of this session's work, or None."""
+    requested_model: str | None = None
+    """The model the session REQUESTED (often an alias), or None (ADR-067 D9)."""
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_seconds: float | None = None
     error_message: str | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def agent_model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``agent_model``."""
+        return format_observed_model(self.agent_model, self.requested_model)
 
 
 # ---------------------------------------------------------------------------
@@ -1342,7 +1371,7 @@ class ArtifactDetail(BaseModel):
 
     None means no phase produced it, or it predates ArtifactCreated v6.
     """
-    agent_model: str | None = None
+    agent_model: ObservedModelId | None = None
     """Model that harness ANNOUNCED while running, never the one requested.
 
     This is the field a cross-model review reads to prove a DIFFERENT model
@@ -1405,7 +1434,7 @@ class SessionCostData(BaseModel):
     tool_calls: int = 0
     turns: int = 0
     duration_ms: int = 0
-    cost_by_model: dict = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     tokens_by_tool: dict[str, int] = Field(default_factory=dict)
     cost_by_tool_tokens: dict[str, Decimal] = Field(default_factory=dict)
@@ -1462,7 +1491,7 @@ class ExecutionCostData(BaseModel):
     A phase absent from ``cost_by_phase`` but present here cost an unknown
     amount; a phase in neither genuinely had no spend (#890).
     """
-    cost_by_model: dict = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -1475,6 +1504,14 @@ class ExecutionCostData(BaseModel):
     completed_at: datetime | None = None
 
 
+class ModelCostEntry(BaseModel):
+    """One model's share of a cost total."""
+
+    model: CostModelKey
+    """A reported model id, or ``unattributed-model``. Never an alias."""
+    cost_usd: Decimal = Decimal("0")
+
+
 class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
@@ -1484,7 +1521,7 @@ class CostSummary(BaseModel):
     total_tokens: int = 0
     """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
-    top_models: list[dict] = Field(default_factory=list)
+    top_models: list[ModelCostEntry] = Field(default_factory=list)
     top_sessions: list[dict] = Field(default_factory=list)
 
 
@@ -1553,7 +1590,10 @@ class ConversationMeta(BaseModel):
 
     session_id: str
     event_count: int = 0
-    model: str | None = None
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this conversation, or None."""
+    requested_model: str | None = None
+    """The model the phase REQUESTED (often an alias), or None (ADR-067 D9)."""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     tool_counts: dict = Field(default_factory=dict)
@@ -1564,6 +1604,15 @@ class ConversationMeta(BaseModel):
     workflow_id: str | None = None
     phase_id: str | None = None
     success: bool | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 # ---------------------------------------------------------------------------
@@ -1918,7 +1967,7 @@ class RepoCostResponse(BaseModel):
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 
@@ -2051,7 +2100,7 @@ class SystemCostResponse(BaseModel):
     total_output_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 
@@ -2227,7 +2276,7 @@ class GlobalCostResponse(BaseModel):
     total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     execution_count: int = 0
 
 

@@ -71,6 +71,10 @@ class _NullCollector:
     async def record_tool_completed(self, **kwargs: object) -> None:
         self.calls.append(("tool_completed", kwargs))
 
+    def note_observed_model(self, model: str | None) -> None:
+        # Not a call: the model reaches every assertion through the rows.
+        return
+
     async def record_token_usage(self, *args: object, **kwargs: object) -> None:
         self.calls.append(("token_usage", {"args": args, **kwargs}))
 

@@ -58,6 +58,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
 from syn_domain.contexts.agent_sessions import model_from_rollout
+from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
+    announced_model_from,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -66,9 +69,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
     InterruptibleWorkspace,
     ReportedUsage,
     StreamResult,
-    announced_model_from,
     api_error_label,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
 )
@@ -84,6 +87,7 @@ from syn_shared.delegation import (
     DelegationTarget,
     looks_like_delegation_command,
 )
+from syn_shared.observed_model import RecordedModel
 from syn_shared.pricing import resolve_model_pricing
 
 if TYPE_CHECKING:
@@ -295,6 +299,10 @@ class CodexObservabilityRecorder(Protocol):
         """See ``ObservabilityCollector.note_agent_activity`` (#1303)."""
         ...
 
+    def note_observed_model(self, model: str | None) -> None:
+        """See ``ObservabilityCollector.note_observed_model`` (ADR-067)."""
+        ...
+
     async def record_tool_started(
         self,
         tool_name: str,
@@ -316,6 +324,7 @@ class CodexObservabilityRecorder(Protocol):
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        model: str | None = None,
     ) -> None: ...
 
     async def record_session_summary(
@@ -457,7 +466,27 @@ class CodexStreamProcessor:
         self._delegation_attempts: int = 0
         self._delegation_successes: int = 0
 
+        #: Per-turn usage rows HELD until the model is known (ADR-067 D9); the
+        #: live accumulator (`self._tokens`) is still fed per turn.
+        self._held_rows = HeldTokenRows(collector, phase_id)
+
     async def process_stream(
+        self,
+        stream: AsyncIterator[str],
+        workspace: InterruptibleWorkspace,
+    ) -> StreamResult:
+        """Process the JSONL event stream from ``codex exec --json``.
+
+        Every held usage row is written before this returns or raises: after
+        the rollout read on the normal path (so rows carry the model codex
+        ran), and in the `finally` otherwise, with whatever model is known.
+        """
+        try:
+            return await self._process_stream(stream, workspace)
+        finally:
+            await self._held_rows.flush(self._announced_model, raise_errors=False)
+
+    async def _process_stream(
         self,
         stream: AsyncIterator[str],
         workspace: InterruptibleWorkspace,
@@ -507,6 +536,7 @@ class CodexStreamProcessor:
             )
 
         await self._name_the_model_from_disk()
+        await self._held_rows.flush(self._announced_model, raise_errors=True)
 
         total_cost_usd = self._estimate_cost()
         duration_ms = int((time.monotonic() - started_at) * 1000)
@@ -648,15 +678,18 @@ class CodexStreamProcessor:
     def _estimate_cost(self) -> float | None:
         """Estimate total cost via the STRICT resolver (never Sonnet default).
 
-        ``self._agent_model`` is ``None`` when the phase omitted `model:`
-        (codex does not report its own model on the wire, so there is no
-        authoritative id to resolve). Returning ``None`` here - rather than
-        guessing a model to price against - leaves cost unpriced instead of
-        confidently wrong (issue #788 follow-up).
+        Priced as the model codex REPORTED (read from its rollout) when there
+        is one, else as the requested model - ``RecordedModel.pricing_model``,
+        the one rule every cost reader applies to the rows this writes, so the
+        live estimate and a later re-read agree (ADR-067). With neither, the
+        cost is left unpriced rather than guessed (issue #788 follow-up).
         """
-        if self._agent_model is None:
+        pricing_model = RecordedModel(
+            observed=self._announced_model, requested=self._agent_model
+        ).pricing_model
+        if pricing_model is None:
             return None
-        pricing = resolve_model_pricing(self._agent_model)
+        pricing = resolve_model_pricing(pricing_model)
         if pricing is None:
             return None
         return float(
@@ -991,9 +1024,5 @@ class CodexStreamProcessor:
             0,
             turn_usage.cache_read,
         )
-        await self._collector.record_token_usage(
-            turn_usage.fresh_input,
-            turn_usage.billable_output,
-            cache_creation=0,
-            cache_read=turn_usage.cache_read,
-        )
+        # Held, not written: see `held_token_rows`.
+        self._held_rows.hold(turn_usage)

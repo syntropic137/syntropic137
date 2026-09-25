@@ -189,12 +189,17 @@ class AgentObservationEvent(DomainEvent):
         cache_read_tokens: int = 0,
         model: str | None = None,
         *,
+        requested_model: str | None = None,
         timestamp: datetime | None = None,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
     ) -> AgentObservationEvent:
-        """Create a TOKEN_USAGE observation."""
+        """Create a TOKEN_USAGE observation.
+
+        ``model`` is the REPORTED model (or None), ``requested_model`` the
+        declared one; both keys are always written (ADR-067).
+        """
         from datetime import UTC
 
         return cls(
@@ -207,6 +212,7 @@ class AgentObservationEvent(DomainEvent):
                 "cache_creation_tokens": cache_creation_tokens,
                 "cache_read_tokens": cache_read_tokens,
                 "model": model,
+                "requested_model": requested_model,
             },
             execution_id=execution_id,
             phase_id=phase_id,
