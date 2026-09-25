@@ -109,7 +109,15 @@ def agreed_label(labels_by_platform: dict[str, dict[str, str]], label: str) -> s
 
 #: The submodule whose source builds these images. The pins ship alongside this
 #: exact commit, so the build they came from must BE this commit.
-SUBMODULE_PATH = "lib/agentic-primitives"
+#:
+#: This is the PUBLISHING repository, which as of 2026-09-25 is
+#: agentic-workspace, not agentic-primitives. The two are vendored separately
+#: and on purpose: agentic-workspace builds and signs the images, while
+#: agentic-primitives still supplies the Python packages the uv workspace
+#: imports. Pointing this at the package submodule would compare a pin's
+#: revision against a repository that did not build it, and the check would
+#: fail for every correct pin.
+SUBMODULE_PATH = "lib/agentic-workspace"
 
 
 def submodule_gitlink(path: str = SUBMODULE_PATH) -> str:
@@ -210,7 +218,7 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
     # THIRD: that revision is the submodule we vendor.
     #
     # THIS IS OUR POLICY, NOT AN UPSTREAM CONTRACT. A codex review checked the
-    # upstream workflow: agentic-primitives documents `agentic.image.channel`,
+    # upstream workflow: the publishing repo documents `agentic.image.channel`,
     # but nothing upstream promises that `org.opencontainers.image.revision`
     # equals a consumer's gitlink - the label comes from docker/metadata-action's
     # implicit default rather than an explicit stamp. It is true today and we
