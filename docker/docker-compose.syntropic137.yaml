@@ -468,7 +468,7 @@ services:
         max-size: 10m
         max-file: "3"
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    image: ghcr.io/syntropic137/minio:RELEASE.2025-04-22T22-12-26Z@sha256:bbac678936882e4033b6068efd0a19d103b219002d979087f7c5bd330172e00d
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ""

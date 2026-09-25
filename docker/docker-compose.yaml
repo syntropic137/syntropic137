@@ -293,7 +293,16 @@ services:
   # MINIO - S3-compatible Object Storage
   # =============================================================================
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    # Our own mirror, because MinIO withdrew anonymous pulls: Docker Hub first
+    # (#1403 moved us to Quay), then quay.io/minio/minio on 2026-09-24, which
+    # broke every fresh `compose up` and the smoke test. The linux/amd64
+    # (sha256:3f97c565...) and linux/arm64 (sha256:54d3d6a0...) manifests are
+    # byte-identical to the ones upstream index
+    # quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa... lists;
+    # only the index digest differs. Unmodified AGPL-3.0 binary, source at
+    # github.com/minio/minio/tree/RELEASE.2025-04-22T22-12-26Z.
+    # See infra/README.md "MinIO image mirror" before changing this.
+    image: ghcr.io/syntropic137/minio:RELEASE.2025-04-22T22-12-26Z@sha256:bbac678936882e4033b6068efd0a19d103b219002d979087f7c5bd330172e00d
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}

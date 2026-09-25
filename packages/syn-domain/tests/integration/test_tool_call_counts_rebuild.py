@@ -415,8 +415,14 @@ async def _hand_migrated_database(admin_url: str) -> AsyncIterator[tuple[str, as
     that hid in a private schema would fail before it reached the tally.
 
     ``agent_events`` is created and seeded here; the tally's tables come from
-    running the real migration file. Nothing else is prepared: what happens
-    next is whatever the test does, and then entirely
+    running the real migration file. The TimescaleDB extension is created
+    too, as a privileged role, because ``002_agent_events.sql`` creates it on
+    every real deploy and startup issues ``CREATE EXTENSION IF NOT EXISTS``
+    unconditionally: present, that is a no-op any role may run; absent, it
+    needs CREATE on the database. A database without it is one no deploy
+    produces, and the no-CREATE-privilege test below would fail on the
+    extension instead of measuring the tally. Nothing else is prepared: what
+    happens next is whatever the test does, and then entirely
     ``AgentEventStore.initialize``.
 
     Yields the DSN and an open connection to it, the second because every
@@ -432,6 +438,7 @@ async def _hand_migrated_database(admin_url: str) -> AsyncIterator[tuple[str, as
 
     conn = await asyncpg.connect(dsn)
     try:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
         await conn.execute(_AGENT_EVENTS_DDL)
         await _seed(conn, _SEEDED_HISTORY)
         await conn.execute(_migration_sql())
@@ -535,7 +542,8 @@ async def test_a_tally_backfilled_before_the_old_writer_stopped_is_recounted(
     await _start_the_application(dsn)
 
     assert await _stored_tally(conn) == await _reference_tally(conn)
-    assert await _stored_tally(conn) == _EXPECTED_TALLY | {("sess-a", "exec-1"): 3}
+    # Three seeded completions plus the one the old writer appended untallied.
+    assert await _stored_tally(conn) == _EXPECTED_TALLY | {("sess-a", "exec-1"): 4}
 
 
 async def test_a_second_startup_does_not_pay_for_the_recount_again(
