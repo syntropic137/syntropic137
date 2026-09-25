@@ -3,6 +3,7 @@ import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader, ObservedModel } from '../../components'
+import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
 import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
@@ -61,28 +62,6 @@ function phaseTone(phase: Phase, execution: ExecutionDetailResponse): string {
   return outcomeTone(phase.status, execution.failure_classification)
 }
 
-function PhaseTokenSegment({ label, total, rows, accentColor }: {
-  label: string; total: number; accentColor: string
-  rows: { label: string; value: number; color?: string }[]
-}) {
-  return (
-    <div className="rounded-md border border-[var(--color-border)] overflow-hidden">
-      <div className={`flex items-center justify-between px-2 py-1 ${accentColor}`}>
-        <span className="font-medium">{label}</span>
-        <span className="text-[var(--color-text-secondary)]">{total.toLocaleString()}</span>
-      </div>
-      <div className="px-2 py-1 space-y-0.5">
-        {rows.map(r => (
-          <div key={r.label} className="flex justify-between">
-            <span className={r.color ?? ''}>{r.label}</span>
-            <span className={r.color ?? 'text-[var(--color-text-secondary)]'}>{r.value.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: number }) {
   const Icon = phaseStatusIcons[tone] ?? Clock
   const tokens = phaseTokenTotals(phase)
@@ -131,24 +110,13 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>{duration}</span>
       </div>
-      <div className="mt-2 space-y-1.5 text-xs text-[var(--color-text-muted)]">
-        <PhaseTokenSegment
-          label="In"
-          total={tokens.inputTokens + tokens.cacheReadTokens}
-          accentColor="bg-indigo-500/10 text-indigo-400"
-          rows={[
-            { label: 'Fresh', value: tokens.inputTokens },
-            { label: 'Cache read', value: tokens.cacheReadTokens, color: 'text-emerald-400' },
-          ]}
-        />
-        <PhaseTokenSegment
-          label="Out"
-          total={tokens.outputTokens + tokens.cacheCreationTokens}
-          accentColor="bg-violet-500/10 text-violet-400"
-          rows={[
-            { label: 'Output', value: tokens.outputTokens },
-            { label: 'Cache write', value: tokens.cacheCreationTokens, color: 'text-amber-400' },
-          ]}
+      <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+        <TokenInOut
+          variant="compact"
+          fresh={tokens.inputTokens}
+          cacheWrite={tokens.cacheCreationTokens}
+          cacheRead={tokens.cacheReadTokens}
+          output={tokens.outputTokens}
         />
       </div>
       {phase.agent_session_id && (

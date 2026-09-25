@@ -44,6 +44,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_select,
 )
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
+from syn_shared.pricing import parse_vendor_cost
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -208,9 +209,11 @@ def price_canonical_row(row: Mapping[str, object], calculator: PricingResolver) 
     and a claude session that ended abnormally may not either, so tokens
     remain the fallback - never zero, which would price real work as free.
     """
-    vendor_cost = row.get("vendor_cost_usd")
+    # Canonicalised: the stored figure is the harness's JS double, so a
+    # numeric read of it carries noise like 0.30566780000000005.
+    vendor_cost = parse_vendor_cost(row.get("vendor_cost_usd"))
     if vendor_cost is not None:
-        return RowCost(Decimal(str(vendor_cost)), 0)
+        return RowCost(vendor_cost, 0)
 
     input_tokens = int(row["input_tokens"])  # type: ignore[arg-type]
     output_tokens = int(row["output_tokens"])  # type: ignore[arg-type]

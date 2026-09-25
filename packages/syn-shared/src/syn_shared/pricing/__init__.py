@@ -25,14 +25,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
+from typing import TYPE_CHECKING, overload
 
 from syn_shared.agents import (
     CLAUDE_MODEL_ALIAS_TARGETS,
     CODEX_MODEL_ALIAS_TARGETS,
     ModelId,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -549,15 +553,173 @@ def calculate_cost(
     return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
 
 
+# ---------------------------------------------------------------------------
+# Vendor-reported cost canonicalisation
+# ---------------------------------------------------------------------------
+
+VENDOR_COST_QUANTUM = Decimal("1E-10")
+"""The precision every harness-reported cost is held to: 1e-10 USD.
+
+Why this number, from both sides:
+
+- It is far BELOW any real price. The cheapest rate in ``MODEL_PRICING_TABLE``
+  is $0.02 per million tokens, i.e. 2e-8 USD for one token, so a single token
+  of the cheapest kind is still 200 quanta. No real charge is rounded away.
+- It is far ABOVE double-precision noise. The Claude CLI reports cost as a JS
+  double, so ``0.3056678`` arrives as ``0.30566780000000005``: the noise sits in
+  the 17th significant digit. A double carries ~15.9 significant decimal
+  digits, so for any cost below $100,000 the representation error is under
+  ~1.5e-11, less than the 5e-11 half-quantum, and rounding lands exactly on the
+  value the vendor meant.
+
+Summed values stay clean too: a sum of already-quantized Decimals is exact, and
+a SQL ``SUM`` over the raw text of N noisy rows carries at most N times the
+per-row noise, still orders of magnitude below the half-quantum.
+"""
+
+
+@overload
+def canonical_cost_usd(raw: Decimal | float | int | str) -> Decimal: ...
+@overload
+def canonical_cost_usd(raw: None) -> None: ...
+def canonical_cost_usd(raw: Decimal | float | int | str | None) -> Decimal | None:
+    """Convert a harness-reported cost into a canonical Decimal, or pass ``None`` on.
+
+    THE ONE PLACE a vendor/SDK cost (``total_cost_usd`` from a harness, however it
+    reaches us: a parsed JSON float, a Postgres ``numeric`` read of the stored
+    JSON text, or a SUM of those) becomes a Decimal. It quantizes to
+    ``VENDOR_COST_QUANTUM`` so double noise (``0.30566780000000005``) never
+    reaches an API response, then strips trailing zeros WITHOUT exponent
+    notation: ``Decimal.normalize()`` alone turns ``100`` into ``1E+2``, which
+    pydantic would serialize verbatim.
+
+    ``None`` means the harness reported no cost and stays ``None``; it is not
+    zero (see ``PricedAmount``).
+
+    Also the form every reported cost TOTAL is put in. A Python ``Decimal`` sum
+    keeps its operands' exponent (``0.3056678 + 0.1324232`` is ``0.4380910``),
+    and quantizing a table-priced cost is lossless: every rate has at most two
+    decimals per million tokens, so a whole number of tokens costs at most 8
+    decimal places, well inside the 10 kept here.
+
+    Raises:
+        ValueError: the value is NaN or infinite, which no real cost can be.
+    """
+    if raw is None:
+        return None
+    # str() of a float is its shortest round-trip repr, the digits the JSON
+    # carried; Decimal(float) would instead expand the binary value exactly.
+    value = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+    if not value.is_finite():
+        msg = f"vendor cost must be finite, got {raw!r}"
+        raise ValueError(msg)
+    quantized = value.quantize(VENDOR_COST_QUANTUM, rounding=ROUND_HALF_EVEN)
+    if quantized.is_zero():
+        return Decimal("0")
+    normalized = quantized.normalize()
+    exponent = normalized.as_tuple().exponent
+    if isinstance(exponent, int) and exponent > 0:
+        return normalized.quantize(Decimal("1"))
+    return normalized
+
+
+def parse_vendor_cost(raw: object) -> Decimal | None:
+    """``canonical_cost_usd`` for a value read from an untyped row or payload.
+
+    For the boundary where the cost arrives as ``object`` (an asyncpg record
+    column, a JSON payload value). Rejects anything that is not a number
+    rather than guessing, so a malformed payload fails loudly instead of
+    becoming a plausible price.
+
+    Raises:
+        TypeError: ``raw`` is not ``None``, a Decimal, an int, a float or a str.
+        ValueError: see ``canonical_cost_usd``.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, Decimal | float | int | str):
+        msg = f"vendor cost must be numeric, got {type(raw).__name__}"
+        raise TypeError(msg)
+    return canonical_cost_usd(raw)
+
+
+def cost_json_number(cost: Decimal | float) -> float:
+    """A cost in the form an observation payload stores it: a clean JSON number.
+
+    Observation payloads are JSON, so a cost leaves this process as a float. It
+    is canonicalised first, and that is what makes the float lossless: a
+    canonical cost has at most 15 significant digits for any value under
+    $100,000 (10 decimals, 5 integer digits), and a double round-trips every
+    decimal of up to 15 significant digits, so ``repr`` (what ``json.dumps``
+    writes) prints exactly the canonical digits. A harness double such as
+    ``0.30566780000000005`` is therefore stored as ``0.3056678`` and every
+    later ``::numeric`` read of the row starts clean.
+    """
+    return float(canonical_cost_usd(cost))
+
+
+# ---------------------------------------------------------------------------
+# Cache rate multipliers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CacheRateMultipliers:
+    """How cache reads and writes are billed relative to fresh input, per scope.
+
+    Each field is ``None`` when no single multiplier describes the scope: no
+    models, a model with no rate, a zero input rate, or models that disagree.
+    """
+
+    cache_read: Decimal | None
+    cache_write: Decimal | None
+
+
+def _uniform(values: list[Decimal | None]) -> Decimal | None:
+    """The one shared value, or ``None`` when absent, unknown or mixed."""
+    if not values or any(v is None for v in values):
+        return None
+    distinct = set(values)
+    return distinct.pop() if len(distinct) == 1 else None
+
+
+def cache_rate_multipliers(models: Iterable[str]) -> CacheRateMultipliers:
+    """Cache read and write rates as multiples of the input rate, across ``models``.
+
+    ``cache_read_per_million / input_per_million`` (and the same for cache
+    creation) for every model. A multiplier is returned only when every model
+    resolves to a rate and they all agree: Opus 5.5 reads cache at 0.05x while
+    GPT-6-Sol reads at 0.1x, so a scope that ran both has no single read rate
+    and saying "0.1x" would be wrong for part of it.
+    """
+    reads: list[Decimal | None] = []
+    writes: list[Decimal | None] = []
+    for model in set(models):
+        pricing = resolve_model_pricing(model)
+        if pricing is None or pricing.input_per_million <= 0:
+            reads.append(None)
+            writes.append(None)
+            continue
+        reads.append(pricing.cache_read_per_million / pricing.input_per_million)
+        writes.append(pricing.cache_creation_per_million / pricing.input_per_million)
+    return CacheRateMultipliers(cache_read=_uniform(reads), cache_write=_uniform(writes))
+
+
 __all__ = [
     "MODEL_ALIASES",
     "MODEL_PRICING_TABLE",
     "PLACEHOLDER_PRICED_MODELS",
+    "VENDOR_COST_QUANTUM",
+    "CacheRateMultipliers",
     "ModelPricing",
     "PricedAmount",
     "PricingStatus",
     "UnknownModelPricingError",
+    "cache_rate_multipliers",
     "calculate_cost",
+    "canonical_cost_usd",
+    "cost_json_number",
+    "parse_vendor_cost",
     "price_tokens",
     "require_model_pricing",
     "resolve_model_pricing",

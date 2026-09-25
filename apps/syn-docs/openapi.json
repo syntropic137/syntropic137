@@ -8379,6 +8379,28 @@
             "title": "Unpriced Observation Count",
             "default": 0
           },
+          "cache_read_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Rate Display"
+          },
+          "cache_write_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Rate Display"
+          },
           "total_duration_seconds": {
             "anyOf": [
               {
@@ -11776,6 +11798,11 @@
             "title": "Cost Usd",
             "default": "0"
           },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "duration_seconds": {
             "anyOf": [
               {
@@ -13377,6 +13404,28 @@
             },
             "type": "object",
             "title": "Cost By Model"
+          },
+          "cache_read_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Rate Display"
+          },
+          "cache_write_rate_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Rate Display"
           },
           "operations": {
             "items": {
@@ -15856,7 +15905,8 @@
           "estimated_cost_usd": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"

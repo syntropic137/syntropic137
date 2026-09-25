@@ -16,6 +16,7 @@ import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { useExecutionData } from '../../hooks'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
+import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
 import { isPlatformFailure, reportedFailureNote } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
@@ -61,15 +62,17 @@ function ReposPanel({ repos }: { repos: string[] }) {
  * reconciles the two; do not treat this sum as the execution's cost.
  */
 function aggregateCostByModel(phases: Phase[]): Record<string, string> {
-  const totals = new Map<string, number>()
+  // Summed exactly: the card downstream reconciles this against the
+  // execution's decimal total, and float sums are what made that disagree.
+  const totals = new Map<string, ExactUsd>()
   for (const phase of phases) {
     for (const [model, costStr] of Object.entries(phase.cost_by_model ?? {})) {
-      const cost = Number.parseFloat(costStr)
-      if (!Number.isFinite(cost)) continue
-      totals.set(model, (totals.get(model) ?? 0) + cost)
+      const cost = parseExactUsd(costStr)
+      if (cost === null) continue
+      totals.set(model, (totals.get(model) ?? 0n) + cost)
     }
   }
-  return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, v.toString()]))
+  return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, exactUsdToString(v)]))
 }
 
 /**
@@ -329,6 +332,8 @@ export function ExecutionDetail() {
           cacheCreationTokens={tokens.cacheCreationTokens}
           cacheReadTokens={tokens.cacheReadTokens}
           inProgressTokens={tokens.inProgressTokens}
+          cacheReadRateDisplay={execution.cache_read_rate_display}
+          cacheWriteRateDisplay={execution.cache_write_rate_display}
         />
       </section>
       {Object.keys(aggregatedCostByModel).length > 0 && (

@@ -61,7 +61,8 @@ async def _phase_metrics(workflow_id: str):
     """Call the real endpoint helper that builds the /metrics phase rows."""
     from syn_api.routes.metrics import _build_phase_metrics
 
-    return {p.phase_id: p for p in await _build_phase_metrics(workflow_id)}
+    # No executions: this module is about durations, not costs.
+    return {p.phase_id: p for p in await _build_phase_metrics(workflow_id, set())}
 
 
 async def _phase_projection():

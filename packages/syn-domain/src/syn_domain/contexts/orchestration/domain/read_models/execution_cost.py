@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any, Final
 
 from syn_shared.observed_model import UNKNOWN_MODEL_KEY
+from syn_shared.pricing import canonical_cost_usd
 
 UNATTRIBUTED_PHASE_ID: Final[str] = "unattributed"
 """Bucket for cost that belongs to an execution but to no particular phase.
@@ -52,6 +53,11 @@ def _coerce_decimal_dict(raw: dict[str, str | Decimal] | None) -> dict[str, Deci
     if not raw:
         return {}
     return {k: _coerce_decimal(v) for k, v in raw.items()}
+
+
+def _canonical_map(raw: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Each cost in *raw* in canonical form (see ``canonical_cost_usd``)."""
+    return {k: canonical_cost_usd(v) for k, v in raw.items()}
 
 
 @dataclass
@@ -160,6 +166,22 @@ class ExecutionCost:
 
     completed_at: datetime | None = None
     """When the last session completed."""
+
+    def __post_init__(self) -> None:
+        """Hold every money field in canonical form (``canonical_cost_usd``).
+
+        Every read path builds this record fresh, so canonicalising here is
+        what keeps a harness's double noise (``0.30566780000000005``) and a
+        Decimal sum's trailing zeros out of every API response, without each
+        query service having to remember to.
+        """
+        self.total_cost_usd = canonical_cost_usd(self.total_cost_usd)
+        self.token_cost_usd = canonical_cost_usd(self.token_cost_usd)
+        self.compute_cost_usd = canonical_cost_usd(self.compute_cost_usd)
+        self.cost_by_phase = _canonical_map(self.cost_by_phase)
+        self.models_by_phase = {k: _canonical_map(v) for k, v in self.models_by_phase.items()}
+        self.cost_by_model = _canonical_map(self.cost_by_model)
+        self.cost_by_tool = _canonical_map(self.cost_by_tool)
 
     @property
     def total_tokens(self) -> int:

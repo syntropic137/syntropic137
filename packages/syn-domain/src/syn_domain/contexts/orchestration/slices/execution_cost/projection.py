@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.observed_model import split_observation_model
-from syn_shared.pricing import PricedAmount, price_tokens
+from syn_shared.pricing import PricedAmount, parse_vendor_cost, price_tokens
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -226,8 +226,8 @@ class ExecutionCostProjection:
         execution_cost.turns += data.get("num_turns", 0)
         execution_cost.duration_ms += data.get("duration_ms", 0) or 0
 
-        if data.get("total_cost_usd") is not None:
-            session_cost = Decimal(str(data["total_cost_usd"]))
+        if (reported_cost := parse_vendor_cost(data.get("total_cost_usd"))) is not None:
+            session_cost = reported_cost
             execution_cost.token_cost_usd += session_cost
             execution_cost.total_cost_usd += session_cost
 

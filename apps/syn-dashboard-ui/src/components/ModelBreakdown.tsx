@@ -28,6 +28,13 @@
 
 import { TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader } from './Card'
+import {
+  type ExactUsd,
+  exactUsdToNumber,
+  isVisibleCost,
+  parseExactUsd,
+  sumExactUsd,
+} from '../utils/exactUsd'
 import { formatCost, formatCostWithCoverage } from '../utils/formatters'
 import { costByModelKeyLabel } from '../utils/modelLabels'
 
@@ -56,19 +63,29 @@ export function ModelBreakdown({
   title = 'Cost by Model',
   subtitle = 'Breakdown by model used',
 }: ModelBreakdownProps) {
-  const entries = Object.entries(costByModel)
-    .map(([model, cost]) => ({ model, cost: Number.parseFloat(cost) }))
-    .filter((e) => Number.isFinite(e.cost) && e.cost > 0)
-    .sort((a, b) => b.cost - a.cost)
+  // Reconcile in exact decimal, not floats: the rows and the total are decimal
+  // strings, and float subtraction of an exactly-attributed total leaves ~1e-17,
+  // which rendered as a "not yet attributed $0.000000" row the API never sent.
+  const exactEntries = Object.entries(costByModel)
+    .map(([model, cost]) => ({ model, exact: parseExactUsd(cost) }))
+    .filter((e): e is { model: string; exact: ExactUsd } => e.exact !== null && e.exact > 0n)
+    .sort((a, b) => (a.exact === b.exact ? 0 : a.exact < b.exact ? 1 : -1))
 
-  if (entries.length === 0) return null
+  if (exactEntries.length === 0) return null
 
-  const attributed = entries.reduce((s, e) => s + e.cost, 0)
-  const scopeTotal = Number(totalCost)
+  const attributedExact = sumExactUsd(exactEntries.map((e) => e.exact))
+  const scopeTotal = parseExactUsd(totalCost)
   // A total that is missing or malformed cannot be a denominator; fall back to
   // what the rows account for so the bars stay meaningful rather than NaN.
-  const basis = Number.isFinite(scopeTotal) && scopeTotal > attributed ? scopeTotal : attributed
-  const unattributed = basis - attributed
+  const basisExact = scopeTotal !== null && scopeTotal > attributedExact ? scopeTotal : attributedExact
+  const unattributedExact = basisExact - attributedExact
+  // Mid-run the remainder is real money (#1048) and keeps its row; a remainder
+  // that would print as $0.000000 is rounding, not money, and gets none.
+  const showUnattributed = isVisibleCost(unattributedExact)
+
+  const entries = exactEntries.map((e) => ({ model: e.model, cost: exactUsdToNumber(e.exact) }))
+  const basis = exactUsdToNumber(basisExact)
+  const unattributed = exactUsdToNumber(unattributedExact)
 
   return (
     <Card>
@@ -113,7 +130,7 @@ export function ModelBreakdown({
               </div>
             )
           })}
-          {unattributed > 0 && (
+          {showUnattributed && (
             <div className="space-y-1">
               <div className="flex items-center justify-between text-sm">
                 <span

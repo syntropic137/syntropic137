@@ -88,7 +88,7 @@ from syn_shared.delegation import (
     looks_like_delegation_command,
 )
 from syn_shared.observed_model import RecordedModel
-from syn_shared.pricing import resolve_model_pricing
+from syn_shared.pricing import cost_json_number, resolve_model_pricing
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -692,7 +692,7 @@ class CodexStreamProcessor:
         pricing = resolve_model_pricing(pricing_model)
         if pricing is None:
             return None
-        return float(
+        return cost_json_number(
             pricing.calculate_cost(
                 self._totals.input_tokens,
                 self._totals.output_tokens,

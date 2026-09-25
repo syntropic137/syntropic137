@@ -24,6 +24,7 @@ from syn_api._wiring import (
     get_session_repo,
     sync_published_events_to_projections,
 )
+from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -266,6 +267,18 @@ class SessionResponse(BaseModel):
     than printing a dollar figure they cannot back up (issue #890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cache_read_rate_display: str | None = None
+    """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
+
+    Derived from the price table for every model this session ran. ``None``
+    when no single multiplier is true: models that disagree, a model with no
+    rate, or no model recorded yet. A client must not substitute a constant.
+    """
+    cache_write_rate_display: str | None = None
+    """How cache WRITES are billed relative to fresh input, e.g. ``"1.25x rate"``.
+
+    Same derivation and ``None`` contract as ``cache_read_rate_display``.
+    """
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
@@ -889,6 +902,12 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
     operations = [_to_operation_info(op) for op in (detail.operations or [])]
 
     total_cost = Decimal(str(detail.total_cost_usd))
+    # Priced-as keys first (they include the unattributed-model bucket, which
+    # correctly blanks the label); the reported model when there is no breakdown.
+    session_models = set(detail.cost_by_model) or (
+        {detail.agent_model} if detail.agent_model else set()
+    )
+    cache_rates = cache_rate_display(session_models)
     return SessionResponse(
         id=detail.id,
         workflow_id=detail.workflow_id,
@@ -920,6 +939,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
         unpriced_observation_count=detail.unpriced_observation_count,
         cost_by_model=detail.cost_by_model,
+        cache_read_rate_display=cache_rates.cache_read_rate_display,
+        cache_write_rate_display=cache_rates.cache_write_rate_display,
         operations=operations,
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,

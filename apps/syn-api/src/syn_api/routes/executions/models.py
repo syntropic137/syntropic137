@@ -188,6 +188,19 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
+    cache_read_rate_display: str | None = None
+    """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
+
+    Derived from the price table for every model this scope ran. ``None`` when
+    no single multiplier is true: models that disagree (Opus 5.5 reads at 0.05x,
+    GPT-6-Sol at 0.1x), a model with no rate, or no model recorded yet. A
+    client must not substitute a constant; that is the bug this field replaced.
+    """
+    cache_write_rate_display: str | None = None
+    """How cache WRITES are billed relative to fresh input, e.g. ``"1.25x rate"``.
+
+    Same derivation and ``None`` contract as ``cache_read_rate_display``.
+    """
     total_duration_seconds: float | None = None
     """Wall-clock seconds across the execution's phases, including any still
     running. ``None`` means no phase had a resolvable duration -- unknown, not
