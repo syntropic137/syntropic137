@@ -528,7 +528,7 @@ def normalize_phase_model(
 _STATIC_DEFAULTS = PhaseModelDefaults()
 
 
-def resolve_phase_model(provider: str, model: str | None) -> str:
+def resolve_phase_model(provider: str | None, model: str | None) -> str:
     """Normalise a phase's model at EXECUTION, with the static fallbacks.
 
     Both ``AgentConfiguration`` copies call this from ``__post_init__``. It is
@@ -539,3 +539,35 @@ def resolve_phase_model(provider: str, model: str | None) -> str:
     the constructor, so a provider switch on a config is corrected too.
     """
     return normalize_phase_model(provider, model, _STATIC_DEFAULTS)[0]
+
+
+@dataclass(frozen=True)
+class PhaseModelResolution:
+    """What a phase DEFINITION will run as, for definition surfaces.
+
+    ``effective`` is what execution uses (``resolve_phase_model``): the stored
+    model, or the provider default when it is unset or belongs to the other
+    provider. ``alias`` resolves ``effective`` when it is an alias.
+    """
+
+    stored: str | None
+    effective: str
+    alias: ModelAliasResolution | None
+
+    @property
+    def substituted(self) -> bool:
+        """True when execution will NOT run the stored value as written."""
+        return (self.stored or "").strip() != self.effective
+
+    @property
+    def concrete(self) -> str | None:
+        """The concrete id, or ``None`` when the stored value already is one."""
+        if self.alias is not None:
+            return self.alias.target
+        return self.effective if self.substituted else None
+
+
+def resolve_definition_model(provider: str | None, model: str | None) -> PhaseModelResolution:
+    """Resolve a phase definition's model the way execution will (single rule)."""
+    effective = resolve_phase_model(provider, model)
+    return PhaseModelResolution(model, effective, resolve_model_alias(effective))

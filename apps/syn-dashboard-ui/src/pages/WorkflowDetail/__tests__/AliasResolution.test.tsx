@@ -70,4 +70,14 @@ describe('alias resolution on the phase definition', () => {
     await user.type(input, 'sonnet')
     expect(screen.queryByTestId('model-resolution-hint')).toBeNull()
   })
+
+  it('editor hides the hint once the provider changes', async () => {
+    const user = userEvent.setup()
+    render(<PhasePromptEditor phase={OPUS} workflowId="wf-1" />)
+    await user.click(screen.getByRole('button', { name: /Edit/ }))
+    expect(screen.getByTestId('model-resolution-hint')).toBeTruthy()
+
+    await user.selectOptions(screen.getByDisplayValue(/Claude/i), 'codex')
+    expect(screen.queryByTestId('model-resolution-hint')).toBeNull()
+  })
 })

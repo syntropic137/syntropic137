@@ -29,8 +29,8 @@ from syn_domain.contexts.orchestration import (
     ReportedFailureReason,
     is_phase_id,
 )
-from syn_shared.agents import resolve_model_alias
-from syn_shared.display import format_model_definition
+from syn_shared.agents import resolve_definition_model
+from syn_shared.display import format_phase_model_definition
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -182,8 +182,8 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
 
 
 def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
-    """One phase; the alias resolution comes from the shared resolver only."""
-    resolution = resolve_model_alias(p.model)
+    """One phase; the model resolves by the same rule execution applies."""
+    resolution = resolve_definition_model(p.provider, p.model)
     return PhaseDefinitionResponse(
         phase_id=p.id,
         name=p.name,
@@ -195,9 +195,9 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         allowed_tools=list(p.allowed_tools),
         argument_hint=p.argument_hint,
         model=p.model,
-        resolved_model=resolution.target if resolution else None,
-        resolution_basis=resolution.basis if resolution else None,
-        model_display=format_model_definition(p.model),
+        resolved_model=resolution.concrete,
+        resolution_basis=resolution.alias.basis if resolution.alias else None,
+        model_display=format_phase_model_definition(resolution),
         provider=p.provider,
         allow_delegation=p.allow_delegation,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],

@@ -17,9 +17,15 @@ from syn_shared.agents import (
     ModelAlias,
     ModelId,
     resolve_codex_model_alias,
+    resolve_definition_model,
     resolve_model_alias,
 )
-from syn_shared.display import ALIAS_ARROW, EM_DASH, format_model_definition
+from syn_shared.display import (
+    ALIAS_ARROW,
+    EM_DASH,
+    format_model_definition,
+    format_phase_model_definition,
+)
 from syn_shared.pricing import MODEL_ALIASES, canonical_model_id
 
 pytestmark = pytest.mark.unit
@@ -104,3 +110,40 @@ class TestFormatModelDefinition:
         assert rendered is not None
         assert ALIAS_ARROW in rendered
         assert EM_DASH not in rendered
+
+
+class TestDefinitionModelFollowsExecution:
+    """Definition surfaces resolve the model execution will run, not the raw text."""
+
+    @pytest.mark.parametrize(
+        ("provider", "model", "display", "concrete"),
+        [
+            ("codex", "gpt-sol", "gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("claude", "opus", "opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
+            (None, "sonnet", "sonnet \u2192 claude-sonnet-5", "claude-sonnet-5"),
+            ("codex", "gpt-6-sol", "gpt-6-sol", None),
+            ("claude", "some-future-model", "some-future-model", None),
+            ("codex", "opus", "opus \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("claude", "gpt-sol", "gpt-sol \u2192 opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
+            (
+                "claude",
+                "gpt-6-sol",
+                "gpt-6-sol \u2192 opus \u2192 claude-opus-5-5",
+                "claude-opus-5-5",
+            ),
+            ("codex", None, "default \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+            ("claude", "  ", "default \u2192 opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
+            (
+                "claude",
+                " haiku ",
+                "haiku \u2192 claude-haiku-4-5-20251001",
+                "claude-haiku-4-5-20251001",
+            ),
+        ],
+    )
+    def test_resolution(
+        self, provider: str | None, model: str | None, display: str, concrete: str | None
+    ) -> None:
+        resolution = resolve_definition_model(provider, model)
+        assert format_phase_model_definition(resolution) == display
+        assert resolution.concrete == concrete

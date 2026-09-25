@@ -436,16 +436,20 @@ class PhaseDefinitionResponse(BaseModel):
     model: str | None = None
     """The model as DEFINED: often a platform alias (``opus``, ``gpt-sol``)."""
     resolved_model: ResolvedModelId | None = None
-    """The concrete id ``model`` resolves to when it is an alias, else ``None``
-    (already concrete, unknown, or unset). A definition-time expectation, not
-    what a run used: runs report their observed model (ADR-067 D9)."""
+    """The concrete id this phase will run as: the alias target, or the provider
+    default when ``model`` is unset or belongs to the other provider (the rule
+    execution applies). ``None`` when ``model`` is already concrete or unknown.
+    A definition-time expectation, not what a run used: runs report their
+    observed model (ADR-067 D9)."""
     resolution_basis: AliasResolutionBasis | None = None
     """``translated``: the platform rewrites the alias itself (codex), so the
     target is what runs. ``expected``: the CLI resolves it (claude), so the
     target is what the pinned CLI is expected to pick. ``None`` with no alias."""
     model_display: str | None = None
-    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``; the bare
-    model when there is nothing to resolve. Render verbatim."""
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``, or
+    ``default → gpt-sol → gpt-6-sol`` when execution substitutes the
+    provider default; the bare model when there is nothing to resolve. Render
+    verbatim."""
     provider: str | None = None
     # Stored since #1012, readable since #1013. `allow_delegation` is
     # security-relevant -- it stages both agent auths -- so a caller must be

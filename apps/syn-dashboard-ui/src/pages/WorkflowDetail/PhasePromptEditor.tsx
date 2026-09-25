@@ -41,9 +41,11 @@ function PhaseMetaBadges({ phase }: { phase: PhaseDefinition }) {
 const inputClass = 'w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]'
 const textareaClass = 'min-h-[400px] w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]'
 
-/** What the SAVED alias resolves to, shown only while the field still holds it. */
-function ModelResolutionHint({ edited, phase }: { edited: string; phase: PhaseDefinition }) {
-  if (!phase.resolved_model || edited !== phase.model) return null
+/** What the SAVED model resolves to, shown only while model AND provider are unchanged:
+ * either edit changes what the save will resolve to. */
+function ModelResolutionHint({ edited, provider, phase }: { edited: string; provider: string; phase: PhaseDefinition }) {
+  const savedProvider = phase.provider || AGENT_PROVIDER.CLAUDE
+  if (!phase.resolved_model || edited !== (phase.model ?? '') || provider !== savedProvider) return null
   return <p className="mt-1 text-xs text-[var(--color-text-muted)]" data-testid="model-resolution-hint">{phase.model_display}</p>
 }
 
@@ -61,7 +63,7 @@ function ConfigFields({ phase, provider, model, timeout, tools, onChange }: {
         </select>
       </div>
       {providerUsesModelField(selectedProvider) && (
-        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. opus, sonnet, gpt-sol" className={inputClass} /><ModelResolutionHint edited={model} phase={phase} /></div>
+        <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label><input type="text" value={model} onChange={(e) => onChange('editedModel', e.target.value)} placeholder="e.g. opus, sonnet, gpt-sol" className={inputClass} /><ModelResolutionHint edited={model} provider={selectedProvider} phase={phase} /></div>
       )}
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Timeout (seconds)</label><input type="number" value={timeout} onChange={(e) => onChange('editedTimeout', e.target.value)} placeholder="300" className={inputClass} /></div>
       <div><label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Allowed Tools</label><input type="text" value={tools} onChange={(e) => onChange('editedTools', e.target.value)} placeholder="Bash, Read, Write" className={inputClass} /></div>

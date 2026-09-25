@@ -14,7 +14,7 @@ import signal
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from syn_shared.agents import resolve_model_alias
+from syn_shared.agents import PhaseModelResolution, resolve_model_alias
 
 logger = logging.getLogger(__name__)
 
@@ -401,3 +401,24 @@ def format_model_definition(model: str | None) -> str | None:
     if resolution is None:
         return model
     return f"{resolution.alias} {ALIAS_ARROW} {resolution.target}"
+
+
+#: Shown in place of a stored model that is unset.
+DEFAULT_MODEL_LABEL = "default"
+
+
+def format_phase_model_definition(resolution: PhaseModelResolution) -> str:
+    """Render a phase definition's model as the chain execution follows.
+
+    ``opus`` -> ``opus \u2192 claude-opus-5-5``; a stale ``opus`` on a codex
+    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6-sol``; unset on codex ->
+    ``default \u2192 gpt-sol \u2192 gpt-6-sol``; a concrete id -> itself.
+    """
+    parts: list[str] = []
+    if resolution.substituted:
+        stored = (resolution.stored or "").strip()
+        parts.append(stored or DEFAULT_MODEL_LABEL)
+    parts.append(resolution.effective)
+    if resolution.alias is not None:
+        parts.append(resolution.alias.target)
+    return f" {ALIAS_ARROW} ".join(parts)
