@@ -11,7 +11,7 @@ const props = { executionId: 'run', harness: 'codex', nativeId: 'native', revisi
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() }))
-  vi.mocked(getLocalTranscript).mockResolvedValue({ status: 'present', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: bytes.toString('base64') })
+  vi.mocked(getLocalTranscript).mockResolvedValue({ status: 'present', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: bytes.toString('base64'), conversation: { supported: true, truncated: false, issues: [], messages: [{ role: 'assistant', text: '<script>not executable</script>', line: 1 }] } })
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 
@@ -55,7 +55,7 @@ it('does not expose a response arriving after the preview was closed', async () 
   const signal = vi.mocked(getLocalTranscript).mock.calls[0]![4]!
   fireEvent.click(screen.getByText('Close transcript'))
   expect(signal.aborted).toBe(true)
-  resolve({ status: 'present', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: bytes.toString('base64') })
+  resolve({ status: 'present', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: bytes.toString('base64'), conversation: { supported: true, truncated: false, issues: [], messages: [{ role: 'assistant', text: '<script>not executable</script>', line: 1 }] } })
   await waitFor(() => expect(screen.queryByRole('link')).toBeNull())
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })

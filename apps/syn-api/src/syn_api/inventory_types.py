@@ -9,6 +9,7 @@ from syn_domain.contexts.agent_sessions import (
     InventorySnapshot,
     RunIdentity,
     TranscriptBodyState,
+    TranscriptConversation,
 )
 
 
@@ -61,3 +62,6 @@ class LocalTranscriptResponse(BaseModel):
     content_format: Literal["native", "envelope"] | None = None
     size: int | None = Field(default=None, ge=0)
     content_base64: str | None = Field(default=None, repr=False)
+    #: Normalized user/assistant excerpt from the harness adapter. Clients render
+    #: this and never parse ``content_base64``, which exists only for download.
+    conversation: TranscriptConversation | None = None

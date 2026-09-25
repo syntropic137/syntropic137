@@ -308,6 +308,49 @@ def test_local_transcript_returns_exact_bytes_without_caching(
     assert args[0] == run
     assert args[1].local_id == "opaque/雪"
     assert args[2] == "a" * 64
+    assert response.json()["conversation"] is None
+
+
+def test_local_transcript_returns_normalized_conversation_for_clients(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    from syn_domain.contexts.agent_sessions import (
+        ArchivedTranscript,
+        CataloguedCapture,
+        LocalTranscriptRead,
+        TranscriptConversation,
+        TranscriptMessage,
+    )
+
+    client, runtime, _, run = setup
+    capture = CataloguedCapture(
+        run=run,
+        producer_id="p",
+        capture_id="c",
+        harness="any-harness",
+        native_id="n",
+        content_format="native",
+        archive=ArchivedTranscript(sha256="a" * 64, size=1),
+    )
+    conversation = TranscriptConversation(
+        supported=True,
+        messages=(TranscriptMessage(role="user", text="hi", line=3),),
+        truncated=True,
+        reader_version="reader/1",
+    )
+    runtime.transcripts.handle = AsyncMock(
+        return_value=LocalTranscriptRead(
+            status="present", capture=capture, body=b"x", conversation=conversation
+        )
+    )
+    response = client.get(
+        "/executions/run/session-transcripts/" + "a" * 64,
+        params={"harness": "any-harness", "native_id": "n"},
+    )
+    assert response.status_code == 200
+    body = response.json()["conversation"]
+    assert body["messages"] == [{"role": "user", "text": "hi", "line": 3}]
+    assert body["truncated"] is True and body["supported"] is True
 
 
 @pytest.mark.parametrize(

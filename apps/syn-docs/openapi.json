@@ -11506,6 +11506,16 @@
               }
             ],
             "title": "Content Base64"
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptConversation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -15951,6 +15961,85 @@
           "status"
         ],
         "title": "TranscriptBodyState"
+      },
+      "TranscriptConversation": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptMessage"
+            },
+            "type": "array",
+            "title": "Messages",
+            "default": []
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "issues": {
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "type": "array",
+            "title": "Issues",
+            "default": []
+          },
+          "reader_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "supported"
+        ],
+        "title": "TranscriptConversation",
+        "description": "``supported`` is False when no reader exists for this harness or format."
+      },
+      "TranscriptMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 32768,
+            "title": "Text"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Line"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "text",
+          "line"
+        ],
+        "title": "TranscriptMessage"
       },
       "TriggerActionResponse": {
         "properties": {

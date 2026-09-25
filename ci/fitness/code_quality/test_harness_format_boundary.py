@@ -412,7 +412,7 @@ def test_exemption_is_exact_and_ratchets(tmp_path: Path) -> None:
     _copy_tree(root, tmp_path)
     budgets = _budgets(root)
     exempt = f"{_AGENT_SESSIONS}/transcript_usage.py"
-    assert exempt in budgets, "transcript_usage.py exemption (#1284) expected"
+    assert exempt in budgets, "transcript_usage.py exemption (#1424) expected"
     # One more marker in the exempt file exceeds its exact budget.
     _plant(tmp_path / exempt, '\n\n_PLANTED = "session_meta"\n')
     assert any("exceed exemption" in f for f in evaluate(tmp_path, budgets))

@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
         SessionTranscriptArchivePort,
     )
+    from syn_domain.contexts.agent_sessions.ports.TranscriptConversationPort import (
+        TranscriptConversation,
+        TranscriptConversationPort,
+    )
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,7 @@ class LocalTranscriptRead:
     status: Literal["present", "not_captured", "missing", "expired", "too_large"]
     capture: CataloguedCapture | None = None
     body: bytes | None = field(default=None, repr=False)
+    conversation: TranscriptConversation | None = None
 
 
 class ReadLocalTranscriptHandler:
@@ -37,6 +42,7 @@ class ReadLocalTranscriptHandler:
         access: SessionTranscriptAccessPort,
         *,
         max_bytes: int = 16 * 1024 * 1024,
+        conversation: TranscriptConversationPort | None = None,
     ) -> None:
         if max_bytes < 1:
             raise ValueError("transcript read bound must be positive")
@@ -44,6 +50,7 @@ class ReadLocalTranscriptHandler:
         self._archive = archive
         self._access = access
         self._max_bytes = max_bytes
+        self._conversation = conversation
 
     async def handle(
         self, run: RunIdentity, identity: QualifiedSessionIdentity, archive_hash: str
@@ -59,4 +66,11 @@ class ReadLocalTranscriptHandler:
         if body is None:
             deleted = await self._archive.is_deleted(capture.archive)
             return LocalTranscriptRead(status="expired" if deleted else "missing", capture=capture)
-        return LocalTranscriptRead(status="present", capture=capture, body=body)
+        preview = (
+            self._conversation.conversation(capture.harness, body, capture.content_format)
+            if self._conversation is not None
+            else None
+        )
+        return LocalTranscriptRead(
+            status="present", capture=capture, body=body, conversation=preview
+        )

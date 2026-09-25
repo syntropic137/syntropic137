@@ -1,4 +1,4 @@
-import { transcriptPreview } from './transcriptPreview'
+import { conversationPreview } from './conversationPreview'
 import { useEffect, useState } from 'react'
 import { getLocalTranscript, type LocalTranscript as TranscriptResponse } from '../../api/sessionInventory'
 
@@ -18,7 +18,9 @@ function decodeArchive(result: TranscriptResponse, revision: string): Uint8Array
   return Uint8Array.from(atob(result.content_base64), c => c.charCodeAt(0))
 }
 
-async function verifiedArchive(props: Props, signal: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+interface Verified { bytes: Uint8Array<ArrayBuffer>; conversation: TranscriptResponse['conversation'] }
+
+async function verifiedArchive(props: Props, signal: AbortSignal): Promise<Verified> {
   const result = await getLocalTranscript(props.executionId, props.harness, props.nativeId, props.revision, signal)
   signal.throwIfAborted()
   const bytes = decodeArchive(result, props.revision)
@@ -26,17 +28,17 @@ async function verifiedArchive(props: Props, signal: AbortSignal): Promise<Uint8
   signal.throwIfAborted()
   const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
   if (hash !== props.revision || bytes.length !== result.size) throw new Error('Transcript integrity verification failed')
-  return bytes
+  return { bytes, conversation: result.conversation }
 }
 
 
 function startPreview(props: Props, updates: PreviewUpdates): () => void {
   const controller = new AbortController()
   let url: string | undefined
-  void verifiedArchive(props, controller.signal).then(bytes => {
+  void verifiedArchive(props, controller.signal).then(({ bytes, conversation }) => {
     if (controller.signal.aborted) return
     url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
-    updates.ready({ text: transcriptPreview(bytes), url, size: bytes.length })
+    updates.ready({ text: conversationPreview(conversation), url, size: bytes.length })
   }).catch(reason => {
     if (controller.signal.aborted) return
     updates.failed(reason instanceof Error ? reason.message : 'Unable to load transcript')

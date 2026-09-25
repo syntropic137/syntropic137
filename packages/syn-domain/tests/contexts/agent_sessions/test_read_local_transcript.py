@@ -72,3 +72,41 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
         archive.is_deleted.assert_not_awaited()
     if outcome == "not_captured":
         access.require_read.assert_not_awaited()
+
+
+async def test_present_body_is_previewed_through_the_port_only_after_authorization() -> None:
+    from unittest.mock import Mock
+
+    from syn_domain.contexts.agent_sessions import TranscriptConversation
+
+    run = RunIdentity(source_instance_id="source", execution_id="run")
+    identity = QualifiedSessionIdentity(
+        kind="transcript", source_instance_id="source", harness="h", local_id="native"
+    )
+    capture = CataloguedCapture(
+        run=run,
+        producer_id="producer",
+        capture_id="capture",
+        harness="h",
+        native_id="native",
+        content_format="envelope",
+        archive=ArchivedTranscript(sha256="a" * 64, size=5),
+    )
+    catalog, archive, access = AsyncMock(), AsyncMock(), AsyncMock()
+    catalog.get_revision.return_value = capture
+    archive.get.return_value = b"exact"
+    preview = TranscriptConversation(supported=True)
+    port = Mock()
+    port.conversation.return_value = preview
+    result = await ReadLocalTranscriptHandler(catalog, archive, access, conversation=port).handle(
+        run, identity, "a" * 64
+    )
+    port.conversation.assert_called_once_with("h", b"exact", "envelope")
+    assert result.conversation == preview
+    access.require_read.side_effect = PermissionError("denied")
+    port.conversation.reset_mock()
+    with pytest.raises(PermissionError):
+        await ReadLocalTranscriptHandler(catalog, archive, access, conversation=port).handle(
+            run, identity, "a" * 64
+        )
+    port.conversation.assert_not_called()

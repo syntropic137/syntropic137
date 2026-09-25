@@ -4265,6 +4265,7 @@ export interface components {
             size?: number | null;
             /** Content Base64 */
             content_base64?: string | null;
+            conversation?: components["schemas"]["TranscriptConversation"] | null;
         };
         /**
          * MaintenanceModeResponse
@@ -6655,6 +6656,43 @@ export interface components {
              * @enum {string}
              */
             status: "expired" | "withheld";
+        };
+        /**
+         * TranscriptConversation
+         * @description ``supported`` is False when no reader exists for this harness or format.
+         */
+        TranscriptConversation: {
+            /** Supported */
+            supported: boolean;
+            /**
+             * Messages
+             * @default []
+             */
+            messages: components["schemas"]["TranscriptMessage"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: string[];
+            /** Reader Version */
+            reader_version?: string | null;
+        };
+        /** TranscriptMessage */
+        TranscriptMessage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Text */
+            text: string;
+            /** Line */
+            line: number;
         };
         /**
          * TriggerActionResponse

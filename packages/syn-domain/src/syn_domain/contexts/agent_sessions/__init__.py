@@ -310,8 +310,11 @@ __all__ = [
     "TokenMetrics",
     "TokenUsageData",
     "TranscriptBodyState",
+    "TranscriptConversation",
+    "TranscriptConversationPort",
     "TranscriptDeletedError",
     "TranscriptIntegrityError",
+    "TranscriptMessage",
     "import_phase_delegates",
     "model_from_rollout",
     "pick_primary_model",
@@ -360,6 +363,11 @@ from .ports.SessionCaptureSpoolPort import (
     CaptureSpoolLease,
     CaptureSpoolLeaseLost,
     SessionCaptureSpoolPort,
+)
+from .ports.TranscriptConversationPort import (
+    TranscriptConversation,
+    TranscriptConversationPort,
+    TranscriptMessage,
 )
 from .slices.capture_local_transcript.CaptureLocalTranscriptHandler import (
     CaptureLocalTranscriptHandler,

@@ -39,6 +39,7 @@ from .recovery_worker import CaptureRecoveryWorker
 from .replication_runtime import create_replication_manager
 from .spool_drain import LocalSpoolDrain
 from .transcript_access import InstallationTranscriptAccess
+from .transcript_conversation import AgenticTranscriptConversation
 
 if TYPE_CHECKING:
     from event_sourcing import EventStoreClient
@@ -165,7 +166,10 @@ async def create_inventory_runtime(
         archive=archive,
         body_availability=PostgresBodyAvailability(pool),
         transcripts=ReadLocalTranscriptHandler(
-            PostgresCaptureCatalog(pool), archive, InstallationTranscriptAccess(pool, source_id)
+            PostgresCaptureCatalog(pool),
+            archive,
+            InstallationTranscriptAccess(pool, source_id),
+            conversation=AgenticTranscriptConversation(),
         ),
         repository=repository,
         processor=InventoryReconciliationProcessManager(
