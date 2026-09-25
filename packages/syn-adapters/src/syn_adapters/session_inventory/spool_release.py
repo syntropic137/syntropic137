@@ -2,12 +2,15 @@
 
 Staged bytes leave the host only after one of two durable facts:
 
-- ``archived``: a complete traversal that began after the session settled (or
-  after a settle grace period), with no other container attached, captured every
-  staged entry into the local archive.
-- ``expired``: the spool exceeded its retention age or byte quota. An explicit
-  acquisition gap is journaled before the volume is removed, so the run's
-  inventory keeps the session discoverable and says why its body is absent.
+- ``archived``: the session reached a durable terminal fact (``SessionCompleted``)
+  and a complete traversal that began after it, with no other container
+  attached, captured every staged entry into the local archive. Nothing else
+  qualifies: an unattached workspace may be paused and resume.
+- ``expired``: a settled spool exceeded its retention age, or the byte quota
+  forced eviction (settled spools first; a non-terminal spool only when settled
+  ones cannot satisfy the quota). An explicit acquisition gap is journaled
+  before the volume is removed, so the run's inventory keeps the session
+  discoverable and says why its body is absent.
 
 ``release_reason`` is committed before removal and ``released_at`` after it, so
 a crash between them repeats an idempotent removal. Runs only from the live
@@ -93,17 +96,16 @@ class CaptureSpoolRetention:
         volumes: SpoolVolumePort,
         journal: SessionEvidenceWritePort,
         *,
-        settle_grace_seconds: int,
         age_seconds: int | None = None,
         max_bytes: int | None = None,
     ) -> None:
-        if settle_grace_seconds < 1 or (age_seconds is not None and age_seconds < 1):
-            raise ValueError("spool retention periods must be positive")
+        if age_seconds is not None and age_seconds < 1:
+            raise ValueError("spool retention period must be positive")
         if max_bytes is not None and max_bytes < 1:
             raise ValueError("spool byte quota must be positive")
         self._pool, self._source = pool, source
         self._volumes, self._journal = volumes, journal
-        self._grace, self._age, self._max_bytes = settle_grace_seconds, age_seconds, max_bytes
+        self._age, self._max_bytes = age_seconds, max_bytes
 
     async def after_drain(self, lease: CaptureSpoolLease, *, exclusive: bool) -> bool:
         if not exclusive or lease.spool.run.source_instance_id != self._source:
@@ -113,13 +115,11 @@ class CaptureSpoolRetention:
                 """UPDATE session_capture_spools SET release_reason='archived'
                 WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3
                 AND release_reason IS NULL AND drained_at IS NOT NULL AND drained_at=claimed_at
-                AND ((settled_at IS NOT NULL AND settled_at<drained_at)
-                    OR registered_at<=drained_at-$4::double precision*interval '1 second')
+                AND settled_at IS NOT NULL AND settled_at<drained_at
                 RETURNING session_id""",
                 self._source,
                 lease.spool.session_id,
                 lease.token,
-                self._grace,
             )
         if marked is None:
             return False
@@ -152,7 +152,7 @@ class CaptureSpoolRetention:
                     WHERE (source_instance_id,session_id) IN (
                         SELECT source_instance_id,session_id FROM session_capture_spools
                         WHERE source_instance_id=$1 AND release_reason IS NULL
-                        AND leased_until<=now()
+                        AND leased_until<=now() AND settled_at IS NOT NULL
                         AND registered_at<=now()-$2::double precision*interval '1 second'
                         ORDER BY registered_at,session_id LIMIT $3 FOR UPDATE SKIP LOCKED)""",
                     self._source,
@@ -160,25 +160,34 @@ class CaptureSpoolRetention:
                     limit,
                 )
             if self._max_bytes is not None:
-                # Only settled sessions are evicted: live capture is never cut
-                # short. Newest spools keep their place within the quota.
-                await conn.execute(
-                    """WITH ranked AS (
-                        SELECT session_id,settled_at,registered_at,
-                        sum(staged_bytes) OVER (ORDER BY registered_at DESC,session_id DESC)
-                            AS newer_total
-                        FROM session_capture_spools
-                        WHERE source_instance_id=$1 AND released_at IS NULL
+                # Settled spools go first. A non-terminal spool is evicted only
+                # when settled ones cannot bring retained bytes within quota,
+                # and always with a journaled gap. Newest spools keep their place.
+                for settled in (True, False):
+                    await conn.execute(
+                        """WITH total AS (
+                            SELECT COALESCE(sum(staged_bytes),0) AS bytes
+                            FROM session_capture_spools
+                            WHERE source_instance_id=$1 AND release_reason IS NULL
+                        ), candidates AS (
+                            SELECT session_id,registered_at,
+                            sum(staged_bytes) OVER (ORDER BY registered_at,session_id)
+                                - staged_bytes AS evicted_before
+                            FROM session_capture_spools
+                            WHERE source_instance_id=$1 AND release_reason IS NULL
+                            AND (settled_at IS NOT NULL)=$4
+                        )
+                        UPDATE session_capture_spools s SET release_reason='expired'
+                        WHERE s.source_instance_id=$1 AND s.release_reason IS NULL
+                        AND s.leased_until<=now() AND s.session_id IN (
+                            SELECT c.session_id FROM candidates c,total t
+                            WHERE c.evicted_before<t.bytes-$2
+                            ORDER BY c.registered_at,c.session_id LIMIT $3)""",
+                        self._source,
+                        self._max_bytes,
+                        limit,
+                        settled,
                     )
-                    UPDATE session_capture_spools s SET release_reason='expired'
-                    WHERE s.source_instance_id=$1 AND s.release_reason IS NULL
-                    AND s.leased_until<=now() AND s.session_id IN (
-                        SELECT session_id FROM ranked WHERE newer_total>$2
-                        AND settled_at IS NOT NULL ORDER BY registered_at,session_id LIMIT $3)""",
-                    self._source,
-                    self._max_bytes,
-                    limit,
-                )
 
     async def _release(self, spool: CaptureSpool, reason: str) -> bool:
         if reason == "expired":

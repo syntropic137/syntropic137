@@ -48,13 +48,11 @@ async def _setup(
     source = str(uuid4())
     spools = PostgresCaptureSpools(pool, source)
     volumes = Volumes()
-    grace = policy.pop("settle_grace_seconds", None) or 3600
     retention = CaptureSpoolRetention(
         pool,
         source,
         volumes,
         evidence,
-        settle_grace_seconds=grace,
         age_seconds=policy.get("age_seconds"),
         max_bytes=policy.get("max_bytes"),
     )
@@ -131,19 +129,50 @@ async def test_in_use_volume_reopens_an_archived_release_for_capture(
     assert again is not None and again.token > lease.token
 
 
-async def test_unsettled_spool_releases_after_grace_when_fully_archived(
+async def test_paused_non_terminal_spool_survives_age_drain_and_resumes(
     db_pool: asyncpg.Pool,
 ) -> None:
-    spools, retention, volumes, _, source = await _setup(db_pool, settle_grace_seconds=60)
-    await spools.project(_spool(source, "legacy"))
+    spools, retention, volumes, _, source = await _setup(db_pool, age_seconds=60)
+    await spools.project(_spool(source, "paused"))
     async with db_pool.acquire() as conn:
         await conn.execute(
-            """UPDATE session_capture_spools SET registered_at=now()-interval '2 minutes'
+            """UPDATE session_capture_spools SET registered_at=now()-interval '2 days'
             WHERE source_instance_id=$1""",
             source,
         )
-    assert await retention.after_drain(await _traverse(spools), exclusive=True)
-    assert volumes.removed == ["legacy"]
+    # Unattached and fully drained, but no terminal fact: it may resume.
+    first = await _traverse(spools, staged=100)
+    assert not await retention.after_drain(first, exclusive=True)
+    assert await retention.step() == 0  # age expiry needs a terminal session too
+    assert volumes.removed == [] and await _gaps(db_pool, source) == 0
+    # The workspace resumes; later bytes are still captured from the same volume.
+    resumed = await spools.claim(lease_seconds=60)
+    assert resumed is not None and resumed.token > first.token
+    await spools.advance(resumed, after=0, watermark=None, retry_seconds=0, staged_bytes=50)
+    await spools.settle("paused")
+    await spools.mark_drained(resumed)
+    # The traversal began before settlement, so it still cannot release.
+    assert not await retention.after_drain(resumed, exclusive=True)
+    final = await _traverse(spools)
+    assert await retention.after_drain(final, exclusive=True)
+    assert volumes.removed == ["paused"] and await _gaps(db_pool, source) == 0
+
+
+async def test_quota_forces_non_terminal_eviction_only_with_gap(
+    db_pool: asyncpg.Pool,
+) -> None:
+    spools, retention, volumes, evidence, source = await _setup(db_pool, max_bytes=500)
+    spool = _spool(source, "live")
+    await spools.project(spool)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE session_capture_spools SET staged_bytes=900 WHERE source_instance_id=$1",
+            source,
+        )
+    assert await retention.step() == 1
+    assert volumes.removed == ["live"]
+    page = await evidence.read(spool.run, await evidence.watermark(spool.run))
+    assert page.items[-1].batch.evidence.acquisition_gaps[0].gap.reason == SPOOL_EXPIRED_GAP
 
 
 async def test_expiry_records_gap_before_removal_and_retries_until_removed(
@@ -153,6 +182,8 @@ async def test_expiry_records_gap_before_removal_and_retries_until_removed(
     spool = _spool(source, "stale")
     await spools.project(spool)
     await spools.project(_spool(source, "fresh"))
+    await spools.settle("stale")
+    await spools.settle("fresh")
     async with db_pool.acquire() as conn:
         await conn.execute(
             """UPDATE session_capture_spools SET registered_at=now()-interval '2 hours'
@@ -180,7 +211,7 @@ async def test_expiry_records_gap_before_removal_and_retries_until_removed(
     assert expiry_gap(spool) == expiry_gap(spool)
 
 
-async def test_byte_quota_expires_oldest_settled_spool_never_live_capture(
+async def test_byte_quota_evicts_settled_spools_before_live_capture(
     db_pool: asyncpg.Pool,
 ) -> None:
     spools, retention, volumes, _, source = await _setup(db_pool, max_bytes=1000)
@@ -197,11 +228,12 @@ async def test_byte_quota_expires_oldest_settled_spool_never_live_capture(
             )
     await spools.settle("settled-old")
     await spools.settle("settled-new")
-    assert await retention.step() == 1
-    # 1800 retained bytes: the live session is oldest but must never be evicted.
-    assert volumes.removed == ["settled-old"]
+    assert await retention.step() == 2
+    # 1800 retained bytes, quota 1000: settled spools go first, even the newer
+    # one, before the oldest (non-terminal) session is touched.
+    assert sorted(volumes.removed) == ["settled-new", "settled-old"]
     assert await retention.step() == 0
-    assert volumes.removed == ["settled-old"]
+    assert "live-oldest" not in volumes.removed
 
 
 async def test_settle_and_release_are_scoped_to_one_installation(db_pool: asyncpg.Pool) -> None:

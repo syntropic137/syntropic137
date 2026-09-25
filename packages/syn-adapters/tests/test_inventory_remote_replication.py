@@ -29,6 +29,7 @@ from syn_adapters.session_inventory.capture_delivery_jobs import (
     PostgresCaptureDeliveryJobs,
 )
 from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
+from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.exporter_transport import (
     ExporterCaptureTransport,
@@ -354,7 +355,9 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
     await archive.ensure_ready()
     catalog = PostgresCaptureCatalog(db_pool)
     jobs = PostgresCaptureDeliveryJobs(db_pool, source, "capture-integration")
-    worker = CaptureDeliveryWorker(jobs, archive, transport, retry_seconds=0)
+    worker = CaptureDeliveryWorker(
+        jobs, archive, transport, retry_seconds=0, fence=DeletionFence(db_pool, source)
+    )
     run = RunIdentity(source_instance_id=source, execution_id="run")
 
     async def capture(capture_id: str, body: bytes) -> None:
@@ -400,6 +403,7 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         LocalSessionTranscriptArchive(tmp_path / "archive"),
         ExporterCaptureTransport(config),
         retry_seconds=0,
+        fence=DeletionFence(db_pool, source),
     )
     assert not await worker.enqueue_step()
     with PostgresContainer("postgres:16-alpine") as remote_db:
@@ -494,26 +498,57 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         retention = LocalBodyRetention(
             db_pool, archive, source, age_seconds=86400, exporter_binary=binary
         )
-        for _ in range(6):
-            assert await retention.step()
-        assert not await retention.step()
-        deletions = CaptureDeletionWorker(db_pool, transport, source, "capture-integration")
+        for _ in range(10):
+            if not await retention.step():
+                break
+        else:
+            pytest.fail("local erasure did not converge")
+        # Deletes travel through their own outbox and count as propagated only
+        # after the replica acknowledges them; the upload outbox stays fenced.
+        deletion_transport = ExporterCaptureTransport(
+            ExporterConfig(
+                binary=binary,
+                outbox_dir=tmp_path / "deletion-outbox",
+                store_url=url,
+                token=SecretStr("capture-test"),
+            )
+        )
+        deletions = CaptureDeletionWorker(
+            db_pool, deletion_transport, source, "capture-integration"
+        )
         for _ in range(3):
-            assert await deletions.step()
-        assert not await CaptureDeletionWorker(
-            db_pool, transport, source, "capture-integration"
-        ).step()
-        offline = await transport.drain()
-        assert offline.failed == 1 and offline.remaining > 0
+            await deletions.step()
+        fenced = CaptureDeliveryWorker(
+            jobs, archive, transport, retry_seconds=0, fence=DeletionFence(db_pool, source)
+        )
+        assert await fenced.drain_step() is None
+
+        async def unacknowledged() -> int:
+            async with db_pool.acquire() as conn:
+                return int(
+                    await conn.fetchval(
+                        """SELECT count(*) FROM session_capture_deletion_checkpoints
+                        WHERE source_instance_id=$1 AND NOT acknowledged""",
+                        source,
+                    )
+                )
+
+        assert await unacknowledged() > 0
         async with server(
             Path(server_path), database, unused_tcp_port, source, tmp_path / "capture-deletion.log"
         ) as client:
+            for _ in range(20):
+                await deletions.step()
+                if await unacknowledged() == 0 and await fenced.drain_step() is not None:
+                    break
+            else:
+                pytest.fail("replica deletion did not converge")
             restarted_transport = ExporterCaptureTransport(config)
             for _ in range(6):
                 if (await restarted_transport.drain()).remaining == 0:
                     break
             else:
-                pytest.fail("deletion outbox did not converge")
+                pytest.fail("capture outbox did not converge")
             assert not list((root / "captures" / "objects").iterdir())
             for version in [None, old.content_hash]:
                 selected = params if version is None else (*params, ("content_hash", version))

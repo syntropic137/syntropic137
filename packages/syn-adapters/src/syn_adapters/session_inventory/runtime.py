@@ -30,6 +30,7 @@ from .body_retention import LocalBodyRetention
 from .capture_catalog import PostgresCaptureCatalog
 from .child_journal import ChildJournalDrain
 from .clock import InventoryRecoveryClock
+from .deletion_fence import DeletionFence
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
 from .history_receipts import PostgresBackfillReceipts, PostgresHistoryBackfillQueue
@@ -177,7 +178,6 @@ async def create_inventory_runtime(
             source_id,
             recovery,
             evidence,
-            settle_grace_seconds=settings.spool_settle_grace_seconds,
             age_seconds=settings.spool_retention_seconds,
             max_bytes=settings.spool_max_bytes,
         )
@@ -258,7 +258,13 @@ async def create_inventory_runtime(
         transcripts=ReadLocalTranscriptHandler(catalog, archive, access),
         catalog=catalog,
         access=access,
-        deletions=PostgresTranscriptDeletions(pool, source_id, capture_destination_id(settings)),
+        deletions=PostgresTranscriptDeletions(
+            pool,
+            source_id,
+            capture_destination_id(settings),
+            archive=archive,
+            fence=DeletionFence(pool, source_id),
+        ),
         repository=repository,
         processor=InventoryReconciliationProcessManager(
             jobs,

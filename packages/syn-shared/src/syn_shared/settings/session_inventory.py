@@ -74,18 +74,12 @@ class SessionInventorySettings(BaseSettings):
     spool_retention_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional lifetime of a staged workspace capture spool since registration. Disabled by default. Expiry records an inventory gap before the volume is removed. Archived spools are released without it.",
+        description="Optional lifetime of a staged workspace capture spool since registration. Disabled by default. Applies only after the session completed. Expiry records an inventory gap before the volume is removed. Archived spools are released without it.",
     )
     spool_max_bytes: int | None = Field(
         default=None,
         ge=1,
-        description="Optional byte quota for retained staged spool bytes. Disabled by default. When exceeded, the oldest settled spools expire with a recorded gap; live sessions are never evicted.",
-    )
-    spool_settle_grace_seconds: int = Field(
-        default=86400,
-        ge=60,
-        le=31536000,
-        description="Age after which a fully archived spool whose session never reported completion may be released. No workspace container may be attached.",
+        description="Optional byte quota for retained staged spool bytes. Disabled by default. When exceeded, the oldest settled spools expire with a recorded gap; a non-terminal spool is evicted only when settled spools cannot satisfy the quota.",
     )
 
     replication_enabled: bool = Field(

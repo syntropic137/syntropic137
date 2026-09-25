@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException
 
 from syn_adapters.session_inventory.body_retention import LocalBodyRetention
 from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
+from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
 from syn_adapters.session_inventory.transcript_access import InstallationTranscriptAccess
@@ -103,7 +104,9 @@ async def stack(
     runtime = Runtime(
         catalog=catalog,
         access=access,
-        deletions=PostgresTranscriptDeletions(db_pool, source, None),
+        deletions=PostgresTranscriptDeletions(
+            db_pool, source, None, archive=archive, fence=DeletionFence(db_pool, source)
+        ),
         transcripts=ReadLocalTranscriptHandler(catalog, archive, access, max_bytes=64),
     )
 
@@ -247,9 +250,10 @@ async def test_deletion_withholds_at_once_erases_later_and_cannot_be_resurrected
     assert deletion["reason"] == "retraction" and deletion["local_status"] == "pending"
     assert deletion["archive_sha256"] == capture.archive.sha256
     assert deletion["replication"] == "disabled" and deletion["requested_at"].endswith("Z")
-    # Withheld through the other membership before any byte is removed.
+    # Withheld through the other membership before erasure has run.
     assert (await stack.read("run-a", capture.archive.sha256)).json()["status"] == "deleted"
-    assert await stack.archive.get(capture.archive) == b"delete me"
+    assert (stack.root / capture.archive.sha256).read_bytes() == b"delete me"
+    assert await stack.archive.get(capture.archive) is None
     assert await LocalBodyRetention(stack.pool, stack.archive, stack.source).drain() == 1
     state = await stack.client.get(base, params=params)
     assert state.status_code == 200

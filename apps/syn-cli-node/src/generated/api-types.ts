@@ -6987,9 +6987,10 @@ export interface components {
             destination_id: string;
             /**
              * Status
+             * @description pending: not yet handed to the exporter. queued: durably queued, not yet acknowledged. propagated: the replica acknowledged deletion. unresolvable: a legacy delivery recorded no content hash to delete by.
              * @enum {string}
              */
-            status: "pending" | "propagated";
+            status: "pending" | "queued" | "propagated" | "unresolvable";
         };
         /** TranscriptDeletionRequest */
         TranscriptDeletionRequest: {

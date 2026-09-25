@@ -35,12 +35,9 @@ def test_quotas_are_disabled_by_default_and_must_be_positive():
     assert settings.local_body_max_bytes is None
     assert settings.spool_retention_seconds is None
     assert settings.spool_max_bytes is None
-    assert settings.spool_settle_grace_seconds == 86400
     for field in ("local_body_max_bytes", "spool_retention_seconds", "spool_max_bytes"):
         with pytest.raises(ValueError):
             SessionInventorySettings.model_validate({field: 0})
-    with pytest.raises(ValueError):
-        SessionInventorySettings.model_validate({"spool_settle_grace_seconds": 59})
 
 
 def test_expiry_requires_explicit_positive_configuration():

@@ -12,6 +12,7 @@ from syn_domain.contexts.agent_sessions import (
 from .capture_deletion_worker import CaptureDeletionWorker
 from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
 from .capture_delivery_worker import CaptureDeliveryWorker
+from .deletion_fence import DeletionFence
 from .evidence_reader import PostgresSessionEvidence
 from .exporter_transport import ExporterCaptureTransport, ExporterConfig, ExporterInventoryTransport
 from .replication_jobs import PostgresReplicationJobs
@@ -78,6 +79,15 @@ def create_replication_manager(
                 token=settings.capture_write_token,
             )
         )
+        deletion_transport = ExporterCaptureTransport(
+            ExporterConfig(
+                binary=settings.exporter_binary,
+                # Deletes never queue behind uploads: their outbox is separate.
+                outbox_dir=settings.archive_dir / "capture-deletions" / destination / source,
+                store_url=url,
+                token=settings.capture_write_token,
+            )
+        )
         capture_work = CaptureDeliveryWorker(
             PostgresCaptureDeliveryJobs(pool, source_id, destination),
             archive,
@@ -85,7 +95,8 @@ def create_replication_manager(
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             journal=PostgresSessionEvidence(pool),
-            deletions=CaptureDeletionWorker(pool, capture_transport, source_id, destination),
+            deletions=CaptureDeletionWorker(pool, deletion_transport, source_id, destination),
+            fence=DeletionFence(pool, source_id),
         )
     supervisor = ReplicationSupervisor(
         InventoryReplicationWorker(

@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from syn_adapters.postgres_text import pg_safe
+from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     read_agent_session_ids,
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.agent_sessions import (
         NativeSessionEvidencePort,
+        NativeTranscriptFacts,
         RunIdentity,
         SessionTranscriptArchivePort,
     )
@@ -143,18 +145,12 @@ class PostgresHistoricalEvidenceSource:
         if len(rows) > self._max_archives:
             raise HistoricalAcquisitionQuotaExceeded("archived transcript quota exceeded")
         result: list[ArchivedTranscriptFacts] = []
+        fence = DeletionFence(self._pool, run.source_instance_id)
         for row in rows:
             capture = CataloguedCapture.model_validate_json(row["payload"])
             if capture.run != run:
                 continue
-            body = await self._archive.get(capture.archive)
-            facts = None
-            if body is not None:
-                facts = (
-                    self._extractor.extract_envelope(capture.harness, body)
-                    if capture.content_format == "envelope"
-                    else self._extractor.extract(capture.harness, body)
-                )
+            facts = await self._facts(fence, capture)
             result.append(
                 ArchivedTranscriptFacts(
                     producer_id=capture.producer_id,
@@ -166,3 +162,29 @@ class PostgresHistoricalEvidenceSource:
                 )
             )
         return tuple(result)
+
+    async def _facts(
+        self, fence: DeletionFence, capture: CataloguedCapture
+    ) -> NativeTranscriptFacts | None:
+        """Facts only from bodies with no tombstone, checked and read under the fence.
+
+        A withdrawn body yields no facts, exactly like an absent one: backfill
+        never publishes derived content after a deletion request.
+        """
+        async with fence.shared() as conn:
+            tombstoned = await conn.fetchval(
+                """SELECT archive_sha256 FROM session_body_deletions
+                WHERE source_instance_id=$1 AND archive_sha256=$2""",
+                capture.run.source_instance_id,
+                capture.archive.sha256,
+            )
+            if tombstoned is not None:
+                return None
+            body = await self._archive.get(capture.archive)
+            if body is None:
+                return None
+            return (
+                self._extractor.extract_envelope(capture.harness, body)
+                if capture.content_format == "envelope"
+                else self._extractor.extract(capture.harness, body)
+            )

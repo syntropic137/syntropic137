@@ -268,3 +268,18 @@ ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS released_at TIMESTAM
 CREATE INDEX IF NOT EXISTS session_capture_spools_retained
     ON session_capture_spools(source_instance_id,registered_at,session_id)
     WHERE released_at IS NULL;
+
+-- Review pass 1 (#1398): the APSS source-content hash is durable before an
+-- envelope can reach the exporter, so replica deletion never depends on local
+-- bytes still existing. Deletion checkpoints distinguish queued from
+-- authoritatively acknowledged.
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT
+    CHECK (content_hash ~ '^sha256:[a-f0-9]{64}$');
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS content_hash TEXT;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledged
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledgements
+    INTEGER NOT NULL DEFAULT 0 CHECK (acknowledgements >= 0);
+CREATE INDEX IF NOT EXISTS session_capture_deletion_unacknowledged
+    ON session_capture_deletion_checkpoints(source_instance_id,destination_id)
+    WHERE NOT acknowledged;

@@ -246,44 +246,67 @@ hash (`sha256:` prefix) used by replicas. Capture pages add `capture_hashes[i]`
 naming what `items[i].transcript_revision` holds, because local and remote
 receipts store different representations in that field.
 
-Anti-resurrection. Once tombstoned, bytes cannot return through archive re-put
-(filesystem marker), spool replay, capture retry (claim excludes tombstoned
-objects), a new destination (discovery excludes them) or a replica retry (one
-checkpointed delete per capture and destination). Catalog rows, inventory
-revisions and body overrides keep the session discoverable with `expired`,
-`deleted` or `withheld`, including replica receipts matched by content hash.
+Deletion fence. After a deletion request no path delivers, serves or derives
+facts from the bytes. The request holds an installation-wide exclusive advisory
+lock while it writes the archive marker (every local read and put of those
+bytes now fails) and commits the SQL tombstone. Byte consumers hold the shared
+side across their tombstone check and the use of the bytes: the replica upload
+drain and historical backfill. So each use either completed before the request
+took effect, or observes the tombstone. Retention tombstones take the same lock.
+
+Replica delivery. The APSS source-content hash is recorded on the delivery job
+before the envelope can reach the exporter, so replica deletion never needs
+local bytes. Deletes use their own exporter outbox. The upload drain is fenced
+while any tombstoned body that reached the exporter lacks an acknowledged
+replica deletion; once acknowledged, a delayed upload is rejected by the replica
+(410, verified by the real SeshMagic test) instead of being accepted. Replica
+state per destination: `pending` (not handed to the exporter), `queued`
+(durable in the deletion outbox), `propagated` (a drain that emptied the
+deletion outbox acknowledged it; one deletion is in flight per destination so
+acknowledgements are attributable; an unacknowledged drop is requeued) or
+`unresolvable` (a legacy delivery that recorded no content hash while bytes
+existed).
+
+Anti-resurrection. Once tombstoned, bytes cannot return through archive re-put,
+spool replay, capture retry, a new destination or a replica retry. Catalog
+rows, inventory revisions and body overrides keep the session discoverable with
+`expired`, `deleted` or `withheld`, including replica receipts matched by
+content hash.
 
 Quotas (all disabled by default, ADR-004 settings forwarded through compose):
 
 - `SYN_SESSION_INVENTORY_LOCAL_BODY_MAX_BYTES`: distinct archived objects are
   counted once; the oldest are tombstoned as `retention_quota` until the newest
   fit. Owner deletions run whether or not any quota is set.
-- `SYN_SESSION_INVENTORY_SPOOL_RETENTION_SECONDS` and
-  `SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES`: a spool past its age, or the oldest
-  settled spools past the byte quota, expire. A `capture_spool_expired` gap is
-  journaled before the volume is removed. Live sessions are never evicted by the
-  byte quota.
-- `SYN_SESSION_INVENTORY_SPOOL_SETTLE_GRACE_SECONDS` (default one day): see below.
+- `SYN_SESSION_INVENTORY_SPOOL_RETENTION_SECONDS`: a spool of a completed
+  session past this age expires.
+- `SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES`: settled spools are evicted oldest
+  first; a non-terminal spool only when settled ones cannot satisfy the quota.
 
-Spool release. A workspace spool volume is removed only after durable local
-archive acknowledgement or recorded expiry. `archived` release requires a
-complete transcript and child traversal whose lease began after the session
-settled (`SessionCompleted`), or after the settle grace for sessions that never
-reported completion, with no other container attached when the volume was
-opened. Docker refuses to remove an attached volume; an interrupted archived
-release reopens the spool for capture. `release_reason` is committed before
-removal and `released_at` after, so a crash repeats an idempotent removal. The
-cleanup owner runs only from the live inventory tick, never from replay.
+Every expiry journals a `capture_spool_expired` gap before the volume is removed.
+
+Spool release. A workspace spool volume is removed as `archived` only with a
+durable terminal fact: the session completed (`SessionCompleted`), a complete
+transcript and child traversal began after that, and no other container was
+attached when the volume was opened. An unattached workspace without a terminal
+fact may be paused and resume, so it is never released as archived. Docker
+refuses to remove an attached volume; an interrupted archived release reopens
+the spool for capture. `release_reason` is committed before removal and
+`released_at` after, so a crash repeats an idempotent removal. The cleanup owner
+runs only from the live inventory tick, never from replay.
 
 Known limits: sessions completed before this change are not settled
-retroactively (the projection version is unchanged, to avoid a full replay);
-they release through the settle grace instead. The archive byte quota scans the
-installation's catalog each tick, bounded by the catalog index.
+retroactively (the projection version is unchanged, to avoid a full replay).
+Their spools are retained until the byte quota forces an expiry with a gap. The
+archive byte quota scans the installation's catalog each tick. The request
+waits for at most one in-flight upload drain (bounded by the exporter timeout).
 
 Tests: `test_transcript_authz_postgres.py` (API matrix: shared membership,
 malformed/traversal/NUL IDs, foreign run and installation, revoked, deleted,
 expired, missing, too large, resurrection, planted secrets),
-`test_transcript_deletion_postgres.py` (whole-object tombstones, replica
-propagation, quota), `test_spool_release_postgres.py` (settlement, exclusivity,
+`test_transcript_deletion_postgres.py` (whole-object tombstones, quota),
+`test_deletion_fence_postgres.py` (both enqueue/delete orders, in-flight drain,
+lost local bytes, unacknowledged drops, backfill with held erasure, against a
+recording FIFO exporter and replica), `test_spool_release_postgres.py` (settlement, exclusivity,
 expiry gaps, byte quota), `test_docker_spool_release.py` (real Docker in-use
 refusal), plus unit tests for the recovery worker and projector.

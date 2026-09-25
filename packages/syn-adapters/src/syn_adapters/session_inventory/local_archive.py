@@ -98,13 +98,28 @@ class LocalSessionTranscriptArchive:
     async def put(self, body: bytes) -> ArchivedTranscript:
         return await asyncio.to_thread(self._put, body)
 
+    def _mark_locked(self, reference: ArchivedTranscript) -> None:
+        marker = self._root / f".deleted-{reference.sha256}"
+        with marker.open("ab") as tombstone:
+            tombstone.flush()
+            os.fsync(tombstone.fileno())
+        _sync_directory(self._root)
+
+    def _mark(self, reference: ArchivedTranscript) -> None:
+        with self._lock(reference.sha256):
+            self._mark_locked(reference)
+
+    async def mark_deleted(self, reference: ArchivedTranscript) -> None:
+        """Durable anti-resurrection marker without erasing yet.
+
+        From here every read returns absent and every put of these bytes fails,
+        whatever path it comes from. Erasure follows asynchronously.
+        """
+        await asyncio.to_thread(self._mark, reference)
+
     def _delete(self, reference: ArchivedTranscript) -> None:
         with self._lock(reference.sha256):
-            marker = self._root / f".deleted-{reference.sha256}"
-            with marker.open("ab") as tombstone:
-                tombstone.flush()
-                os.fsync(tombstone.fileno())
-            _sync_directory(self._root)
+            self._mark_locked(reference)
             # A crash before unlink still denies reads and subsequent puts.
             (self._root / reference.sha256).unlink(missing_ok=True)
             _sync_directory(self._root)

@@ -39,7 +39,11 @@ class TranscriptDeletionReplica(InventoryModel):
     """Propagation of one body deletion to one configured replication destination."""
 
     destination_id: str = Field(description="Server-derived opaque destination identity.")
-    status: Literal["pending", "propagated"]
+    status: Literal["pending", "queued", "propagated", "unresolvable"] = Field(
+        description="pending: not yet handed to the exporter. queued: durably queued, "
+        "not yet acknowledged. propagated: the replica acknowledged deletion. "
+        "unresolvable: a legacy delivery recorded no content hash to delete by."
+    )
 
 
 class TranscriptDeletion(InventoryModel):

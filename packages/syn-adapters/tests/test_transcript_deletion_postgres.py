@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -19,11 +18,11 @@ import pytest
 from syn_adapters.session_inventory.body_availability import PostgresBodyAvailability
 from syn_adapters.session_inventory.body_retention import LocalBodyRetention
 from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
-from syn_adapters.session_inventory.capture_deletion_worker import CaptureDeletionWorker
 from syn_adapters.session_inventory.capture_delivery_jobs import (
     CaptureDeliveryLeaseLost,
     PostgresCaptureDeliveryJobs,
 )
+from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
 from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
@@ -97,6 +96,17 @@ async def _record(
     return capture
 
 
+def _deletions(
+    pool: asyncpg.Pool,
+    source: str,
+    archive: LocalSessionTranscriptArchive,
+    destination: str | None,
+) -> PostgresTranscriptDeletions:
+    return PostgresTranscriptDeletions(
+        pool, source, destination, archive=archive, fence=DeletionFence(pool, source)
+    )
+
+
 def _identity(capture: CataloguedCapture) -> QualifiedSessionIdentity:
     assert capture.native_id is not None
     return QualifiedSessionIdentity(
@@ -152,7 +162,7 @@ def _receipt(run: RunIdentity, *, local: str | None, remote: str | None) -> Capt
 
 
 async def test_owner_deletion_is_whole_object_idempotent_and_cannot_be_resurrected(
-    db_pool: asyncpg.Pool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_pool: asyncpg.Pool, tmp_path: Path
 ) -> None:
     evidence = PostgresSessionEvidence(db_pool)
     await evidence.ensure_ready()
@@ -172,20 +182,25 @@ async def test_owner_deletion_is_whole_object_idempotent_and_cannot_be_resurrect
     await jobs.discover()
     in_flight = await jobs.claim()
     assert in_flight is not None
+    # This delivery reached the exporter's enqueue step: its content hash is durable.
+    await jobs.record_content_hash(in_flight, CONTENT_HASH)
     access = InstallationTranscriptAccess(db_pool, source)
     reader = ReadLocalTranscriptHandler(PostgresCaptureCatalog(db_pool), archive, access)
-    deletions = PostgresTranscriptDeletions(db_pool, source, "replica")
+    deletions = _deletions(db_pool, source, archive, "replica")
 
     state, created = await deletions.request(first, "deletion")
     assert created and state.reason == "deletion" and state.local_status == "pending"
     assert state.replication == "propagate"
     assert [r.status for r in state.replicas] == ["pending"]
+    assert state.source_content_hash == CONTENT_HASH
     again, created_again = await deletions.request(shared, "retraction")
     assert not created_again
     assert again.reason == "deletion" and again.requested_at == state.requested_at
 
-    # Withheld immediately for every sharing run, although bytes still exist.
-    assert await archive.get(first.archive) == body
+    # Withheld immediately for every sharing run: the archive marker denies
+    # reads and puts although erasure has not run yet.
+    assert (tmp_path / "archive" / first.archive.sha256).read_bytes() == body
+    assert await archive.get(first.archive) is None
     for capture in (first, shared):
         assert await access.tombstone(capture) == "deleted"
         read = await reader.handle(capture.run, _identity(capture), capture.archive.sha256)
@@ -195,27 +210,14 @@ async def test_owner_deletion_is_whole_object_idempotent_and_cannot_be_resurrect
         await jobs.finish(in_flight, queued=True)
     assert await jobs.claim() is None
 
-    monkeypatch.setattr(
-        "syn_adapters.session_inventory.body_retention.original_envelope_hash",
-        AsyncMock(return_value=CONTENT_HASH),
-    )
-    # No automatic retention configured: owner deletions still run.
-    retention = LocalBodyRetention(db_pool, archive, source, exporter_binary=Path("/fixture"))
-    assert await retention.drain() == 2  # content-hash commit, then erase
-    assert await archive.get(first.archive) is None
+    # No automatic retention configured: owner deletions still run, and need no
+    # local bytes or exporter because the content hash was recorded at enqueue.
+    retention = LocalBodyRetention(db_pool, archive, source)
+    assert await retention.drain() == 1
+    assert not (tmp_path / "archive" / first.archive.sha256).exists()
     erased = await deletions.state(first)
     assert erased is not None and erased.local_status == "deleted"
     assert erased.deleted_at is not None and erased.source_content_hash == CONTENT_HASH
-
-    # Replica propagation happens once per capture and destination, then stops.
-    transport = AsyncMock()
-    worker = CaptureDeletionWorker(db_pool, transport, source, "replica")
-    assert await worker.step() and await worker.step()
-    assert not await worker.step()
-    assert transport.delete.await_count == 2
-    assert {c.args[1] for c in transport.delete.await_args_list} == {CONTENT_HASH}
-    propagated = await deletions.state(first)
-    assert propagated is not None and [r.status for r in propagated.replicas] == ["propagated"]
 
     # Resurrection attempts: re-upload, replayed capture, retry, new destination.
     with pytest.raises(TranscriptDeletedError):
@@ -275,7 +277,7 @@ async def test_revocation_withholds_shared_object_and_deletion_takes_precedence(
     page = _page(shared.run, _receipt(shared.run, local=shared.archive.sha256, remote=None))
     availability = PostgresBodyAvailability(db_pool)
     assert [o.status for o in await availability.overrides(page)] == ["withheld"]
-    await PostgresTranscriptDeletions(db_pool, source, None).request(first, "retraction")
+    await _deletions(db_pool, source, archive, None).request(first, "retraction")
     assert [o.status for o in await availability.overrides(page)] == ["deleted"]
     # Another installation's policy never touches this object.
     other = InstallationTranscriptAccess(db_pool, str(uuid4()))
@@ -312,16 +314,14 @@ async def test_retention_expiry_is_expired_not_deleted_and_quota_counts_objects_
     assert not await retention.step()  # within quota now
     access = InstallationTranscriptAccess(db_pool, source)
     assert await access.tombstone(oldest) == "expired"
-    state = await PostgresTranscriptDeletions(db_pool, source, None).state(oldest)
+    state = await _deletions(db_pool, source, archive, None).state(oldest)
     assert state is not None and state.reason == "retention_quota"
     assert state.replication == "disabled" and state.replicas == ()
     reader = ReadLocalTranscriptHandler(PostgresCaptureCatalog(db_pool), archive, access)
     read = await reader.handle(oldest.run, _identity(oldest), oldest.archive.sha256)
     assert read.status == "expired" and read.capture == oldest
     # An owner request for an already-expired body keeps the original reason.
-    again, created = await PostgresTranscriptDeletions(db_pool, source, None).request(
-        oldest, "deletion"
-    )
+    again, created = await _deletions(db_pool, source, archive, None).request(oldest, "deletion")
     assert not created and again.reason == "retention_quota"
     with pytest.raises(ValueError):
         LocalBodyRetention(db_pool, archive, source, max_bytes=0)

@@ -32,11 +32,25 @@ async def test_capture_checkpoint_follows_durable_enqueue(failure: str | None) -
     archive.get.return_value = None if failure == "archive" else b"{}"
     if failure == "exporter":
         transport.enqueue.side_effect = RuntimeError("do-not-log-this-token")
+    order: list[str] = []
+    transport.content_hash.return_value = "sha256:" + "d" * 64
+    jobs.record_content_hash.side_effect = lambda *_: order.append("hash")
+    enqueue_effect = transport.enqueue.side_effect
+
+    async def enqueue(*args: object) -> None:
+        order.append("enqueue")
+        if enqueue_effect is not None:
+            raise enqueue_effect
+
+    transport.enqueue.side_effect = enqueue
     worker = CaptureDeliveryWorker(jobs, archive, transport, retry_seconds=10)
     assert await worker.enqueue_step()
     if failure is None:
         jobs.finish.assert_awaited_once_with(lease, queued=True)
         assert transport.enqueue.await_args.args[1] == b"{}"
+        # The deletion key is durable before the exporter can hold the bytes.
+        jobs.record_content_hash.assert_awaited_once_with(lease, "sha256:" + "d" * 64)
+        assert order == ["hash", "enqueue"]
     else:
         jobs.finish.assert_awaited_once_with(lease, queued=False, retry_seconds=10)
     transport.drain.assert_not_awaited()

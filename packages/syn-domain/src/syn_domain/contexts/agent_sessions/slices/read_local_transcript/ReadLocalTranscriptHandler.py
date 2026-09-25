@@ -62,6 +62,11 @@ class ReadLocalTranscriptHandler:
         # Integrity and storage errors propagate; neither means confirmed absence.
         body = await self._archive.get(capture.archive)
         if body is None:
+            # A deletion request marks the archive before its SQL tombstone
+            # commits; ask again so the absence is labelled by its cause.
+            tombstone = await self._access.tombstone(capture)
+            if tombstone is not None:
+                return LocalTranscriptRead(status=tombstone, capture=capture)
             deleted = await self._archive.is_deleted(capture.archive)
             return LocalTranscriptRead(status="expired" if deleted else "missing", capture=capture)
         return LocalTranscriptRead(status="present", capture=capture, body=body)

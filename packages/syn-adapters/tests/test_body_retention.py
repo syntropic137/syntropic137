@@ -146,9 +146,15 @@ async def test_expiry_cancels_delivery_and_fences_claimed_worker(
     retention = LocalBodyRetention(
         db_pool, archive, source, age_seconds=86400, exporter_binary=Path("/fixture/exporter")
     )
+    # One step: a legacy queued delivery (no enqueue-time hash) derives its
+    # replica deletion key from the still-present bytes before erasure.
     assert await retention.step()
-    assert await archive.get(capture.archive) is not None
-    assert await retention.step()
+    async with db_pool.acquire() as conn:
+        recorded = await conn.fetchval(
+            "SELECT content_hash FROM session_body_deletions WHERE source_instance_id=$1",
+            source,
+        )
+    assert recorded == ("sha256:" + "a" * 64 if already_queued else None)
     with pytest.raises(CaptureDeliveryLeaseLost):
         await jobs.renew(lease)
     with pytest.raises(CaptureDeliveryLeaseLost):
@@ -215,10 +221,6 @@ async def test_real_exporter_retains_deletion_key_before_body_removal(db_pool, t
         db_pool, archive, source, age_seconds=86400, exporter_binary=Path(binary)
     )
     assert await retention.step()
-    assert await archive.get(ref) == body
-    assert await LocalBodyRetention(
-        db_pool, archive, source, age_seconds=86400, exporter_binary=Path(binary)
-    ).step()
     assert await archive.get(ref) is None
     transport = ExporterCaptureTransport(
         ExporterConfig(

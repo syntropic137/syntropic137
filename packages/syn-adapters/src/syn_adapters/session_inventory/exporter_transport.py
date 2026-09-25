@@ -106,6 +106,10 @@ class ExporterCaptureTransport:
     def __init__(self, config: ExporterConfig) -> None:
         self._config = config
 
+    async def content_hash(self, envelope: bytes) -> str:
+        """APSS original-content hash, computed by the exporter, never reimplemented."""
+        return await original_envelope_hash(self._config.binary, envelope)
+
     async def enqueue(self, identity: QualifiedTranscript, envelope: bytes) -> EnqueueReceipt:
         # The standard exporter parses/validates the original envelope. Do not
         # parse and reconstruct native content in this orchestration adapter.
