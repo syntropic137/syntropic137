@@ -9,7 +9,6 @@ the session discoverable.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -48,6 +47,8 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import asyncpg
 
 pytestmark = pytest.mark.integration
