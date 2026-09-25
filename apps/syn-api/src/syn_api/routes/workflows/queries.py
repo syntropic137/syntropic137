@@ -29,6 +29,8 @@ from syn_domain.contexts.orchestration import (
     ReportedFailureReason,
     is_phase_id,
 )
+from syn_shared.agents import resolve_definition_model
+from syn_shared.display import format_phase_model_definition
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -176,29 +178,35 @@ class ExportManifestResponse(BaseModel):
 
 def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDefinitionResponse]:
     """Map domain PhaseDefinitionDetail objects to API response models."""
-    return [
-        PhaseDefinitionResponse(
-            phase_id=p.id,
-            name=p.name,
-            order=p.order,
-            description=p.description,
-            agent_type=p.agent_type,
-            prompt_template=p.prompt_template,
-            timeout_seconds=p.timeout_seconds or 300,
-            allowed_tools=list(p.allowed_tools),
-            argument_hint=p.argument_hint,
-            model=p.model,
-            provider=p.provider,
-            allow_delegation=p.allow_delegation,
-            claude_plugins=[_ref_response(r) for r in p.claude_plugins],
-            skills=[_ref_response(r) for r in p.skills],
-            execution_type=p.execution_type,
-            max_tokens=p.max_tokens,
-            input_artifact_types=list(p.input_artifact_types),
-            output_artifact_types=list(p.output_artifact_types),
-        )
-        for p in (raw_phases or [])
-    ]
+    return [_map_phase(p) for p in (raw_phases or [])]
+
+
+def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
+    """One phase; the model resolves by the same rule execution applies."""
+    resolution = resolve_definition_model(p.provider, p.model)
+    return PhaseDefinitionResponse(
+        phase_id=p.id,
+        name=p.name,
+        order=p.order,
+        description=p.description,
+        agent_type=p.agent_type,
+        prompt_template=p.prompt_template,
+        timeout_seconds=p.timeout_seconds or 300,
+        allowed_tools=list(p.allowed_tools),
+        argument_hint=p.argument_hint,
+        model=p.model,
+        resolved_model=resolution.concrete,
+        resolution_basis=resolution.alias.basis if resolution.alias else None,
+        model_display=format_phase_model_definition(resolution),
+        provider=p.provider,
+        allow_delegation=p.allow_delegation,
+        claude_plugins=[_ref_response(r) for r in p.claude_plugins],
+        skills=[_ref_response(r) for r in p.skills],
+        execution_type=p.execution_type,
+        max_tokens=p.max_tokens,
+        input_artifact_types=list(p.input_artifact_types),
+        output_artifact_types=list(p.output_artifact_types),
+    )
 
 
 def _map_input_declarations(

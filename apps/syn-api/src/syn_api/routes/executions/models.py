@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import BranchObservationInfo, PhaseActivityInfo
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
 from syn_shared.display import EM_DASH
+from syn_shared.observed_model import format_observed_model
 
 
 class PhaseOperationInfo(BaseModel):
@@ -75,8 +77,15 @@ class PhaseExecutionInfo(BaseModel):
     model -> here. A client auditing which runs stood on a salvage reads this;
     `status` says `completed` either way.
     """
-    model: str | None = None
-    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this phase, or null (ADR-067 D9).
+
+    Never an alias such as ``opus``: that is what the phase asked for, and it
+    is ``requested_model``. Null means nothing reported what ran.
+    """
+    requested_model: str | None
+    """The model the phase REQUESTED (often an alias), or null if not recorded."""
+    cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -139,6 +148,15 @@ class PhaseExecutionInfo(BaseModel):
     row by row; this is the summary of it, and `operations_count` is
     deliberately not that list's length.
     """
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 class ExecutionDetailResponse(BaseModel):

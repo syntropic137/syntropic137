@@ -12,12 +12,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 from syn_api._wiring import ensure_connected, get_conversation_store, get_projection_mgr
+from syn_api.model_identity import ObservedModelId, observed_model_of
 from syn_api.types import (
     ConversationLine,
     ConversationLog,
@@ -34,6 +35,7 @@ from syn_shared.codex_stream import (
     CodexItemType,
     CodexStreamType,
 )
+from syn_shared.observed_model import format_observed_model
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +80,24 @@ class ConversationMetadataResponse(BaseModel):
     tool_counts: dict[str, int] | None = None
     started_at: str | None = None
     completed_at: str | None = None
-    model: str | None = None
+    model: ObservedModelId | None = None
+    """The model the harness REPORTED for this conversation, or null.
+
+    Never an alias (ADR-067 D9): what the phase asked for is ``requested_model``.
+    """
+    requested_model: str | None = None
+    """The model the phase REQUESTED (often an alias such as ``opus``), or null."""
     success: bool | None = None
     size_bytes: int | None = None
+
+    @computed_field(
+        description="The model for humans: the reported id verbatim, or "
+        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+    )
+    @property
+    def model_display(self) -> str:
+        """Derived, never passed in, so it cannot contradict ``model``."""
+        return format_observed_model(self.model, self.requested_model)
 
 
 # =============================================================================
@@ -736,11 +753,16 @@ async def get_conversation_metadata(
         if meta is None:
             return Ok(None)
 
+        # The index classifies its own legacy rows, but a store that does not
+        # (or a row written before it did) can still hand back the REQUESTED
+        # alias as ``model``: it is served as the request, never as what ran.
+        recorded = observed_model_of(meta.get("model"), meta.get("requested_model"))
         return Ok(
             ConversationMeta(
                 session_id=session_id,
                 event_count=meta.get("event_count", 0),
-                model=meta.get("model"),
+                model=recorded.observed,
+                requested_model=recorded.requested,
                 total_input_tokens=meta.get("total_input_tokens", 0),
                 total_output_tokens=meta.get("total_output_tokens", 0),
                 tool_counts=meta.get("tool_counts") or {},
@@ -850,6 +872,7 @@ async def get_conversation_metadata_endpoint(
         started_at=str(meta.started_at) if meta.started_at else None,
         completed_at=str(meta.completed_at) if meta.completed_at else None,
         model=meta.model,
+        requested_model=meta.requested_model,
         size_bytes=meta.size_bytes,
         execution_id=meta.execution_id,
         workflow_id=meta.workflow_id,

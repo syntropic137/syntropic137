@@ -19,9 +19,11 @@ export const PROVIDER_OPTIONS: readonly ProviderOption[] = [
   { value: AGENT_PROVIDER.CODEX, label: 'Codex' },
 ]
 
-// Codex uses its account-default model; a Claude model id (e.g. "haiku") is
+// A codex phase with no model gets the server-side codex default (the
+// `gpt-sol` alias), never an account default. A Claude alias (e.g. "haiku") is
 // rejected by codex, so the phase editor hides the model field for codex and
-// never sends a model override for it.
+// sends no override; the server fills in the codex default. The model that
+// actually ran is reported per run (ADR-067 D9), not hidden.
 export function providerUsesModelField(provider: string): boolean {
   return provider !== AGENT_PROVIDER.CODEX
 }

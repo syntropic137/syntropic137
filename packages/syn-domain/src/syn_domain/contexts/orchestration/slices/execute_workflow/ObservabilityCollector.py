@@ -12,7 +12,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.agent_sessions import ObservationType, SessionSummaryData
+from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
+    announced_model_from,
+)
 from syn_shared.events import SESSION_SUMMARY
+from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -70,15 +74,42 @@ class ObservabilityCollector:
         execution_id: str,
         phase_id: str,
         workspace_id: str | None,
-        agent_model: str | None,
+        requested_model: str | None,
     ) -> None:
         self._writer = writer
         self._session_id = session_id
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._workspace_id = workspace_id
-        self._agent_model = agent_model
+        #: What the phase ASKED for, usually an alias (``opus``, ``gpt-sol``).
+        #: Written to every usage row as ``requested_model`` and never as
+        #: ``model``: an alias is a pointer, not a record of what ran (ADR-067).
+        self._requested_model = requested_model
+        #: What the harness REPORTED running, once it has said. None until then,
+        #: and for a harness that never says.
+        self._observed_model: str | None = None
         self._saw_agent_activity = False
+
+    @property
+    def requested_model(self) -> str | None:
+        """The model the phase declared (often an alias), or None."""
+        return self._requested_model
+
+    @property
+    def observed_model(self) -> str | None:
+        """The model the harness reported running so far, or None (ADR-067)."""
+        return self._observed_model
+
+    def note_observed_model(self, model: str | None) -> None:
+        """Record the model the harness REPORTED. First non-blank report wins.
+
+        The same rule as ``announced_model_from`` and for the same reason: a
+        delegate or subagent line arriving late must not rebind the leader's
+        identity. ``None`` and blank are ignored, so a stream that says nothing
+        leaves the session honestly unknown rather than blanking a real answer.
+        """
+        if self._observed_model is None:
+            self._observed_model = announced_model_from(model)
 
     @property
     def has_writer(self) -> bool:
@@ -177,10 +208,19 @@ class ObservabilityCollector:
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        model: str | None = None,
     ) -> None:
-        """Record token usage observation."""
+        """Record token usage observation.
+
+        ``model`` is the model THIS TURN reported (claude repeats it on every
+        assistant message, and a subagent's turn names its own). Without one
+        the row takes the session's observed model so far, and without that it
+        is None - never the requested alias, which travels separately as
+        ``requested_model`` (ADR-067).
+        """
         if self._writer is None:
             return
+        row_model = announced_model_from(model) or self._observed_model
 
         await self._writer.record_observation(
             session_id=self._session_id,
@@ -190,7 +230,10 @@ class ObservabilityCollector:
                 "output_tokens": output_tokens,
                 "cache_creation_tokens": cache_creation,
                 "cache_read_tokens": cache_read,
-                "model": self._agent_model,
+                OBSERVED_MODEL_KEY: row_model,
+                # ALWAYS present, null included: the key's presence is how a
+                # reader tells a row written under ADR-067 from a legacy one.
+                REQUESTED_MODEL_KEY: self._requested_model,
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,
@@ -362,7 +405,8 @@ class ObservabilityCollector:
             "cache_read_tokens": cache_read,
             "num_turns": num_turns,
             "duration_ms": duration_ms,
-            "model": self._agent_model,
+            "model": self._observed_model,
+            "requested_model": self._requested_model,
             "totals_are_authoritative": totals_are_authoritative,
         }
 

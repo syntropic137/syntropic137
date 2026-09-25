@@ -36,7 +36,12 @@ class TokenUsageData(TypedDict):
     output_tokens: int
     cache_creation_tokens: int
     cache_read_tokens: int
+    #: What the harness REPORTED for this turn, or None. Never an alias (ADR-067).
     model: str | None
+    #: What the phase asked for, often an alias. Always written from ADR-067
+    #: on (null allowed); absent only on legacy rows, which is how a reader
+    #: tells the two eras apart - see ``syn_shared.observed_model``.
+    requested_model: NotRequired[str | None]
 
 
 class SessionSummaryData(TypedDict):
@@ -59,7 +64,11 @@ class SessionSummaryData(TypedDict):
     cache_read_tokens: int
     num_turns: int | None
     duration_ms: int | None
+    #: What the harness REPORTED running, or None. Never an alias (ADR-067).
     model: str | None
+    #: What the phase asked for. ``NotRequired`` for legacy rows only; every
+    #: producer writes it (see ``TokenUsageData.requested_model``).
+    requested_model: NotRequired[str | None]
 
     #: Read by both summary consumers, written by no current producer, so it
     #: always resolves to "not reported" and leaves the counted tool calls

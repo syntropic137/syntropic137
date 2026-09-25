@@ -29,6 +29,7 @@
 import { TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader } from './Card'
 import { formatCost, formatCostWithCoverage } from '../utils/formatters'
+import { costByModelKeyLabel } from '../utils/modelLabels'
 
 export interface ModelBreakdownProps {
   costByModel: Record<string, string>
@@ -88,12 +89,11 @@ export function ModelBreakdown({
         <div className="space-y-2.5">
           {entries.map(({ model, cost }) => {
             const pct = basis > 0 ? (cost / basis) * 100 : 0
-            const shortName = model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
             return (
               <div key={model} className="space-y-1">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-mono text-xs text-[var(--color-text-secondary)]">
-                    {shortName}
+                    {costByModelKeyLabel(model)}
                   </span>
                   <div className="flex items-center gap-3">
                     <span className="font-medium tabular-nums text-[var(--color-text-primary)]">

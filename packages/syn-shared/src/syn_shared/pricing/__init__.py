@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from syn_shared.agents import CODEX_MODEL_ALIAS_TARGETS, CodexModelAlias, ModelAlias, ModelId
+from syn_shared.agents import (
+    CLAUDE_MODEL_ALIAS_TARGETS,
+    CODEX_MODEL_ALIAS_TARGETS,
+    ModelId,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -385,16 +389,12 @@ PLACEHOLDER_PRICED_MODELS: frozenset[ModelId] = frozenset()
 # map moves with it.
 MODEL_ALIASES: dict[str, ModelId] = {
     "gpt-codex": ModelId.GPT_5_6,
-    # The platform's codex alias: it is what a codex phase STORES, so the
+    # The platform's codex aliases: what a codex phase STORES, so the
     # requested-model pricing path (CodexStreamProcessor._estimate_cost) sees
     # `gpt-sol`, not the slug `codex exec --model` was given.
-    CodexModelAlias.GPT_SOL: CODEX_MODEL_ALIAS_TARGETS[CodexModelAlias.GPT_SOL],
-    # claude-code 2.1.280 moved `opus` to Opus 5.5; probed on 2.1.281, the CLI
-    # reports it as exactly `claude-opus-5-5` (no `[1m]` suffix).
-    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5_5,
-    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
-    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
-    ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
+    **CODEX_MODEL_ALIAS_TARGETS,
+    # Claude aliases: the same map definition surfaces show (single source).
+    **CLAUDE_MODEL_ALIAS_TARGETS,
     # Undated family names the CLI also accepts. Only ids that DIFFER from a
     # ModelId value need an entry: canonical_model_id() already falls back to
     # ModelId(value), so the Claude 5 ids (which are undated) resolve on their

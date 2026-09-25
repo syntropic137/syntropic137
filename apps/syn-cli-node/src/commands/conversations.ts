@@ -74,7 +74,8 @@ const metadataCommand: CommandDef = {
 
     print(`${style("Metadata:", BOLD)} ${m.session_id}`);
 
-    if (m.model != null) print(`  Model:            ${m.model}`);
+    print(`  Model:            ${m.model_display}`);
+    if (m.model != null && m.requested_model != null) print(`  Requested:        ${m.requested_model}`);
     if (m.event_count != null) print(`  Events:           ${m.event_count.toLocaleString()}`);
     if (m.total_input_tokens != null) print(`  Input tokens:     ${m.total_input_tokens.toLocaleString()}`);
     if (m.total_output_tokens != null) print(`  Output tokens:    ${m.total_output_tokens.toLocaleString()}`);

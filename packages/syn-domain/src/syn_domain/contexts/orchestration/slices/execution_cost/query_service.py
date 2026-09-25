@@ -17,7 +17,11 @@ if TYPE_CHECKING:
     import asyncpg
 
 from syn_domain import tool_call_counts
-from syn_domain.contexts.agent_sessions import CostCalculator
+from syn_domain.contexts.agent_sessions import (
+    CostCalculator,
+    recorded_model_group_by,
+    recorded_model_select,
+)
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     PhaseCosts,
@@ -45,7 +49,7 @@ from syn_shared.events import (
 # SAME model - one SDK-priced, one not - do not merge into a group whose
 # non-NULL cost SUM suppresses the token fallback while still carrying the
 # unpriced row's tokens. See the matching note in ``timescale_query.py``.
-_LIST_ALL_FROM_SUMMARY_QUERY = """
+_LIST_ALL_FROM_SUMMARY_QUERY = f"""
 WITH recent_executions AS (
     SELECT execution_id, MAX(time) as last_time
     FROM agent_events
@@ -57,7 +61,7 @@ WITH recent_executions AS (
 )
 SELECT
     a.execution_id,
-    a.data->>'model' as model,
+    {recorded_model_select("a.data")},
     SUM((a.data->>'total_input_tokens')::int) as total_input,
     SUM((a.data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((a.data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -73,7 +77,7 @@ SELECT
 FROM agent_events a
 JOIN recent_executions r ON r.execution_id = a.execution_id
 WHERE a.event_type = $1
-GROUP BY a.execution_id, a.data->>'model', ((a.data->>'total_cost_usd') IS NULL)
+GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL)
 """
 
 # Fallback: list executions from token_usage (in-progress, no summary yet).
@@ -83,10 +87,10 @@ GROUP BY a.execution_id, a.data->>'model', ((a.data->>'total_cost_usd') IS NULL)
 # group rather than flattening all tokens into one SUM per execution and
 # pricing them as a single model (issue #788). Rows for the same
 # execution_id are merged in Python via ``price_grouped_token_usage``.
-_LIST_ALL_FROM_TOKEN_USAGE_QUERY = """
+_LIST_ALL_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -99,7 +103,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id IS NOT NULL
-GROUP BY execution_id, data->>'model'
+GROUP BY execution_id, {recorded_model_group_by()}
 """
 
 # Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
@@ -107,10 +111,10 @@ GROUP BY execution_id, data->>'model'
 # the caller already knows which executions it wants (e.g. one page of a
 # list endpoint) so the query returns exactly those rows in one round trip
 # instead of one round trip per id.
-_BY_IDS_FROM_SUMMARY_QUERY = """
+_BY_IDS_FROM_SUMMARY_QUERY = f"""
 SELECT
     a.execution_id,
-    a.data->>'model' as model,
+    {recorded_model_select("a.data")},
     SUM((a.data->>'total_input_tokens')::int) as total_input,
     SUM((a.data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((a.data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -126,14 +130,14 @@ SELECT
 FROM agent_events a
 WHERE a.event_type = $1
   AND a.execution_id = ANY($2::text[])
-GROUP BY a.execution_id, a.data->>'model', ((a.data->>'total_cost_usd') IS NULL)
+GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL)
 """
 
 # Same shape as _LIST_ALL_FROM_TOKEN_USAGE_QUERY, scoped by id (issue #1077).
-_BY_IDS_FROM_TOKEN_USAGE_QUERY = """
+_BY_IDS_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -146,7 +150,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
-GROUP BY execution_id, data->>'model'
+GROUP BY execution_id, {recorded_model_group_by()}
 """
 
 # Per-execution, per-phase cost breakdown.
@@ -156,11 +160,11 @@ GROUP BY execution_id, data->>'model'
 # SUM(total_cost_usd) GROUP BY phase_id drops phases with no SDK cost
 # (PostgreSQL excludes NULLs from SUM) while the total prices them, so the
 # breakdown sums to less than the total it decomposes (issue #812).
-_COST_BY_PHASE_QUERY = """
+_COST_BY_PHASE_QUERY = f"""
 SELECT
     execution_id,
     phase_id,
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'total_input_tokens')::int) as total_input,
     SUM((data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -170,7 +174,8 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
-GROUP BY execution_id, phase_id, data->>'model', ((data->>'total_cost_usd') IS NULL)
+GROUP BY execution_id, phase_id, {recorded_model_group_by()},
+    ((data->>'total_cost_usd') IS NULL)
 """
 
 

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_shared.observed_model import split_observation_model
 from syn_shared.pricing import PricedAmount, price_tokens
 
 
@@ -106,18 +107,22 @@ def _apply_token_usage(
     execution_cost.cache_creation_tokens += cache_creation
     execution_cost.cache_read_tokens += cache_read
 
-    model = data.get("model")
+    # Classified exactly as the SQL read path classifies the same row
+    # (ADR-067): priced as the reported model, else the requested one, and
+    # filed under what RAN - the reported id or the unknown bucket.
+    model = split_observation_model(data)
     priced = _calculate_token_cost(
-        input_tokens, output_tokens, cache_creation, cache_read, model=model
+        input_tokens, output_tokens, cache_creation, cache_read, model=model.pricing_model
     )
     token_cost = priced.cost if priced.cost is not None else Decimal("0")
     execution_cost.token_cost_usd += token_cost
     execution_cost.total_cost_usd += token_cost
     if not priced.is_priced:
         execution_cost.unpriced_observation_count += 1
-    if model and priced.is_priced:
-        current = execution_cost.cost_by_model.get(model, Decimal("0"))
-        execution_cost.cost_by_model[model] = current + token_cost
+    if priced.is_priced:
+        key = model.cost_key
+        current = execution_cost.cost_by_model.get(key, Decimal("0"))
+        execution_cost.cost_by_model[key] = current + token_cost
 
     _attribute_to_phase(execution_cost, event_data.get("phase_id"), token_cost, priced.is_priced)
 

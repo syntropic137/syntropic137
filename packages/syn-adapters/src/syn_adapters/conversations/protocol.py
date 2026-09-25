@@ -23,8 +23,11 @@ class SessionContext:
     phase_id: str | None = None
     workflow_id: str | None = None
 
-    # Agent metadata
+    # Agent metadata (ADR-067). ``model`` is what the harness REPORTED running,
+    # or None when it never said - never an alias. ``requested_model`` is what
+    # the phase asked for, usually an alias such as ``opus``.
     model: str | None = None
+    requested_model: str | None = None
 
     # Metrics (from SessionSummary)
     event_count: int = 0
@@ -46,6 +49,7 @@ class SessionContext:
             "phase_id": self.phase_id,
             "workflow_id": self.workflow_id,
             "model": self.model,
+            "requested_model": self.requested_model,
             "event_count": self.event_count,
             "tool_counts": self.tool_counts,
             "total_input_tokens": self.total_input_tokens,

@@ -117,6 +117,9 @@ _SESSION = SessionCost(
     tokens_by_tool={"Bash": 512},
     cost_by_tool_tokens={"Bash": Decimal("0.0031")},
     agent_model="claude-opus-5",
+    requested_model="opus",
+    tokens_by_model={"claude-opus-5": 166500},
+    tokens_by_requested_model={"opus": 166500},
     unpriced_observation_count=3,
     #: A PROPER SUBSET of the default (which is every member). A fixture using
     #: the full set would pass with the mapper line deleted, and the empty set

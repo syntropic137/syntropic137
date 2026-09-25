@@ -1,4 +1,5 @@
 export { AgentBadge } from './AgentBadge'
+export { ObservedModel } from './ObservedModel'
 export { AGENT_PROVIDER_LABELS, agentProviderLabel } from './agentProvider'
 export { Breadcrumbs } from './Breadcrumbs'
 export { ChartTooltip } from './ChartTooltip'

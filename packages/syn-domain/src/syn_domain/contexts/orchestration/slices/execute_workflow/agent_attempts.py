@@ -150,7 +150,7 @@ async def run_phase_agent(
         execution_id=todo.execution_id,
         phase_id=todo.phase_id,
         workspace_id=getattr(launch.workspace, "workspace_id", None),
-        agent_model=phase.agent_config.model,
+        requested_model=phase.agent_config.model,
     )
 
     # ONE deadline for the phase, fixed here, before anything runs. Every

@@ -2,6 +2,7 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, MessageSquare, TrendingUp, Zap } from 'lucide-react'
 import type { ExecutionCost } from '../types'
 import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
+import { costByModelKeyLabel } from '../utils/modelLabels'
 
 interface ExecutionCostSummaryProps {
   cost: ExecutionCost
@@ -172,7 +173,7 @@ function ModelBreakdown({ costByModel }: { costByModel: Record<string, string> }
           .sort(([, a], [, b]) => parseFloat(b) - parseFloat(a))
           .map(([model, modelCost]) => (
             <div key={model} className="flex justify-between text-sm">
-              <span className="text-[var(--color-text-muted)] truncate flex-1">{model}</span>
+              <span className="text-[var(--color-text-muted)] truncate flex-1 font-mono">{costByModelKeyLabel(model)}</span>
               <span className="text-[var(--color-text-primary)] font-medium ml-4">
                 {formatCost(parseFloat(modelCost))}
               </span>

@@ -42,7 +42,14 @@ export interface PhaseDefinition {
   timeout_seconds: number
   allowed_tools: string[]
   argument_hint: string | null
+  /** The model as DEFINED: often an alias (opus, gpt-sol). */
   model: string | null
+  /** Concrete id the alias resolves to; null when not an alias. Never what a run used. */
+  resolved_model?: string | null
+  /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
+  resolution_basis?: 'translated' | 'expected' | null
+  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  model_display?: string | null
   provider: string | null
 }
 
@@ -89,8 +96,12 @@ export interface SessionSummary {
   phase_display: string | null
   status: string
   agent_provider: string | null
+  // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  agent_model_display: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  agent_model_display: string
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
   repos: string[]
   repos_display: string | null
   total_tokens: number
@@ -120,7 +131,12 @@ export interface SessionResponse {
   phase_display: string | null
   milestone_id: string | null
   agent_provider: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
   agent_model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  agent_model_display: string
   status: string
   input_tokens: number
   output_tokens: number
@@ -371,7 +387,13 @@ export interface PhaseExecutionDetail {
   unpriced_observation_count: number
   started_at: string | null
   completed_at: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
   model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  model_display: string
+  /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
 }
 

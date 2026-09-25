@@ -13,7 +13,10 @@ if TYPE_CHECKING:
 from syn_domain.contexts.agent_sessions import (
     CANONICAL_SESSION_USAGE_CTE,
     CANONICAL_USAGE_EVENT_FILTER,
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
     CostCalculator,
+    recorded_model_from_row,
 )
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     HeatmapDayBucket,
@@ -240,6 +243,8 @@ scoped_events AS (
 SELECT
     {_utc_day("s.started_at")} AS day,
     u.model AS model,
+    u.{REQUESTED_MODEL_COLUMN} AS {REQUESTED_MODEL_COLUMN},
+    u.{HAS_REQUESTED_MODEL_COLUMN} AS {HAS_REQUESTED_MODEL_COLUMN},
     SUM(u.vendor_cost_usd) AS vendor_cost_usd,
     SUM(u.input_tokens) AS input_tokens,
     SUM(u.output_tokens) AS output_tokens,
@@ -247,7 +252,8 @@ SELECT
     SUM(u.cache_read_tokens) AS cache_read_tokens
 FROM canonical_usage u
 JOIN session_start s ON s.session_id = u.session_id
-GROUP BY day, u.model, (u.vendor_cost_usd IS NULL)
+GROUP BY day, u.model, u.{REQUESTED_MODEL_COLUMN}, u.{HAS_REQUESTED_MODEL_COLUMN},
+    (u.vendor_cost_usd IS NULL)
 ORDER BY day
 """
 
@@ -372,8 +378,9 @@ class TimescaleHeatmapQuery:
                 day_cost.priced_cost += Decimal(str(vendor_cost))
                 continue
 
-            raw_model = row.get("model")
-            model = raw_model if isinstance(raw_model, str) else None
+            # Priced as what ran when reported, else as what was requested
+            # (ADR-067) - the rate a legacy alias row was always priced at.
+            model = recorded_model_from_row(row).pricing_model
             pricing = self._cost_calculator.resolve_pricing(model)
             if pricing is None:
                 day_cost.unpriced_tokens += (

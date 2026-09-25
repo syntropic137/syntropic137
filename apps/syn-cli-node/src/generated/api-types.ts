@@ -2004,6 +2004,12 @@ export interface components {
             version: string;
         };
         /**
+         * AliasResolutionBasis
+         * @description How confident an alias -> model id resolution is.
+         * @enum {string}
+         */
+        AliasResolutionBasis: "translated" | "expected";
+        /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
          */
@@ -2500,10 +2506,17 @@ export interface components {
             completed_at?: string | null;
             /** Model */
             model?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Success */
             success?: boolean | null;
             /** Size Bytes */
             size_bytes?: number | null;
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
         };
         /**
          * CostOutlierResponse
@@ -4118,6 +4131,19 @@ export interface components {
             phases?: components["schemas"]["PhaseMetrics"][];
         };
         /**
+         * ModelCostEntry
+         * @description One model's share of a cost total.
+         */
+        ModelCostEntry: {
+            /** Model */
+            model: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+        };
+        /**
          * OperationInfo
          * @description Information about a session operation.
          */
@@ -4316,6 +4342,11 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Resolved Model */
+            resolved_model?: string | null;
+            resolution_basis?: components["schemas"]["AliasResolutionBasis"] | null;
+            /** Model Display */
+            model_display?: string | null;
             /** Provider */
             provider?: string | null;
             /**
@@ -4386,6 +4417,8 @@ export interface components {
             deliverable_recovered: boolean;
             /** Model */
             model?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -4399,6 +4432,11 @@ export interface components {
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
         };
         /**
          * PhaseMetrics
@@ -5349,8 +5387,8 @@ export interface components {
             agent_provider: string | null;
             /** Agent Model */
             agent_model: string | null;
-            /** Agent Model Display */
-            agent_model_display?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -5447,6 +5485,11 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
         };
         /**
          * SessionSummaryResponse
@@ -5485,8 +5528,8 @@ export interface components {
             agent_provider: string | null;
             /** Agent Model */
             agent_model?: string | null;
-            /** Agent Model Display */
-            agent_model_display?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -5547,6 +5590,11 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
         };
         /**
          * SessionTokenMetrics
@@ -6733,9 +6781,7 @@ export interface components {
              */
             total_tool_calls: number;
             /** Top Models */
-            top_models?: {
-                [key: string]: unknown;
-            }[];
+            top_models?: components["schemas"]["ModelCostEntry"][];
             /** Top Sessions */
             top_sessions?: {
                 [key: string]: unknown;

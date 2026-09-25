@@ -27,7 +27,7 @@ def _make_collector(
         execution_id="exec-1",
         phase_id="phase-1",
         workspace_id="ws-1",
-        agent_model="claude-haiku",
+        requested_model="claude-haiku",
     )
 
 
@@ -70,7 +70,10 @@ class TestObservabilityCollectorWithWriter:
         assert data["output_tokens"] == 50
         assert data["cache_creation_tokens"] == 10
         assert data["cache_read_tokens"] == 20
-        assert data["model"] == "claude-haiku"
+        # Nothing reported a model, so the row says unknown; the request is
+        # carried separately and never as `model` (ADR-067).
+        assert data["model"] is None
+        assert data["requested_model"] == "claude-haiku"
 
     @pytest.mark.anyio
     async def test_record_tool_started(self) -> None:
@@ -201,7 +204,8 @@ class TestObservabilityCollectorWithWriter:
         assert data["cache_read_tokens"] == 144509
         assert data["num_turns"] == 7
         assert data["duration_ms"] == 48000
-        assert data["model"] == "claude-haiku"
+        assert data["model"] is None
+        assert data["requested_model"] == "claude-haiku"
 
     @pytest.mark.anyio
     async def test_record_session_summary_noop_without_writer(self) -> None:

@@ -1,6 +1,7 @@
 import { Clock, DollarSign, MessageSquare, Zap } from 'lucide-react'
 import type { SessionCost } from '../types'
 import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
+import { costByModelKeyLabel } from '../utils/modelLabels'
 import { ToolCostBreakdown } from './ToolCostBreakdown'
 
 interface SessionCostCardProps {
@@ -102,7 +103,7 @@ function SessionBreakdowns({ cost }: { cost: SessionCost }) {
           <div className="space-y-1">
             {Object.entries(cost.cost_by_model).map(([model, modelCost]) => (
               <div key={model} className="flex justify-between text-sm">
-                <span className="text-[var(--color-text-muted)] truncate">{model}</span>
+                <span className="text-[var(--color-text-muted)] truncate font-mono">{costByModelKeyLabel(model)}</span>
                 <span className="text-[var(--color-text-primary)] font-medium">
                   ${parseFloat(modelCost).toFixed(4)}
                 </span>

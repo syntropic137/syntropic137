@@ -36,6 +36,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
+    recorded_model_from_row,
+    recorded_model_group_by,
+    recorded_model_select,
+)
 from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
 if TYPE_CHECKING:
@@ -52,6 +59,11 @@ CANONICAL_USAGE_EVENT_FILTER = f"event_type IN ('{SESSION_SUMMARY}', '{TOKEN_USA
 """SQL predicate selecting the rows ``CANONICAL_SESSION_USAGE_CTE`` consumes."""
 
 
+_MODEL_COLUMNS = f"{REQUESTED_MODEL_COLUMN}, {HAS_REQUESTED_MODEL_COLUMN}"
+
+CANONICAL_MODEL_COLUMNS = f"model, {_MODEL_COLUMNS}"
+"""The CTE's three model columns, for a consumer's SELECT and GROUP BY lists."""
+
 CANONICAL_SESSION_USAGE_CTE = f"""
 summary_rows AS (
     -- One row per summary observation, NOT aggregated. Aggregating first was
@@ -63,7 +75,7 @@ summary_rows AS (
     SELECT
         session_id,
         time,
-        data->>'model' AS model,
+        {recorded_model_select()},
         (data->>'total_cost_usd')::numeric AS vendor_cost_usd,
         COALESCE((data->>'total_input_tokens')::bigint, 0) AS input_tokens,
         COALESCE((data->>'total_output_tokens')::bigint, 0) AS output_tokens,
@@ -78,7 +90,7 @@ ranked_summary AS (
     -- run that produced no result event records the accumulator in the domain
     -- lane and zeroes here, and letting that win reports real work as free.
     SELECT
-        session_id, model, vendor_cost_usd,
+        session_id, model, {_MODEL_COLUMNS}, vendor_cost_usd,
         input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
         ROW_NUMBER() OVER (
             PARTITION BY session_id
@@ -101,7 +113,7 @@ ranked_summary AS (
 ),
 priced_summary AS (
     SELECT
-        session_id, model, vendor_cost_usd,
+        session_id, model, {_MODEL_COLUMNS}, vendor_cost_usd,
         input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
     FROM ranked_summary
     WHERE rn = 1
@@ -113,7 +125,7 @@ turn_usage AS (
     -- in the summary, so these rows are always priced from tokens.
     SELECT
         session_id,
-        data->>'model' AS model,
+        {recorded_model_select()},
         NULL::numeric AS vendor_cost_usd,
         SUM(COALESCE((data->>'input_tokens')::bigint, 0)) AS input_tokens,
         SUM(COALESCE((data->>'output_tokens')::bigint, 0)) AS output_tokens,
@@ -121,7 +133,7 @@ turn_usage AS (
         SUM(COALESCE((data->>'cache_read_tokens')::bigint, 0)) AS cache_read_tokens
     FROM scoped_events
     WHERE event_type = '{TOKEN_USAGE}'
-    GROUP BY session_id, data->>'model'
+    GROUP BY session_id, {recorded_model_group_by()}
 ),
 canonical_usage AS (
     -- The summary SUPERSEDES the per-turn rows for a session; it never adds
@@ -142,8 +154,10 @@ that is a question about a session's whole life, and answering it from rows
 narrowed to two event types would report the first BILLED observation as the
 start. A caller that needs it must establish it over an unnarrowed scan and
 supply its own ``session_start``. Yields columns:
-``session_id, model, vendor_cost_usd, input_tokens, output_tokens,
-cache_creation_tokens, cache_read_tokens``. ``vendor_cost_usd`` is the
+``session_id, model, requested_model, has_requested_model, vendor_cost_usd,
+input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens``. The
+three model columns are classified by ``recorded_model_from_row`` (ADR-067);
+a consumer that groups the CTE must group on all three. ``vendor_cost_usd`` is the
 harness's OWN reported cost and is NULL whenever it did not report one -
 codex never does, and a claude session that ended abnormally may not either.
 """
@@ -203,8 +217,9 @@ def price_canonical_row(row: Mapping[str, object], calculator: PricingResolver) 
     cache_creation = int(row["cache_creation_tokens"])  # type: ignore[arg-type]
     cache_read = int(row["cache_read_tokens"])  # type: ignore[arg-type]
 
-    raw_model = row.get("model")
-    model = raw_model if isinstance(raw_model, str) else None
+    # Priced as what ran when it was reported, else as what was requested -
+    # the rate a legacy alias row has always been priced at (ADR-067).
+    model = recorded_model_from_row(row).pricing_model
     pricing = calculator.resolve_pricing(model)
     if pricing is None:
         return RowCost(Decimal("0"), input_tokens + output_tokens + cache_creation + cache_read)

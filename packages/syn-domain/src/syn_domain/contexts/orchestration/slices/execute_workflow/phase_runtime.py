@@ -444,6 +444,11 @@ class PhaseRuntime:
         announced = result.stream_result.announced_model
         if announced is not None:
             self._announced_models[phase_id] = announced
+            # So a session that later closes as failed or cancelled names the
+            # model that ran rather than only the one requested (ADR-067).
+            session_mgr = self._session_managers.get(phase_id)
+            if session_mgr is not None:
+                session_mgr.note_observed_model(announced)
         # The authoritative totals from the harness result event, which are the
         # only ones that include cache tokens.
         # From the resolved usage rather than the completion command, because a

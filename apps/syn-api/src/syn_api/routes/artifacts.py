@@ -24,6 +24,7 @@ from syn_api.list_query import (
     WindowBound,
     resolve_page_size,
 )
+from syn_api.model_identity import ObservedModelId, observed_model_of
 from syn_api.types import (
     ArtifactActionResponse,
     ArtifactDetail,
@@ -66,7 +67,7 @@ class ArtifactSummaryResponse(BaseModel):
     #: request further out. None on either means not reported, never "as
     #: configured" - see ArtifactDetail.
     agent_provider: str | None = None
-    agent_model: str | None = None
+    agent_model: ObservedModelId | None = None
 
 
 class ArtifactListResponse(BaseModel):
@@ -134,7 +135,7 @@ class ArtifactResponse(BaseModel):
     #: because THIS is the model `GET /artifacts/{id}` answers with; a field
     #: added only to the internal one never reaches the wire.
     agent_provider: str | None = None
-    agent_model: str | None = None
+    agent_model: ObservedModelId | None = None
 
 
 # =============================================================================
@@ -223,7 +224,7 @@ async def list_artifacts(
                         # whose detail answers correctly - see the comment on
                         # excluded_undated below, which is this same hop (#1284).
                         agent_provider=a.agent_provider,
-                        agent_model=a.agent_model,
+                        agent_model=observed_model_of(a.agent_model, None).observed,
                     )
                     for a in domain_page.rows
                 ],
@@ -315,7 +316,7 @@ async def get_artifact(
                 size_bytes=artifact.size_bytes,
                 created_at=_parse_artifact_created_at(artifact.created_at),
                 agent_provider=artifact.agent_provider,
-                agent_model=artifact.agent_model,
+                agent_model=observed_model_of(artifact.agent_model, None).observed,
             )
         )
     except Exception as e:

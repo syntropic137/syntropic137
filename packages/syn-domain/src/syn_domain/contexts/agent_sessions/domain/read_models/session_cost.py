@@ -155,9 +155,27 @@ class SessionCost:
     cost_by_tool_tokens: dict[str, Decimal] = field(default_factory=dict)
     """Token cost breakdown by tool (derived from tokens_by_tool)."""
 
-    # Model
+    # Model (ADR-067)
     agent_model: str | None = None
-    """Primary model used for this session (from CLI result event)."""
+    """The model the harness REPORTED doing most of this session's work.
+
+    None when no model was reported - never an alias. What the phase asked for
+    is ``requested_model``.
+    """
+
+    requested_model: str | None = None
+    """The model the workflow REQUESTED for this session (often an alias), or None."""
+
+    tokens_by_model: dict[str, int] = field(default_factory=dict)
+    """Tokens per OBSERVED model, the basis for ``agent_model``.
+
+    Kept by the in-memory projection so it picks the primary model by the
+    same most-tokens rule as the SQL read path; unreported-model tokens are
+    not in it.
+    """
+
+    tokens_by_requested_model: dict[str, int] = field(default_factory=dict)
+    """Tokens per REQUESTED model, the basis for ``requested_model``."""
 
     unpriced_observation_count: int = 0
     """Count of TOKEN_USAGE observations whose model was unknown/missing.
@@ -243,6 +261,9 @@ class SessionCost:
             cost_by_tool_tokens=_coerce_decimal_dict(data.get("cost_by_tool_tokens")),
             is_finalized=data.get("is_finalized", False),
             agent_model=data.get("agent_model"),
+            requested_model=data.get("requested_model"),
+            tokens_by_model=dict(data.get("tokens_by_model") or {}),
+            tokens_by_requested_model=dict(data.get("tokens_by_requested_model") or {}),
             unpriced_observation_count=data.get("unpriced_observation_count", 0),
             unmeasured_fields=_coerce_cost_fields(data.get("unmeasured_fields")),
             started_at=_coerce_datetime(data.get("started_at")),
@@ -274,6 +295,9 @@ class SessionCost:
             "cost_by_tool_tokens": {k: str(v) for k, v in self.cost_by_tool_tokens.items()},
             "is_finalized": self.is_finalized,
             "agent_model": self.agent_model,
+            "requested_model": self.requested_model,
+            "tokens_by_model": dict(self.tokens_by_model),
+            "tokens_by_requested_model": dict(self.tokens_by_requested_model),
             "unpriced_observation_count": self.unpriced_observation_count,
             "unmeasured_fields": sorted(self.unmeasured_fields),
             "started_at": self.started_at.isoformat() if self.started_at else None,

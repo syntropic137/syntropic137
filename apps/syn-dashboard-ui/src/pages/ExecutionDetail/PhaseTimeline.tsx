@@ -2,11 +2,12 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader } from '../../components'
+import { Card, CardContent, CardHeader, ObservedModel } from '../../components'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
 import { REFUSED, outcomeTone } from '../../utils/executionOutcome'
 import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
+import { costByModelKeyLabel } from '../../utils/modelLabels'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
 function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
@@ -19,11 +20,10 @@ function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, stri
     <div className="mt-2 space-y-1">
       {entries.map(({ model, cost }) => {
         const pct = totalCost > 0 ? (cost / totalCost) * 100 : 0
-        const shortName = model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
         return (
           <div key={model} className="space-y-0.5">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="font-mono text-[var(--color-text-muted)]">{shortName}</span>
+              <span className="font-mono text-[var(--color-text-muted)]">{costByModelKeyLabel(model)}</span>
               <span className="text-[var(--color-text-secondary)]">
                 ${cost.toFixed(4)} &middot; {pct.toFixed(0)}%
               </span>
@@ -104,6 +104,13 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         <Icon className={clsx('h-4 w-4', statusIconColors[tone] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
       </div>
+      {/* The model that RAN, verbatim; the requested alias is secondary context only. */}
+      <ObservedModel
+        display={phase.model_display}
+        observed={phase.model}
+        requested={phase.requested_model}
+        className="mt-1 text-[10px] text-[var(--color-text-secondary)]"
+      />
       {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
         <PhaseModelBreakdown costByModel={phase.cost_by_model} />
       )}

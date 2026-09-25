@@ -11,7 +11,7 @@
 import type { ColumnDef } from '../../components'
 import type { SortKey } from '../../hooks/useSortUrlState'
 import type { SessionSummary } from '../../types'
-import { AgentBadge, StatusBadge } from '../../components'
+import { AgentBadge, ObservedModel, StatusBadge } from '../../components'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
 const EM_DASH = '—'
@@ -28,8 +28,22 @@ const AGENT: ColumnDef<SessionSummary, SortKey> = {
   key: 'agent',
   label: 'Agent',
   align: 'left',
-  cellTitle: (s) => s.agent_provider ?? undefined,
-  render: (s) => (s.agent_provider ? <AgentBadge provider={s.agent_provider} /> : EM_DASH),
+  cellTitle: (s) => [s.agent_provider, s.agent_model_display].filter(Boolean).join('\n') || undefined,
+  // Provider badge plus the model that RAN (agent_model_display, verbatim).
+  render: (s) =>
+    s.agent_provider || s.agent_model_display ? (
+      <span className="inline-flex flex-col gap-0.5">
+        {s.agent_provider && <AgentBadge provider={s.agent_provider} />}
+        <ObservedModel
+          display={s.agent_model_display}
+          observed={s.agent_model}
+          requested={s.requested_model}
+          className="text-xs text-[var(--color-text-secondary)]"
+        />
+      </span>
+    ) : (
+      EM_DASH
+    ),
 }
 
 const WORKFLOW: ColumnDef<SessionSummary, SortKey> = {

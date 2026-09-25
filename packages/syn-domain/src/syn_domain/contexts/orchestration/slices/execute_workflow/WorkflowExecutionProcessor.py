@@ -632,7 +632,7 @@ class WorkflowExecutionProcessor:
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
-            model=phase.agent_config.model,
+            requested_model=phase.agent_config.model,
             started_at=launch.started_at,
         )
         runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)

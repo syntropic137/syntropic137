@@ -234,17 +234,38 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
             "ghcr.io/agentparadise/agentic-workspace-claude-cli@sha256:"
-            "a0ec2333a0e8d9169eda5ce8faf147a67a55b93368d04ba9285338cd207c9341"
+            "ed7c7f1ef3b2112c16c53ca71036bcdb18eb5a406f94ecc5daf5ac455bf11b19"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
             "ghcr.io/agentparadise/omni-agent-workspace@sha256:"
-            "898aeef61dd057546ef0db7a84467c7d05cb8bb71452a4a3bfd9789343eb912a"
+            "a6ba94d71507384d33df7abe2050f7255bdae8b81dc5a37dbe92b7972f154773"
         ),
     }
 )
 
 # History of the agentic-primitives pins, kept for the record and because the
 # first entry is what AP_ROLLBACK_IMAGES holds.
+#
+# BOTH pins below were taken on 2026-09-25 from the release-branch build run
+# 36159902844 of agentic-primitives 09887e6 (release PR #430), and both carry
+# agentic.image.channel=release and revision 09887e6 on linux/amd64 AND
+# linux/arm64. cosign verify passes for each against
+# AGENTIC_PRIMITIVES_IDENTITY_REGEXP.
+#
+# omni-agent       omni-agent manifest 1.7.1. CLIs unchanged from 1.7.0 and
+#                  verified by running OUT OF THIS DIGEST on both
+#                  architectures: "2.1.281 (Claude Code)", "codex-cli 0.156.1",
+#                  "apss-session-exporter 0.5.0". The release carries
+#                  agentic-isolation 0.8.1: `find -H` on the transcript root
+#                  (#1415 - the session-store capability symlinks
+#                  ~/.codex/sessions, so every codex rollout was invisible and
+#                  no codex phase could record the model it ran), plus a mount
+#                  guard and a finalizer credential log-leak fix (AP #428).
+# claude-cli       claude-cli manifest 2.1.5, CLIs unchanged (claude 2.1.126,
+#                  codex 0.144.6). Re-pinned for the single-revision rule; it
+#                  still cannot run a default codex phase (see below).
+#
+#                  Previous pins, for the record:
 #
 # BOTH pins below were taken on 2026-09-24 from the release-branch build run
 # 36040151207 of agentic-primitives 6b9f81e (release PR #425), and both carry

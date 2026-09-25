@@ -19,6 +19,9 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
+    announced_model_from,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
@@ -332,34 +335,6 @@ class StreamResult:
     announced_model: str | None = None
 
 
-def announced_model_from(*candidates: object) -> str | None:
-    """The model this line says is running, or None if it does not say (#1284).
-
-    Shared by both stream processors, because the RULE is harness-neutral even
-    though the places to look are not: the first candidate that is a non-blank
-    string wins. ``CodexStreamProcessor`` imports it rather than restating it,
-    so "" and a late rebind are rejected identically on both streams.
-
-    Claude states it in two places and both are the harness speaking about
-    itself: the ``system``/``init`` line carries it at the top level, and every
-    ``assistant`` line repeats it under ``message``. Both are offered here
-    rather than picking one, so a recording that begins mid-stream still yields
-    an answer instead of none.
-
-    The candidates are passed as values rather than the line itself: the
-    parameter would otherwise be one more ``Mapping[str, Any]``, which spends
-    ratchet budget to say nothing (#673).
-
-    Returns None for a line that carries no model at all, which is most of
-    them, and for a blank one - "" is not an identity and must not displace the
-    real value that a later line may carry.
-    """
-    for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate
-    return None
-
-
 def _model_under_message(message: object) -> object:
     """``model`` as an assistant line carries it, under ``message``."""
     return message.get("model") if isinstance(message, Mapping) else None
@@ -466,7 +441,7 @@ class EventStreamProcessor:
                 execution_id=execution_id,
                 phase_id=phase_id,
                 workspace_id=workspace_id,
-                agent_model=agent_model,
+                requested_model=agent_model,
             )
 
         # Collaborators extracted for CC reduction (ISS-196)
@@ -661,9 +636,7 @@ class EventStreamProcessor:
                 self._leader_native_session_id = announced
 
         if self._announced_model is None:
-            self._announced_model = announced_model_from(
-                cli_event.get("model"), _model_under_message(cli_event.get("message"))
-            )
+            self._note_announced_model(cli_event.get("model"), cli_event.get("message"))
 
         if cli_type == "result":
             await self._handle_result_event(cli_event)
@@ -676,6 +649,17 @@ class EventStreamProcessor:
 
         if cli_type == "system":
             logger.debug("CLI message: %s", cli_type)
+
+    def _note_announced_model(self, model: object, message: object) -> None:
+        """Take the model this line announces, if it names one (#1284, ADR-067).
+
+        The collector stamps every later usage row and the summary with it, so
+        it learns it the moment the stream says it. Values rather than the
+        line, for the reason ``announced_model_from`` gives (#673).
+        """
+        self._announced_model = announced_model_from(model, _model_under_message(message))
+        if self._announced_model is not None:
+            self._collector.note_observed_model(self._announced_model)
 
     def _capture_result_tokens(self, cli_event: ClaudeResultLine) -> None:
         """Store authoritative cumulative token counts from a result event.
@@ -784,8 +768,14 @@ class EventStreamProcessor:
 
         if input_tokens or output_tokens or cache_creation or cache_read:
             self._tokens.record(input_tokens, output_tokens, cache_creation, cache_read)
+            # The model THIS message names, not the session's: a subagent turn
+            # on another model is priced as that model, not as the leader.
             await self._collector.record_token_usage(
-                input_tokens, output_tokens, cache_creation, cache_read
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
+                model=announced_model_from(message.get("model")),
             )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",

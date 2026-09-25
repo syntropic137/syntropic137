@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse
 
 from syn_api._wiring import ensure_connected
+from syn_api.model_identity import cost_by_observed_model_text
 from syn_api.types import (
     ContributionHeatmapResponse,
     GlobalCostResponse,
@@ -233,7 +234,7 @@ async def get_global_cost_endpoint(
         total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
         cost_by_repo=data.get("cost_by_repo", {}),
         cost_by_workflow=data.get("cost_by_workflow", {}),
-        cost_by_model=data.get("cost_by_model", {}),
+        cost_by_model=cost_by_observed_model_text(data.get("cost_by_model")),
         execution_count=data.get("execution_count", 0),
     )
 

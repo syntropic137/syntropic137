@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
+from syn_adapters.conversations.minio_index import ensure_requested_model_column
 from syn_adapters.conversations.minio_session import (
     create_conversation_storage as _create_conversation_storage,
 )
@@ -86,6 +88,8 @@ class MinioConversationStorage:
 
         self._client: Minio | None = None
         self._pool: asyncpg.Pool | None = None
+        #: Whether the index has ADR-067's ``requested_model`` column.
+        self._index_has_requested_model = False
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -115,6 +119,10 @@ class MinioConversationStorage:
         # recovery loop (ADR-057). _client is reset so retry re-initializes fully.
         try:
             self._pool = await asyncpg.create_pool(self._db_url, min_size=1, max_size=5)
+            self._index_has_requested_model = await ensure_requested_model_column(
+                self._pool,
+                auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() != "true",
+            )
         except Exception:
             self._client = None  # Reset so next initialize() attempt retries fully
             logger.warning(
@@ -194,7 +202,13 @@ class MinioConversationStorage:
         from syn_adapters.conversations.minio_index import insert_index
 
         await insert_index(
-            self._pool, session_id, object_key, size_bytes, context, self.BUCKET_NAME
+            self._pool,
+            session_id,
+            object_key,
+            size_bytes,
+            context,
+            self.BUCKET_NAME,
+            with_requested_model=self._index_has_requested_model,
         )
 
     async def retrieve_session(
