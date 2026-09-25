@@ -47,17 +47,30 @@ function Summary({ data }: { data: InventoryData }) {
       <dt>Gaps</dt><dd>{count(summary.gaps)}</dd>
     </dl>
     <p>Coverage: {summary.coverage_display}. Reconstruction: {data.status.reconstruction_status.replace('_', ' ')}.</p>
+    <p data-state={hasPending(data) ? 'loading-incomplete' : 'loaded'}>Loaded: {hasPending(data) ? `partial (${Object.keys(data.pending).length} sections have more)` : 'every section of this revision'}.</p>
     {summary.revision && <p className="si-muted si-wrap">Revision: {summary.revision}</p>}
   </div>
+}
+
+function CoverageNotice({ data }: { data: InventoryData }) {
+  const { summary } = data.status
+  if (summary.coverage_state === 'unsupported') {
+    return <p className="si-notice si-notice-warn" data-state="unsupported">Unsupported: completeness cannot be proven for this run's harness. Listed sessions are real; others may exist.</p>
+  }
+  if (!summary.complete) {
+    return data.snapshot ? <p className="si-notice si-notice-warn" data-state="partial">Partial inventory: {summary.coverage_display}.</p> : null
+  }
+  // Coverage completeness is the server's; traversal completeness is ours. Both are required.
+  if (hasPending(data)) {
+    return <p className="si-notice si-notice-warn" data-state="coverage-complete-not-loaded">Coverage reconciled, but not all sections are loaded yet; this view is not complete.</p>
+  }
+  return <p className="si-notice si-notice-ok" data-state="complete">Complete: every expected session is accounted for and loaded.</p>
 }
 
 function Notices({ data }: { data: InventoryData }) {
   const { summary } = data.status
   return <>
-    {summary.coverage_state === 'unsupported'
-      ? <p className="si-notice si-notice-warn" data-state="unsupported">Unsupported: completeness cannot be proven for this run's harness. Listed sessions are real; others may exist.</p>
-      : !summary.complete && data.snapshot && <p className="si-notice si-notice-warn" data-state="partial">Partial inventory: {summary.coverage_display}.</p>}
-    {summary.complete && <p className="si-notice si-notice-ok" data-state="complete">Complete: every expected session is accounted for.</p>}
+    <CoverageNotice data={data} />
     {data.status.later_evidence_pending && <p className="si-notice" data-state="pending">New evidence is awaiting reconstruction; load the latest revision later.</p>}
     {summary.remote_replication === 'disabled' && <p className="si-notice" data-state="remote-disabled">Remote replication is disabled. Local capture and this inventory are unaffected.</p>}
   </>

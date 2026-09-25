@@ -49,6 +49,7 @@ syn execution sessions <execution-id> [options]
 | `--phase` | `text` | --- | Only sessions with a membership in this phase ID |
 | `--attempt` | `text` | --- | Only sessions with a membership in this attempt ID |
 | `--limit` | `text` | `100` | Items per page (1 to 500) |
+| `--max-pages` | `text` | `10000` | Stop after this many pages and report the rest as pending (1 to 10000) |
 | `--cursor` | `text` | --- | Continue a previously returned inventory cursor |
 | `--require-complete` | `boolean` | --- | Exit nonzero unless coverage is reconciled and the revision is current |
 

@@ -704,7 +704,7 @@ async def test_newer_metadata_survives_an_older_build_retry_and_real_changes_con
     await ready(inventory, current)
     # An older build (no namespace counts) retrying the same revision is compatible.
     await inventory.stage(current.without_derived_counts())
-    with pytest.raises(InventoryPublicationConflict, match="metadata"):
+    with pytest.raises(InventoryPublicationConflict, match="disagree with nodes"):
         await inventory.stage(
             current.model_copy(
                 update={
@@ -718,3 +718,63 @@ async def test_newer_metadata_survives_an_older_build_retry_and_real_changes_con
         await inventory.stage(current.without_derived_counts().model_copy(update={"revision": "x"}))
     await inventory.publish(run, current.snapshot_id, None)
     assert await inventory.head(run) == current
+
+
+def _wrong_split(item: InventorySnapshot) -> InventorySnapshot:
+    """Same node total as the stored nodes, different per-namespace split."""
+    total = item.counts.node
+    namespaces = (
+        InventoryNamespaceCount(kind="platform", count=1),
+        InventoryNamespaceCount(kind="transcript", harness="third-harness", count=total - 1),
+    )
+    return item.model_copy(
+        update={"counts": item.counts.model_copy(update={"namespaces": namespaces})}
+    )
+
+
+@pytest.mark.parametrize("wrong_first", [True, False])
+async def test_wrong_namespace_split_is_rejected_in_either_retry_order(
+    inventory: PostgresSessionInventory,
+    db_pool: asyncpg.Pool,
+    run: RunIdentity,
+    wrong_first: bool,
+) -> None:
+    current = snapshot(run)
+    await _stage_as_older_build(inventory, db_pool, current.without_derived_counts())
+    wrong = _wrong_split(current)
+    if wrong_first:
+        with pytest.raises(InventoryPublicationConflict, match="disagree with nodes"):
+            await inventory.stage(wrong)
+        await inventory.stage(current)
+    else:
+        await inventory.stage(current)
+        with pytest.raises(InventoryPublicationConflict, match="disagree with nodes"):
+            await inventory.stage(wrong)
+    await inventory.publish(run, current.snapshot_id, None)
+    assert await inventory.head(run) == current
+
+
+async def test_publication_derives_counts_even_when_a_retry_could_not_be_checked(
+    inventory: PostgresSessionInventory,
+    run: RunIdentity,
+) -> None:
+    current = snapshot(run)
+    # Legacy staging before any node is stored: a wrong-split retry cannot be
+    # checked yet, and must not become the published truth.
+    await inventory.stage(current.without_derived_counts())
+    await inventory.stage(_wrong_split(current))
+    await inventory.append(run, current.snapshot_id, "node", 0, nodes(run, 3))
+    await inventory.publish(run, current.snapshot_id, None)
+    assert await inventory.head(run) == current
+
+
+async def test_declared_counts_that_disagree_with_stored_nodes_never_publish(
+    inventory: PostgresSessionInventory,
+    run: RunIdentity,
+) -> None:
+    wrong = _wrong_split(snapshot(run))
+    await inventory.stage(wrong)
+    await inventory.append(run, wrong.snapshot_id, "node", 0, nodes(run, 3))
+    with pytest.raises(InventoryPublicationConflict, match="disagree with nodes"):
+        await inventory.publish(run, wrong.snapshot_id, None)
+    assert await inventory.head(run) is None

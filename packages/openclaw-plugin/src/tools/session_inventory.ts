@@ -120,12 +120,52 @@ async function readSection(t: Traversal, kind: InventoryKind): Promise<SectionRe
   }
 }
 
+/** Test seam: the page budget is fixed for agents, smaller in tests. */
+export interface InventoryToolOptions {
+  maxPages?: number;
+}
+
+interface Completeness {
+  coverage_complete: boolean;
+  traversal_complete: boolean;
+  complete: boolean;
+  pending_sections: InventoryKind[];
+  note?: string;
+}
+
+/**
+ * Loaded data is complete only when the server says coverage is complete AND
+ * this call read every section of the revision from its first page, unfiltered,
+ * with nothing left behind by the page budget.
+ */
+function completeness(args: SessionInventoryArgs, coverageComplete: boolean, sections: Partial<Record<InventoryKind, SectionResult>>): Completeness {
+  const pending = kinds.filter(kind => sections[kind] === undefined || sections[kind]!.truncated);
+  const partialRead = args.cursor !== undefined || args.phase_id !== undefined || args.attempt_id !== undefined;
+  const traversal = pending.length === 0 && !partialRead;
+  const result: Completeness = {
+    coverage_complete: coverageComplete,
+    traversal_complete: traversal,
+    complete: coverageComplete && traversal,
+    pending_sections: pending,
+  };
+  if (!traversal) result.note = traversalNote(pending, partialRead);
+  return result;
+}
+
+function traversalNote(pending: InventoryKind[], partialRead: boolean): string {
+  const parts: string[] = [];
+  if (pending.length > 0) parts.push(`Sections not fully read: ${pending.join(", ")}.`);
+  if (partialRead) parts.push("This read was filtered or resumed from a cursor, so it is a subset of the revision.");
+  parts.push("Gaps and lineage are provisional until every section is read.");
+  return parts.join(" ");
+}
+
 /**
  * Every page of every requested section of ONE pinned revision. The page
  * budget bounds work; a truncated section keeps its cursor so the caller can
  * resume, and gaps are returned alongside so partial coverage stays visible.
  */
-async function readAll(client: SyntropicClient, base: string, args: SessionInventoryArgs): Promise<ToolResult> {
+async function readAll(client: SyntropicClient, base: string, args: SessionInventoryArgs, maxPages: number): Promise<ToolResult> {
   const status = await client.get<SessionInventoryResponse>(base);
   if (!status.ok) return formatError(status.error);
   const head = {
@@ -137,9 +177,9 @@ async function readAll(client: SyntropicClient, base: string, args: SessionInven
   const snapshotId = args.snapshot_id ?? status.data.snapshot?.snapshot_id;
   if (snapshotId === undefined) {
     // No published revision: say so, never an empty inventory.
-    return json({ ...head, snapshot_id: null, revision: null, coverage: null, counts: null, sections: {}, gaps: null });
+    return json({ ...head, ...completeness(args, false, {}), snapshot_id: null, revision: null, coverage: null, counts: null, sections: {}, gaps: null });
   }
-  const t: Traversal = { client, base, snapshotId, args, budget: { pages: MAX_ALL_PAGES }, snapshot: null };
+  const t: Traversal = { client, base, snapshotId, args, budget: { pages: maxPages }, snapshot: null };
   const sections: Partial<Record<InventoryKind, SectionResult>> = {};
   for (const kind of args.kind !== undefined ? [args.kind] : [...kinds]) {
     const section = await readSection(t, kind);
@@ -150,6 +190,7 @@ async function readAll(client: SyntropicClient, base: string, args: SessionInven
   const gaps = sections.gap && !sections.gap.truncated ? (sections.gap.items as InventoryGap[]) : null;
   return json({
     ...head,
+    ...completeness(args, status.data.summary.complete === true, sections),
     snapshot_id: snapshotId,
     revision: pinned?.revision ?? null,
     coverage: pinned?.coverage ?? null,
@@ -187,26 +228,28 @@ async function readOnePage(client: SyntropicClient, base: string, snapshotId: st
   return passThrough(await client.get<SessionInventoryPageResponse>(`${base}/${snapshotId}/${kind}`, pageQuery(args.limit, args.cursor, args)));
 }
 
-async function dispatch(client: SyntropicClient, base: string, args: SessionInventoryArgs): Promise<ToolResult> {
+async function dispatch(client: SyntropicClient, base: string, args: SessionInventoryArgs, maxPages: number): Promise<ToolResult> {
   if (args.all === true) {
     const conflict = allModeConflict(args);
-    return conflict ? fail(conflict) : readAll(client, base, args);
+    return conflict ? fail(conflict) : readAll(client, base, args, maxPages);
   }
   if (args.snapshot_id === undefined) return readStatus(client, base, args);
   if (args.node_key !== undefined) return lookupNode(client, base, args.snapshot_id, args);
   return readOnePage(client, base, args.snapshot_id, args);
 }
 
-export async function synGetSessionInventory(client: SyntropicClient, args: SessionInventoryArgs): Promise<ToolResult> {
+export async function synGetSessionInventory(
+  client: SyntropicClient, args: SessionInventoryArgs, options: InventoryToolOptions = {},
+): Promise<ToolResult> {
   if (typeof args.execution_id !== "string" || !args.execution_id.trim()) return fail("execution_id is required");
   const invalid = validateSelectors(args);
   if (invalid) return fail(invalid);
-  return dispatch(client, `/executions/${encodeURIComponent(args.execution_id)}/session-inventory`, args);
+  return dispatch(client, `/executions/${encodeURIComponent(args.execution_id)}/session-inventory`, args, options.maxPages ?? MAX_ALL_PAGES);
 }
 
 export const sessionInventoryToolDefs = [{
   name: "syn_get_session_inventory",
-  description: "Find all sessions associated with a workflow run, including reconstructed relationships, captures, and gaps. Omit snapshot_id to read reconstruction status, the committed snapshot and `summary` (server-derived counts per identity namespace, coverage and `complete`). Set all=true to read every section (or only `kind`) and every page of one pinned revision in one call; gaps and per-section truncation cursors are returned. Otherwise use snapshot_id for bounded pages and pass next_cursor unchanged as cursor until null (a cursor is bound to one snapshot, section and filter set). phase_id/attempt_id narrow to sessions with a matching membership. node_key (from item_keys) resolves an edge endpoint that lives on another page. Native transcript ids are harness-scoped and are never platform session ids. Coverage may be open, unknown, missing or unsupported even when reconstruction is current; only summary.complete means complete. This read never schedules agents or reconstruction.",
+  description: "Find all sessions associated with a workflow run, including reconstructed relationships, captures, and gaps. Omit snapshot_id to read reconstruction status, the committed snapshot and `summary` (server-derived counts per identity namespace, coverage and `complete`). Set all=true to read every section (or only `kind`) and every page of one pinned revision in one call; gaps and per-section truncation cursors are returned, plus coverage_complete (server coverage), traversal_complete (every section read unfiltered from its first page, nothing truncated) and complete (both); pending_sections and note name what was left unread, and gaps/lineage are provisional until then. Otherwise use snapshot_id for bounded pages and pass next_cursor unchanged as cursor until null (a cursor is bound to one snapshot, section and filter set). phase_id/attempt_id narrow to sessions with a matching membership. node_key (from item_keys) resolves an edge endpoint that lives on another page. Native transcript ids are harness-scoped and are never platform session ids. Coverage may be open, unknown, missing or unsupported even when reconstruction is current; single-page reads never claim completeness; an all read is complete only when its complete field is true. This read never schedules agents or reconstruction.",
   inputSchema: {
     type: "object" as const,
     additionalProperties: false,

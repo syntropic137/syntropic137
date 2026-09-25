@@ -91,6 +91,10 @@ interface Traversal {
   gaps: Page["items"] | null;
   nextCursor: string | null;
   pages: Page[];
+  /** Sections read from their first page to their last in this invocation. */
+  whole: Kind[];
+  /** A section stopped by the page budget, not by the end of its data. */
+  capped: boolean;
 }
 
 interface Plan {
@@ -99,6 +103,7 @@ interface Plan {
   kinds: readonly Kind[];
   everyPage: boolean;
   limit: number;
+  maxPages: number;
   filters: Filters;
   server: string | undefined;
   onPage: (page: Page) => void;
@@ -107,8 +112,9 @@ interface Plan {
 
 interface ReadState { budget: number; pinned: Snapshot | null; pages: Page[] }
 
-async function nextPage(plan: Plan, kind: Kind, server: string | undefined, state: ReadState): Promise<Page> {
-  if (state.budget-- <= 0) throw new CLIError(`Inventory traversal exceeded ${MAX_PAGES} pages`);
+async function nextPage(plan: Plan, kind: Kind, server: string | undefined, state: ReadState): Promise<Page | null> {
+  if (state.budget <= 0) return null;
+  state.budget -= 1;
   const page = await readPage(plan.status, plan.snapshotId, kind, plan.limit, plan.filters, server);
   state.pinned = page.snapshot;
   plan.onPage(page);
@@ -127,35 +133,63 @@ function continuation(plan: Plan, kind: Kind, server: string): string {
   return Buffer.from(JSON.stringify(envelope)).toString("base64url");
 }
 
-interface SectionRead { gaps: Page["items"]; nextCursor: string | null }
+interface SectionRead { gaps: Page["items"]; nextCursor: string | null; done: boolean; capped: boolean }
 
 async function readSection(plan: Plan, kind: Kind, start: string | undefined, state: ReadState): Promise<SectionRead> {
   const gaps: Page["items"] = [];
   let server = start;
   for (;;) {
     const page = await nextPage(plan, kind, server, state);
+    if (page === null) {
+      const resume = server === undefined ? null : continuation(plan, kind, server);
+      return { gaps, nextCursor: resume, done: false, capped: true };
+    }
     if (kind === "gap") gaps.push(...page.items);
     const next = page.next_cursor ?? null;
-    if (next === null) return { gaps, nextCursor: null };
+    if (next === null) return { gaps, nextCursor: null, done: true, capped: false };
     if (next === server) throw new CLIError("Inventory cursor did not advance");
-    if (!plan.everyPage) return { gaps, nextCursor: continuation(plan, kind, next) };
     server = next;
+    if (!plan.everyPage) return { gaps, nextCursor: continuation(plan, kind, next), done: false, capped: false };
   }
 }
 
 async function traverse(plan: Plan): Promise<Traversal> {
-  const state: ReadState = { budget: MAX_PAGES, pinned: null, pages: [] };
-  const result: Traversal = { pinned: null, gaps: null, nextCursor: null, pages: state.pages };
+  const state: ReadState = { budget: plan.maxPages, pinned: null, pages: [] };
+  const result: Traversal = { pinned: null, gaps: null, nextCursor: null, pages: state.pages, whole: [], capped: false };
   for (const [index, kind] of plan.kinds.entries()) {
-    const section = await readSection(plan, kind, index === 0 ? plan.server : undefined, state);
+    const fromStart = index !== 0 || plan.server === undefined;
+    const section = await readSection(plan, kind, fromStart ? undefined : plan.server, state);
     result.nextCursor = section.nextCursor;
     // Gaps are reported only when the gap section was read from its start to
     // its end; a partial list must never look like the complete set.
-    const whole = section.nextCursor === null && plan.server === undefined;
-    if (kind === "gap" && whole) result.gaps = section.gaps;
+    if (section.done && fromStart) {
+      result.whole.push(kind);
+      if (kind === "gap") result.gaps = section.gaps;
+    }
+    if (section.capped) { result.capped = true; break; }
   }
   result.pinned = state.pinned;
   return result;
+}
+
+function emptyTraversal(): Traversal {
+  return { pinned: null, gaps: null, nextCursor: null, pages: [], whole: [], capped: false };
+}
+
+interface Verdict { coverage: boolean; traversal: boolean; complete: boolean; pending: Kind[] }
+
+/**
+ * Complete only when the server says coverage is complete for the current head
+ * AND this invocation read every section of that revision, unfiltered, from
+ * its first page to its last. Either alone is a partial view.
+ */
+function verdict(status: Status, traversal: Traversal, filters: Filters): Verdict {
+  const pinned = traversal.pinned ?? status.snapshot ?? null;
+  const coverage = status.summary.complete && pinned !== null && status.snapshot?.snapshot_id === pinned.snapshot_id;
+  const pending = pinned === null ? [] : KINDS.filter(kind => !traversal.whole.includes(kind));
+  const unfiltered = filters.phase_id === undefined && filters.attempt_id === undefined;
+  const traversal_ = pinned !== null && pending.length === 0 && unfiltered;
+  return { coverage, traversal: traversal_, complete: coverage && traversal_, pending };
 }
 
 async function scheduleRefresh(execution: string, key: unknown): Promise<components["schemas"]["SessionInventoryJobResponse"]> {
@@ -179,6 +213,21 @@ function printHeader(status: Status): void {
   print(`Remote replication: ${summary.remote_replication}`);
 }
 
+function printPartial(result: Verdict, traversal: Traversal): void {
+  if (result.complete || traversal.pinned === null) return;
+  if (result.pending.length > 0) {
+    print(`Partial listing: not read to the end: ${result.pending.join(", ")}; gaps and lineage above are provisional.`);
+  } else if (!result.traversal) print("Partial listing: filtered to a phase/attempt; not the whole run.");
+  if (traversal.capped) print("Stopped at the --max-pages budget.");
+}
+
+function incompleteError(status: Status, result: Verdict): CLIError {
+  if (!result.coverage) {
+    return new CLIError(`Session inventory is not complete (coverage ${status.summary.coverage_state}, reconstruction ${status.reconstruction_status})`);
+  }
+  return new CLIError(`Session inventory coverage is reconciled but this read is partial (pending: ${result.pending.join(", ") || "filtered"}); rerun with --all and no --cursor, --kind or filters`);
+}
+
 export const executionSessionsCommand: CommandDef = {
   name: "sessions",
   description: "List every session of a workflow run: platform sessions, invocations and native transcripts, with lineage, gaps and coverage",
@@ -192,6 +241,7 @@ export const executionSessionsCommand: CommandDef = {
     phase: { type: "string", description: "Only sessions with a membership in this phase ID" },
     attempt: { type: "string", description: "Only sessions with a membership in this attempt ID" },
     limit: { type: "string", default: "100", description: "Items per page (1 to 500)" },
+    "max-pages": { type: "string", default: String(MAX_PAGES), description: "Stop after this many pages and report the rest as pending (1 to 10000)" },
     cursor: { type: "string", description: "Continue a previously returned inventory cursor" },
     "require-complete": { type: "boolean", description: "Exit nonzero unless coverage is reconciled and the revision is current" },
   },
@@ -201,6 +251,10 @@ export const executionSessionsCommand: CommandDef = {
     const limit = Number(values["limit"] ?? "100");
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
       throw new CLIError("limit must be an integer between 1 and 500");
+    }
+    const maxPages = Number(values["max-pages"] ?? MAX_PAGES);
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_PAGES) {
+      throw new CLIError(`max-pages must be an integer between 1 and ${MAX_PAGES}`);
     }
     const cursor = parseCursor(values["cursor"]);
     const everyPage = values["all"] === true;
@@ -232,27 +286,25 @@ export const executionSessionsCommand: CommandDef = {
     let first = true;
     const traversal: Traversal = snapshotId
       ? await traverse({
-        status, snapshotId, kinds, everyPage, limit, filters, server: cursor?.server, keepPages: joinedView,
+        status, snapshotId, kinds, everyPage, limit, maxPages, filters, server: cursor?.server, keepPages: joinedView,
         onPage: page => {
           if (json) process.stdout.write(`${first ? "" : ","}${JSON.stringify(page)}`);
           else if (!joinedView) for (const line of renderItems(page, status.summary.remote_replication)) print(line);
           first = false;
         },
       })
-      : { pinned: null, gaps: null, nextCursor: null, pages: [] };
+      : emptyTraversal();
     const pinned = traversal.pinned ?? status.snapshot ?? null;
-    // Complete only for the current head: a cursor into an older revision is never complete.
-    const complete = status.summary.complete && pinned !== null && status.snapshot?.snapshot_id === pinned.snapshot_id;
+    const result = verdict(status, traversal, filters);
     if (json) {
-      process.stdout.write(`],"snapshot_id":${JSON.stringify(pinned?.snapshot_id ?? null)},"revision":${JSON.stringify(pinned?.revision ?? null)},"coverage":${JSON.stringify(pinned?.coverage ?? null)},"counts":${JSON.stringify(pinned?.counts ?? null)},"gaps":${JSON.stringify(traversal.gaps)},"next_cursor":${JSON.stringify(traversal.nextCursor)},"complete":${JSON.stringify(complete)}}\n`);
+      process.stdout.write(`],"snapshot_id":${JSON.stringify(pinned?.snapshot_id ?? null)},"revision":${JSON.stringify(pinned?.revision ?? null)},"coverage":${JSON.stringify(pinned?.coverage ?? null)},"counts":${JSON.stringify(pinned?.counts ?? null)},"gaps":${JSON.stringify(traversal.gaps)},"next_cursor":${JSON.stringify(traversal.nextCursor)},"coverage_complete":${JSON.stringify(result.coverage)},"traversal_complete":${JSON.stringify(result.traversal)},"pending_sections":${JSON.stringify(result.pending)},"page_budget_exhausted":${JSON.stringify(traversal.capped)},"complete":${JSON.stringify(result.complete)}}\n`);
     } else {
       if (joinedView) for (const line of renderInventory(traversal.pages, status.summary.remote_replication)) print(line);
       if (!status.snapshot && !cursor) print("No published inventory yet.");
+      printPartial(result, traversal);
       if (traversal.nextCursor) print(`More results: --cursor ${traversal.nextCursor}`);
       else if (!everyPage && status.snapshot) print(`Full inventory: ${status.summary.follow_up_command}`);
     }
-    if (values["require-complete"] === true && !complete) {
-      throw new CLIError(`Session inventory is not complete (coverage ${status.summary.coverage_state}, reconstruction ${status.reconstruction_status})`);
-    }
+    if (values["require-complete"] === true && !result.complete) throw incompleteError(status, result);
   },
 };

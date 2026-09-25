@@ -64,6 +64,10 @@ phase or attempt, and `node_key` (from `item_keys`) with `snapshot_id` to
 resolve a lineage endpoint that lives on another page.
 
 Report `summary.counts_display` and `summary.coverage_display` verbatim; they
-are the same text the CLI and dashboard show. Only `summary.complete` means the
-inventory is complete. Native transcript IDs are scoped to their harness; never
+are the same text the CLI and dashboard show. `summary.complete` is the server's
+coverage verdict only. An `all` result also reports `traversal_complete` (every
+section read from its first page, unfiltered, nothing truncated) and `complete`
+(both). Only say the inventory is complete when `complete` is true; otherwise
+report `pending_sections` and `note`, and treat gaps and lineage as provisional.
+A single page never proves completeness. Native transcript IDs are scoped to their harness; never
 pass one where a platform session ID is expected (e.g. `syn_get_session`).

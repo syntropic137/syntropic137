@@ -124,15 +124,63 @@ for (const state of ["unknown", "open", "missing", "unsupported", "conflicting"]
   });
 }
 
-it("require-complete passes only on the server's complete verdict for the current head", async () => {
-  const reconciled = { ...status, snapshot: { ...snapshot, coverage: { state: "reconciled" } }, summary: { ...summary, coverage_state: "reconciled", complete: true } };
-  fetchMock.mockResolvedValueOnce(response(reconciled)).mockResolvedValueOnce(response(page("native", null)));
-  await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } });
-  expect(JSON.parse(output()).complete).toBe(true);
+const reconciled = { ...status, snapshot: { ...snapshot, coverage: { state: "reconciled" } }, summary: { ...summary, coverage_state: "reconciled", complete: true } };
+
+/** Every section of the reconciled revision, two node pages, one page elsewhere. */
+function serveReconciled(body: object = reconciled) {
+  fetchMock.mockImplementation(async (request: Request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/session-inventory")) return response(body);
+    const kind = url.pathname.split("/").pop()!;
+    if (kind === "node" && !url.searchParams.get("cursor")) return response({ ...page("native-a", "n2"), snapshot: reconciled.snapshot });
+    return response({ ...page("native-b", null, kind), snapshot: reconciled.snapshot });
+  });
+}
+
+it("require-complete passes only for reconciled coverage AND a full traversal of the head", async () => {
+  serveReconciled();
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true, "require-complete": true } });
+  const result = JSON.parse(output());
+  expect(result).toMatchObject({ complete: true, coverage_complete: true, traversal_complete: true, pending_sections: [], page_budget_exhausted: false });
   // Reconciled but newer evidence pending: the server says incomplete, and the CLI obeys.
-  fetchMock.mockResolvedValueOnce(response({ ...reconciled, reconstruction_status: "pending", summary: { ...reconciled.summary, complete: false } }))
-    .mockResolvedValueOnce(response(page("native", null)));
-  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { "require-complete": true } })).rejects.toThrow("not complete");
+  serveReconciled({ ...reconciled, reconstruction_status: "pending", summary: { ...reconciled.summary, complete: false } });
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, "require-complete": true } })).rejects.toThrow("not complete");
+});
+
+it("reconciled coverage with a one-page budget never claims complete", async () => {
+  serveReconciled();
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true, "max-pages": "1", "require-complete": true } }))
+    .rejects.toThrow(/reconciled but this read is partial \(pending: node, membership/);
+  const result = JSON.parse(output());
+  expect(result.complete).toBe(false);
+  expect(result.coverage_complete).toBe(true);
+  expect(result.traversal_complete).toBe(false);
+  expect(result.page_budget_exhausted).toBe(true);
+  expect(result.pending_sections).toEqual(["node", "membership", "edge", "capture", "gap", "binding", "retraction"]);
+  expect(result.gaps).toBeNull();
+  expect(JSON.parse(Buffer.from(result.next_cursor, "base64url").toString())).toMatchObject({ kind: "node", server: "n2" });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("reconciled coverage read by one section, one page or one phase is partial", async () => {
+  for (const values of [{}, { all: true, kind: "node" }, { all: true, phase: "phase-plan" }]) {
+    serveReconciled();
+    vi.mocked(process.stdout.write).mockClear();
+    await executionSessionsCommand.handler({ positionals: ["execution"], values: { ...values, json: true } });
+    const result = JSON.parse(output());
+    expect(result.coverage_complete).toBe(true);
+    expect(result.complete).toBe(false);
+  }
+  serveReconciled();
+  vi.mocked(process.stdout.write).mockClear();
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, "max-pages": "1" } });
+  expect(output()).toContain("Partial listing: not read to the end: node, membership");
+  expect(output()).toContain("Stopped at the --max-pages budget.");
+});
+
+it("rejects an out-of-range page budget before network access", async () => {
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { "max-pages": "0" } })).rejects.toThrow("max-pages");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it("surfaces an expired cursor with its restart hint", async () => {

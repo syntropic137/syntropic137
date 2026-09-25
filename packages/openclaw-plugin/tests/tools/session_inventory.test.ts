@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SyntropicClient } from "../../src/client.js";
 import { synGetSessionInventory } from "../../src/tools/session_inventory.js";
 import { allToolDefs } from "../../src/index.js";
@@ -126,4 +126,52 @@ it("surfaces structured cursor errors with their restart instructions", async ()
   expect(result.content).toContain("410");
   expect(result.content).toContain("cursor_expired");
   expect(result.content).toContain(snapshot);
+});
+
+describe("all-mode completeness", () => {
+  const reconciled = { snapshot: { snapshot_id: snapshot, revision: "rev" }, reconstruction_status: "current", later_evidence_pending: false, summary: { complete: true } };
+  function serveTwoNodePages() {
+    mockFetch.mockImplementation(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith("/session-inventory")) return json(reconciled);
+      const kind = url.pathname.split("/").pop()!;
+      if (kind === "node") return json(url.searchParams.get("cursor") === "c1" ? pageBody("node", ["two"], null) : pageBody("node", ["one"], "c1"));
+      return json(pageBody(kind, [], null));
+    });
+  }
+
+  it("reconciled coverage with an exhausted page budget is not complete", async () => {
+    serveTwoNodePages();
+    const result = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true }, { maxPages: 1 })).content);
+    expect(result.coverage_complete).toBe(true);
+    expect(result.traversal_complete).toBe(false);
+    expect(result.complete).toBe(false);
+    expect(result.pending_sections).toEqual(["node", "membership", "edge", "capture", "gap", "retraction", "binding"]);
+    expect(result.note).toContain("provisional");
+    expect(result.gaps).toBeNull();
+  });
+
+  it("reconciled coverage with a full unfiltered traversal is complete", async () => {
+    serveTwoNodePages();
+    const result = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true })).content);
+    expect(result).toMatchObject({ coverage_complete: true, traversal_complete: true, complete: true, pending_sections: [] });
+    expect(result.note).toBeUndefined();
+  });
+
+  it("a single-section or filtered traversal never claims completeness", async () => {
+    serveTwoNodePages();
+    const one = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true, kind: "node" })).content);
+    expect(one).toMatchObject({ traversal_complete: false, complete: false });
+    expect(one.pending_sections).not.toContain("node");
+    const filtered = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", all: true, phase_id: "p" })).content);
+    expect(filtered).toMatchObject({ traversal_complete: false, complete: false, pending_sections: [] });
+    expect(filtered.note).toContain("subset");
+  });
+
+  it("single-page reads carry no top-level completeness claim", async () => {
+    serveTwoNodePages();
+    const page = JSON.parse((await synGetSessionInventory(client, { execution_id: "run", snapshot_id: snapshot })).content);
+    expect(page.complete).toBeUndefined();
+    expect(page.traversal_complete).toBeUndefined();
+  });
 });

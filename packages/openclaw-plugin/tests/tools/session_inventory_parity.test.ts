@@ -35,7 +35,7 @@ afterEach(() => vi.unstubAllGlobals());
 const namespace = (ref: InventoryNodeRef) => ref.harness == null ? ref.kind : `${ref.kind}:${ref.harness}`;
 
 interface AllResult {
-  summary: Record<string, unknown>; snapshot_id: string; revision: string;
+  summary: Record<string, unknown>; complete: boolean; traversal_complete: boolean; snapshot_id: string; revision: string;
   coverage: { state: string }; counts: Record<string, number>;
   sections: Record<InventoryKind, { items: InventoryItem[]; truncated: boolean }>; gaps: InventoryGap[] | null;
 }
@@ -57,7 +57,7 @@ it("derives the API's counts, coverage, revision, gaps and namespaces", async ()
     revision: out.revision,
     snapshot_id: out.snapshot_id,
     coverage_state: out.coverage.state,
-    complete: out.summary["complete"],
+    complete: out.complete,
     counts: Object.fromEntries(KINDS.map(k => [k, out.counts[k]])),
     traversed: Object.fromEntries(KINDS.map(k => [k, out.sections[k].items.length])),
     distinct_sessions: out.summary["distinct_sessions"],
@@ -73,6 +73,7 @@ it("derives the API's counts, coverage, revision, gaps and namespaces", async ()
   };
   expect(digest).toEqual(fixture.expected);
   expect(KINDS.every(k => !out.sections[k].truncated)).toBe(true);
+  expect(out.traversal_complete).toBe(true);
 });
 
 it("phase filter selects the same sessions and the node lookup resolves the cross-page child", async () => {

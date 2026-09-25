@@ -67,7 +67,7 @@ The agent uses 16 tools under the hood — you don't need to know their names.
 |------|-------------|
 | `syn_list_executions` | List recent/active executions |
 | `syn_get_execution` | Detailed status: phases, tokens, costs |
-| `syn_get_session_inventory` | Run sessions, relationships, captures, and gaps: revision-pinned pages, `all` traversal, phase/attempt filters, node lookup |
+| `syn_get_session_inventory` | Run sessions, relationships, captures, and gaps: revision-pinned pages, `all` traversal with separate coverage/traversal completeness, phase/attempt filters, node lookup |
 
 ### Control
 | Tool | What it does |
