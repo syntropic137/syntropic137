@@ -15,6 +15,19 @@ interface PhasePipelineProps {
   onPhaseSelect?: (phaseId: string) => void
 }
 
+function PhaseMetricLine({ metric }: { metric: PhaseMetrics }) {
+  return (
+    <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+      <span>{metric.total_tokens.toLocaleString()} tok</span>
+      {/* Unpriced work must not read as a confident $0 (#890); a running phase's cost is a lower bound (#1048). */}
+      <span title={metric.cost_in_progress ? 'Counted so far; this phase is still running' : undefined}>
+        {formatCostWithCoverage(metric.cost_usd, metric.unpriced_observation_count)}
+        {metric.cost_in_progress ? ' so far' : ''}
+      </span>
+    </div>
+  )
+}
+
 function PhaseCard({
   phase,
   phaseMetric,
@@ -60,17 +73,7 @@ function PhaseCard({
         <span>{providerLabel(phase.provider ?? phase.agent_type)}</span>
         <PhaseModelBadge model={phase.model} modelDisplay={phase.model_display} />
       </div>
-      {phaseMetric && (
-        <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-          <span>{phaseMetric.total_tokens.toLocaleString()} tok</span>
-          {/* Unpriced work must not read as a confident $0 (#890). */}
-          {/* A phase still running has no attributed cost for that run yet: a lower bound (#1048). */}
-          <span title={phaseMetric.cost_in_progress ? 'Counted so far; this phase is still running' : undefined}>
-            {formatCostWithCoverage(phaseMetric.cost_usd, phaseMetric.unpriced_observation_count)}
-            {phaseMetric.cost_in_progress ? ' so far' : ''}
-          </span>
-        </div>
-      )}
+      {phaseMetric && <PhaseMetricLine metric={phaseMetric} />}
     </div>
   )
 }
