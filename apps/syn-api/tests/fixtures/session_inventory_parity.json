@@ -108,6 +108,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -218,6 +219,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -330,6 +332,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -442,6 +445,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -568,6 +572,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -696,6 +701,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -795,6 +801,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -896,7 +903,20 @@
     "body_overrides": [
      {
       "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_content_hash": null,
       "status": "expired"
+     }
+    ],
+    "capture_hashes": [
+     {
+      "archived_bytes_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_content_hash": null,
+      "transcript_revision_kind": null
+     },
+     {
+      "archived_bytes_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_content_hash": null,
+      "transcript_revision_kind": null
      }
     ],
     "filters": {
@@ -1017,7 +1037,15 @@
     "body_overrides": [
      {
       "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_content_hash": null,
       "status": "expired"
+     }
+    ],
+    "capture_hashes": [
+     {
+      "archived_bytes_sha256": null,
+      "source_content_hash": null,
+      "transcript_revision_kind": null
      }
     ],
     "filters": {
@@ -1114,6 +1142,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -1207,6 +1236,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -1333,6 +1363,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": null
@@ -1421,6 +1452,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
@@ -1533,6 +1565,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
@@ -1661,6 +1694,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
@@ -1764,7 +1798,20 @@
     "body_overrides": [
      {
       "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_content_hash": null,
       "status": "expired"
+     }
+    ],
+    "capture_hashes": [
+     {
+      "archived_bytes_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_content_hash": null,
+      "transcript_revision_kind": null
+     },
+     {
+      "archived_bytes_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_content_hash": null,
+      "transcript_revision_kind": null
      }
     ],
     "filters": {
@@ -1885,6 +1932,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
@@ -1953,6 +2001,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
@@ -2052,6 +2101,7 @@
   {
    "body": {
     "body_overrides": [],
+    "capture_hashes": [],
     "filters": {
      "attempt_id": null,
      "phase_id": "phase-plan"
