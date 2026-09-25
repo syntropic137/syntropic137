@@ -104,6 +104,12 @@ _openapi:
 
           expired, missing and oversized bodies are explicit statuses, never
           content.
+
+          The shared deletion fence spans authorization, the read and rendering
+          of the
+
+          response, so a deletion request either waits for this handoff or is
+          seen.
         heading: get-local-transcript-revision
       - content: Local erasure and replica propagation state of an existing tombstone.
         heading: get-local-transcript-deletion

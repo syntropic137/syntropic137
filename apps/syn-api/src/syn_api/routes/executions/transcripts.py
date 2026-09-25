@@ -73,37 +73,50 @@ async def _catalogued(
     return capture
 
 
-@router.get("/executions/{execution_id}/session-transcripts/{archive_hash}")
+@router.get(
+    "/executions/{execution_id}/session-transcripts/{archive_hash}",
+    response_model=LocalTranscriptResponse,
+)
 async def get_local_transcript_revision(
     execution_id: str,
     archive_hash: _ArchiveHash,
     harness: _OpaqueQuery,
     native_id: _OpaqueQuery,
-    response: Response,
-) -> LocalTranscriptResponse:
+) -> Response:
     """Serve one exact archived revision after current whole-object authorization.
 
     Bytes are returned exactly as archived (source redaction only). Deleted,
     expired, missing and oversized bodies are explicit statuses, never content.
+    The shared deletion fence spans authorization, the read and rendering of the
+    response, so a deletion request either waits for this handoff or is seen.
     """
-    response.headers["Cache-Control"] = "no-store"
     run = await _visible_run(execution_id)
     identity = _identity(run, harness, native_id)
+    runtime = get_inventory_runtime()
     try:
-        result = await get_inventory_runtime().transcripts.handle(run, identity, archive_hash)
+        async with runtime.fence.shared():
+            result = await runtime.transcripts.handle(run, identity, archive_hash)
+            payload = LocalTranscriptResponse(
+                status=result.status,
+                archive_sha256=archive_hash,
+                content_format=result.capture.content_format
+                if result.capture is not None
+                else None,
+                size=result.capture.archive.size if result.capture is not None else None,
+                content_base64=base64.b64encode(result.body).decode("ascii")
+                if result.body is not None
+                else None,
+            )
+            # Rendered to bytes before the fence is released: the handoff point.
+            return Response(
+                content=payload.model_dump_json(),
+                media_type="application/json",
+                headers=_NO_STORE,
+            )
     except PermissionError as exc:
         raise _denied(403, "Transcript access denied") from exc
     except (OSError, TranscriptIntegrityError) as exc:
         raise _denied(503, "Transcript storage unavailable") from exc
-    return LocalTranscriptResponse(
-        status=result.status,
-        archive_sha256=archive_hash,
-        content_format=result.capture.content_format if result.capture is not None else None,
-        size=result.capture.archive.size if result.capture is not None else None,
-        content_base64=base64.b64encode(result.body).decode("ascii")
-        if result.body is not None
-        else None,
-    )
 
 
 @router.post(

@@ -9,6 +9,7 @@ execution visibility (a projection lookup) is doubled.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
@@ -53,6 +54,7 @@ class Runtime:
     access: InstallationTranscriptAccess
     deletions: PostgresTranscriptDeletions
     transcripts: ReadLocalTranscriptHandler
+    fence: DeletionFence
 
 
 @dataclass
@@ -108,6 +110,7 @@ async def stack(
             db_pool, source, None, archive=archive, fence=DeletionFence(db_pool, source)
         ),
         transcripts=ReadLocalTranscriptHandler(catalog, archive, access, max_bytes=64),
+        fence=DeletionFence(db_pool, source),
     )
 
     async def visible(execution_id: str) -> RunIdentity:
@@ -268,6 +271,44 @@ async def test_deletion_withholds_at_once_erases_later_and_cannot_be_resurrected
         response = await stack.read(execution, capture.archive.sha256)
         assert response.json()["status"] == "deleted"
         assert response.json()["content_base64"] is None
+
+
+async def test_paused_read_holds_the_fence_until_the_response_is_rendered(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    capture = await stack.capture("run-a", b"racing read")
+    started, release = asyncio.Event(), asyncio.Event()
+    real_get = stack.archive.get
+
+    async def paused_get(reference: object) -> bytes | None:
+        started.set()
+        await release.wait()
+        return await real_get(reference)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(stack.archive, "get", paused_get)
+    read = asyncio.create_task(stack.read("run-a", capture.archive.sha256))
+    await started.wait()
+    delete = asyncio.create_task(
+        stack.client.post(
+            f"/executions/run-a/session-transcripts/{capture.archive.sha256}/deletion",
+            json={"harness": "codex", "native_id": "native"},
+        )
+    )
+    try:
+        await asyncio.sleep(0.2)
+        # The deletion cannot commit between this read and its response.
+        assert not delete.done()
+    finally:
+        release.set()
+        served = await asyncio.wait_for(read, 10)
+        deleted = await asyncio.wait_for(delete, 10)
+    assert served.json()["status"] == "present"
+    assert base64.b64decode(served.json()["content_base64"]) == b"racing read"
+    assert deleted.status_code == 202
+    # Any read after the request commits is withheld.
+    monkeypatch.setattr(stack.archive, "get", real_get)
+    after = await stack.read("run-a", capture.archive.sha256)
+    assert after.json()["status"] == "deleted" and after.json()["content_base64"] is None
 
 
 async def test_expired_missing_and_too_large_are_explicit_states(stack: Stack) -> None:

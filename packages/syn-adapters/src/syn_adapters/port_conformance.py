@@ -54,6 +54,10 @@ if TYPE_CHECKING:
     )
     from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
     from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
+    from syn_adapters.session_inventory.capture_outboxes import (
+        CaptureOutboxPort,
+        ExporterCaptureOutboxes,
+    )
     from syn_adapters.session_inventory.docker_recovery import DockerSpoolRecovery
     from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
     from syn_adapters.session_inventory.history_receipts import (
@@ -386,6 +390,7 @@ if TYPE_CHECKING:
         history_receipts: PostgresBackfillReceipts,
         history_queue: PostgresHistoryBackfillQueue,
         spool_release: CaptureSpoolRetention,
+        outboxes: ExporterCaptureOutboxes,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
@@ -407,6 +412,7 @@ if TYPE_CHECKING:
         _recovery: SpoolRecoveryPort = recovery
         _volumes: SpoolVolumePort = recovery
         _release: SpoolReleasePort = spool_release
+        _outboxes: CaptureOutboxPort = outboxes
         _work: InventoryWorkPort = work
         _dispatch: InventoryReplicationDispatchPort = supervisor
         _inventory_lane: InventoryReplicationWorkPort = inventory_replication

@@ -16,6 +16,14 @@ class CaptureDeliveryLeaseLost(RuntimeError):
     pass
 
 
+class DrainTarget(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    producer_id: str
+    capture_id: str
+    withdrawn: bool
+    """Tombstoned or cancelled: the outbox is discarded, never sent."""
+
+
 class CaptureDeliveryLease(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     capture: CataloguedCapture
@@ -138,31 +146,113 @@ class PostgresCaptureDeliveryJobs:
         if result is None:
             raise CaptureDeliveryLeaseLost("capture delivery lease expired, superseded or deleted")
 
-    async def drain_blocked(self, conn: Connection) -> bool:
-        """Whether a tombstoned body may still sit in this destination's outbox.
+    async def withdrawn(self, capture: CataloguedCapture) -> bool:
+        """Current tombstone or cancellation for this capture's exact bytes."""
+        async with self._pool.acquire() as conn:
+            found = await conn.fetchval(
+                """SELECT (EXISTS(SELECT 1 FROM session_body_deletions d
+                    WHERE d.source_instance_id=$2 AND d.archive_sha256=$5)
+                OR EXISTS(SELECT 1 FROM session_capture_delivery_jobs j
+                    WHERE j.destination_id=$1 AND j.source_instance_id=$2
+                    AND j.producer_id=$3 AND j.capture_id=$4 AND j.cancelled))::text""",
+                self._destination,
+                self._source,
+                capture.producer_id,
+                capture.capture_id,
+                capture.archive.sha256,
+            )
+        return found == "true"
 
-        True until the replica has authoritatively acknowledged deletion for every
-        capture of a tombstoned object that reached (or may have reached) the
-        exporter. Call under the shared deletion fence, on its connection.
+    async def claim_drain(self, lease_seconds: int = 120) -> DrainTarget | None:
+        """One capture whose own outbox may still hold a queued upload.
+
+        Cancelled jobs are included: their outbox must be discarded, not sent.
+        Call under the shared deletion fence so ``withdrawn`` cannot go stale.
         """
-        blocked = await conn.fetchval(
-            """SELECT EXISTS(
-                SELECT 1 FROM session_body_deletions d
-                JOIN session_capture_catalog c ON c.source_instance_id=d.source_instance_id
-                    AND c.payload->'archive'->>'sha256'=d.archive_sha256
-                JOIN session_capture_delivery_jobs j ON j.source_instance_id=c.source_instance_id
+        if lease_seconds < 1:
+            raise ValueError("capture drain lease must be positive")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """WITH candidate AS (
+                    SELECT destination_id,source_instance_id,producer_id,capture_id
+                    FROM session_capture_delivery_jobs
+                    WHERE destination_id=$1 AND source_instance_id=$2
+                    AND queued AND NOT outbox_drained AND drain_at<=now()
+                    ORDER BY drain_at,producer_id,capture_id FOR UPDATE SKIP LOCKED LIMIT 1
+                ), claimed AS (
+                    UPDATE session_capture_delivery_jobs j
+                    SET drain_at=now()+$3::double precision*interval '1 second'
+                    FROM candidate c WHERE j.destination_id=c.destination_id
+                    AND j.source_instance_id=c.source_instance_id
                     AND j.producer_id=c.producer_id AND j.capture_id=c.capture_id
-                    AND j.destination_id=$2
-                WHERE d.source_instance_id=$1 AND (j.queued OR j.content_hash IS NOT NULL)
-                AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL
-                AND NOT EXISTS(SELECT 1 FROM session_capture_deletion_checkpoints k
-                    WHERE k.source_instance_id=c.source_instance_id AND k.destination_id=$2
-                    AND k.producer_id=c.producer_id AND k.capture_id=c.capture_id
-                    AND k.acknowledged))::text""",
+                    RETURNING j.producer_id,j.capture_id,j.cancelled
+                )
+                SELECT c.producer_id,c.capture_id,
+                (c.cancelled OR EXISTS(SELECT 1 FROM session_body_deletions d
+                    WHERE d.source_instance_id=$2
+                    AND d.archive_sha256=a.payload->'archive'->>'sha256'))::text AS withdrawn
+                FROM claimed c JOIN session_capture_catalog a
+                ON a.source_instance_id=$2 AND a.producer_id=c.producer_id
+                AND a.capture_id=c.capture_id""",
+                self._destination,
+                self._source,
+                lease_seconds,
+            )
+        if not rows:
+            return None
+        row = rows[0]
+        return DrainTarget(
+            producer_id=row["producer_id"],
+            capture_id=row["capture_id"],
+            withdrawn=row["withdrawn"] == "true",
+        )
+
+    async def finish_drain(
+        self, target: DrainTarget, *, drained: bool, retry_seconds: int = 0
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_capture_delivery_jobs
+                SET outbox_drained=$5,
+                drain_at=CASE WHEN $5 THEN drain_at
+                    ELSE now()+$6::double precision*interval '1 second' END
+                WHERE destination_id=$1 AND source_instance_id=$2
+                AND producer_id=$3 AND capture_id=$4""",
+                self._destination,
+                self._source,
+                target.producer_id,
+                target.capture_id,
+                drained,
+                retry_seconds,
+            )
+
+    async def reset_legacy_queue(self, conn: Connection) -> bool:
+        """Once per destination: captures queued in the retired shared outbox.
+
+        Undelivered, non-withdrawn captures are redelivered through their own
+        outboxes; everything else is marked drained because that outbox is gone.
+        Returns whether this call performed the reset. Run under the exclusive
+        fence, in a transaction on ``conn``.
+        """
+        created = await conn.fetchval(
+            """INSERT INTO session_capture_outbox_retirements(source_instance_id,destination_id)
+            VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING destination_id""",
             self._source,
             self._destination,
         )
-        return blocked == "true"
+        if created is None:
+            return False
+        await conn.execute(
+            """UPDATE session_capture_delivery_jobs SET
+            queued=CASE WHEN NOT cancelled AND NOT receipt_recorded THEN FALSE ELSE queued END,
+            outbox_drained=(cancelled OR receipt_recorded),
+            retry_at='-infinity',leased_until='-infinity'
+            WHERE destination_id=$1 AND source_instance_id=$2 AND queued
+            AND NOT outbox_drained""",
+            self._destination,
+            self._source,
+        )
+        return True
 
     async def finish(
         self, lease: CaptureDeliveryLease, *, queued: bool, retry_seconds: int = 0

@@ -1,5 +1,7 @@
 """HTTP inventory contract: explicit pending state, bounded pinned reads, current visibility."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -91,6 +93,12 @@ def transcript_setup(
     run = RunIdentity(source_instance_id="installation", execution_id="run")
     visible = AsyncMock(return_value=run)
     runtime = Mock()
+
+    @asynccontextmanager
+    async def shared() -> AsyncIterator[None]:
+        yield None
+
+    runtime.fence.shared = shared
     monkeypatch.setattr(transcripts, "_visible_run", visible)
     monkeypatch.setattr(transcripts, "get_inventory_runtime", lambda: runtime)
     app = FastAPI()

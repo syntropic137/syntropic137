@@ -246,26 +246,33 @@ hash (`sha256:` prefix) used by replicas. Capture pages add `capture_hashes[i]`
 naming what `items[i].transcript_revision` holds, because local and remote
 receipts store different representations in that field.
 
-Deletion fence. After a deletion request no path delivers, serves or derives
-facts from the bytes. The request holds an installation-wide exclusive advisory
-lock while it writes the archive marker (every local read and put of those
-bytes now fails) and commits the SQL tombstone. Byte consumers hold the shared
-side across their tombstone check and the use of the bytes: the replica upload
-drain and historical backfill. So each use either completed before the request
-took effect, or observes the tombstone. Retention tombstones take the same lock.
+Deletion fence. After a deletion request commits, withdrawn bytes never leave
+this host again, are never served and never yield derived facts. The request
+holds an installation-wide exclusive advisory lock while it writes the archive
+marker (every local read and put of those bytes now fails), commits the SQL
+tombstone and discards every queued exporter copy. Byte consumers hold the
+shared side across their tombstone check and the use of the bytes: handing an
+envelope to the exporter, sending it, receipt lookups, historical backfill and
+the transcript read route, which renders its response before releasing the
+lock. Each use either completed before the request or observes the tombstone.
 
-Replica delivery. The APSS source-content hash is recorded on the delivery job
-before the envelope can reach the exporter, so replica deletion never needs
-local bytes. Deletes use their own exporter outbox. The upload drain is fenced
-while any tombstoned body that reached the exporter lacks an acknowledged
-replica deletion; once acknowledged, a delayed upload is rejected by the replica
-(410, verified by the real SeshMagic test) instead of being accepted. Replica
-state per destination: `pending` (not handed to the exporter), `queued`
-(durable in the deletion outbox), `propagated` (a drain that emptied the
-deletion outbox acknowledged it; one deletion is in flight per destination so
-acknowledgements are attributable; an unacknowledged drop is requeued) or
-`unresolvable` (a legacy delivery that recorded no content hash while bytes
-existed).
+Per-capture outboxes. The standard exporter cannot cancel a queued upload, so
+every capture gets its own exporter outbox directory, owned by Syntropic137.
+Discarding a queued upload is removing that directory; Syntropic137 never reads
+or edits the exporter's files inside it. The drain sends one capture's outbox at
+a time under the shared fence and discards (never sends) a withdrawn one. The
+pre-1398 shared outbox mixed captures and cannot be partially cancelled: it is
+never drained again. On first use it is retired: undelivered, non-withdrawn
+captures are redelivered through their own outboxes, then it is removed.
+
+Replica deletion. The APSS source-content hash is recorded on the delivery job
+before the envelope reaches the exporter, so replica deletion never needs local
+bytes. Deletes use their own outbox. Replica state per destination: `pending`
+(not handed to the exporter), `queued` (durable in the deletion outbox),
+`propagated` (a drain that emptied the deletion outbox acknowledged it; one
+deletion is in flight per destination so acknowledgements are attributable; an
+unacknowledged drop is requeued) or `unresolvable` (a legacy delivery with no
+recorded content hash and no local bytes left to derive one).
 
 Anti-resurrection. Once tombstoned, bytes cannot return through archive re-put,
 spool replay, capture retry, a new destination or a replica retry. Catalog
@@ -298,15 +305,17 @@ runs only from the live inventory tick, never from replay.
 Known limits: sessions completed before this change are not settled
 retroactively (the projection version is unchanged, to avoid a full replay).
 Their spools are retained until the byte quota forces an expiry with a gap. The
-archive byte quota scans the installation's catalog each tick. The request
-waits for at most one in-flight upload drain (bounded by the exporter timeout).
+archive byte quota scans the installation's catalog each tick. A request
+waits for in-flight hand-offs under the shared fence (each bounded by the
+exporter timeout).
 
 Tests: `test_transcript_authz_postgres.py` (API matrix: shared membership,
 malformed/traversal/NUL IDs, foreign run and installation, revoked, deleted,
 expired, missing, too large, resurrection, planted secrets),
 `test_transcript_deletion_postgres.py` (whole-object tombstones, quota),
-`test_deletion_fence_postgres.py` (both enqueue/delete orders, in-flight drain,
-lost local bytes, unacknowledged drops, backfill with held erasure, against a
-recording FIFO exporter and replica), `test_spool_release_postgres.py` (settlement, exclusivity,
+`test_deletion_fence_postgres.py` (both enqueue/delete orders, in-flight enqueue
+and drain, legacy queued upload without hash or bytes, lost local bytes,
+unacknowledged drops, backfill with held erasure; a recording exporter logs
+every hand-off and send), `test_spool_release_postgres.py` (settlement, exclusivity,
 expiry gaps, byte quota), `test_docker_spool_release.py` (real Docker in-use
 refusal), plus unit tests for the recovery worker and projector.

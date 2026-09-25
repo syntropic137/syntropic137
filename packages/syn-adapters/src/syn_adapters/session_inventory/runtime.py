@@ -42,7 +42,11 @@ from .postgres_inventory import PostgresSessionInventory
 from .postgres_jobs import PostgresSessionInventoryJobs
 from .postgres_spools import PostgresCaptureSpools
 from .recovery_worker import CaptureRecoveryWorker
-from .replication_runtime import capture_destination_id, create_replication_manager
+from .replication_runtime import (
+    capture_destination_id,
+    capture_outboxes,
+    create_replication_manager,
+)
 from .spool_drain import LocalSpoolDrain
 from .spool_release import CaptureSpoolRetention
 from .transcript_access import InstallationTranscriptAccess
@@ -88,6 +92,7 @@ class InventoryRuntime:
     catalog: PostgresCaptureCatalog
     access: InstallationTranscriptAccess
     deletions: PostgresTranscriptDeletions
+    fence: DeletionFence
     replication: InventoryReplicationProcessManager | None = None
     history: BackfillSessionInventoryHandler | None = None
     """None when no observability reader is wired; explicit backfill is then unavailable."""
@@ -186,6 +191,7 @@ async def create_inventory_runtime(
     )
     catalog = PostgresCaptureCatalog(pool)
     access = InstallationTranscriptAccess(pool, source_id)
+    fence = DeletionFence(pool, source_id)
     history = (
         BackfillSessionInventoryHandler(
             PostgresHistoricalEvidenceSource(
@@ -263,8 +269,10 @@ async def create_inventory_runtime(
             source_id,
             capture_destination_id(settings),
             archive=archive,
-            fence=DeletionFence(pool, source_id),
+            fence=fence,
+            outboxes=capture_outboxes(settings, source_id),
         ),
+        fence=fence,
         repository=repository,
         processor=InventoryReconciliationProcessManager(
             jobs,

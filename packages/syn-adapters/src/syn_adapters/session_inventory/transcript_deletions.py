@@ -17,6 +17,7 @@ from syn_domain.contexts.agent_sessions import TranscriptDeletion, TranscriptDel
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import CataloguedCapture, OwnerDeletionReason
 
+    from .capture_outboxes import CaptureOutboxPort
     from .database import Pool
     from .deletion_fence import DeletionFence
     from .local_archive import LocalSessionTranscriptArchive
@@ -35,9 +36,10 @@ class PostgresTranscriptDeletions:
         *,
         archive: LocalSessionTranscriptArchive,
         fence: DeletionFence,
+        outboxes: CaptureOutboxPort | None = None,
     ) -> None:
         self._pool, self._source, self._destination = pool, source_instance_id, destination_id
-        self._archive, self._fence = archive, fence
+        self._archive, self._fence, self._outboxes = archive, fence, outboxes
 
     async def request(
         self, capture: CataloguedCapture, reason: OwnerDeletionReason
@@ -79,6 +81,18 @@ class PostgresTranscriptDeletions:
                     self._source,
                     capture.archive.sha256,
                 )
+            if self._outboxes is not None:
+                # Still exclusive: no queued copy of these bytes survives the
+                # request. A failure here leaves cancelled jobs, which the
+                # fenced drain discards instead of sending.
+                sharing = await conn.fetch(
+                    """SELECT producer_id,capture_id FROM session_capture_catalog
+                    WHERE source_instance_id=$1 AND payload->'archive'->>'sha256'=$2""",
+                    self._source,
+                    capture.archive.sha256,
+                )
+                for row in sharing:
+                    await self._outboxes.discard(row["producer_id"], row["capture_id"])
         state = await self.state(capture)
         if state is None:
             raise RuntimeError("deletion tombstone was not recorded")

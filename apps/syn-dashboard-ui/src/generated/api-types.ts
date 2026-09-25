@@ -518,6 +518,8 @@ export interface paths {
          *
          *     Bytes are returned exactly as archived (source redaction only). Deleted,
          *     expired, missing and oversized bodies are explicit statuses, never content.
+         *     The shared deletion fence spans authorization, the read and rendering of the
+         *     response, so a deletion request either waits for this handoff or is seen.
          */
         get: operations["get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get"];
         put?: never;

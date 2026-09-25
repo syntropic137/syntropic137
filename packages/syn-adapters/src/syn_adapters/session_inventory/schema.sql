@@ -283,3 +283,19 @@ ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknow
 CREATE INDEX IF NOT EXISTS session_capture_deletion_unacknowledged
     ON session_capture_deletion_checkpoints(source_instance_id,destination_id)
     WHERE NOT acknowledged;
+
+-- Review pass 2 (#1398): per-capture exporter outboxes. outbox_drained means the
+-- capture's own outbox was emptied (delivered, rejected or discarded).
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS outbox_drained
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS drain_at
+    TIMESTAMPTZ NOT NULL DEFAULT '-infinity';
+CREATE INDEX IF NOT EXISTS session_capture_outbox_pending
+    ON session_capture_delivery_jobs(destination_id,source_instance_id,drain_at)
+    WHERE queued AND NOT outbox_drained;
+CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    retired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id,destination_id)
+);

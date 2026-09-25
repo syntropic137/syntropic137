@@ -29,6 +29,7 @@ from syn_adapters.session_inventory.capture_delivery_jobs import (
     PostgresCaptureDeliveryJobs,
 )
 from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
+from syn_adapters.session_inventory.capture_outboxes import ExporterCaptureOutboxes
 from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.exporter_transport import (
@@ -346,17 +347,22 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
     identity = QualifiedTranscript(
         source_instance_id=source, harness="third-party", native_session_id=native
     )
-    config = ExporterConfig(
-        binary=binary, outbox_dir=root, store_url=url, token=SecretStr("capture-test")
+    outboxes = ExporterCaptureOutboxes(
+        binary=binary,
+        root=root,
+        legacy_root=tmp_path / "legacy-outbox",
+        store_url=url,
+        token=SecretStr("capture-test"),
     )
-    transport = ExporterCaptureTransport(config)
+    # The first capture's own outbox: direct receipt and retry checks target it.
+    transport = outboxes.for_capture("producer", "first")
     await PostgresSessionInventory(db_pool).ensure_ready()
     archive = LocalSessionTranscriptArchive(tmp_path / "archive")
     await archive.ensure_ready()
     catalog = PostgresCaptureCatalog(db_pool)
     jobs = PostgresCaptureDeliveryJobs(db_pool, source, "capture-integration")
     worker = CaptureDeliveryWorker(
-        jobs, archive, transport, retry_seconds=0, fence=DeletionFence(db_pool, source)
+        jobs, archive, outboxes, retry_seconds=0, fence=DeletionFence(db_pool, source)
     )
     run = RunIdentity(source_instance_id=source, execution_id="run")
 
@@ -401,7 +407,7 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
     worker = CaptureDeliveryWorker(
         PostgresCaptureDeliveryJobs(db_pool, source, "capture-integration"),
         LocalSessionTranscriptArchive(tmp_path / "archive"),
-        ExporterCaptureTransport(config),
+        outboxes,
         retry_seconds=0,
         fence=DeletionFence(db_pool, source),
     )
@@ -413,7 +419,7 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         ) as client:
             sent = await worker.drain_step()
             assert sent.acknowledged == 1 and sent.remaining == 0
-            accepted = await ExporterCaptureTransport(config).receipt(identity, first)
+            accepted = await outboxes.for_capture("producer", "first").receipt(identity, first)
             assert accepted is not None
             assert accepted.storage_key == identity.storage_key()
             assert await transport.receipt(identity, payload("not-delivered")) is None
@@ -436,7 +442,12 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
             await jobs.finish_receipt(receipt_lease, recorded=False, retry_seconds=0)
             journal = PostgresSessionEvidence(db_pool)
             receipt_worker = CaptureDeliveryWorker(
-                jobs, archive, ExporterCaptureTransport(config), journal=journal, retry_seconds=0
+                jobs,
+                archive,
+                outboxes,
+                journal=journal,
+                retry_seconds=0,
+                fence=DeletionFence(db_pool, source),
             )
             assert await receipt_worker.receipt_step()
             assert await journal.watermark(run) == 1
@@ -504,7 +515,8 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         else:
             pytest.fail("local erasure did not converge")
         # Deletes travel through their own outbox and count as propagated only
-        # after the replica acknowledges them; the upload outbox stays fenced.
+        # after the replica acknowledges them. Withdrawn upload outboxes are
+        # discarded, never sent.
         deletion_transport = ExporterCaptureTransport(
             ExporterConfig(
                 binary=binary,
@@ -519,9 +531,10 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         for _ in range(3):
             await deletions.step()
         fenced = CaptureDeliveryWorker(
-            jobs, archive, transport, retry_seconds=0, fence=DeletionFence(db_pool, source)
+            jobs, archive, outboxes, retry_seconds=0, fence=DeletionFence(db_pool, source)
         )
-        assert await fenced.drain_step() is None
+        for _ in range(5):
+            assert await fenced.drain_step() is None  # discarded, not sent
 
         async def unacknowledged() -> int:
             async with db_pool.acquire() as conn:
@@ -539,17 +552,11 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         ) as client:
             for _ in range(20):
                 await deletions.step()
-                if await unacknowledged() == 0 and await fenced.drain_step() is not None:
+                if await unacknowledged() == 0:
                     break
             else:
                 pytest.fail("replica deletion did not converge")
-            restarted_transport = ExporterCaptureTransport(config)
-            for _ in range(6):
-                if (await restarted_transport.drain()).remaining == 0:
-                    break
-            else:
-                pytest.fail("capture outbox did not converge")
-            assert not list((root / "captures" / "objects").iterdir())
+            assert not any(root.rglob("objects/*"))
             for version in [None, old.content_hash]:
                 selected = params if version is None else (*params, ("content_hash", version))
                 response = await client.get(
