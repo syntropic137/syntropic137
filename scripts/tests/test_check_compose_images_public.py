@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 from scripts.check_compose_images_public import (
-    COMPOSE_FILES,
     ImageRef,
     PullResult,
+    compose_files,
     evaluate,
     fixed_image_refs,
     parse_ref,
@@ -65,7 +65,7 @@ def test_a_pinned_ref_is_asked_for_by_digest_not_tag() -> None:
 
 
 def test_the_real_compose_files_include_the_minio_image_and_skip_templated_app_images() -> None:
-    texts = [(_ROOT / p).read_text() for p in COMPOSE_FILES]
+    texts = [p.read_text() for p in compose_files(_ROOT)]
     refs = fixed_image_refs(texts)
     repos = {r.repository for r in refs}
 
@@ -100,3 +100,22 @@ def test_a_pullable_pinned_and_a_pullable_tagged_image_pass() -> None:
         [PullResult(_ref(), 200, _DIGEST), PullResult(_ref(None), 200, "sha256:" + "c" * 64)]
     )
     assert code == 0
+
+
+def test_every_compose_overlay_is_discovered() -> None:
+    """A hand-kept list is how an overlay's image goes unchecked."""
+    found = {p.name for p in compose_files(_ROOT)}
+    on_disk = {p.name for p in (_ROOT / "docker").iterdir() if p.name.startswith("docker-compose")}
+    assert found == on_disk
+    assert {"docker-compose.cloudflare.yaml", "docker-compose.dev-cloudflare.yaml"} <= found
+
+
+def test_a_ref_only_in_an_overlay_is_selected(tmp_path: Path) -> None:
+    docker = tmp_path / "docker"
+    docker.mkdir()
+    (docker / "docker-compose.yaml").write_text("services:\n  a:\n    image: redis:7\n")
+    (docker / "docker-compose.extra.yaml").write_text(
+        "services:\n  b:\n    image: quay.io/only/overlay:1\n"
+    )
+    refs = fixed_image_refs([p.read_text() for p in compose_files(tmp_path)])
+    assert "quay.io/only/overlay:1" in {r.original for r in refs}

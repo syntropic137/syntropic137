@@ -28,10 +28,9 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-COMPOSE_FILES = (
-    Path("docker/docker-compose.yaml"),
-    Path("docker/docker-compose.syntropic137.yaml"),
-)
+#: Every compose file and overlay, discovered rather than listed: a list is
+#: how an overlay's new image goes unchecked (codex review, PR #1416).
+COMPOSE_GLOB = "docker/docker-compose*.yaml"
 
 _IMAGE_LINE = re.compile(r"^\s*image:\s*[\"']?([^\s\"'#]+)", re.MULTILINE)
 _TIMEOUT_SECONDS = 30
@@ -44,6 +43,9 @@ _MANIFEST_ACCEPT = ", ".join(
     )
 )
 _DOCKER_HUB = "registry-1.docker.io"
+#: One retry for a transport error or a 5xx - a registry hiccup, not a verdict.
+#: 401/403/404 are answers about the image and are never retried.
+_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -129,7 +131,20 @@ def _anonymous_token(ref: ImageRef) -> str | None:
     return str(token) if token else None
 
 
+def compose_files(root: Path) -> list[Path]:
+    return sorted(root.glob(COMPOSE_GLOB))
+
+
 def probe(ref: ImageRef) -> PullResult:
+    result = _probe_once(ref)
+    for _ in range(_ATTEMPTS - 1):
+        if result.status is not None and result.status < 500:
+            break
+        result = _probe_once(ref)
+    return result
+
+
+def _probe_once(ref: ImageRef) -> PullResult:
     try:
         token = _anonymous_token(ref)
         req = urllib.request.Request(
@@ -173,7 +188,7 @@ def evaluate(results: list[PullResult]) -> tuple[int, list[str]]:
 
 
 def main() -> int:
-    texts = [p.read_text() for p in COMPOSE_FILES]
+    texts = [p.read_text() for p in compose_files(Path.cwd())]
     code, lines = evaluate([probe(ref) for ref in fixed_image_refs(texts)])
     print("\n".join(lines))
     return code
