@@ -38,7 +38,13 @@ from syn_domain.contexts.agent_sessions.domain.services.inventory_resolution imp
 )
 
 from .acquisition_status import acquisition_gaps
-from .coverage_settlement import Settlement, expected_capture_states, settle_coverage
+from .coverage_settlement import (
+    Settlement,
+    SettlementInput,
+    expected_capture_states,
+    settle_coverage,
+)
+from .gap_reasons import GapReason
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
@@ -104,7 +110,9 @@ def _coverage(
 ) -> InventoryCoverage:
     contract = settlement.contract
     if contract is None:
-        return InventoryCoverage(state=CoverageState.UNKNOWN)
+        return InventoryCoverage(
+            state=CoverageState.UNSUPPORTED if settlement.uninstrumented else CoverageState.UNKNOWN
+        )
     expected = {ref.key for ref in contract.expected_nodes}
     states = expected_capture_states(evidence, bindings, expected)
     present = {key for key, values in states.items() if values == {BodyAvailability.PRESENT}}
@@ -149,10 +157,6 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         }
     )
     bindings, binding_gaps = resolve_bindings(evidence.bindings)
-    settlement = settle_coverage(
-        evidence, evidence.coverage_contract, bindings, process_gaps, context_gaps
-    )
-    evidence = evidence.model_copy(update={"coverage_contract": settlement.contract})
     nodes = _nodes(evidence)
     resolved_edges, conflict_gaps = resolve_parent_conflicts(lineage(evidence.edges))
     cycles = cyclic_edges(resolved_edges)
@@ -161,13 +165,12 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         *process_gaps,
         *conflict_gaps,
         *binding_gaps,
-        *settlement.gaps,
         *(item.gap for item in evidence.acquisition_gaps),
     ]
     if cycles:
         gaps.append(
             InventoryGap(
-                reason="lineage_cycle",
+                reason=GapReason.LINEAGE_CYCLE,
                 node_keys=tuple(sorted({vertex[0] for pair in cycles for vertex in pair})),
             )
         )
@@ -181,7 +184,7 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         if edge.confidence == EvidenceClass.CANDIDATE:
             gaps.append(
                 InventoryGap(
-                    reason="unresolved_parentage",
+                    reason=GapReason.UNRESOLVED_PARENTAGE,
                     node_keys=(edge.parent.key, edge.child.key),
                     evidence_ids=tuple(ref.evidence_id for ref in edge.evidence),
                 )
@@ -190,13 +193,26 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         if claim.confidence is EvidenceClass.CONFLICTING:
             gaps.append(
                 InventoryGap(
-                    reason="conflicting_source_evidence", evidence_ids=(claim.evidence.evidence_id,)
+                    reason=GapReason.CONFLICTING_SOURCE,
+                    evidence_ids=(claim.evidence.evidence_id,),
                 )
             )
+    settlement = settle_coverage(
+        SettlementInput(
+            evidence=evidence,
+            contract=evidence.coverage_contract,
+            nodes=nodes,
+            bindings=bindings,
+            gaps=tuple(gaps),
+        )
+    )
+    gaps.extend(settlement.gaps)
     coverage = _coverage(evidence, bindings, settlement)
     if coverage.missing_keys:
         gaps.append(
-            InventoryGap(reason="expected_body_unavailable", node_keys=coverage.missing_keys)
+            InventoryGap(
+                reason=GapReason.EXPECTED_BODY_UNAVAILABLE, node_keys=coverage.missing_keys
+            )
         )
     unique_gaps = {gap.model_dump_json(): gap for gap in gaps}
     result = ResolvedInventory(

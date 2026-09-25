@@ -1,10 +1,18 @@
-"""Host-side seal: coverage settles only after the run and every descendant do (#1398)."""
+"""Host-side seal: coverage reconciles only when every known node settles (#1398).
 
+The table enumerates the state space: each row is one kind of node or claim a
+run can contain, resolved while running, after the execution ends, and after
+the bounded settlement deadline. The invariant check after it holds for every
+row: ``reconciled`` never coexists with an unaccounted, unsettled, unresolved
+or conflicting fact.
+"""
+
+from collections.abc import Callable
 from itertools import permutations
 
 import pytest
 
-from syn_domain.contexts.agent_sessions import UnsupportedEvidenceIssue
+from syn_domain.contexts.agent_sessions import EvidenceBatch, UnsupportedEvidenceIssue
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     AcquisitionGapEvidence,
     CaptureEvidence,
@@ -26,11 +34,12 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     EvidenceRetraction,
     InventoryGap,
     InventoryNodeRef,
+    ResolvedInventory,
     RunIdentity,
 )
-from syn_domain.contexts.agent_sessions.domain.services.coverage_settlement import (
-    CAPTURE_UNSETTLED_AT_SEAL,
-    INVOCATION_UNSETTLED_AT_SEAL,
+from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import (
+    CONFLICT_REASONS,
+    GapReason,
 )
 from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
     resolve_relationships,
@@ -39,6 +48,9 @@ from syn_domain.contexts.agent_sessions.domain.services.session_relationship_res
 pytestmark = pytest.mark.unit
 RUN = RunIdentity(source_instance_id="source", execution_id="run")
 HASH = "a" * 64
+OPEN, RECONCILED, MISSING = CoverageState.OPEN, CoverageState.RECONCILED, CoverageState.MISSING
+CONFLICTING, UNSUPPORTED = CoverageState.CONFLICTING, CoverageState.UNSUPPORTED
+UNKNOWN = CoverageState.UNKNOWN
 
 
 def proof(name: str, producer: str = "host") -> EvidenceReference:
@@ -53,6 +65,10 @@ def proof(name: str, producer: str = "host") -> EvidenceReference:
 
 def invocation(name: str) -> InventoryNodeRef:
     return InventoryNodeRef(kind="invocation", source_instance_id="source", local_id=name)
+
+
+def platform(name: str) -> InventoryNodeRef:
+    return InventoryNodeRef(kind="platform", source_instance_id="source", local_id=name)
 
 
 def transcript(name: str) -> InventoryNodeRef:
@@ -98,6 +114,16 @@ def capture(
     )
 
 
+def spawn(parent: str, child: str, confidence: EvidenceClass) -> LineageEvidence:
+    return LineageEvidence(
+        parent=transcript(parent),
+        child=transcript(child),
+        relation="spawn",
+        confidence=confidence,
+        evidence=proof(f"edge-{parent}-{child}", "capture"),
+    )
+
+
 def settlement(*stages: RunSettlementStage) -> tuple[RunSettlementEvidence, ...]:
     return tuple(
         RunSettlementEvidence(stage=stage, evidence=proof(f"settle-{stage}", "settlement"))
@@ -109,19 +135,25 @@ TERMINAL = settlement(RunSettlementStage.EXECUTION_TERMINAL)
 DEADLINE = settlement(RunSettlementStage.EXECUTION_TERMINAL, RunSettlementStage.SETTLEMENT_DEADLINE)
 
 
-def host_run(**update: object) -> SessionEvidence:
-    """A registered root invocation, as the host contract builder produces it."""
-    base = SessionEvidence(
+def host_run() -> SessionEvidence:
+    """What the host projector records for one registered, finished invocation.
+
+    As in ``invocation_evidence``, one host record names both the invocation
+    and its platform session, so the platform session needs no body of its own.
+    """
+    record = proof("registered")
+    return SessionEvidence(
         run=RUN,
-        memberships=(
+        memberships=tuple(
             MembershipEvidence(
-                node=ROOT,
+                node=node,
                 run=RUN,
                 phase_id="phase",
                 attempt_id="attempt",
                 confidence=EvidenceClass.REGISTERED,
-                evidence=proof("registered"),
-            ),
+                evidence=record,
+            )
+            for node in (ROOT, platform("session"))
         ),
         bindings=(binding(ROOT, "root-native"),),
         invocation_lifecycle=(lifecycle(ROOT, 1, "launched"), lifecycle(ROOT, 2, "completed")),
@@ -130,218 +162,327 @@ def host_run(**update: object) -> SessionEvidence:
             contract_id="syntropic-invocations/1", expected_nodes=(ROOT,), sealed=False
         ),
     )
-    return base.model_copy(update=update)
 
 
-def with_child(evidence: SessionEvidence, *extra: object) -> SessionEvidence:
-    """A background child registered through the root's exact attempt."""
-    context = InvocationContextEvidence(
-        controller=ROOT, child=CHILD, attempt_id="attempt", evidence=proof("ctx", "workspace")
+Change = Callable[[SessionEvidence], SessionEvidence]
+
+
+def add(**extra: tuple[object, ...]) -> Change:
+    def apply(evidence: SessionEvidence) -> SessionEvidence:
+        return evidence.model_copy(
+            update={name: (*getattr(evidence, name), *items) for name, items in extra.items()}
+        )
+
+    return apply
+
+
+def replace(**fields: object) -> Change:
+    return lambda evidence: evidence.model_copy(update=fields)
+
+
+def child(attempt: str = "attempt") -> Change:
+    return add(
+        invocation_contexts=(
+            InvocationContextEvidence(
+                controller=ROOT, child=CHILD, attempt_id=attempt, evidence=proof("ctx", "workspace")
+            ),
+        ),
+        bindings=(binding(CHILD, "child-native"),),
     )
-    lifecycle_items = tuple(item for item in extra if isinstance(item, InvocationLifecycleEvidence))
-    captures = tuple(item for item in extra if isinstance(item, CaptureEvidence))
-    return evidence.model_copy(
-        update={
-            "invocation_contexts": (context,),
-            "bindings": (*evidence.bindings, binding(CHILD, "child-native")),
-            "invocation_lifecycle": (*evidence.invocation_lifecycle, *lifecycle_items),
-            "captures": (*evidence.captures, *captures),
-        }
-    )
 
 
-def reasons(evidence: SessionEvidence) -> set[str]:
-    return {gap.reason for gap in resolve_relationships(evidence).gaps}
-
-
-def test_host_contract_stays_open_until_the_execution_is_terminal() -> None:
-    assert resolve_relationships(host_run()).coverage.state is CoverageState.OPEN
-
-
-def test_terminal_run_with_every_expected_body_present_is_reconciled() -> None:
-    result = resolve_relationships(host_run(run_settlement=TERMINAL))
-    assert result.coverage.state is CoverageState.RECONCILED
-    assert result.coverage.missing_keys == ()
-    assert result.coverage.contract_id == "syntropic-invocations/1"
-
-
-def test_terminal_run_with_a_settled_but_absent_body_is_missing() -> None:
-    evidence = host_run(
-        run_settlement=TERMINAL, captures=(capture("root-native", BodyAvailability.MISSING),)
-    )
-    result = resolve_relationships(evidence)
-    assert result.coverage.state is CoverageState.MISSING
-    assert result.coverage.missing_keys == (ROOT.key,)
-    assert "expected_body_unavailable" in {gap.reason for gap in result.gaps}
-
-
-def test_unsupported_capture_mechanism_reports_unsupported_not_missing() -> None:
-    gap = AcquisitionGapEvidence(
-        gap=InventoryGap(reason=UnsupportedEvidenceIssue.HARNESS), evidence=proof("gap", "capture")
-    )
-    evidence = host_run(run_settlement=DEADLINE, acquisition_gaps=(gap,))
-    assert resolve_relationships(evidence).coverage.state is CoverageState.UNSUPPORTED
-
-
-def test_conflicting_process_outcomes_report_conflicting_even_after_the_deadline() -> None:
-    evidence = host_run(
-        run_settlement=DEADLINE,
-        invocation_lifecycle=(
-            lifecycle(ROOT, 1, "completed"),
-            lifecycle(ROOT, 1, "launch_failed", "other-host"),
+CHILD_SETTLED = add(
+    invocation_lifecycle=(lifecycle(CHILD, 1, "launched"), lifecycle(CHILD, 2, "completed")),
+    captures=(capture("child-native"),),
+)
+LEGACY_PLATFORM = add(
+    memberships=(
+        MembershipEvidence(
+            node=platform("legacy"),
+            run=RUN,
+            phase_id="phase",
+            confidence=EvidenceClass.REGISTERED,
+            evidence=proof("session-started"),
         ),
     )
-    assert resolve_relationships(evidence).coverage.state is CoverageState.CONFLICTING
+)
+
+# name, changes, (while running, execution terminal, after deadline)
+STATES: list[tuple[str, tuple[Change, ...], tuple[CoverageState, ...]]] = [
+    ("baseline", (), (OPEN, RECONCILED, RECONCILED)),
+    (
+        "root still running",
+        (replace(invocation_lifecycle=(lifecycle(ROOT, 1, "launched"),)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    ("root without any outcome", (replace(invocation_lifecycle=()),), (OPEN, OPEN, MISSING)),
+    (
+        "root capture pending",
+        (replace(captures=(capture("root-native", BodyAvailability.PENDING),)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    ("root never captured", (replace(captures=()),), (OPEN, OPEN, MISSING)),
+    (
+        "root capture settled missing",
+        (replace(captures=(capture("root-native", BodyAvailability.MISSING),)),),
+        (OPEN, MISSING, MISSING),
+    ),
+    (
+        "root launch failed",
+        (replace(invocation_lifecycle=(lifecycle(ROOT, 1, "launch_failed"),), captures=()),),
+        (OPEN, MISSING, MISSING),
+    ),
+    (
+        "background child running",
+        (child(), add(invocation_lifecycle=(lifecycle(CHILD, 1, "launched"),))),
+        (OPEN, OPEN, MISSING),
+    ),
+    ("background child settled", (child(), CHILD_SETTLED), (OPEN, RECONCILED, RECONCILED)),
+    ("unverified child attempt", (child("stale"), CHILD_SETTLED), (OPEN, OPEN, MISSING)),
+    (
+        "conflicting child attempts",
+        (
+            child(),
+            CHILD_SETTLED,
+            add(
+                invocation_contexts=(
+                    InvocationContextEvidence(
+                        controller=ROOT,
+                        child=CHILD,
+                        attempt_id="other",
+                        evidence=proof("ctx-other", "workspace"),
+                    ),
+                )
+            ),
+        ),
+        (CONFLICTING, CONFLICTING, CONFLICTING),
+    ),
+    (
+        "native child uncaptured",
+        (add(edges=(spawn("root-native", "native-child", EvidenceClass.CORROBORATED),)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
+        "native child captured",
+        (
+            add(
+                edges=(spawn("root-native", "native-child", EvidenceClass.CORROBORATED),),
+                captures=(capture("native-child"),),
+            ),
+        ),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "native child parentage unresolved",
+        (
+            add(
+                edges=(spawn("root-native", "native-child", EvidenceClass.CANDIDATE),),
+                captures=(capture("native-child"),),
+            ),
+        ),
+        (OPEN, OPEN, CONFLICTING),
+    ),
+    (
+        "conflicting native edge",
+        (
+            add(
+                edges=(spawn("root-native", "native-child", EvidenceClass.CONFLICTING),),
+                captures=(capture("native-child"),),
+            ),
+        ),
+        (CONFLICTING, CONFLICTING, CONFLICTING),
+    ),
+    (
+        "two competing parents",
+        (
+            add(
+                edges=(
+                    spawn("root-native", "native-child", EvidenceClass.CORROBORATED),
+                    spawn("other-parent", "native-child", EvidenceClass.CORROBORATED),
+                ),
+                captures=(capture("native-child"), capture("other-parent")),
+            ),
+        ),
+        (CONFLICTING, CONFLICTING, CONFLICTING),
+    ),
+    (
+        "conflicting process outcomes",
+        (
+            replace(
+                invocation_lifecycle=(
+                    lifecycle(ROOT, 1, "completed"),
+                    lifecycle(ROOT, 1, "launch_failed", "other-host"),
+                )
+            ),
+        ),
+        (CONFLICTING, CONFLICTING, CONFLICTING),
+    ),
+    ("platform session without invocation", (LEGACY_PLATFORM,), (OPEN, OPEN, MISSING)),
+    (
+        "captured unbound transcript",
+        (add(captures=(capture("stray"),)),),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "unsupported capture mechanism",
+        (
+            add(
+                acquisition_gaps=(
+                    AcquisitionGapEvidence(
+                        gap=InventoryGap(reason=UnsupportedEvidenceIssue.HARNESS),
+                        evidence=proof("gap", "capture"),
+                    ),
+                )
+            ),
+        ),
+        (UNSUPPORTED, UNSUPPORTED, UNSUPPORTED),
+    ),
+    (
+        "unreadable child journal",
+        (
+            add(
+                acquisition_gaps=(
+                    AcquisitionGapEvidence(
+                        gap=InventoryGap(reason="child_journal_unreadable"),
+                        evidence=proof("read", "journal"),
+                    ),
+                )
+            ),
+        ),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
+        "no host registration",
+        (replace(coverage_contract=None), LEGACY_PLATFORM),
+        (UNKNOWN, UNSUPPORTED, UNSUPPORTED),
+    ),
+]
+STAGES = ((), TERMINAL, DEADLINE)
 
 
-def test_conflicting_child_context_reports_conflicting() -> None:
-    evidence = with_child(host_run(run_settlement=TERMINAL))
-    other = evidence.invocation_contexts[0].model_copy(
-        update={"attempt_id": "other", "evidence": proof("ctx-other", "workspace")}
-    )
-    evidence = evidence.model_copy(
-        update={"invocation_contexts": (*evidence.invocation_contexts, other)}
-    )
-    assert resolve_relationships(evidence).coverage.state is CoverageState.CONFLICTING
+def build(changes: tuple[Change, ...], stage: tuple[RunSettlementEvidence, ...]) -> SessionEvidence:
+    evidence = host_run()
+    for change in changes:
+        evidence = change(evidence)
+    return evidence.model_copy(update={"run_settlement": stage})
 
 
-def test_parent_finishing_does_not_seal_while_a_background_child_runs() -> None:
-    running = with_child(host_run(run_settlement=TERMINAL), lifecycle(CHILD, 1, "launched"))
-    result = resolve_relationships(running)
-    assert result.coverage.state is CoverageState.OPEN
-    assert result.coverage.expected_count == 2
-    settled = with_child(
-        host_run(run_settlement=TERMINAL),
-        lifecycle(CHILD, 1, "launched"),
-        lifecycle(CHILD, 2, "completed"),
-        capture("child-native"),
-    )
-    assert resolve_relationships(settled).coverage.state is CoverageState.RECONCILED
+def _proven_nodes(result: ResolvedInventory) -> set[str]:
+    """Independent oracle: which nodes a reconciled revision can vouch for."""
+    present = {
+        item.node.key for item in result.captures if item.availability is BodyAvailability.PRESENT
+    }
+    verified = [
+        item
+        for item in result.bindings
+        if item.confidence in (EvidenceClass.REGISTERED, EvidenceClass.CORROBORATED)
+    ]
+    proven = set(present)
+    for item in verified:
+        if item.transcript.key in present:
+            proven |= {item.owner.key, item.transcript.key}
+    for membership in result.memberships:
+        if membership.node.kind == "platform":
+            records = set(membership.evidence)
+            if any(
+                other.node.key in proven
+                and other.node.kind == "invocation"
+                and records & set(other.evidence)
+                for other in result.memberships
+            ):
+                proven.add(membership.node.key)
+    return proven
 
 
-def test_registered_invocation_without_any_outcome_blocks_the_host_seal() -> None:
-    evidence = host_run(run_settlement=TERMINAL, invocation_lifecycle=())
-    assert resolve_relationships(evidence).coverage.state is CoverageState.OPEN
+def assert_invariant(result: ResolvedInventory) -> None:
+    reasons = {gap.reason for gap in result.gaps}
+    if result.coverage.state is RECONCILED:
+        assert result.coverage.missing_keys == ()
+        assert not reasons & CONFLICT_REASONS
+        assert GapReason.UNRESOLVED_PARENTAGE not in reasons
+        assert GapReason.UNVERIFIED_CONTEXT not in reasons
+        assert GapReason.INVOCATION_RUNNING not in reasons
+        # Every node the evidence names is vouched for by a present body.
+        assert {node.ref.key for node in result.nodes} <= _proven_nodes(result)
+    if reasons & CONFLICT_REASONS and result.coverage.state not in (UNKNOWN, UNSUPPORTED):
+        assert result.coverage.state is CONFLICTING
 
 
-def test_pending_capture_blocks_seal_until_the_deadline() -> None:
-    pending = (capture("root-native", BodyAvailability.PENDING),)
-    assert (
-        resolve_relationships(host_run(run_settlement=TERMINAL, captures=pending)).coverage.state
-        is CoverageState.OPEN
-    )
-    result = resolve_relationships(host_run(run_settlement=DEADLINE, captures=pending))
-    assert result.coverage.state is CoverageState.MISSING
-    assert CAPTURE_UNSETTLED_AT_SEAL in {gap.reason for gap in result.gaps}
+@pytest.mark.parametrize(("name", "changes", "states"), STATES, ids=[row[0] for row in STATES])
+def test_coverage_state_space(
+    name: str, changes: tuple[Change, ...], states: tuple[CoverageState, ...]
+) -> None:
+    del name
+    for stage, expected in zip(STAGES, states, strict=True):
+        result = resolve_relationships(build(changes, stage))
+        assert result.coverage.state is expected, stage
+        assert_invariant(result)
 
 
-def test_stuck_invocation_becomes_an_explicit_gap_at_the_deadline() -> None:
-    stuck = with_child(host_run(run_settlement=TERMINAL), lifecycle(CHILD, 1, "launched"))
-    assert resolve_relationships(stuck).coverage.state is CoverageState.OPEN
-    result = resolve_relationships(stuck.model_copy(update={"run_settlement": DEADLINE}))
-    assert result.coverage.state is CoverageState.MISSING
+def test_stuck_invocation_gap_names_the_node_at_the_deadline() -> None:
+    stuck = build((child(), add(invocation_lifecycle=(lifecycle(CHILD, 1, "launched"),))), DEADLINE)
+    result = resolve_relationships(stuck)
     assert CHILD.key in result.coverage.missing_keys
-    unsettled = [gap for gap in result.gaps if gap.reason == INVOCATION_UNSETTLED_AT_SEAL]
-    assert unsettled == [InventoryGap(reason=INVOCATION_UNSETTLED_AT_SEAL, node_keys=(CHILD.key,))]
+    unsettled = [gap for gap in result.gaps if gap.reason == GapReason.INVOCATION_UNSETTLED_AT_SEAL]
+    assert unsettled == [
+        InventoryGap(reason=GapReason.INVOCATION_UNSETTLED_AT_SEAL, node_keys=(CHILD.key,))
+    ]
     # The running observation itself is still reported, not rewritten.
-    assert "invocation_running" in {gap.reason for gap in result.gaps}
+    assert GapReason.INVOCATION_RUNNING in {gap.reason for gap in result.gaps}
+
+
+def test_deadline_gaps_name_each_unresolved_claim() -> None:
+    unverified = resolve_relationships(build((child("stale"), CHILD_SETTLED), DEADLINE))
+    assert GapReason.CHILD_CONTEXT_UNRESOLVED_AT_SEAL in {g.reason for g in unverified.gaps}
+    assert CHILD.key in unverified.coverage.missing_keys
+    candidate = resolve_relationships(
+        build(
+            (
+                add(
+                    edges=(spawn("root-native", "native-child", EvidenceClass.CANDIDATE),),
+                    captures=(capture("native-child"),),
+                ),
+            ),
+            DEADLINE,
+        )
+    )
+    assert GapReason.PARENTAGE_UNRESOLVED_AT_SEAL in {g.reason for g in candidate.gaps}
+    legacy = resolve_relationships(build((LEGACY_PLATFORM,), DEADLINE))
+    assert platform("legacy").key in legacy.coverage.missing_keys
+    assert platform("session").key not in legacy.coverage.missing_keys
+
+
+def test_uninstrumented_run_is_classified_with_a_named_gap() -> None:
+    result = resolve_relationships(
+        build((replace(coverage_contract=None), LEGACY_PLATFORM), TERMINAL)
+    )
+    assert result.coverage.state is UNSUPPORTED
+    gaps = [gap for gap in result.gaps if gap.reason == GapReason.NO_HOST_REGISTRATION]
+    assert len(gaps) == 1
+    assert platform("legacy").key in gaps[0].node_keys
 
 
 def test_deadline_without_terminal_execution_never_seals() -> None:
-    evidence = host_run(run_settlement=settlement(RunSettlementStage.SETTLEMENT_DEADLINE))
-    assert resolve_relationships(evidence).coverage.state is CoverageState.OPEN
+    evidence = build((), settlement(RunSettlementStage.SETTLEMENT_DEADLINE))
+    assert resolve_relationships(evidence).coverage.state is OPEN
 
 
 def test_late_child_after_seal_reopens_in_a_new_revision() -> None:
-    sealed = resolve_relationships(host_run(run_settlement=TERMINAL))
-    assert sealed.coverage.state is CoverageState.RECONCILED
+    sealed = resolve_relationships(build((), TERMINAL))
+    assert sealed.coverage.state is RECONCILED
     late = resolve_relationships(
-        with_child(host_run(run_settlement=TERMINAL), lifecycle(CHILD, 1, "launched"))
+        build((child(), add(invocation_lifecycle=(lifecycle(CHILD, 1, "launched"),))), TERMINAL)
     )
     assert late.revision != sealed.revision
-    assert late.coverage.state is CoverageState.OPEN
+    assert late.coverage.state is OPEN
     assert late.coverage.expected_count == 2
     # The earlier revision is an immutable value; nothing rewrote it.
-    assert sealed.coverage.state is CoverageState.RECONCILED
+    assert sealed.coverage.state is RECONCILED
     assert sealed.coverage.expected_count == 1
 
 
-def test_late_child_after_deadline_is_a_gap_until_it_settles() -> None:
-    late = with_child(host_run(run_settlement=DEADLINE), lifecycle(CHILD, 1, "launched"))
-    assert resolve_relationships(late).coverage.state is CoverageState.MISSING
-    settled = with_child(
-        host_run(run_settlement=DEADLINE),
-        lifecycle(CHILD, 1, "launched"),
-        lifecycle(CHILD, 2, "completed"),
-        capture("child-native"),
-    )
-    result = resolve_relationships(settled)
-    assert result.coverage.state is CoverageState.RECONCILED
-    assert INVOCATION_UNSETTLED_AT_SEAL not in {gap.reason for gap in result.gaps}
-
-
-def test_native_child_of_an_expected_transcript_must_settle_too() -> None:
-    edge = LineageEvidence(
-        parent=transcript("root-native"),
-        child=transcript("native-child"),
-        relation="spawn",
-        confidence=EvidenceClass.CORROBORATED,
-        evidence=proof("native-edge", "capture"),
-    )
-    open_run = host_run(run_settlement=TERMINAL, edges=(edge,))
-    result = resolve_relationships(open_run)
-    assert result.coverage.state is CoverageState.OPEN
-    assert result.coverage.expected_count == 2
-    captured = open_run.model_copy(
-        update={"captures": (*open_run.captures, capture("native-child"))}
-    )
-    assert resolve_relationships(captured).coverage.state is CoverageState.RECONCILED
-    expired = resolve_relationships(open_run.model_copy(update={"run_settlement": DEADLINE}))
-    assert expired.coverage.state is CoverageState.MISSING
-    assert transcript("native-child").key in expired.coverage.missing_keys
-
-
-def test_conflicting_native_edge_does_not_expand_expectations() -> None:
-    edge = LineageEvidence(
-        parent=transcript("root-native"),
-        child=transcript("native-child"),
-        relation="spawn",
-        confidence=EvidenceClass.CONFLICTING,
-        evidence=proof("native-edge", "capture"),
-    )
-    result = resolve_relationships(host_run(run_settlement=TERMINAL, edges=(edge,)))
-    assert result.coverage.expected_count == 1
-
-
-def test_launch_failure_settles_without_a_body_and_is_reported_missing() -> None:
-    evidence = host_run(
-        run_settlement=TERMINAL, invocation_lifecycle=(lifecycle(ROOT, 1, "launch_failed"),)
-    )
-    result = resolve_relationships(evidence.model_copy(update={"captures": ()}))
-    assert result.coverage.state is CoverageState.MISSING
-    assert "invocation_launch_failed" in {gap.reason for gap in result.gaps}
-
-
-def test_unreadable_child_journal_blocks_the_seal_until_the_deadline() -> None:
-    gap = AcquisitionGapEvidence(
-        gap=InventoryGap(reason="child_journal_unreadable"), evidence=proof("read", "journal")
-    )
-    assert (
-        resolve_relationships(
-            host_run(run_settlement=TERMINAL, acquisition_gaps=(gap,))
-        ).coverage.state
-        is CoverageState.OPEN
-    )
-    assert (
-        resolve_relationships(
-            host_run(run_settlement=DEADLINE, acquisition_gaps=(gap,))
-        ).coverage.state
-        is CoverageState.MISSING
-    )
-
-
 def test_settlement_is_order_independent_and_survives_corrections() -> None:
-    evidence = host_run(run_settlement=DEADLINE)
+    evidence = build((), DEADLINE)
     expected = resolve_relationships(evidence)
     for order in permutations(evidence.run_settlement):
         assert resolve_relationships(evidence.model_copy(update={"run_settlement": order})) == (
@@ -359,12 +500,10 @@ def test_settlement_is_order_independent_and_survives_corrections() -> None:
             ),
         }
     )
-    assert resolve_relationships(corrected).coverage.state is CoverageState.RECONCILED
+    assert resolve_relationships(corrected).coverage.state is RECONCILED
 
 
 def test_settlement_facts_count_toward_the_batch_quota() -> None:
-    from syn_domain.contexts.agent_sessions import EvidenceBatch
-
     with pytest.raises(ValueError, match="500"):
         EvidenceBatch(
             producer_id="p",

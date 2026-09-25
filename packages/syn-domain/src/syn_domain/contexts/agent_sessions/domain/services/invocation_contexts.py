@@ -14,9 +14,8 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryGap,
 )
 
+from .gap_reasons import GapReason
 from .inventory_resolution import references
-
-CONFLICTING_CONTEXT = "conflicting_invocation_context"
 
 
 def context_memberships(
@@ -34,14 +33,12 @@ def context_memberships(
     for child_key, contexts in sorted(groups.items()):
         claims = {(item.controller.key, item.attempt_id) for item in contexts}
         if len(claims) != 1:
-            gaps.append(InventoryGap(reason=CONFLICTING_CONTEXT, node_keys=(child_key,)))
+            gaps.append(InventoryGap(reason=GapReason.CONFLICTING_CONTEXT, node_keys=(child_key,)))
             continue
         hosts = registered[next(iter(claims))]
         attribution = {(host.phase_id, host.attempt_id, host.segment) for host in hosts}
         if len(attribution) != 1:
-            gaps.append(
-                InventoryGap(reason="unverified_invocation_context", node_keys=(child_key,))
-            )
+            gaps.append(InventoryGap(reason=GapReason.UNVERIFIED_CONTEXT, node_keys=(child_key,)))
             continue
         derived.extend(_derive(contexts, hosts, evidence))
     return tuple(derived), tuple(gaps)

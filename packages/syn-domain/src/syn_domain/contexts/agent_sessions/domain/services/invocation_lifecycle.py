@@ -7,9 +7,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import InventoryGap
 
-INVOCATION_RUNNING = "invocation_running"
-CONFLICTING_LIFECYCLE = "conflicting_invocation_lifecycle"
-INVOCATION_LAUNCH_FAILED = "invocation_launch_failed"
+from .gap_reasons import GapReason
 
 
 def lifecycle_gaps(
@@ -46,10 +44,10 @@ def _reason(items: list[InvocationLifecycleEvidence]) -> str | None:
         or len(codes) > 1
         or (terminals and outcomes != terminals)
     ):
-        return CONFLICTING_LIFECYCLE
+        return GapReason.CONFLICTING_LIFECYCLE
     status = next(iter(outcomes))
     if status == "completed":
         return None
     if status == "launched":
-        return INVOCATION_RUNNING
+        return GapReason.INVOCATION_RUNNING
     return "invocation_" + status

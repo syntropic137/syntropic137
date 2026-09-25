@@ -249,7 +249,7 @@ def test_child_capture_does_not_reseal_contract_that_omitted_its_intent() -> Non
     assert resolve_relationships(settled).coverage.state == "reconciled"
 
 
-def test_unverified_child_context_reopens_contract_without_inventing_expectations() -> None:
+def test_unverified_child_context_reopens_contract_and_stays_accountable() -> None:
     source = evidence(attempt="stale").model_copy(
         update={
             "coverage_contract": CoverageContract(
@@ -258,6 +258,9 @@ def test_unverified_child_context_reopens_contract_without_inventing_expectation
         }
     )
     resolved = resolve_relationships(source)
-    assert resolved.coverage.expected_count == 1
+    # The unattributed child is known, so it is expected (never silently
+    # dropped), but it inherits no phase membership from the stale attempt.
+    assert resolved.coverage.expected_count == 2
+    assert node("child").key in resolved.coverage.missing_keys
     assert resolved.coverage.state == "open"
     assert "unverified_invocation_context" in {gap.reason for gap in resolved.gaps}

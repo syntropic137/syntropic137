@@ -13,6 +13,8 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     Membership,
 )
 
+from .gap_reasons import GapReason
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -111,7 +113,7 @@ def resolve_parent_conflicts(
             )
         gaps.append(
             InventoryGap(
-                reason="conflicting_parentage",
+                reason=GapReason.CONFLICTING_PARENTAGE,
                 node_keys=tuple(sorted({edges[i].child.key for i in indices})),
                 evidence_ids=tuple(
                     sorted({ref.evidence_id for i in indices for ref in edges[i].evidence})

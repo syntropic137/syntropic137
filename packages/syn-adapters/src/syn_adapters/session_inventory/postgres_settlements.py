@@ -21,10 +21,11 @@ class PostgresSettlementDeadlines:
         if deadline.run.source_instance_id != self._source:
             raise ValueError("Settlement deadline belongs to another installation")
 
-    async def schedule(self, deadline: SettlementDeadline) -> None:
+    async def schedule(self, deadline: SettlementDeadline) -> SettlementDeadline:
         self._own(deadline)
-        async with self._pool.acquire() as conn:
-            # First terminal fact wins; a later one never postpones settlement.
+        async with self._pool.acquire() as conn, conn.transaction():
+            # First terminal fact wins; a later one or another grace setting
+            # never moves it. The stored record is the answer.
             await conn.execute(
                 """INSERT INTO session_settlement_deadlines
                 (source_instance_id,execution_id,due_at,payload)
@@ -34,6 +35,15 @@ class PostgresSettlementDeadlines:
                 deadline.due_at,
                 deadline.model_dump_json(),
             )
+            raw = await conn.fetchval(
+                """SELECT payload::text FROM session_settlement_deadlines
+                WHERE source_instance_id=$1 AND execution_id=$2""",
+                deadline.run.source_instance_id,
+                deadline.run.execution_id,
+            )
+        if raw is None:
+            raise RuntimeError("settlement deadline vanished after scheduling")
+        return SettlementDeadline.model_validate_json(raw)
 
     async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:
         if not 1 <= limit <= 500:

@@ -45,9 +45,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryGap,
     InventoryNodeRef,
 )
-from syn_domain.contexts.agent_sessions.domain.services.coverage_settlement import (
-    INVOCATION_UNSETTLED_AT_SEAL,
-)
+from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
 from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
     RESOLVER_VERSION,
 )
@@ -834,6 +832,31 @@ async def test_host_seal_turns_stuck_invocation_into_missing_after_recorded_dead
     await inventory.publish(host.run, missing.snapshot_id, None)
     page = await inventory.page(host.run, missing.snapshot_id, "gap")
     assert any(
-        isinstance(item, InventoryGap) and item.reason == INVOCATION_UNSETTLED_AT_SEAL
+        isinstance(item, InventoryGap) and item.reason == GapReason.INVOCATION_UNSETTLED_AT_SEAL
         for item in page.items
     )
+
+
+async def test_replay_under_another_grace_reads_the_durable_deadline(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    host = await _host_run(db_pool, tmp_path, "host-grace", ("registered", "launched"))
+    await host.terminate()
+    watermark = await host.journal.watermark(host.run)
+    replay = _HostRun(
+        host.run,
+        host.journal,
+        HostSessionEvidenceProjector(
+            host.journal,
+            host.run.source_instance_id,
+            settlements=PostgresSettlementDeadlines(db_pool, host.run.source_instance_id),
+            settlement_grace=timedelta(days=3),
+        ),
+        host.builder,
+    )
+    # A recomputed deadline would change the terminal batch and be rejected
+    # as reused evidence identity; the stored one makes replay a no-op.
+    await replay.terminate()
+    assert await host.journal.watermark(host.run) == watermark
+    await replay.tick(ENDED + timedelta(minutes=6))
+    assert (await replay.snapshot()).coverage.state is CoverageState.MISSING

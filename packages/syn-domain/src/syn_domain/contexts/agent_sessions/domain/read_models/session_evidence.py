@@ -6,6 +6,7 @@ Claims retain producer identity so a repeated delivery is not a new fact.
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003 - runtime Pydantic field
 from enum import StrEnum
 from typing import Literal
 
@@ -101,6 +102,10 @@ class RunSettlementStage(StrEnum):
 class RunSettlementEvidence(InventoryModel):
     stage: RunSettlementStage
     evidence: EvidenceReference
+    # The deadline the host durably fixed for this run when it first saw the
+    # execution end. Read back from that record, never recomputed from the
+    # current grace setting, so replay under other settings yields this fact.
+    due_at: datetime | None = None
 
 
 class NodeEvidence(InventoryModel):

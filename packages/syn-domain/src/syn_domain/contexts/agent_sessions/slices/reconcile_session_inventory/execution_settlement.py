@@ -20,7 +20,12 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import EvidenceBatch
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import SettlementDeadline
+    from datetime import datetime
+
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+        EvidenceReference,
+        RunIdentity,
+    )
 
 SETTLEMENT_PRODUCER = "syntropic-execution-settlement"
 DEADLINE_BATCH = "settlement-deadline"
@@ -42,10 +47,14 @@ class ExecutionTerminal(BaseModel):
 
 
 def settlement_batch(
-    deadline: SettlementDeadline, stage: RunSettlementStage, batch_id: str
+    run: RunIdentity,
+    source: EvidenceReference,
+    stage: RunSettlementStage,
+    batch_id: str,
+    due_at: datetime | None,
 ) -> EvidenceBatch:
     """Deterministic payload: replaying the same fact is a byte-equivalent retry."""
-    reference = deadline.terminal.model_copy(
+    reference = source.model_copy(
         update={
             "evidence_id": f"{SETTLEMENT_PRODUCER}:{batch_id}",
             "extractor_version": "host-execution-settlement/1",
@@ -55,7 +64,7 @@ def settlement_batch(
         batch_id=batch_id,
         producer_id=SETTLEMENT_PRODUCER,
         evidence=SessionEvidence(
-            run=deadline.run,
-            run_settlement=(RunSettlementEvidence(stage=stage, evidence=reference),),
+            run=run,
+            run_settlement=(RunSettlementEvidence(stage=stage, evidence=reference, due_at=due_at),),
         ),
     )

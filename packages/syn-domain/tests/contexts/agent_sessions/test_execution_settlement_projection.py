@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
-from pydantic import ConfigDict
 
 from syn_domain.contexts.agent_sessions import (
     HostSessionEvidenceProjector,
@@ -20,17 +19,71 @@ from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import Evi
 from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.execution_settlement import (
     ExecutionTerminalEventType,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+    ExecutionCancelledEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+    WorkflowCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import WorkflowFailedEvent
+from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent import (
+    WorkflowInterruptedEvent,
+)
 
 pytestmark = pytest.mark.unit
 ENDED = datetime(2026, 9, 25, 12, tzinfo=UTC)
 
 
-class _Terminal(DomainEvent):
-    """Stand-in for an orchestration terminal event: only execution_id is read."""
+def _real_terminal(kind: ExecutionTerminalEventType, execution_id: str) -> DomainEvent:
+    """The actual orchestration event classes, so a renamed event fails here."""
+    if kind is ExecutionTerminalEventType.COMPLETED:
+        return WorkflowCompletedEvent(
+            workflow_id="definition",
+            execution_id=execution_id,
+            completed_at=ENDED,
+            total_phases=1,
+            completed_phases=1,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_tokens=0,
+            total_duration_seconds=1.0,
+            artifact_ids=[],
+        )
+    if kind is ExecutionTerminalEventType.FAILED:
+        return WorkflowFailedEvent(
+            workflow_id="definition",
+            execution_id=execution_id,
+            failed_at=ENDED,
+            error_message="boom",
+            completed_phases=0,
+            total_phases=1,
+        )
+    if kind is ExecutionTerminalEventType.CANCELLED:
+        return ExecutionCancelledEvent(
+            workflow_id="definition",
+            execution_id=execution_id,
+            phase_id="phase",
+            cancelled_at=ENDED,
+        )
+    return WorkflowInterruptedEvent(
+        workflow_id="definition",
+        execution_id=execution_id,
+        phase_id="phase",
+        interrupted_at=ENDED,
+    )
 
-    model_config = ConfigDict(frozen=True, extra="allow")
-    execution_id: str
-    workflow_id: str = "definition"
+
+def test_terminal_constants_are_the_real_orchestration_event_names() -> None:
+    real = {
+        ExecutionTerminalEventType.COMPLETED: WorkflowCompletedEvent,
+        ExecutionTerminalEventType.FAILED: WorkflowFailedEvent,
+        ExecutionTerminalEventType.CANCELLED: ExecutionCancelledEvent,
+        ExecutionTerminalEventType.INTERRUPTED: WorkflowInterruptedEvent,
+    }
+    assert set(real) == set(ExecutionTerminalEventType)
+    for kind, event_class in real.items():
+        assert kind == event_class.event_type
+        assert _real_terminal(kind, "run").event_type == kind
 
 
 class _Deadlines:
@@ -38,8 +91,8 @@ class _Deadlines:
         self.rows: dict[str, SettlementDeadline] = {}
         self.settled: set[str] = set()
 
-    async def schedule(self, deadline: SettlementDeadline) -> None:
-        self.rows.setdefault(deadline.run.execution_id, deadline)
+    async def schedule(self, deadline: SettlementDeadline) -> SettlementDeadline:
+        return self.rows.setdefault(deadline.run.execution_id, deadline)
 
     async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:
         items = [
@@ -57,7 +110,7 @@ def _terminal(
     kind: ExecutionTerminalEventType, *, event_id: str = "end", execution_id: str = "run"
 ) -> EventEnvelope[DomainEvent]:
     return EventEnvelope(
-        event=_Terminal(execution_id=execution_id),
+        event=_real_terminal(kind, execution_id),
         metadata=EventMetadata(
             event_id=event_id,
             timestamp=ENDED,
@@ -169,3 +222,26 @@ def test_negative_grace_is_rejected() -> None:
         HostSessionEvidenceProjector(
             AsyncMock(), "installation", settlement_grace=timedelta(seconds=-1)
         )
+
+
+async def test_replay_under_a_different_grace_setting_yields_identical_facts() -> None:
+    deadlines = _Deadlines()
+    first_journal, replay_journal = AsyncMock(), AsyncMock()
+    terminal = _terminal(ExecutionTerminalEventType.COMPLETED)
+    tick = _sweep(ENDED + timedelta(minutes=6))
+    first = HostSessionEvidenceProjector(
+        first_journal, "installation", settlements=deadlines, settlement_grace=timedelta(minutes=5)
+    )
+    await first.handle(terminal)
+    await first.handle(tick)
+    deadlines.settled.clear()  # Rebuild: the to-do is re-derived from recorded events.
+    replay = HostSessionEvidenceProjector(
+        replay_journal, "installation", settlements=deadlines, settlement_grace=timedelta(hours=9)
+    )
+    await replay.handle(terminal)
+    await replay.handle(tick)
+    first_batches = [call.args[0] for call in first_journal.append.await_args_list]
+    replay_batches = [call.args[0] for call in replay_journal.append.await_args_list]
+    assert len(first_batches) == 2
+    assert replay_batches == first_batches
+    assert first_batches[0].evidence.run_settlement[0].due_at == ENDED + timedelta(minutes=5)

@@ -220,24 +220,34 @@ class HostSessionEvidenceProjector:
         if not event.execution_id:
             return
         metadata = envelope.metadata
-        deadline = SettlementDeadline(
-            run=RunIdentity(source_instance_id=self._source, execution_id=event.execution_id),
-            due_at=metadata.timestamp + self._grace,
-            terminal=EvidenceReference(
-                producer_id=SETTLEMENT_PRODUCER,
-                evidence_id=metadata.event_id,
-                source_revision=str(metadata.aggregate_nonce),
-                locator=f"{metadata.aggregate_type}-{metadata.aggregate_id}",
-                extractor_version="host-execution-settlement/1",
-            ),
+        run = RunIdentity(source_instance_id=self._source, execution_id=event.execution_id)
+        reference = EvidenceReference(
+            producer_id=SETTLEMENT_PRODUCER,
+            evidence_id=metadata.event_id,
+            source_revision=str(metadata.aggregate_nonce),
+            locator=f"{metadata.aggregate_type}-{metadata.aggregate_id}",
+            extractor_version="host-execution-settlement/1",
         )
+        due_at = None
+        if self._settlements is not None:
+            # First terminal fact per run fixes the deadline durably. Replay
+            # reads that record back, so changing the grace setting later
+            # never changes an existing run's facts or revisions.
+            fixed = await self._settlements.schedule(
+                SettlementDeadline(
+                    run=run, due_at=metadata.timestamp + self._grace, terminal=reference
+                )
+            )
+            due_at = fixed.due_at
         await self._evidence.append(
             settlement_batch(
-                deadline, RunSettlementStage.EXECUTION_TERMINAL, f"terminal:{metadata.event_id}"
+                run,
+                reference,
+                RunSettlementStage.EXECUTION_TERMINAL,
+                f"terminal:{metadata.event_id}",
+                due_at,
             )
         )
-        if self._settlements is not None:
-            await self._settlements.schedule(deadline)
 
     async def _release_deadlines(self, envelope: EventEnvelope[DomainEvent]) -> None:
         if self._settlements is None:
@@ -251,6 +261,12 @@ class HostSessionEvidenceProjector:
                 raise ValueError("settlement deadline belongs to another installation")
             # Durable fact first; a crash before settle() re-appends identically.
             await self._evidence.append(
-                settlement_batch(deadline, RunSettlementStage.SETTLEMENT_DEADLINE, DEADLINE_BATCH)
+                settlement_batch(
+                    deadline.run,
+                    deadline.terminal,
+                    RunSettlementStage.SETTLEMENT_DEADLINE,
+                    DEADLINE_BATCH,
+                    deadline.due_at,
+                )
             )
             await self._settlements.settle(deadline)

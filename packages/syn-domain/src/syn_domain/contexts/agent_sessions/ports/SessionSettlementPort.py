@@ -27,8 +27,12 @@ class SettlementDeadlinePage(InventoryModel):
 
 
 class SessionSettlementPort(Protocol):
-    async def schedule(self, deadline: SettlementDeadline) -> None:
-        """Idempotent. The first terminal fact wins; later ones never extend it."""
+    async def schedule(self, deadline: SettlementDeadline) -> SettlementDeadline:
+        """Idempotent; returns the run's durable deadline.
+
+        The first terminal fact wins and is immutable: later terminal facts and
+        replays under a different grace setting get the stored record back.
+        """
         ...
 
     async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:

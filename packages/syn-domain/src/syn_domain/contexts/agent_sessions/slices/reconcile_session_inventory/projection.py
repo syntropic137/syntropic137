@@ -91,6 +91,15 @@ class InventoryReconciliationProcessManager(ProcessManager):
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
+        # To-do writes only, as in the pre-existing SessionStarted/invocation
+        # path this extends. The evidence journal is this process manager's
+        # own durable to-do input (its outbox is what process_pending()
+        # schedules from); spools and settlement deadlines are its own to-do
+        # tables. Every write is keyed by the source event's identity or the
+        # run, first-write-wins, so catch-up replay converges on the same rows.
+        # Deadline release on a SWEEP event reads only recorded clock time,
+        # never the wall clock. No external call, launch or upload happens
+        # here; that work stays in process_pending(), which runs live only.
         if self._host_evidence is not None:
             await self._host_evidence.handle(envelope)
         if envelope.metadata.event_type == InventoryReconciliationChangedEvent.event_type:
