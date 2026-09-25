@@ -214,6 +214,26 @@ async def test_enqueued_then_deleted_body_never_leaves_the_host(stack: Stack) ->
     assert stack.wire.deleted == [_hash(body)]
 
 
+async def test_failed_discard_at_request_is_still_never_sent(stack: Stack) -> None:
+    """If discarding fails after the tombstone commits, the drain discards it."""
+    body = b'{"raw":"discard failed"}'
+    capture = await stack.capture(body)
+    assert await stack.worker.enqueue_step()
+    real = stack.outboxes.discard
+
+    async def failing(producer_id: str, capture_id: str) -> None:
+        raise OSError("disk busy")
+
+    stack.outboxes.discard = failing  # type: ignore[method-assign]
+    with pytest.raises(OSError):
+        await stack.deletions.request(capture, "deletion")
+    stack.outboxes.discard = real  # type: ignore[method-assign]
+    assert capture_outbox_key("spool", "c") in stack.outboxes.boxes
+    await stack.churn()
+    assert stack.wire.sent == []
+    assert capture_outbox_key("spool", "c") not in stack.outboxes.boxes
+
+
 async def test_deleted_before_enqueue_is_never_handed_to_the_exporter(stack: Stack) -> None:
     capture = await stack.capture(b'{"raw":"never"}')
     await stack.deletions.request(capture, "retraction")
