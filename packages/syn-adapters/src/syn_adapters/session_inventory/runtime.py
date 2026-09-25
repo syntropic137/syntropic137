@@ -11,6 +11,7 @@ from event_sourcing import RepositoryFactory
 
 from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_domain.contexts.agent_sessions import (
+    BackfillSessionInventoryHandler,
     BuildInventorySnapshotHandler,
     CaptureLocalTranscriptHandler,
     HostSessionEvidenceProjector,
@@ -18,7 +19,9 @@ from syn_domain.contexts.agent_sessions import (
     InventoryReconciliationAggregate,
     InventoryReconciliationProcessManager,
     InventoryStepHandler,
+    ProcessHistoryBackfillQueueHandler,
     ReadLocalTranscriptHandler,
+    RefreshSessionInventoryHandler,
     SchedulePendingInventoryHandler,
 )
 
@@ -29,6 +32,8 @@ from .child_journal import ChildJournalDrain
 from .clock import InventoryRecoveryClock
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
+from .history_receipts import PostgresBackfillReceipts, PostgresHistoryBackfillQueue
+from .history_source import PostgresHistoricalEvidenceSource
 from .installation_identity import installation_identity
 from .local_archive import LocalSessionTranscriptArchive
 from .native_evidence import AgenticNativeSessionEvidence
@@ -49,9 +54,16 @@ if TYPE_CHECKING:
     from syn_shared.settings.session_inventory import SessionInventorySettings
 
     from .database import Pool
+    from .history_source import CaptureObservationQuery
 
 
 logger = logging.getLogger(__name__)
+
+#: Historical acquisition bounds per execution. Exceeding one fails the backfill
+#: visibly; a truncated history is never journaled as if it were complete.
+HISTORY_MAX_OBSERVATIONS = 10_000
+HISTORY_MAX_ARCHIVES = 2_000
+HISTORY_MAX_ATTEMPTS = 5
 
 
 @dataclass(frozen=True)
@@ -69,7 +81,10 @@ class InventoryRuntime:
     capture: CaptureLocalTranscriptHandler
     drain: LocalSpoolDrain
     spools: PostgresCaptureSpools
+    history_queue: PostgresHistoryBackfillQueue
     replication: InventoryReplicationProcessManager | None = None
+    history: BackfillSessionInventoryHandler | None = None
+    """None when no observability reader is wired; explicit backfill is then unavailable."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +93,7 @@ class InventoryWork:
     step: InventoryStepHandler
     recovery: CaptureRecoveryWorker | None = None
     retention: LocalBodyRetention | None = None
+    history: ProcessHistoryBackfillQueueHandler | None = None
 
     async def schedule(self) -> None:
         if self.retention is not None:
@@ -87,6 +103,12 @@ class InventoryWork:
                 logger.exception("Local body expiry failed; durable deletion remains pending")
         if self.recovery is not None:
             await self.recovery.step()
+        if self.history is not None:
+            try:
+                await self.history.handle()
+            except Exception:
+                logger.exception("History backfill tick failed; durable queue remains pending")
+        # Same tick: journaled history wakes the ordinary reconciliation outbox.
         await self.scheduler.handle()
 
     async def execute(self, lease: InventoryJobLease) -> None:
@@ -99,6 +121,7 @@ async def create_inventory_runtime(
     settings: SessionInventorySettings,
     *,
     recovery_image: str | None = None,
+    observations: CaptureObservationQuery | None = None,
 ) -> InventoryRuntime:
     evidence = PostgresSessionEvidence(pool)
     inventory = PostgresSessionInventory(pool)
@@ -111,6 +134,9 @@ async def create_inventory_runtime(
         installation_identity, settings.archive_dir, settings.source_instance_id
     )
     spools = PostgresCaptureSpools(pool, source_id)
+    receipts = PostgresBackfillReceipts(pool)
+    await receipts.ensure_ready()
+    history_queue = PostgresHistoryBackfillQueue(pool, source_id)
     sdk_repo = RepositoryFactory(event_store).create_repository(
         InventoryReconciliationAggregate,  # type: ignore[arg-type]  # ESP SDK event generic is invariant
         aggregate_type="InventoryReconciliation",
@@ -126,7 +152,34 @@ async def create_inventory_runtime(
         archive, evidence, AgenticNativeSessionEvidence(), catalog=PostgresCaptureCatalog(pool)
     )
     drain = LocalSpoolDrain(capture)
+    history = (
+        BackfillSessionInventoryHandler(
+            PostgresHistoricalEvidenceSource(
+                pool,
+                observations,
+                archive,
+                AgenticNativeSessionEvidence(),
+                max_observations=HISTORY_MAX_OBSERVATIONS,
+                max_archives=HISTORY_MAX_ARCHIVES,
+            ),
+            receipts,
+            evidence,
+            RefreshSessionInventoryHandler(repository, evidence, inventory),
+        )
+        if observations is not None
+        else None
+    )
     work = InventoryWork(
+        history=ProcessHistoryBackfillQueueHandler(
+            history_queue,
+            history,
+            lease_seconds=settings.lease_seconds,
+            retry_seconds=settings.retry_seconds,
+            max_items_per_tick=settings.max_jobs_per_tick,
+            max_attempts=HISTORY_MAX_ATTEMPTS,
+        )
+        if history is not None
+        else None,
         retention=LocalBodyRetention(
             pool,
             archive,
@@ -159,6 +212,8 @@ async def create_inventory_runtime(
         capture=capture,
         drain=drain,
         spools=spools,
+        history=history,
+        history_queue=history_queue,
         evidence=evidence,
         inventory=inventory,
         jobs=jobs,

@@ -69,6 +69,13 @@ from syn_domain.contexts.agent_sessions.domain.events.observation_payloads impor
     SessionSummaryData,
     TokenUsageData,
 )
+from syn_domain.contexts.agent_sessions.domain.read_models.legacy_evidence import (
+    ArchivedTranscriptFacts,
+    BackfillReceipt,
+    HistoricalAcquisition,
+    LegacyCaptureObservation,
+    LegacyDelegateAlias,
+)
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     CaptureReceipt,
     EvidenceRetraction,
@@ -85,6 +92,14 @@ from syn_domain.contexts.agent_sessions.import_ledger import (
     BilledUsage,
     ImportLedger,
     ImportLedgerPort,
+)
+from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptConflict
+from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
+    HistoricalAcquisitionQuotaExceeded,
+)
+from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
+    HistoryBackfillItem,
+    HistoryBackfillLease,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     EvidenceBatch,
@@ -129,6 +144,13 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+)
+from syn_domain.contexts.agent_sessions.slices.backfill_session_inventory.BackfillSessionInventoryHandler import (
+    BackfillResult,
+    BackfillSessionInventoryHandler,
+)
+from syn_domain.contexts.agent_sessions.slices.backfill_session_inventory.ProcessHistoryBackfillQueueHandler import (
+    ProcessHistoryBackfillQueueHandler,
 )
 from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
     CanonicalTotals,
@@ -211,6 +233,11 @@ __all__ = [
     "AgentLaunchedEvent",
     "AgentSessionAggregate",
     "ArchivedTranscript",
+    "ArchivedTranscriptFacts",
+    "BackfillReceipt",
+    "BackfillReceiptConflict",
+    "BackfillResult",
+    "BackfillSessionInventoryHandler",
     "BilledUsage",
     "BodyAvailability",
     "BuildInventorySnapshotHandler",
@@ -231,6 +258,10 @@ __all__ = [
     "EvidencePage",
     "EvidenceReference",
     "EvidenceRetraction",
+    "HistoricalAcquisition",
+    "HistoricalAcquisitionQuotaExceeded",
+    "HistoryBackfillItem",
+    "HistoryBackfillLease",
     "HostSessionEvidenceProjector",
     "IdentityBinding",
     "IdentityBindingEvidence",
@@ -262,6 +293,8 @@ __all__ = [
     "InvocationLifecycleEvidence",
     "InvocationStatus",
     "ItemKind",
+    "LegacyCaptureObservation",
+    "LegacyDelegateAlias",
     "LineageEdge",
     "LineageEvidence",
     "LocalCaptureResult",
@@ -281,6 +314,7 @@ __all__ = [
     "OperationType",
     "PendingEvidence",
     "PricedUsage",
+    "ProcessHistoryBackfillQueueHandler",
     "QualifiedSessionIdentity",
     "ReadLocalTranscriptHandler",
     "RecordOperationCommand",

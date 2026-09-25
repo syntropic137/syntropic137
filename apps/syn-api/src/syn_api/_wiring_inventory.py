@@ -24,6 +24,8 @@ async def initialize_inventory_runtime() -> None:
     pool = get_shared_db_pool()
     if pool is None:
         raise RuntimeError("session inventory requires a durable PostgreSQL backend")
+    from syn_api._wiring import get_event_store_instance
+
     _runtime = await create_inventory_runtime(
         # asyncpg installs proxy methods dynamically; its stubs omit the
         # connection interface exercised by the real-Postgres contract tests.
@@ -31,6 +33,8 @@ async def initialize_inventory_runtime() -> None:
         get_event_store_client(),
         get_settings().session_inventory,
         recovery_image=WorkspaceSettings().docker_image,
+        # Historical backfill reads ALL capture verdicts from the observability lane.
+        observations=get_event_store_instance(),
     )
 
 

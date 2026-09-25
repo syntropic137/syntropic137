@@ -22,6 +22,9 @@ from syn_api.routes.executions.inventory_cursor import (
 from syn_api.types import (
     Err,
     LocalTranscriptResponse,
+    SessionHistoryBackfillSummary,
+    SessionInventoryBackfillRequest,
+    SessionInventoryBackfillResponse,
     SessionInventoryCursorError,
     SessionInventoryCursorErrorResponse,
     SessionInventoryJobResponse,
@@ -32,6 +35,8 @@ from syn_api.types import (
     SessionInventoryResponse,
 )
 from syn_domain.contexts.agent_sessions import (
+    HistoricalAcquisitionQuotaExceeded,
+    HistoryBackfillItem,
     InventoryFilter,
     InventoryJob,
     InventoryNotFound,
@@ -238,6 +243,8 @@ async def refresh_session_inventory(
 ) -> SessionInventoryRefreshResponse:
     run = await _visible_run(execution_id)
     runtime = get_inventory_runtime()
+    if request.include_history:
+        return await _backfill_history(run, request.idempotency_key)
     handler = RefreshSessionInventoryHandler(
         runtime.repository, runtime.evidence, runtime.inventory
     )
@@ -246,6 +253,51 @@ async def refresh_session_inventory(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SessionInventoryRefreshResponse(job_id=job_id)
+
+
+async def _backfill_history(run: RunIdentity, key: str) -> SessionInventoryRefreshResponse:
+    """Local reads only. A retry with the same key resumes from durable receipts."""
+    history = get_inventory_runtime().history
+    if history is None:
+        raise HTTPException(status_code=503, detail="Historical backfill is not configured")
+    try:
+        result = await history.handle(run, key)
+    except HistoricalAcquisitionQuotaExceeded as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return SessionInventoryRefreshResponse(
+        job_id=result.job_id,
+        history=SessionHistoryBackfillSummary(
+            receipts=result.receipts,
+            materialized=result.materialized,
+            evidence_watermark=result.evidence_watermark,
+        ),
+    )
+
+
+@router.post("/session-inventory/backfill", status_code=202)
+async def backfill_all_session_inventories(
+    request: SessionInventoryBackfillRequest,
+) -> SessionInventoryBackfillResponse:
+    """Queue every known execution. The live inventory worker drains the durable list."""
+    from syn_api._wiring import get_projection_mgr
+
+    runtime = get_inventory_runtime()
+    if runtime.history is None:
+        raise HTTPException(status_code=503, detail="Historical backfill is not configured")
+    records = await get_projection_mgr().store.get_by_prefix("workflow_execution_details", "")
+    items = tuple(
+        HistoryBackfillItem(
+            run=RunIdentity(source_instance_id=runtime.source_instance_id, execution_id=key),
+            idempotency_key=request.idempotency_key,
+        )
+        for key in sorted({key for key, _ in records if key.strip()})
+    )
+    enqueued = 0
+    for start in range(0, len(items), 500):
+        enqueued += await runtime.history_queue.enqueue(items[start : start + 500])
+    return SessionInventoryBackfillResponse(executions=len(items), enqueued=enqueued)
 
 
 async def _resolve_inventory_job_id(job_id: str) -> str:

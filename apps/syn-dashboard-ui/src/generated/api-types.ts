@@ -468,6 +468,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/session-inventory/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill All Session Inventories
+         * @description Queue every known execution. The live inventory worker drains the durable list.
+         */
+        post: operations["backfill_all_session_inventories_session_inventory_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/session-inventory-jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -5678,6 +5698,33 @@ export interface components {
             completed_at?: string | null;
         };
         /**
+         * SessionHistoryBackfillSummary
+         * @description Receipts are reused across retries, so a resumed backfill reports the same total.
+         */
+        SessionHistoryBackfillSummary: {
+            /** Receipts */
+            receipts: number;
+            /** Materialized */
+            materialized: number;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+        };
+        /** SessionInventoryBackfillRequest */
+        SessionInventoryBackfillRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /**
+         * SessionInventoryBackfillResponse
+         * @description Durably queued per-execution backfills; the live inventory worker drains them.
+         */
+        SessionInventoryBackfillResponse: {
+            /** Executions */
+            executions: number;
+            /** Enqueued */
+            enqueued: number;
+        };
+        /**
          * SessionInventoryCursorError
          * @description Why a continuation cursor was refused. ``restart`` means re-read the head.
          */
@@ -5773,11 +5820,17 @@ export interface components {
         SessionInventoryRefreshRequest: {
             /** Idempotency Key */
             idempotency_key: string;
+            /**
+             * Include History
+             * @default false
+             */
+            include_history: boolean;
         };
         /** SessionInventoryRefreshResponse */
         SessionInventoryRefreshResponse: {
             /** Job Id */
             job_id: string;
+            history?: components["schemas"]["SessionHistoryBackfillSummary"] | null;
         };
         /**
          * SessionInventoryResponse
@@ -8146,6 +8199,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInventoryRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_all_session_inventories_session_inventory_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryBackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryBackfillResponse"];
                 };
             };
             /** @description Validation Error */
