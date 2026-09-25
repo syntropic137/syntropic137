@@ -14,10 +14,10 @@ from syn_domain.contexts.agent_sessions.domain.services.session_relationship_res
     resolve_relationships,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
-    InventoryCounts,
     InventoryItem,
     InventorySnapshot,
     ItemKind,
+    inventory_counts,
 )
 
 if TYPE_CHECKING:
@@ -120,15 +120,7 @@ class BuildInventorySnapshotHandler:
             resolver_version=resolved.resolver_version,
             evidence_watermark=request.evidence_watermark,
             coverage=resolved.coverage,
-            counts=InventoryCounts(
-                node=len(resolved.nodes),
-                binding=len(resolved.bindings),
-                membership=len(resolved.memberships),
-                edge=len(resolved.edges),
-                capture=len(resolved.captures),
-                gap=len(resolved.gaps),
-                retraction=len(resolved.retractions),
-            ),
+            counts=inventory_counts(resolved),
         )
         await self._inventory.stage(snapshot)
         groups: tuple[tuple[ItemKind, tuple[InventoryItem, ...]], ...] = (

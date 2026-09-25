@@ -95,6 +95,38 @@ describe("execution commands", () => {
       expect(out).toContain("unknown (requested: gpt-sol)");
     });
 
+    const detail = {
+      workflow_execution_id: "exec-001", workflow_name: "test-wf", status: "completed",
+      started_at: "2026-01-01T00:00:00Z", total_tokens: 1, total_cost_usd: "0.01", phases: [],
+    };
+
+    it("prints the server inventory summary and the follow-up command", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(detail)).mockResolvedValueOnce(jsonResponse({
+        run: { source_instance_id: "src", execution_id: "exec-001" }, snapshot: null,
+        reconstruction_status: "current", observed_evidence_watermark: 0, later_evidence_pending: false,
+        summary: {
+          complete: false, coverage_state: "open", coverage_display: "open: more sessions may still appear",
+          counts_display: "2 platform sessions, 3 native transcripts (claude 3), 0 invocations, 1 gap",
+          follow_up_command: "syn execution sessions exec-001 --all", remote_replication: "disabled",
+          revision: "r", distinct_sessions: 5, platform_sessions: 2, invocations: 0, native_transcripts: 3, gaps: 1, namespaces: [],
+        },
+      }));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("2 platform sessions, 3 native transcripts (claude 3), 0 invocations, 1 gap");
+      expect(out).toContain("open: more sessions may still appear (incomplete)");
+      expect(out).toContain("syn execution sessions exec-001 --all");
+      const second = new URL((mockFetch.mock.calls[1]![0] as Request).url);
+      expect(second.pathname).toMatch(/\/executions\/exec-001\/session-inventory$/);
+    });
+
+    it("still shows the execution when the inventory cannot be read", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(detail)).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      expect(stdout()).toContain("test-wf");
+      expect(stdout()).toContain("Session inventory: unavailable (403)");
+    });
+
     it("throws on missing execution-id", async () => {
       await expect(handler({ positionals: [], values: {} })).rejects.toThrow(CLIError);
     });

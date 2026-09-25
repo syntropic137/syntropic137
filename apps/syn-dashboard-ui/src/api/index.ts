@@ -1,4 +1,4 @@
-export { API_BASE, fetchJSON } from './base'
+export { API_BASE, ApiError, fetchJSON } from './base'
 export * from './workflows'
 export * from './executions'
 export * from './sessions'

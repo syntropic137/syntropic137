@@ -19,6 +19,7 @@ from syn_api.routes.executions.inventory_cursor import (
     InventoryCursorInvalid,
     issue_cursor,
 )
+from syn_api.routes.executions.inventory_summary import build_summary
 from syn_api.types import (
     Err,
     LocalTranscriptResponse,
@@ -112,6 +113,13 @@ async def get_session_inventory(execution_id: str) -> SessionInventoryResponse:
         observed_evidence_watermark=watermark,
         later_evidence_pending=later,
         job_id=job.job_id if job is not None else None,
+        summary=build_summary(
+            execution_id=run.execution_id,
+            snapshot=snapshot,
+            status=status,
+            later_evidence_pending=later,
+            remote_replication="enabled" if runtime.replication is not None else "disabled",
+        ),
     )
 
 

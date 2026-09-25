@@ -1,0 +1,2186 @@
+{
+ "exchanges": [
+  {
+   "body": {
+    "job_id": null,
+    "later_evidence_pending": false,
+    "observed_evidence_watermark": 7,
+    "reconstruction_status": "current",
+    "run": {
+     "execution_id": "exec-parity-1398",
+     "source_instance_id": "installation-parity"
+    },
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    },
+    "summary": {
+     "complete": false,
+     "counts_display": "2 platform sessions, 3 native transcripts (claude 2, codex 1), 1 invocation, 2 gaps",
+     "coverage_display": "open: more sessions may still appear",
+     "coverage_state": "open",
+     "distinct_sessions": 6,
+     "follow_up_command": "syn execution sessions exec-parity-1398 --all",
+     "gaps": 2,
+     "invocations": 1,
+     "namespaces": [
+      {
+       "count": 2,
+       "harness": null,
+       "kind": "platform",
+       "namespace": "platform"
+      },
+      {
+       "count": 1,
+       "harness": null,
+       "kind": "invocation",
+       "namespace": "invocation"
+      },
+      {
+       "count": 2,
+       "harness": "claude",
+       "kind": "transcript",
+       "namespace": "transcript:claude"
+      },
+      {
+       "count": 1,
+       "harness": "codex",
+       "kind": "transcript",
+       "namespace": "transcript:codex"
+      }
+     ],
+     "native_transcripts": 3,
+     "platform_sessions": 2,
+     "remote_replication": "disabled",
+     "revision": "rev-parity-1398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": null
+     },
+     {
+      "node_key": "25957026ff9a36e75c9fe65c06e75b18f333b0c1fa8900bbe95edb3f1bd903e4",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-sess-plat-plan-0001",
+        "extractor_version": "parity/1",
+        "locator": "fixture/sess-plat-plan-0001",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      }
+     },
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-sess-plat-build-0002",
+        "extractor_version": "parity/1",
+        "locator": "fixture/sess-plat-build-0002",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-build-0002",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "node",
+    "next_cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibm9kZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0",
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/node",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-inv-build-retry-0003",
+        "extractor_version": "parity/1",
+        "locator": "fixture/inv-build-retry-0003",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": null,
+       "kind": "invocation",
+       "local_id": "inv-build-retry-0003",
+       "source_instance_id": "installation-parity"
+      }
+     },
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-claude-native-leader-aaaa",
+        "extractor_version": "parity/1",
+        "locator": "fixture/claude-native-leader-aaaa",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "node",
+    "next_cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibm9kZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6M30",
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/node",
+   "query": {
+    "cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibm9kZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c",
+      "peer_key": null
+     },
+     {
+      "node_key": "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-claude-native-child-cccc",
+        "extractor_version": "parity/1",
+        "locator": "fixture/claude-native-child-cccc",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-child-cccc",
+       "source_instance_id": "installation-parity"
+      }
+     },
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-codex-native-leader-bbbb",
+        "extractor_version": "parity/1",
+        "locator": "fixture/codex-native-leader-bbbb",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": "codex",
+       "kind": "transcript",
+       "local_id": "codex-native-leader-bbbb",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "node",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/node",
+   "query": {
+    "cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibm9kZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6M30"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-sess-plat-plan-0001",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-sess-plat-plan-0001",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-plan",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     },
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-claude-native-leader-aaaa",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-claude-native-leader-aaaa",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-plan",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     }
+    ],
+    "kind": "membership",
+    "next_cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibWVtYmVyc2hpcCIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0",
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/membership",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "25957026ff9a36e75c9fe65c06e75b18f333b0c1fa8900bbe95edb3f1bd903e4",
+      "peer_key": null
+     },
+     {
+      "node_key": "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-sess-plat-build-0002",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-sess-plat-build-0002",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-build-0002",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-build",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     },
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-codex-native-leader-bbbb",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-codex-native-leader-bbbb",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": "codex",
+       "kind": "transcript",
+       "local_id": "codex-native-leader-bbbb",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-build",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     }
+    ],
+    "kind": "membership",
+    "next_cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibWVtYmVyc2hpcCIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6M30",
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/membership",
+   "query": {
+    "cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibWVtYmVyc2hpcCIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "attempt_id": "attempt-2",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-inv-build-retry-0003",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-inv-build-retry-0003",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": null,
+       "kind": "invocation",
+       "local_id": "inv-build-retry-0003",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-build",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     }
+    ],
+    "kind": "membership",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/membership",
+   "query": {
+    "cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoibWVtYmVyc2hpcCIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6M30"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+     }
+    ],
+    "items": [
+     {
+      "child": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-child-cccc",
+       "source_instance_id": "installation-parity"
+      },
+      "child_segment": null,
+      "confidence": "corroborated",
+      "evidence": [
+       {
+        "evidence_id": "evidence-edge-claude",
+        "extractor_version": "parity/1",
+        "locator": "fixture/edge-claude",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "parent": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "parent_segment": null,
+      "relation": "spawn"
+     }
+    ],
+    "kind": "edge",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/edge",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [
+     {
+      "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "expired"
+     }
+    ],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "archived_byte_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "availability": "present",
+      "destination": "local",
+      "evidence": {
+       "evidence_id": "evidence-capture-claude-local",
+       "extractor_version": "parity/1",
+       "locator": "fixture/capture-claude-local",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "receipt_sequence": 1,
+      "transcript_revision": null
+     },
+     {
+      "archived_byte_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "availability": "present",
+      "destination": "remote",
+      "evidence": {
+       "evidence_id": "evidence-capture-claude-remote",
+       "extractor_version": "parity/1",
+       "locator": "fixture/capture-claude-remote",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "receipt_sequence": 2,
+      "transcript_revision": null
+     }
+    ],
+    "kind": "capture",
+    "next_cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoiY2FwdHVyZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0",
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/capture",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [
+     {
+      "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "expired"
+     }
+    ],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "archived_byte_hash": null,
+      "availability": "pending",
+      "destination": "local",
+      "evidence": {
+       "evidence_id": "evidence-capture-codex-local",
+       "extractor_version": "parity/1",
+       "locator": "fixture/capture-codex-local",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "node": {
+       "harness": "codex",
+       "kind": "transcript",
+       "local_id": "codex-native-leader-bbbb",
+       "source_instance_id": "installation-parity"
+      },
+      "receipt_sequence": 3,
+      "transcript_revision": null
+     }
+    ],
+    "kind": "capture",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/capture",
+   "query": {
+    "cursor": "eyJ2IjoxLCJydW4iOnsic291cmNlX2luc3RhbmNlX2lkIjoiaW5zdGFsbGF0aW9uLXBhcml0eSIsImV4ZWN1dGlvbl9pZCI6ImV4ZWMtcGFyaXR5LTEzOTgifSwic25hcHNob3RfaWQiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDEzOTgiLCJraW5kIjoiY2FwdHVyZSIsImZpbHRlcnMiOnsicGhhc2VfaWQiOm51bGwsImF0dGVtcHRfaWQiOm51bGx9LCJhZnRlciI6MX0"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": null,
+      "peer_key": null
+     },
+     {
+      "node_key": null,
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence_ids": [],
+      "node_keys": [
+       "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+      ],
+      "reason": "unlinked_native_transcript"
+     },
+     {
+      "evidence_ids": [
+       "evidence-capture-codex-local"
+      ],
+      "node_keys": [],
+      "reason": "capture_pending"
+     }
+    ],
+    "kind": "gap",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/gap",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e"
+     },
+     {
+      "node_key": "25957026ff9a36e75c9fe65c06e75b18f333b0c1fa8900bbe95edb3f1bd903e4",
+      "peer_key": "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c"
+     }
+    ],
+    "items": [
+     {
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-bind-plan",
+        "extractor_version": "parity/1",
+        "locator": "fixture/bind-plan",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "owner": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null,
+      "transcript": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      }
+     },
+     {
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-bind-build",
+        "extractor_version": "parity/1",
+        "locator": "fixture/bind-build",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "owner": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-build-0002",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null,
+      "transcript": {
+       "harness": "codex",
+       "kind": "transcript",
+       "local_id": "codex-native-leader-bbbb",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "binding",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/binding",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": null
+    },
+    "item_keys": [
+     {
+      "node_key": null,
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": {
+       "evidence_id": "evidence-stale-correction",
+       "extractor_version": "parity/1",
+       "locator": "fixture/stale-correction",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "target": {
+       "evidence_id": "evidence-stale",
+       "extractor_version": "parity/1",
+       "locator": "fixture/stale",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      }
+     }
+    ],
+    "kind": "retraction",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/retraction",
+   "query": {},
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-sess-plat-plan-0001",
+        "extractor_version": "parity/1",
+        "locator": "fixture/sess-plat-plan-0001",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      }
+     },
+     {
+      "evidence": [
+       {
+        "evidence_id": "evidence-claude-native-leader-aaaa",
+        "extractor_version": "parity/1",
+        "locator": "fixture/claude-native-leader-aaaa",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "ref": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "node",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/node",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-sess-plat-plan-0001",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-sess-plat-plan-0001",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-plan",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     },
+     {
+      "attempt_id": "attempt-1",
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-member-claude-native-leader-aaaa",
+        "extractor_version": "parity/1",
+        "locator": "fixture/member-claude-native-leader-aaaa",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "phase_id": "phase-plan",
+      "run": {
+       "execution_id": "exec-parity-1398",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null
+     }
+    ],
+    "kind": "membership",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/membership",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+     }
+    ],
+    "items": [
+     {
+      "child": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-child-cccc",
+       "source_instance_id": "installation-parity"
+      },
+      "child_segment": null,
+      "confidence": "corroborated",
+      "evidence": [
+       {
+        "evidence_id": "evidence-edge-claude",
+        "extractor_version": "parity/1",
+        "locator": "fixture/edge-claude",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "parent": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "parent_segment": null,
+      "relation": "spawn"
+     }
+    ],
+    "kind": "edge",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/edge",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [
+     {
+      "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "expired"
+     }
+    ],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     },
+     {
+      "node_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e",
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "archived_byte_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "availability": "present",
+      "destination": "local",
+      "evidence": {
+       "evidence_id": "evidence-capture-claude-local",
+       "extractor_version": "parity/1",
+       "locator": "fixture/capture-claude-local",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "receipt_sequence": 1,
+      "transcript_revision": null
+     },
+     {
+      "archived_byte_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "availability": "present",
+      "destination": "remote",
+      "evidence": {
+       "evidence_id": "evidence-capture-claude-remote",
+       "extractor_version": "parity/1",
+       "locator": "fixture/capture-claude-remote",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "node": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      },
+      "receipt_sequence": 2,
+      "transcript_revision": null
+     }
+    ],
+    "kind": "capture",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/capture",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": null,
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence_ids": [
+       "evidence-capture-codex-local"
+      ],
+      "node_keys": [],
+      "reason": "capture_pending"
+     }
+    ],
+    "kind": "gap",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/gap",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": "6840f41cb739cf22e7bccb382e222d2a23262314a5be27c69d277a7834e541af",
+      "peer_key": "2b28b3c65facf8d20050c0790aa741ac4cb25986b1e58974b7fb5ff33172ba1e"
+     }
+    ],
+    "items": [
+     {
+      "confidence": "registered",
+      "evidence": [
+       {
+        "evidence_id": "evidence-bind-plan",
+        "extractor_version": "parity/1",
+        "locator": "fixture/bind-plan",
+        "producer_id": "producer-parity",
+        "source_revision": "1"
+       }
+      ],
+      "owner": {
+       "harness": null,
+       "kind": "platform",
+       "local_id": "sess-plat-plan-0001",
+       "source_instance_id": "installation-parity"
+      },
+      "segment": null,
+      "transcript": {
+       "harness": "claude",
+       "kind": "transcript",
+       "local_id": "claude-native-leader-aaaa",
+       "source_instance_id": "installation-parity"
+      }
+     }
+    ],
+    "kind": "binding",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/binding",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "body_overrides": [],
+    "filters": {
+     "attempt_id": null,
+     "phase_id": "phase-plan"
+    },
+    "item_keys": [
+     {
+      "node_key": null,
+      "peer_key": null
+     }
+    ],
+    "items": [
+     {
+      "evidence": {
+       "evidence_id": "evidence-stale-correction",
+       "extractor_version": "parity/1",
+       "locator": "fixture/stale-correction",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      },
+      "target": {
+       "evidence_id": "evidence-stale",
+       "extractor_version": "parity/1",
+       "locator": "fixture/stale",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      }
+     }
+    ],
+    "kind": "retraction",
+    "next_cursor": null,
+    "snapshot": {
+     "counts": {
+      "binding": 2,
+      "capture": 3,
+      "edge": 1,
+      "gap": 2,
+      "membership": 5,
+      "namespaces": [
+       {
+        "count": 2,
+        "harness": null,
+        "kind": "platform"
+       },
+       {
+        "count": 1,
+        "harness": null,
+        "kind": "invocation"
+       },
+       {
+        "count": 2,
+        "harness": "claude",
+        "kind": "transcript"
+       },
+       {
+        "count": 1,
+        "harness": "codex",
+        "kind": "transcript"
+       }
+      ],
+      "node": 6,
+      "retraction": 1
+     },
+     "coverage": {
+      "contract_id": "parity-contract",
+      "expected_count": null,
+      "missing_keys": [],
+      "state": "open"
+     },
+     "evidence_watermark": 7,
+     "resolver_version": "parity/1",
+     "revision": "rev-parity-1398",
+     "run": {
+      "execution_id": "exec-parity-1398",
+      "source_instance_id": "installation-parity"
+     },
+     "snapshot_id": "00000000-0000-4000-8000-000000001398"
+    }
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/retraction",
+   "query": {
+    "phase_id": "phase-plan"
+   },
+   "status": 200
+  },
+  {
+   "body": {
+    "node": {
+     "evidence": [
+      {
+       "evidence_id": "evidence-claude-native-child-cccc",
+       "extractor_version": "parity/1",
+       "locator": "fixture/claude-native-child-cccc",
+       "producer_id": "producer-parity",
+       "source_revision": "1"
+      }
+     ],
+     "ref": {
+      "harness": "claude",
+      "kind": "transcript",
+      "local_id": "claude-native-child-cccc",
+      "source_instance_id": "installation-parity"
+     }
+    },
+    "node_key": "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c",
+    "snapshot_id": "00000000-0000-4000-8000-000000001398",
+    "status": "resolved"
+   },
+   "path": "/executions/exec-parity-1398/session-inventory/00000000-0000-4000-8000-000000001398/nodes/8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c",
+   "query": {},
+   "status": 200
+  }
+ ],
+ "execution_id": "exec-parity-1398",
+ "expected": {
+  "complete": false,
+  "counts": {
+   "binding": 2,
+   "capture": 3,
+   "edge": 1,
+   "gap": 2,
+   "membership": 5,
+   "node": 6,
+   "retraction": 1
+  },
+  "counts_display": "2 platform sessions, 3 native transcripts (claude 2, codex 1), 1 invocation, 2 gaps",
+  "coverage_display": "open: more sessions may still appear",
+  "coverage_state": "open",
+  "distinct_sessions": 6,
+  "gaps": [
+   {
+    "node_keys": [],
+    "reason": "capture_pending"
+   },
+   {
+    "node_keys": [
+     "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+    ],
+    "reason": "unlinked_native_transcript"
+   }
+  ],
+  "invocations": 1,
+  "namespaces": {
+   "invocation": 1,
+   "platform": 2,
+   "transcript:claude": 2,
+   "transcript:codex": 1
+  },
+  "native_transcripts": 3,
+  "node_ids": [
+   "invocation/inv-build-retry-0003",
+   "platform/sess-plat-build-0002",
+   "platform/sess-plat-plan-0001",
+   "transcript:claude/claude-native-child-cccc",
+   "transcript:claude/claude-native-leader-aaaa",
+   "transcript:codex/codex-native-leader-bbbb"
+  ],
+  "platform_sessions": 2,
+  "revision": "rev-parity-1398",
+  "snapshot_id": "00000000-0000-4000-8000-000000001398",
+  "traversed": {
+   "binding": 2,
+   "capture": 3,
+   "edge": 1,
+   "gap": 2,
+   "membership": 5,
+   "node": 6,
+   "retraction": 1
+  }
+ },
+ "expected_phase": {
+  "cross_page_child": "transcript:claude/claude-native-child-cccc",
+  "node_ids": [
+   "platform/sess-plat-plan-0001",
+   "transcript:claude/claude-native-leader-aaaa"
+  ]
+ },
+ "generated_by": "apps/syn-api/tests/test_session_inventory_parity.py; never hand-edit, regenerate",
+ "phase_filter": "phase-plan"
+}

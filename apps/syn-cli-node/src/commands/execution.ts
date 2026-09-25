@@ -16,6 +16,7 @@ import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
+type InventorySummary = components["schemas"]["SessionInventorySummary"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -140,8 +141,37 @@ const showCommand: CommandDef = {
       }
       table.print();
     }
+    await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/**
+ * Inventory is additive context: an execution whose inventory cannot be read
+ * (not yet reconstructed, runtime disabled) still shows, with the reason.
+ */
+async function readInventorySummary(executionId: string): Promise<InventorySummary | string> {
+  try {
+    const result = await api.GET("/executions/{execution_id}/session-inventory", {
+      params: { path: { execution_id: executionId } },
+    });
+    if (result.data?.summary && result.error === undefined && result.response.ok) return result.data.summary;
+    return `unavailable (${result.response.status})`;
+  } catch {
+    return "unavailable";
+  }
+}
+
+async function printInventorySummary(executionId: string): Promise<void> {
+  const summary = await readInventorySummary(executionId);
+  if (typeof summary === "string") {
+    printDim(`\nSession inventory: ${summary}`);
+    return;
+  }
+  print("");
+  print(`${style("Session inventory:", BOLD)} ${summary.counts_display}`);
+  print(`  Coverage:   ${summary.coverage_display}${summary.complete ? "" : " (incomplete)"}`);
+  print(`  Details:    ${summary.follow_up_command}`);
+}
 
 export const executionGroup = new CommandGroup("execution", "List and inspect workflow executions");
 executionGroup.command(listCommand).command(showCommand).command(executionSessionsCommand).command(executionTranscriptCommand);

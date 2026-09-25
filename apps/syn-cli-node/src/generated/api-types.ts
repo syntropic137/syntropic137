@@ -4205,6 +4205,8 @@ export interface components {
              * @default 0
              */
             binding: number;
+            /** Namespaces */
+            namespaces?: components["schemas"]["InventoryNamespaceCount"][] | null;
         };
         /** InventoryCoverage */
         InventoryCoverage: {
@@ -4258,6 +4260,21 @@ export interface components {
             node_key?: string | null;
             /** Peer Key */
             peer_key?: string | null;
+        };
+        /**
+         * InventoryNamespaceCount
+         * @description Distinct nodes in one identity namespace. Transcripts are split per harness.
+         */
+        InventoryNamespaceCount: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
         };
         /** InventoryNode */
         InventoryNode: {
@@ -5772,6 +5789,25 @@ export interface components {
             failure_code: string | null;
         };
         /**
+         * SessionInventoryNamespace
+         * @description Distinct sessions in one identity namespace (``platform``, ``invocation``,
+         *     ``transcript:<harness>``). A native transcript id is only meaningful inside
+         *     its harness namespace; it is never a platform session id.
+         */
+        SessionInventoryNamespace: {
+            /** Namespace */
+            namespace: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
+        };
+        /**
          * SessionInventoryNodeResponse
          * @description A node-by-key lookup within one revision. Unknown keys disclose nothing.
          */
@@ -5850,6 +5886,52 @@ export interface components {
             later_evidence_pending: boolean;
             /** Job Id */
             job_id?: string | null;
+            summary: components["schemas"]["SessionInventorySummary"];
+        };
+        /**
+         * SessionInventorySummary
+         * @description Server-derived counts, completeness and display text every client shows verbatim.
+         *
+         *     ``complete`` is the single completeness verdict: the published coverage
+         *     contract is ``reconciled`` AND that revision is current. Every other
+         *     coverage state (open, unknown, missing, unsupported, conflicting) or a
+         *     pending/failed reconstruction is incomplete. Count fields are None when no
+         *     revision is published, and the namespace split is None on revisions built
+         *     before it was recorded.
+         */
+        SessionInventorySummary: {
+            /** Complete */
+            complete: boolean;
+            /**
+             * Coverage State
+             * @enum {string}
+             */
+            coverage_state: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+            /** Coverage Display */
+            coverage_display: string;
+            /** Revision */
+            revision: string | null;
+            /** Distinct Sessions */
+            distinct_sessions: number | null;
+            /** Platform Sessions */
+            platform_sessions: number | null;
+            /** Invocations */
+            invocations: number | null;
+            /** Native Transcripts */
+            native_transcripts: number | null;
+            /** Gaps */
+            gaps: number | null;
+            /** Namespaces */
+            namespaces: components["schemas"]["SessionInventoryNamespace"][] | null;
+            /** Counts Display */
+            counts_display: string;
+            /**
+             * Remote Replication
+             * @enum {string}
+             */
+            remote_replication: "enabled" | "disabled";
+            /** Follow Up Command */
+            follow_up_command: string;
         };
         /**
          * SessionListResponse

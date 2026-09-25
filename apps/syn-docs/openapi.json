@@ -11362,6 +11362,20 @@
             "minimum": 0.0,
             "title": "Binding",
             "default": 0
+          },
+          "namespaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InventoryNamespaceCount"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespaces"
           }
         },
         "additionalProperties": false,
@@ -11512,6 +11526,44 @@
         "type": "object",
         "title": "InventoryItemKeys",
         "description": "Qualified node keys an item references, so a foreign endpoint is resolvable."
+      },
+      "InventoryNamespaceCount": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "invocation",
+              "transcript"
+            ],
+            "title": "Kind"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "count"
+        ],
+        "title": "InventoryNamespaceCount",
+        "description": "Distinct nodes in one identity namespace. Transcripts are split per harness."
       },
       "InventoryNode": {
         "properties": {
@@ -14487,6 +14539,48 @@
         ],
         "title": "SessionInventoryJobResponse"
       },
+      "SessionInventoryNamespace": {
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "invocation",
+              "transcript"
+            ],
+            "title": "Kind"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "namespace",
+          "kind",
+          "count"
+        ],
+        "title": "SessionInventoryNamespace",
+        "description": "Distinct sessions in one identity namespace (``platform``, ``invocation``,\n``transcript:<harness>``). A native transcript id is only meaningful inside\nits harness namespace; it is never a platform session id."
+      },
       "SessionInventoryNodeResponse": {
         "properties": {
           "snapshot_id": {
@@ -14706,6 +14800,9 @@
               }
             ],
             "title": "Job Id"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SessionInventorySummary"
           }
         },
         "additionalProperties": false,
@@ -14715,10 +14812,155 @@
           "snapshot",
           "reconstruction_status",
           "observed_evidence_watermark",
-          "later_evidence_pending"
+          "later_evidence_pending",
+          "summary"
         ],
         "title": "SessionInventoryResponse",
         "description": "Published inventory and observed reconstruction progress, without read side effects."
+      },
+      "SessionInventorySummary": {
+        "properties": {
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          },
+          "coverage_state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "open",
+              "reconciled",
+              "missing",
+              "unsupported",
+              "conflicting"
+            ],
+            "title": "Coverage State"
+          },
+          "coverage_display": {
+            "type": "string",
+            "title": "Coverage Display"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "distinct_sessions": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Sessions"
+          },
+          "platform_sessions": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Sessions"
+          },
+          "invocations": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invocations"
+          },
+          "native_transcripts": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Transcripts"
+          },
+          "gaps": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gaps"
+          },
+          "namespaces": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SessionInventoryNamespace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespaces"
+          },
+          "counts_display": {
+            "type": "string",
+            "title": "Counts Display"
+          },
+          "remote_replication": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "title": "Remote Replication"
+          },
+          "follow_up_command": {
+            "type": "string",
+            "title": "Follow Up Command"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "complete",
+          "coverage_state",
+          "coverage_display",
+          "revision",
+          "distinct_sessions",
+          "platform_sessions",
+          "invocations",
+          "native_transcripts",
+          "gaps",
+          "namespaces",
+          "counts_display",
+          "remote_replication",
+          "follow_up_command"
+        ],
+        "title": "SessionInventorySummary",
+        "description": "Server-derived counts, completeness and display text every client shows verbatim.\n\n``complete`` is the single completeness verdict: the published coverage\ncontract is ``reconciled`` AND that revision is current. Every other\ncoverage state (open, unknown, missing, unsupported, conflicting) or a\npending/failed reconstruction is incomplete. Count fields are None when no\nrevision is published, and the namespace split is None on revisions built\nbefore it was recorded."
       },
       "SessionListResponse": {
         "properties": {

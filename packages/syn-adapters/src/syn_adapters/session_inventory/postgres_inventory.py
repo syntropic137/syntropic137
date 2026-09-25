@@ -19,13 +19,13 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 from .postgres_items import ITEM_MODELS, append_item
-from .postgres_publication import publish_snapshot
+from .postgres_publication import derived_namespaces, publish_snapshot
 from .postgres_queries import backfill_query_keys, lookup_node, query_page
 
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from .database import Pool
+    from .database import Connection, Pool
 
 _SCOPE = "source_instance_id=$1 AND execution_id=$2 AND snapshot_id=$3"
 
@@ -56,10 +56,12 @@ class PostgresSessionInventory:
                 snapshot.snapshot_id,
                 snapshot.model_dump_json(),
             )
-            if actual is None or InventorySnapshot.model_validate_json(actual) != snapshot:
-                raise InventoryPublicationConflict(
-                    "snapshot identity reused with different metadata"
-                )
+            if actual is None:
+                raise InventoryPublicationConflict("snapshot staging returned no metadata")
+            stored = InventorySnapshot.model_validate_json(actual)
+            if stored == snapshot:
+                return
+            await _reconcile_staged_shape(conn, stored, snapshot)
 
     async def append(
         self,
@@ -164,3 +166,33 @@ class PostgresSessionInventory:
         self, run: RunIdentity, snapshot_id: UUID, node_key: str
     ) -> InventoryNode | None:
         return await lookup_node(self._pool, run, snapshot_id, node_key)
+
+
+async def _reconcile_staged_shape(
+    conn: Connection, stored: InventorySnapshot, staged: InventorySnapshot
+) -> None:
+    """A retry across an upgrade is the same revision, never a conflict.
+
+    Staging never rewrites stored metadata: only the derived namespace counts
+    may differ, and publication derives those from the stored nodes and rejects
+    any declared counts that disagree. Here a retry's declared counts are
+    checked as soon as every node is stored, so a wrong split fails fast in
+    either retry order. Any other difference is a genuinely different revision.
+    """
+    if stored.without_derived_counts() != staged.without_derived_counts():
+        raise InventoryPublicationConflict("snapshot identity reused with different metadata")
+    if staged.counts.namespaces is None:
+        return
+    run = staged.run
+    stored_nodes = await conn.fetchval(
+        f"SELECT count(*)::text FROM session_inventory_items WHERE {_SCOPE} AND kind='node'",
+        run.source_instance_id,
+        run.execution_id,
+        staged.snapshot_id,
+    )
+    if int(stored_nodes or 0) == staged.counts.node:
+        derived = await derived_namespaces(conn, run, staged.snapshot_id)
+        if staged.counts.namespaces != derived:
+            raise InventoryPublicationConflict("declared namespace counts disagree with nodes")
+    elif stored.counts.namespaces not in (None, staged.counts.namespaces):
+        raise InventoryPublicationConflict("snapshot identity reused with different metadata")

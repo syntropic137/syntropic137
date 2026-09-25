@@ -332,3 +332,221 @@ export interface TriggerCreateResponse {
   name: string;
   status: string;
 }
+
+// --- Session inventory (#1398) ---
+// Handwritten mirror of the API models; codegen does not reach this plugin (#1182).
+// tests/tools/session_inventory_parity.test.ts checks these key lists against
+// the API-generated parity fixture, so a new or renamed field fails a test.
+
+export type InventoryKind = "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+export type CoverageState = "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+export type ReconstructionStatus = "not_started" | "pending" | "running" | "current" | "failed";
+export type NodeKind = "platform" | "invocation" | "transcript";
+export type EvidenceClass = "registered" | "corroborated" | "candidate" | "conflicting";
+export type BodyAvailability = "present" | "pending" | "missing" | "expired" | "unknown";
+
+export interface RunIdentity {
+  source_instance_id: string;
+  execution_id: string;
+}
+
+export interface InventoryNamespaceCount {
+  kind: NodeKind;
+  harness?: string | null;
+  count: number;
+}
+
+export interface InventoryCounts {
+  node: number;
+  membership: number;
+  edge: number;
+  capture: number;
+  gap: number;
+  retraction: number;
+  binding: number;
+  namespaces?: InventoryNamespaceCount[] | null;
+}
+
+export interface InventoryCoverage {
+  state: CoverageState;
+  contract_id?: string | null;
+  expected_count?: number | null;
+  missing_keys: string[];
+}
+
+export interface InventorySnapshot {
+  snapshot_id: string;
+  run: RunIdentity;
+  revision: string;
+  resolver_version: string;
+  evidence_watermark: number;
+  coverage: InventoryCoverage;
+  counts: InventoryCounts;
+}
+
+export interface SessionInventoryNamespace {
+  namespace: string;
+  kind: NodeKind;
+  harness?: string | null;
+  count: number;
+}
+
+export interface SessionInventorySummary {
+  complete: boolean;
+  coverage_state: CoverageState;
+  coverage_display: string;
+  revision: string | null;
+  distinct_sessions: number | null;
+  platform_sessions: number | null;
+  invocations: number | null;
+  native_transcripts: number | null;
+  gaps: number | null;
+  namespaces: SessionInventoryNamespace[] | null;
+  counts_display: string;
+  remote_replication: "enabled" | "disabled";
+  follow_up_command: string;
+}
+
+export interface SessionInventoryResponse {
+  run: RunIdentity;
+  snapshot: InventorySnapshot | null;
+  reconstruction_status: ReconstructionStatus;
+  observed_evidence_watermark: number;
+  later_evidence_pending: boolean;
+  job_id?: string | null;
+  summary: SessionInventorySummary;
+}
+
+export interface EvidenceReference {
+  evidence_id: string;
+  producer_id: string;
+  source_revision: string;
+  locator: string;
+  extractor_version: string;
+}
+
+export interface InventoryNodeRef {
+  kind: NodeKind;
+  source_instance_id: string;
+  local_id: string;
+  harness?: string | null;
+}
+
+export interface InventoryNode {
+  ref: InventoryNodeRef;
+  evidence: EvidenceReference[];
+}
+
+export interface Membership {
+  node: InventoryNodeRef;
+  run: RunIdentity;
+  phase_id?: string | null;
+  attempt_id?: string | null;
+  segment?: string | null;
+  confidence: EvidenceClass;
+  evidence: EvidenceReference[];
+}
+
+export interface LineageEdge {
+  parent: InventoryNodeRef;
+  child: InventoryNodeRef;
+  relation: "spawn" | "resume" | "fork";
+  confidence: EvidenceClass;
+  evidence: EvidenceReference[];
+  parent_segment?: string | null;
+  child_segment?: string | null;
+}
+
+export interface CaptureReceipt {
+  node: InventoryNodeRef;
+  availability: BodyAvailability;
+  receipt_sequence: number;
+  evidence: EvidenceReference;
+  destination: "local" | "remote";
+  transcript_revision?: string | null;
+  archived_byte_hash?: string | null;
+}
+
+export interface InventoryGap {
+  reason: string;
+  node_keys: string[];
+  evidence_ids: string[];
+}
+
+export interface EvidenceRetraction {
+  target: EvidenceReference;
+  evidence: EvidenceReference;
+}
+
+export interface IdentityBinding {
+  owner: InventoryNodeRef;
+  transcript: InventoryNodeRef;
+  segment?: string | null;
+  confidence: EvidenceClass;
+  evidence: EvidenceReference[];
+}
+
+export type InventoryItem =
+  | InventoryNode | Membership | LineageEdge | CaptureReceipt
+  | InventoryGap | EvidenceRetraction | IdentityBinding;
+
+export interface InventoryFilter {
+  phase_id?: string | null;
+  attempt_id?: string | null;
+}
+
+export interface InventoryItemKeys {
+  node_key?: string | null;
+  peer_key?: string | null;
+}
+
+export interface TranscriptBodyState {
+  archive_sha256: string;
+  status: "expired" | "withheld";
+}
+
+export interface SessionInventoryPageResponse {
+  snapshot: InventorySnapshot;
+  kind: InventoryKind;
+  filters: InventoryFilter;
+  items: InventoryItem[];
+  item_keys: InventoryItemKeys[];
+  next_cursor?: string | null;
+  body_overrides: TranscriptBodyState[];
+}
+
+export interface SessionInventoryNodeResponse {
+  snapshot_id: string;
+  node_key: string;
+  status: "resolved" | "unresolved";
+  node?: InventoryNode | null;
+}
+
+export interface SessionInventoryCursorError {
+  code: "cursor_invalid" | "cursor_mismatch" | "cursor_expired";
+  message: string;
+  mismatched: ("scope" | "revision" | "section" | "filters")[];
+  restart: boolean;
+  restart_snapshot_id?: string | null;
+}
+
+/** Field lists for drift checks: `satisfies` makes each list exactly the interface's keys. */
+type Keys<T> = { [K in keyof Required<T>]: true };
+export const inventoryFieldKeys = {
+  SessionInventoryResponse: { run: true, snapshot: true, reconstruction_status: true, observed_evidence_watermark: true, later_evidence_pending: true, job_id: true, summary: true } satisfies Keys<SessionInventoryResponse>,
+  SessionInventorySummary: { complete: true, coverage_state: true, coverage_display: true, revision: true, distinct_sessions: true, platform_sessions: true, invocations: true, native_transcripts: true, gaps: true, namespaces: true, counts_display: true, remote_replication: true, follow_up_command: true } satisfies Keys<SessionInventorySummary>,
+  SessionInventoryNamespace: { namespace: true, kind: true, harness: true, count: true } satisfies Keys<SessionInventoryNamespace>,
+  InventorySnapshot: { snapshot_id: true, run: true, revision: true, resolver_version: true, evidence_watermark: true, coverage: true, counts: true } satisfies Keys<InventorySnapshot>,
+  InventoryCounts: { node: true, membership: true, edge: true, capture: true, gap: true, retraction: true, binding: true, namespaces: true } satisfies Keys<InventoryCounts>,
+  InventoryCoverage: { state: true, contract_id: true, expected_count: true, missing_keys: true } satisfies Keys<InventoryCoverage>,
+  SessionInventoryPageResponse: { snapshot: true, kind: true, filters: true, items: true, item_keys: true, next_cursor: true, body_overrides: true } satisfies Keys<SessionInventoryPageResponse>,
+  SessionInventoryNodeResponse: { snapshot_id: true, node_key: true, status: true, node: true } satisfies Keys<SessionInventoryNodeResponse>,
+  InventoryNode: { ref: true, evidence: true } satisfies Keys<InventoryNode>,
+  InventoryNodeRef: { kind: true, source_instance_id: true, local_id: true, harness: true } satisfies Keys<InventoryNodeRef>,
+  Membership: { node: true, run: true, phase_id: true, attempt_id: true, segment: true, confidence: true, evidence: true } satisfies Keys<Membership>,
+  LineageEdge: { parent: true, child: true, relation: true, confidence: true, evidence: true, parent_segment: true, child_segment: true } satisfies Keys<LineageEdge>,
+  CaptureReceipt: { node: true, availability: true, receipt_sequence: true, evidence: true, destination: true, transcript_revision: true, archived_byte_hash: true } satisfies Keys<CaptureReceipt>,
+  InventoryGap: { reason: true, node_keys: true, evidence_ids: true } satisfies Keys<InventoryGap>,
+  IdentityBinding: { owner: true, transcript: true, segment: true, confidence: true, evidence: true } satisfies Keys<IdentityBinding>,
+  EvidenceRetraction: { target: true, evidence: true } satisfies Keys<EvidenceRetraction>,
+} as const;

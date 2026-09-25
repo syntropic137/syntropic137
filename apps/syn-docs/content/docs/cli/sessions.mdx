@@ -7,7 +7,7 @@ List and inspect agent sessions
 
 ## `syn sessions list`
 
-List platform sessions; use execution sessions for the complete run inventory
+List platform sessions. For every session of a run (native transcripts, lineage, gaps, coverage) use `syn execution sessions <execution-id>`
 
 ```bash
 syn sessions list [options]
@@ -17,7 +17,7 @@ syn sessions list [options]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--execution` | `text` | --- | Filter platform sessions by execution ID |
+| `--execution` | `text` | --- | Filter platform sessions by execution ID (complete run inventory: `syn execution sessions &lt;execution-id&gt;`) |
 | `--workflow`, `-w` | `text` | --- | Filter by workflow ID |
 | `--status`, `-s` | `text` | --- | Filter by status |
 | `--limit`, `-n` | `text` | `50` | Max results |

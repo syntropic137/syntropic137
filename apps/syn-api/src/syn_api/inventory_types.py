@@ -15,6 +15,50 @@ from syn_domain.contexts.agent_sessions import (
     TranscriptBodyState,
 )
 
+ReconstructionStatus = Literal["not_started", "pending", "running", "current", "failed"]
+CoverageStateValue = Literal[
+    "unknown", "open", "reconciled", "missing", "unsupported", "conflicting"
+]
+
+
+class SessionInventoryNamespace(BaseModel):
+    """Distinct sessions in one identity namespace (``platform``, ``invocation``,
+    ``transcript:<harness>``). A native transcript id is only meaningful inside
+    its harness namespace; it is never a platform session id."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    namespace: str
+    kind: Literal["platform", "invocation", "transcript"]
+    harness: str | None = None
+    count: int = Field(ge=0)
+
+
+class SessionInventorySummary(BaseModel):
+    """Server-derived counts, completeness and display text every client shows verbatim.
+
+    ``complete`` is the single completeness verdict: the published coverage
+    contract is ``reconciled`` AND that revision is current. Every other
+    coverage state (open, unknown, missing, unsupported, conflicting) or a
+    pending/failed reconstruction is incomplete. Count fields are None when no
+    revision is published, and the namespace split is None on revisions built
+    before it was recorded.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    complete: bool
+    coverage_state: CoverageStateValue
+    coverage_display: str
+    revision: str | None
+    distinct_sessions: int | None = Field(ge=0)
+    platform_sessions: int | None = Field(ge=0)
+    invocations: int | None = Field(ge=0)
+    native_transcripts: int | None = Field(ge=0)
+    gaps: int | None = Field(ge=0)
+    namespaces: tuple[SessionInventoryNamespace, ...] | None
+    counts_display: str
+    remote_replication: Literal["enabled", "disabled"]
+    follow_up_command: str
+
 
 class SessionInventoryResponse(BaseModel):
     """Published inventory and observed reconstruction progress, without read side effects."""
@@ -22,10 +66,11 @@ class SessionInventoryResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     run: RunIdentity
     snapshot: InventorySnapshot | None
-    reconstruction_status: Literal["not_started", "pending", "running", "current", "failed"]
+    reconstruction_status: ReconstructionStatus
     observed_evidence_watermark: int = Field(ge=0)
     later_evidence_pending: bool
     job_id: str | None = None
+    summary: SessionInventorySummary
 
 
 class SessionInventoryPageResponse(BaseModel):
