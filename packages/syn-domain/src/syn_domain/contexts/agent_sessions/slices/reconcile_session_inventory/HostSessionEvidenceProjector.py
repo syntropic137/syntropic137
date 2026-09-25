@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
     InventoryReconciliationSweepEvent,
 )
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
+    SessionInvocationBindingConflictedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
     SessionInvocationRecordedEvent,
 )
@@ -37,7 +40,7 @@ from .execution_settlement import (
     ExecutionTerminalEventType,
     settlement_batch,
 )
-from .invocation_evidence import invocation_evidence
+from .invocation_evidence import binding_conflict_evidence, invocation_evidence
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -93,6 +96,7 @@ class HostSessionEvidenceProjector:
         types = {
             SessionStartedEvent.event_type,
             SessionInvocationRecordedEvent.event_type,
+            SessionInvocationBindingConflictedEvent.event_type,
             *ExecutionTerminalEventType,
         }
         if self._settlements is not None:
@@ -101,17 +105,19 @@ class HostSessionEvidenceProjector:
 
     async def handle(self, envelope: EventEnvelope[DomainEvent]) -> None:
         event_type = envelope.metadata.event_type
-        if event_type == SessionInvocationRecordedEvent.event_type:
-            await self._project_invocation(envelope)
-            return
         if event_type in _TERMINAL_EVENT_TYPES:
             await self._project_terminal(envelope)
             return
-        if event_type == InventoryReconciliationSweepEvent.event_type:
-            await self._record_clock(envelope)
-            return
-        if envelope.metadata.event_type != SessionStartedEvent.event_type:
-            return
+        project = {
+            SessionStartedEvent.event_type: self._project_session,
+            SessionInvocationRecordedEvent.event_type: self._project_invocation,
+            SessionInvocationBindingConflictedEvent.event_type: self._project_binding_conflict,
+            InventoryReconciliationSweepEvent.event_type: self._record_clock,
+        }.get(event_type or "")
+        if project is not None:
+            await project(envelope)
+
+    async def _project_session(self, envelope: EventEnvelope[DomainEvent]) -> None:
         event = SessionStartedEvent.model_validate_json(envelope.event.model_dump_json())
         if not event.execution_id:
             return  # Old unscoped sessions cannot be assigned to a run by guesswork.
@@ -166,15 +172,32 @@ class HostSessionEvidenceProjector:
             )
         )
 
-    async def _project_invocation(self, envelope: EventEnvelope[DomainEvent]) -> None:
-        event = SessionInvocationRecordedEvent.model_validate_json(envelope.event.model_dump_json())
-        reference = EvidenceReference(
+    @staticmethod
+    def _invocation_reference(envelope: EventEnvelope[DomainEvent]) -> EvidenceReference:
+        return EvidenceReference(
             producer_id="syntropic-invocation-events",
             evidence_id=envelope.metadata.event_id,
             source_revision=str(envelope.metadata.aggregate_nonce),
             locator=f"AgentSession-{envelope.metadata.aggregate_id}",
             extractor_version="host-invocation-events/1",
         )
+
+    async def _project_binding_conflict(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        event = SessionInvocationBindingConflictedEvent.model_validate_json(
+            envelope.event.model_dump_json()
+        )
+        reference = self._invocation_reference(envelope)
+        await self._evidence.append(
+            EvidenceBatch(
+                batch_id=envelope.metadata.event_id,
+                producer_id=reference.producer_id,
+                evidence=binding_conflict_evidence(event, self._source, reference),
+            )
+        )
+
+    async def _project_invocation(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        event = SessionInvocationRecordedEvent.model_validate_json(envelope.event.model_dump_json())
+        reference = self._invocation_reference(envelope)
         await self._evidence.append(
             EvidenceBatch(
                 batch_id=envelope.metadata.event_id,

@@ -17,12 +17,22 @@ if TYPE_CHECKING:
     from .SessionLifecycleManager import SessionLifecycleManager
 
 
+class UnregisteredLaunchError(RuntimeError):
+    """A controlled launch was attempted with no durable invocation intent (#1398)."""
+
+    def __init__(self, harness: str) -> None:
+        super().__init__(f"refusing to launch {harness}: no durable invocation intent")
+
+
 @asynccontextmanager
 async def registered_attempt(
     manager: SessionLifecycleManager | None,
     harness: str,
 ) -> AsyncIterator[SessionInvocationState | None]:
     invocation = await manager.prepare_invocation(harness) if manager is not None else None
+    if invocation is None:
+        # Fail closed: a controlled process never launches without durable intent.
+        raise UnregisteredLaunchError(harness)
     try:
         yield invocation
     except asyncio.CancelledError:

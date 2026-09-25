@@ -11,11 +11,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.agent_sessions import SessionInvocationState
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.invocation_attempt import (
+    UnregisteredLaunchError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_agent_attempts import (
+    started_session_manager,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -114,6 +121,11 @@ class TestAgentRunnerSelection:
             claude_cmd=["agent"],
             delivers_repo_changes=True,
         )
+        processor._runtimes.of("exec-1").begin(
+            "p-1",
+            session_manager=await started_session_manager(execution_id="exec-1", phase_id="p-1"),
+            started_at=datetime.now(UTC),
+        )
         phase = ExecutablePhase(
             phase_id="p-1",
             name="Phase 1",
@@ -176,7 +188,11 @@ class TestAgentRunnerSelection:
 
         session_mgr = MagicMock()
         session_mgr.mark_launched = AsyncMock()
-        session_mgr.prepare_invocation = AsyncMock(return_value=None)
+        session_mgr.prepare_invocation = AsyncMock(
+            return_value=SessionInvocationState(
+                invocation_id="invocation", attempt_id="attempt", harness="claude"
+            )
+        )
         session_mgr.finish_invocation = AsyncMock()
         processor._runtimes.of("exec-1").begin(
             "p-1", session_manager=session_mgr, started_at=datetime.now(UTC)
@@ -209,9 +225,9 @@ class TestAgentRunnerSelection:
         assert handler.handle.await_args.kwargs["on_launch"] is session_mgr.mark_launched
 
     @pytest.mark.anyio
-    async def test_handle_run_agent_tolerates_missing_session_manager(self) -> None:
-        """No session manager registered for the phase (session tracking
-        disabled, repo=None) must not block agent dispatch.
+    async def test_handle_run_agent_refuses_dispatch_without_session_manager(self) -> None:
+        """No session manager for the phase means no durable invocation intent,
+        so the agent is never dispatched (#1398): fail closed, not open.
         """
         from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
             TodoAction,
@@ -244,7 +260,7 @@ class TestAgentRunnerSelection:
             prompt_template="do it",
         )
 
-        with pytest.raises(RuntimeError, match="stop after dispatch"):
+        with pytest.raises(UnregisteredLaunchError):
             await processor._handle_run_agent(
                 TodoItem(
                     execution_id="exec-1",
@@ -256,6 +272,7 @@ class TestAgentRunnerSelection:
                 MagicMock(workflow_id="wf-1"),
                 _DispatchContext(),
             )
+        handler.handle.assert_not_awaited()
 
 
 @pytest.mark.unit

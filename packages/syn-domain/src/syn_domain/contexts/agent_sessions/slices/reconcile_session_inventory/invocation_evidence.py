@@ -1,5 +1,8 @@
 """Normalize host invocation facts without interpreting harness wire formats."""
 
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
+    SessionInvocationBindingConflictedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
     SessionInvocationRecordedEvent,
 )
@@ -71,4 +74,33 @@ def invocation_evidence(
         )
         if event.status == "registered"
         else None,
+    )
+
+
+def binding_conflict_evidence(
+    event: SessionInvocationBindingConflictedEvent, source: str, reference: EvidenceReference
+) -> SessionEvidence:
+    """The rejected claim as a host-registered binding, so the resolver sees both.
+
+    Two registered bindings for one invocation are exactly what the resolver
+    reports as ``conflicting_native_binding``; coverage becomes conflicting.
+    The aggregate never rebinds, and nothing here chooses a winner.
+    """
+    return SessionEvidence(
+        run=RunIdentity(source_instance_id=source, execution_id=event.execution_id),
+        bindings=(
+            IdentityBindingEvidence(
+                owner=InventoryNodeRef(
+                    kind="invocation", source_instance_id=source, local_id=event.invocation_id
+                ),
+                transcript=InventoryNodeRef(
+                    kind="transcript",
+                    source_instance_id=source,
+                    local_id=event.conflicting_native_session_id,
+                    harness=event.harness,
+                ),
+                confidence=EvidenceClass.REGISTERED,
+                evidence=reference,
+            ),
+        ),
     )

@@ -129,3 +129,76 @@ async def test_host_lifecycle_uses_separate_replay_stable_producer_without_inven
     writer.append.reset_mock()
     await projector.handle(envelope)
     assert [call.args[0] for call in writer.append.await_args_list] == [first, lifecycle]
+
+
+async def test_conflicting_rebind_is_visible_evidence_and_makes_coverage_conflicting() -> None:
+    """The aggregate's rejected claim reaches the resolver; nothing is rebound."""
+    from syn_domain.contexts.agent_sessions import (
+        AgentSessionAggregate,
+        InvocationStatus,
+        RecordSessionInvocationCommand,
+        SessionInvocationState,
+        StartSessionCommand,
+    )
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+        CoverageState,
+        EvidenceClass,
+        RunIdentity,
+    )
+    from syn_domain.contexts.agent_sessions.domain.services.evidence_assembly import (
+        assemble_evidence,
+    )
+    from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
+    from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
+        resolve_relationships,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
+        StoredEvidenceBatch,
+    )
+
+    aggregate = AgentSessionAggregate()
+    aggregate.start_session(
+        StartSessionCommand(
+            aggregate_id="platform",
+            workflow_id="definition",
+            execution_id="run",
+            phase_id="phase",
+            agent_provider="claude",
+        )
+    )
+    intent = SessionInvocationState(invocation_id="inv", attempt_id="att", harness="claude")
+    bound = intent.model_copy(
+        update={"status": InvocationStatus.LAUNCHED, "native_session_id": "first"}
+    )
+    for state in (intent, bound, bound.model_copy(update={"native_session_id": "second"})):
+        aggregate.record_invocation(
+            RecordSessionInvocationCommand(aggregate_id="platform", invocation=state)
+        )
+    journal = AsyncMock()
+    projector = HostSessionEvidenceProjector(journal, "installation")
+    for nonce, item in enumerate(aggregate.get_uncommitted_events(), start=1):
+        await projector.handle(
+            EventEnvelope(
+                event=item.event,
+                metadata=EventMetadata(
+                    event_id=f"event-{nonce}",
+                    aggregate_id="platform",
+                    aggregate_type="AgentSession",
+                    aggregate_nonce=nonce,
+                    global_nonce=nonce,
+                    event_type=type(item.event).event_type,
+                ),
+            )
+        )
+    batches = [call.args[0] for call in journal.append.await_args_list]
+    result = resolve_relationships(
+        assemble_evidence(
+            RunIdentity(source_instance_id="installation", execution_id="run"),
+            [StoredEvidenceBatch(sequence=i, batch=b) for i, b in enumerate(batches, start=1)],
+        )
+    )
+    assert {b.transcript.local_id for b in result.bindings} == {"first", "second"}
+    assert {b.confidence for b in result.bindings} == {EvidenceClass.CONFLICTING}
+    assert GapReason.CONFLICTING_BINDING in {gap.reason for gap in result.gaps}
+    assert result.coverage.state is CoverageState.CONFLICTING
+    assert aggregate.invocations[0].native_session_id == "first"

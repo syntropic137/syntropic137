@@ -27,6 +27,29 @@ class SessionInvocationState(InventoryModel):
     native_session_id: Identifier | None = None
 
 
+def conflicting_native_id(
+    previous: SessionInvocationState | None, successor: SessionInvocationState
+) -> Identifier | None:
+    """The successor's native ID when it contradicts an existing binding, else None.
+
+    A contradicting claim is evidence, not a transition: the caller records it
+    and keeps the first binding. Absence of an ID is never a contradiction.
+    """
+    if previous is None or previous.native_session_id is None:
+        return None
+    claimed = successor.native_session_id
+    return claimed if claimed is not None and claimed != previous.native_session_id else None
+
+
+def keep_binding(
+    previous: SessionInvocationState | None, successor: SessionInvocationState
+) -> SessionInvocationState:
+    """The successor with any existing native binding kept (never rebound or dropped)."""
+    if previous is None or previous.native_session_id is None:
+        return successor
+    return successor.model_copy(update={"native_session_id": previous.native_session_id})
+
+
 def validate_invocation_transition(
     previous: SessionInvocationState | None, successor: SessionInvocationState
 ) -> None:
@@ -64,6 +87,7 @@ def _validate_identity(previous: SessionInvocationState, successor: SessionInvoc
         previous.native_session_id is not None
         and previous.native_session_id != successor.native_session_id
     ):
+        # Callers split a contradicting claim off first (conflicting_native_id).
         raise ValueError("invocation native identity cannot be rebound")
 
 

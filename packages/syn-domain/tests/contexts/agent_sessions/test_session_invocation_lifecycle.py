@@ -12,6 +12,9 @@ from syn_domain.contexts.agent_sessions import (
     SessionInvocationState,
     StartSessionCommand,
 )
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
+    SessionInvocationBindingConflictedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
@@ -39,7 +42,7 @@ def _record(aggregate: AgentSessionAggregate, state: SessionInvocationState) -> 
     )
 
 
-def test_replayed_invocation_rejects_conflicting_binding_and_preserves_billing_identity() -> None:
+def test_replayed_invocation_records_conflicting_binding_and_preserves_billing_identity() -> None:
     aggregate = _aggregate()
     intent = SessionInvocationState(
         invocation_id="invocation", attempt_id="attempt", harness="claude"
@@ -55,8 +58,23 @@ def test_replayed_invocation_rejects_conflicting_binding_and_preserves_billing_i
     assert restored.invocations == (bound,)
     _record(restored, bound)
     assert restored.get_uncommitted_events() == []
-    with pytest.raises(ValueError, match="native identity"):
-        _record(restored, bound.model_copy(update={"native_session_id": "another"}))
+    # A contradicting bind is recorded as evidence; the first binding stands.
+    _record(restored, bound.model_copy(update={"native_session_id": "another"}))
+    (conflict,) = restored.get_uncommitted_events()
+    assert isinstance(conflict.event, SessionInvocationBindingConflictedEvent)
+    assert (
+        conflict.event.bound_native_session_id,
+        conflict.event.conflicting_native_session_id,
+    ) == ("opaque/native", "another")
+    assert restored.invocations == (bound,)
+    # The same contradiction again, even after replay, adds nothing.
+    _record(restored, bound.model_copy(update={"native_session_id": "another"}))
+    assert len(restored.get_uncommitted_events()) == 1
+    replayed = AgentSessionAggregate()
+    replayed.rehydrate([*aggregate.get_uncommitted_events(), conflict])
+    _record(replayed, bound.model_copy(update={"native_session_id": "another"}))
+    assert replayed.get_uncommitted_events() == []
+    assert replayed.invocations == (bound,)
     with pytest.raises(ValueError, match="attempt or harness"):
         _record(restored, bound.model_copy(update={"harness": "codex"}))
     assert restored.tokens.total_tokens == 0
@@ -186,3 +204,47 @@ def test_observed_launch_cannot_be_reclassified_as_launch_failure() -> None:
     _record(aggregate, intent.model_copy(update={"status": InvocationStatus.LAUNCHED}))
     with pytest.raises(ValueError, match="observed launch"):
         _record(aggregate, intent.model_copy(update={"status": InvocationStatus.LAUNCH_FAILED}))
+
+
+def test_conflicting_bind_with_a_terminal_outcome_keeps_first_binding_and_advances() -> None:
+    aggregate = _aggregate()
+    intent = SessionInvocationState(
+        invocation_id="invocation", attempt_id="attempt", harness="codex"
+    )
+    _record(aggregate, intent)
+    launched = intent.model_copy(
+        update={"status": InvocationStatus.LAUNCHED, "native_session_id": "first"}
+    )
+    _record(aggregate, launched)
+    _record(
+        aggregate,
+        launched.model_copy(
+            update={"status": InvocationStatus.COMPLETED, "native_session_id": "second"}
+        ),
+    )
+    (state,) = aggregate.invocations
+    assert (state.status, state.native_session_id) == (InvocationStatus.COMPLETED, "first")
+    names = [type(item.event).__name__ for item in aggregate.get_uncommitted_events()]
+    assert names[-2:] == [
+        "SessionInvocationBindingConflictedEvent",
+        "SessionInvocationRecordedEvent",
+    ]
+    # A status update that carries no identity never unbinds.
+    _record(aggregate, state.model_copy(update={"native_session_id": None}))
+    assert aggregate.invocations == (state,)
+
+
+def test_duplicate_register_bind_and_finish_are_idempotent() -> None:
+    aggregate = _aggregate()
+    intent = SessionInvocationState(
+        invocation_id="invocation", attempt_id="attempt", harness="claude"
+    )
+    launched = intent.model_copy(update={"status": InvocationStatus.LAUNCHED})
+    bound = launched.model_copy(update={"native_session_id": "native"})
+    finished = bound.model_copy(update={"status": InvocationStatus.COMPLETED})
+    counts = []
+    for state in (intent, intent, launched, launched, bound, bound, finished, finished):
+        _record(aggregate, state)
+        counts.append(len(aggregate.get_uncommitted_events()))
+    # Session start + one event per distinct transition; every repeat adds nothing.
+    assert counts == [2, 2, 3, 3, 4, 4, 5, 5]

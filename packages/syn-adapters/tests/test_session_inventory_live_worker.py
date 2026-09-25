@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
@@ -23,6 +24,8 @@ from event_sourcing import (
     PostgresCheckpointStore,
     RepositoryFactory,
 )
+from event_sourcing.core.errors import StreamAlreadyExistsError
+from fastapi import FastAPI
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
 from testcontainers.core.wait_strategies import PortWaitStrategy
@@ -34,8 +37,11 @@ from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscripti
 from syn_domain.contexts.agent_sessions import (
     AgentSessionAggregate,
     EvidenceBatch,
+    InventorySnapshot,
     InvocationStatus,
+    RecordSessionInvocationCommand,
     RunIdentity,
+    SessionInvocationState,
 )
 from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import ReconciliationStage
 from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
@@ -45,8 +51,13 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     EvidenceReference,
+    IdentityBinding,
+    InventoryGap,
     InventoryNodeRef,
     Membership,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+    WorkflowCompletedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
@@ -61,7 +72,7 @@ from syn_shared.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from syn_adapters.session_inventory.database import Pool
 
@@ -307,3 +318,287 @@ async def test_live_clock_recovers_pending_inventory_after_full_runtime_restart(
         await coordinator.stop()
         await client.disconnect()
         await pool.close()
+
+
+# ---------------------------------------------------------------------------
+# Acceptance row 4 (#1398): invocation intent across a crash before binding.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Live:
+    pool: asyncpg.Pool
+    client: GrpcEventStoreClient
+    settings: SessionInventorySettings
+    runtime: InventoryRuntime
+    coordinator: CoordinatorSubscriptionService
+
+    @classmethod
+    async def start(cls, stack: InventoryStack, tmp_path: Path) -> _Live:
+        pool = await asyncpg.create_pool(stack.database_url, min_size=1, max_size=5)
+        assert pool is not None
+        client = GrpcEventStoreClient(stack.event_store_address)
+        await client.connect()
+        settings = SessionInventorySettings(
+            _env_file=None,
+            archive_dir=tmp_path,
+            sweep_interval_seconds=1,
+            retry_seconds=1,
+            settlement_grace_seconds=0,
+        )
+        live = cls(pool, client, settings, None, None)  # type: ignore[arg-type]
+        await live._boot()
+        return live
+
+    async def _boot(self) -> None:
+        self.runtime = await create_inventory_runtime(
+            cast("Pool", self.pool), self.client, self.settings
+        )
+        self.coordinator = CoordinatorSubscriptionService(
+            event_store=self.client,
+            projections=[self.runtime.processor],
+            checkpoint_store=PostgresCheckpointStore(self.pool),  # type: ignore[arg-type]
+        )
+        await self.coordinator.start()
+        await self.runtime.clock.start()
+
+    async def stop(self) -> None:
+        await self.runtime.clock.stop()
+        await self.coordinator.stop()
+
+    async def restart(self) -> None:
+        """Drop every in-memory inventory/coordinator object; only durable stores remain."""
+        await self.stop()
+        await self.pool.expire_connections()
+        await self._boot()
+
+    async def close(self) -> None:
+        await self.stop()
+        await self.client.disconnect()
+        await self.pool.close()
+
+    def sessions(self) -> RepositoryAdapter[AgentSessionAggregate]:
+        return RepositoryAdapter(
+            RepositoryFactory(self.client).create_repository(
+                AgentSessionAggregate,
+                aggregate_type="AgentSession",  # type: ignore[arg-type]
+            )
+        )
+
+    def manager(self, run: RunIdentity, session_id: str, harness: str) -> SessionLifecycleManager:
+        return SessionLifecycleManager(
+            repository=self.sessions(),
+            session_id=session_id,
+            workflow_id="definition",
+            execution_id=run.execution_id,
+            phase_id="phase",
+            agent_provider=harness,
+            agent_model=None,
+        )
+
+    async def wait_for(
+        self, run: RunIdentity, ready: Callable[[InventorySnapshot], bool]
+    ) -> InventorySnapshot:
+        head = None
+        try:
+            async with asyncio.timeout(30):
+                while True:
+                    head = await self.runtime.inventory.head(run)
+                    job = await self.runtime.jobs.latest(run)
+                    current = await self.runtime.evidence.watermark(run)
+                    if (
+                        head is not None
+                        and head.evidence_watermark == current
+                        and job is not None
+                        and job.state.stage is ReconciliationStage.COMPLETED
+                        and ready(head)
+                    ):
+                        return head
+                    await asyncio.sleep(0.05)
+        except TimeoutError:
+            raise AssertionError(f"inventory never became ready: head={head!r}") from None
+
+    async def items(self, run: RunIdentity, head: InventorySnapshot, kind: str) -> list[object]:
+        page = await self.runtime.inventory.page(run, head.snapshot_id, kind, limit=500)  # type: ignore[arg-type]
+        return list(page.items)
+
+
+def _invocation_key(run: RunIdentity, invocation_id: str) -> str:
+    return InventoryNodeRef(
+        kind="invocation", source_instance_id=run.source_instance_id, local_id=invocation_id
+    ).key
+
+
+async def _record(
+    repository: RepositoryAdapter[AgentSessionAggregate],
+    session_id: str,
+    *states: SessionInvocationState,
+) -> int:
+    """Apply states on the aggregate reloaded from the event store; return events saved."""
+    aggregate = await repository.get_by_id(session_id)
+    assert aggregate is not None
+    for state in states:
+        aggregate.record_invocation(
+            RecordSessionInvocationCommand(aggregate_id=session_id, invocation=state)
+        )
+    saved = len(aggregate.get_uncommitted_events())
+    if saved:
+        await repository.save(aggregate)
+    return saved
+
+
+async def test_intent_survives_crash_before_bind_then_late_bind_duplicates_and_conflict(
+    inventory_stack: InventoryStack,
+    tmp_path: Path,
+) -> None:
+    live = await _Live.start(inventory_stack, tmp_path)
+    run = RunIdentity(source_instance_id=live.runtime.source_instance_id, execution_id="crash-run")
+    try:
+        # Intent is durable before launch; the host process then dies before any
+        # launch, bind or finish is recorded.
+        crashed = live.manager(run, "crashed-session", "codex")
+        await crashed.start()
+        intent = await crashed.prepare_invocation("codex")
+        assert intent is not None
+        del crashed
+        await live.restart()
+
+        key = _invocation_key(run, intent.invocation_id)
+        head = await live.wait_for(run, lambda h: h.counts.node >= 1)
+        gaps = cast("list[InventoryGap]", await live.items(run, head, "gap"))
+        assert head.coverage.state == "open"
+        assert key in head.coverage.missing_keys
+        assert any(g.reason == "expected_body_unavailable" and key in g.node_keys for g in gaps)
+        assert head.counts.binding == 0, "no native ID is fabricated for an unbound intent"
+        members = cast("list[Membership]", await live.items(run, head, "membership"))
+        assert any(
+            m.node.key == key and m.attempt_id == intent.attempt_id and m.confidence == "registered"
+            for m in members
+        )
+        repository = live.sessions()
+        restored = await repository.get_by_id("crashed-session")
+        assert restored is not None
+        assert restored.invocations == (intent,)
+        # A redelivered registration after the restart is a no-op.
+        assert await _record(repository, "crashed-session", intent) == 0
+
+        # The bind arrives late, after the restart, and resolves to that intent.
+        launched = intent.model_copy(update={"status": InvocationStatus.LAUNCHED})
+        finished = launched.model_copy(
+            update={"status": InvocationStatus.COMPLETED, "native_session_id": "late-native"}
+        )
+        assert await _record(repository, "crashed-session", launched, finished) == 2
+        head = await live.wait_for(run, lambda h: h.counts.binding == 1)
+        (binding,) = cast("list[IdentityBinding]", await live.items(run, head, "binding"))
+        assert (binding.owner.key, binding.transcript.local_id) == (key, "late-native")
+        assert binding.confidence == "registered"
+        bound_revision = head.revision
+
+        # Duplicate start is refused by the event store; nothing new is appended.
+        with pytest.raises(StreamAlreadyExistsError):
+            await live.manager(run, "crashed-session", "codex").start()
+        # A redelivered bind+finish (same terminal state) is a no-op.
+        assert await _record(repository, "crashed-session", finished, finished) == 0
+        watermark = await live.runtime.evidence.watermark(run)
+        await asyncio.sleep(2)  # Two live clock sweeps: nothing new to reconcile.
+        assert await live.runtime.evidence.watermark(run) == watermark
+        assert (await live.wait_for(run, lambda _: True)).revision == bound_revision
+
+        # A contradicting bind is recorded, never applied: coverage turns conflicting.
+        other = finished.model_copy(update={"native_session_id": "other-native"})
+        assert await _record(repository, "crashed-session", other) == 1
+        assert await _record(repository, "crashed-session", other) == 0
+        head = await live.wait_for(run, lambda h: h.coverage.state == "conflicting")
+        gaps = cast("list[InventoryGap]", await live.items(run, head, "gap"))
+        assert any(g.reason == "conflicting_native_binding" and key in g.node_keys for g in gaps)
+        natives = {
+            b.transcript.local_id
+            for b in cast("list[IdentityBinding]", await live.items(run, head, "binding"))
+        }
+        assert natives == {"late-native", "other-native"}
+        final = await repository.get_by_id("crashed-session")
+        assert final is not None
+        assert final.invocations[0].native_session_id == "late-native"
+    finally:
+        await live.close()
+
+
+async def test_failed_launch_stays_distinct_from_launched_but_uncaptured_in_api(
+    inventory_stack: InventoryStack,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from syn_api.routes.executions import inventory as inventory_routes
+
+    live = await _Live.start(inventory_stack, tmp_path)
+    run = RunIdentity(
+        source_instance_id=live.runtime.source_instance_id, execution_id="outcome-run"
+    )
+    try:
+        never = live.manager(run, "never-launched", "claude")
+        await never.start()
+        failed_launch = await never.prepare_invocation("claude")
+        await never.finish_invocation(native_session_id=None, status=InvocationStatus.LAUNCH_FAILED)
+        lost = live.manager(run, "launched-uncaptured", "codex")
+        await lost.start()
+        uncaptured = await lost.prepare_invocation("codex")
+        await lost.mark_launched()
+        await lost.finish_invocation(native_session_id=None, status=InvocationStatus.FAILED)
+        assert failed_launch is not None and uncaptured is not None
+        await live.client.append_events(
+            "WorkflowExecution-outcome-run",
+            [
+                EventEnvelope(
+                    event=WorkflowCompletedEvent(
+                        workflow_id="definition",
+                        execution_id=run.execution_id,
+                        completed_at=datetime.now(UTC),
+                        total_phases=1,
+                        completed_phases=0,
+                        total_input_tokens=0,
+                        total_output_tokens=0,
+                        total_tokens=0,
+                        total_duration_seconds=1.0,
+                        artifact_ids=[],
+                    ),
+                    metadata=EventMetadata(
+                        aggregate_id="outcome-run",
+                        aggregate_type="WorkflowExecution",
+                        aggregate_nonce=1,
+                        event_type=WorkflowCompletedEvent.event_type,
+                    ),
+                )
+            ],
+            expected_version=0,
+        )
+        # Zero grace: the live clock releases the deadline on its next sweep.
+        await live.wait_for(run, lambda h: h.coverage.state == "missing")
+
+        monkeypatch.setattr(inventory_routes, "get_inventory_runtime", lambda: live.runtime)
+        monkeypatch.setattr(inventory_routes, "_visible_run", AsyncMock(return_value=run))
+        app = FastAPI()
+        app.include_router(inventory_routes.router)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://api") as http:
+            body = (await http.get("/executions/outcome-run/session-inventory")).json()
+            assert body["reconstruction_status"] == "current"
+            snapshot = body["snapshot"]
+            assert snapshot["coverage"]["state"] == "missing"
+            page = await http.get(
+                f"/executions/outcome-run/session-inventory/{snapshot['snapshot_id']}/gap"
+            )
+            assert page.status_code == 200
+        by_reason: dict[str, set[str]] = {}
+        for gap in page.json()["items"]:
+            by_reason.setdefault(gap["reason"], set()).update(gap["node_keys"])
+        never_key = _invocation_key(run, failed_launch.invocation_id)
+        lost_key = _invocation_key(run, uncaptured.invocation_id)
+        assert by_reason["invocation_launch_failed"] == {never_key}
+        assert by_reason["invocation_failed"] == {lost_key}
+        # Only the process that ran owes a transcript it never delivered.
+        assert by_reason["capture_unsettled_at_seal"] == {lost_key}
+        assert never_key not in by_reason.get("invocation_unsettled_at_seal", set())
+        assert lost_key not in by_reason["invocation_launch_failed"]
+    finally:
+        await live.close()

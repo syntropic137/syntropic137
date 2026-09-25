@@ -44,12 +44,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.invocation_attempt import (
+    UnregisteredLaunchError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import PhaseLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
 from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
+from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentProvider, AgentRunner
 from syn_shared.env_constants import ENV_AGENTIC_ATTEMPT_ID, ENV_AGENTIC_INVOCATION_ID
 
@@ -192,6 +196,36 @@ def _launch() -> PhaseLaunch:
     )
 
 
+# Controlled launches refuse to run without durable intent (#1398). Shared by
+# the other dispatch tests in this slice.
+async def started_session_manager(
+    *,
+    session_id: str = "sess-1",
+    execution_id: str = "exec-1",
+    phase_id: str = "verify",
+    provider: str = "claude",
+    repository: FakeSessionRepository | None = None,
+) -> SessionLifecycleManager:
+    manager = SessionLifecycleManager(
+        repository=repository or FakeSessionRepository(),
+        session_id=session_id,
+        workflow_id="definition",
+        execution_id=execution_id,
+        phase_id=phase_id,
+        agent_provider=provider,
+        agent_model=None,
+    )
+    await manager.start()
+    return manager
+
+
+async def _registered(launch: PhaseLaunch) -> PhaseLaunch:
+    """Controlled launches need durable intent (#1398); supply it when a test has none."""
+    if launch.session_manager is not None:
+        return launch
+    return replace(launch, session_manager=await started_session_manager())
+
+
 async def _run(
     handler: _RecordingHandler,
     *,
@@ -208,7 +242,7 @@ async def _run(
             session_id="sess-1",
         ),
         phase=phase or _phase(),
-        launch=launch or _launch(),
+        launch=await _registered(launch or _launch()),
         session_id="sess-1",
         observability=None,
         retry_policy=retry_policy,
@@ -880,7 +914,8 @@ async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: st
     assert original_env[ENV_AGENTIC_ATTEMPT_ID] == "stale-attempt"
 
 
-async def test_unregistered_dispatch_cannot_inherit_invocation_identity() -> None:
+async def test_unregistered_dispatch_is_refused_and_cannot_inherit_invocation_identity() -> None:
+    """No durable intent, no launch (#1398): stale inherited IDs never reach a process."""
     handler = _RecordingHandler(scripted=FakeAgentExecutionHandler.success())
     launch = replace(
         _launch(),
@@ -890,8 +925,26 @@ async def test_unregistered_dispatch_cannot_inherit_invocation_identity() -> Non
             ENV_AGENTIC_ATTEMPT_ID: "stale-attempt",
         },
     )
+    with pytest.raises(UnregisteredLaunchError):
+        await run_phase_agent(
+            handler=handler,
+            todo=TodoItem(
+                action=TodoAction.RUN_AGENT,
+                execution_id="exec-1",
+                phase_id="verify",
+                session_id="sess-1",
+            ),
+            phase=_phase(),
+            launch=launch,
+            session_id="sess-1",
+            observability=None,
+            retry_policy=NO_WAITING,
+        )
+    assert handler.attempts == []
     await _run(handler, launch=launch)
-    assert handler.attempts[0].agent_env == {"SYN_PHASE": "verify"}
+    env = handler.attempts[0].agent_env
+    assert env[ENV_AGENTIC_INVOCATION_ID] != "stale-invocation"
+    assert env[ENV_AGENTIC_ATTEMPT_ID] != "stale-attempt"
 
 
 async def test_failed_registration_prevents_handler_dispatch() -> None:
