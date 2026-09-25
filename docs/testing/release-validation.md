@@ -638,6 +638,7 @@ syn health
 ```
 
 - [ ] API connectivity confirmed
+- [ ] First line reports the running `syn-api` release; image tag and commit appear when the image was stamped
 - [ ] No version mismatch warnings
 
 ### Verify CLI version matches selfhost stack
@@ -696,11 +697,12 @@ syn health
 curl -s http://localhost:<port>/api/v1/health | jq .
 ```
 
-> **Neither of these reports webhook or polling state.** Measured 2026-08-27:
-> `syn health` prints only event-store and subscription lines, and
-> `/api/v1/health` returns exactly `{status, mode, subscription, codex_auth}`.
-> There is no webhook field to read. Use `/health` (no `/api/v1`) and you get the
-> SPA's HTML 200, which looks like a passing check and is not one.
+> **Neither of these reports webhook or polling state.** Verified 2026-09-23:
+> `syn health` prints build identity, status, and read-path details.
+> `/api/v1/health` returns `status`, `mode`, and `build`, plus optional
+> `degraded_reasons`, `subscription`, `codex_auth`, and `warnings` blocks. There
+> is no webhook field to read. Use `/health` (no `/api/v1`) and you get the SPA's
+> HTML 200, which looks like a passing check and is not one.
 >
 > Until a webhook-status field exists, determine the mode from the API logs
 > instead - the poller announces itself at startup:
@@ -3408,7 +3410,7 @@ report ever generated from it.
 **Validated by:** <name or agent>
 **Stack environment:** selfhost (`syntropic137_selfhost`)
 **Webhook mode:** polling-only / webhook active
-**Runbook:** [docs/testing/release-validation.md](../release-validation.md)
+**Runbook:** [docs/testing/release-validation.md](release-validation.md)
 
 ## What Passed
 
@@ -3692,12 +3694,18 @@ grep 'image:.*syn-api\|image:.*syn-gateway' ~/.syntropic137/docker-compose.syntr
 #    After:  image: syntropic137_development-gateway:latest
 ```
 
-Then recreate only the affected containers:
+Then recreate only the affected containers. Check first -- restarting `api`
+orphans every running execution, discarding its work and leaving any pull
+request it already opened open and unverified (#1179):
 
 ```bash
+python3 predeploy_check.py   # infra/scripts/, copy to the host; needs only python3
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps api
 docker compose -f ~/.syntropic137/docker-compose.syntropic137.yaml up -d --no-deps gateway
 ```
+
+- [ ] `predeploy_check.py` exited 0 before the restart (exit 2 means it could
+      not tell, which is not an all-clear), or `--force` was a deliberate choice
 
 Verify the containers restarted with the local images:
 

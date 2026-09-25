@@ -120,6 +120,7 @@ const showCommand: CommandDef = {
       table.addColumn("#", { align: "right", style: DIM });
       table.addColumn("Name");
       table.addColumn("Status");
+      table.addColumn("Model");
       table.addColumn("Started");
       table.addColumn("Tokens", { align: "right" });
       table.addColumn("Cost", { align: "right" });
@@ -130,6 +131,8 @@ const showCommand: CommandDef = {
           String(i + 1),
           ph.name,
           formatStatus(ph.status),
+          // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
+          ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),
           formatCostWithCoverage(ph.cost_usd, ph.unpriced_observation_count),

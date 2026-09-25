@@ -23,6 +23,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseExecutionType,
     require_supported_execution_type,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    TASK_INPUT_KEY,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
@@ -420,7 +423,7 @@ class ExecuteWorkflowHandler:
             if decl.default is not None and decl.name not in merged:
                 merged[decl.name] = str(decl.default)
         if command.task is not None:
-            merged["task"] = command.task
+            merged[TASK_INPUT_KEY] = command.task
         return merged
 
     @staticmethod

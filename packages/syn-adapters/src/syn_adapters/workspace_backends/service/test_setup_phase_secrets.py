@@ -94,8 +94,12 @@ class TestBuildSetupScript:
         )
         script = secrets.build_setup_script()
         assert "x-access-token:tok-abc@github.com/org/repo-a" in script
-        assert "~/.git-credentials" in script
-        assert "chmod 600 ~/.git-credentials" in script
+        # Written to a staged file at 0600 and renamed onto the destination,
+        # never written into the destination itself (#1396). What that is worth
+        # is asserted against real bash in test_1393_the_credential_is_replaced_
+        # atomically.py; here it is only that the entry and the destination
+        # still appear.
+        assert 'mv -f -- "$syn_staged_secret" ~/.git-credentials' in script
 
     def test_multi_repo_has_multiple_clone_lines(self) -> None:
         """Multiple repos produce one clone line per repo."""

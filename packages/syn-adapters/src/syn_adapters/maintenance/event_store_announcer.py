@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
+from uuid import uuid4
 
 from event_sourcing import EventEnvelope, EventMetadata, ExpectedVersion
 
@@ -21,22 +22,16 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts._shared.maintenance import MaintenanceMode
 
-#: One stream for the whole system, not one per deploy. The announcements are
-#: a small ordered log of "admission is open", and consumers care only about
-#: the latest one arriving - there is no aggregate here to version.
-_STREAM: Final[str] = "Maintenance-admission"
-
-_AGGREGATE_ID: Final[str] = "admission"
 _AGGREGATE_TYPE: Final[str] = "Maintenance"
 
 
 class EventStoreAdmissionAnnouncer:
     """Writes :class:`AdmissionOpenEvent` to the event store.
 
-    Satisfies ``syn_domain.contexts._shared.AdmissionAnnouncer``. Appends with
-    ``ExpectedVersion.ANY``: two API replicas announcing at once is not a
-    conflict to resolve, it is two true statements, and refusing one of them
-    would be the failure this exists to prevent.
+    Satisfies ``syn_domain.contexts._shared.AdmissionAnnouncer``. Each
+    announcement gets its own one-event stream. The store requires a positive,
+    sequential aggregate nonce, and its client maps ``ANY`` to ``NO_STREAM``
+    on the wire. Distinct streams let concurrent true announcements land.
     """
 
     def __init__(self, event_store: EventStoreClient) -> None:
@@ -45,6 +40,7 @@ class EventStoreAdmissionAnnouncer:
     async def announce_open(self, mode: MaintenanceMode, *, after_restart: bool) -> None:
         """Append the announcement. Durable before it returns."""
         announced_at = datetime.now(UTC)
+        aggregate_id = uuid4().hex
         envelope: EventEnvelope[DomainEvent] = EventEnvelope(
             event=AdmissionOpenEvent(
                 announced_at=announced_at,
@@ -54,14 +50,14 @@ class EventStoreAdmissionAnnouncer:
             ),
             metadata=EventMetadata(
                 event_type=AdmissionOpenEvent.event_type,
-                aggregate_id=_AGGREGATE_ID,
+                aggregate_id=aggregate_id,
                 aggregate_type=_AGGREGATE_TYPE,
-                aggregate_nonce=0,
+                aggregate_nonce=1,
                 timestamp=announced_at,
             ),
         )
         await self._event_store.append_events(
-            stream_name=_STREAM,
+            stream_name=f"{_AGGREGATE_TYPE}-{aggregate_id}",
             events=[envelope],
-            expected_version=ExpectedVersion.ANY,
+            expected_version=ExpectedVersion.NO_STREAM,
         )

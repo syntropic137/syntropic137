@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from syn_adapters.session_inventory.runtime import _InventoryWork
+from syn_adapters.session_inventory.runtime import InventoryWork
 from syn_shared.settings.session_inventory import SessionInventorySettings
 
 pytestmark = pytest.mark.unit
@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 async def test_expiry_failure_does_not_block_inventory_work():
     retention, recovery, scheduler = AsyncMock(), AsyncMock(), AsyncMock()
     retention.step.side_effect = OSError("storage unavailable")
-    work = _InventoryWork(
+    work = InventoryWork(
         scheduler=scheduler, step=AsyncMock(), recovery=recovery, retention=retention
     )
     await work.schedule()

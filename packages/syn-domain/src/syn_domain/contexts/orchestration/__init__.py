@@ -39,8 +39,10 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PHASE_ID_PATTERN,
     RESERVED_INPUT_NAMES,
     WorkflowDefinition,
+    is_phase_id,
     validate_workflow_yaml,
 )
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
@@ -114,6 +116,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
     AttemptClock,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    CredentialRenewalFailedError,
     DuplicateExecutionError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
@@ -163,6 +166,7 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
@@ -188,6 +192,7 @@ __all__ = [
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    "CredentialRenewalFailedError",
     # Errors
     "DuplicateExecutionError",
     # Value objects - execution
@@ -248,6 +253,7 @@ __all__ = [
     "WorkspaceAggregate",
     "announce_as",
     "build_command_from_definition",
+    "is_phase_id",
     "mint_wrapper_name",
     "render_workspace_prompt",
     "require_supported_execution_type",

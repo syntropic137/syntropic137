@@ -101,6 +101,7 @@ _PHASE_IDENTITY_FIELDS: Final = ("workflow_id", "phase_id")
 _PHASE_UPDATE_FIELDS: Final = (
     "prompt_template",
     "model",
+    "model_defaulted",
     "provider",
     "timeout_seconds",
     "allowed_tools",
@@ -538,6 +539,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             phase_id=command.phase_id,
             prompt_template=command.prompt_template,
             model=command.model,
+            model_defaulted=command.model_defaulted,
             provider=command.provider,
             timeout_seconds=command.timeout_seconds,
             allowed_tools=command.allowed_tools,

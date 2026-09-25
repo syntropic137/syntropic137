@@ -16,6 +16,7 @@ semantics) — no runtime coupling to the library.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -44,6 +45,42 @@ from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDE
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
+
+#: The one grammar for a phase id, in the spelling Pydantic's `pattern=` takes.
+#:
+#: A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from a phase are
+#: injected into the next phase's workspace at `artifacts/input/<phase-id>/`.
+#: `min_length=1` alone accepted `../../../tmp/owned`, which escapes the
+#: workspace on injection - and with the Docker backend the write lands on the
+#: host beside the mount, not merely elsewhere inside the container.
+#:
+#: Workflows are installable from a marketplace, so the author of a phase id is
+#: not necessarily the operator running it. That makes this reachable by an
+#: untrusted party, which is what decides the grammar: an allowlist, not a `..`
+#: denylist. Denylists lose to encoding tricks; a closed character set does not.
+#:
+#: EVERY consumer must come through here. Three hand-written copies of this
+#: pattern existed before #1298, and the fourth one drifted - a workflow-gate
+#: regex left the `.` out, so it read `premise.old.md` as a reference to
+#: `premise` and reported a phase that does not exist as one that does. Two
+#: independently written patterns for one grammar is how that happens, and it
+#: is silent, so there is exactly one pattern now.
+PHASE_ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+
+_PHASE_ID = re.compile(PHASE_ID_PATTERN)
+
+
+def is_phase_id(value: str) -> bool:
+    """True when `value` is a phase id IN ITS ENTIRETY.
+
+    Callers get a decision, not a pattern, because the pattern has a trap in
+    it that every caller would otherwise have to remember: Python's `$` also
+    matches before a trailing newline, so `_PHASE_ID.match("premise\n")`
+    succeeds. That is the same bug as the gate regex above - a matcher
+    answering "is this whole thing an id?" that can succeed on less than the
+    whole thing - and `fullmatch` is the only spelling without it.
+    """
+    return _PHASE_ID.fullmatch(value) is not None
 
 
 def _resolve_shared_prompt_path(
@@ -273,21 +310,9 @@ class PhaseYamlDefinition(BaseModel):
         extra="forbid",
     )
 
-    # A phase id is INTERPOLATED INTO A FILESYSTEM PATH: outputs from this
-    # phase are injected into the next phase's workspace at
-    # `artifacts/input/<phase-id>/...`. `min_length=1` alone accepted
-    # `../../../tmp/owned`, which escapes the workspace on injection - and with
-    # the Docker backend the write lands on the host beside the mount, not
-    # merely elsewhere inside the container.
-    #
-    # Workflows are installable from a marketplace, so the author of a phase id
-    # is not necessarily the operator running it. That makes this reachable by
-    # an untrusted party, which is what decides the grammar below: an
-    # allowlist, not a `..` denylist. Denylists lose to encoding tricks; a
-    # closed character set does not.
-    id: str = Field(
-        ..., alias="id", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
-    )
+    # See PHASE_ID_PATTERN for why the grammar is what it is, and why it is
+    # written down once.
+    id: str = Field(..., alias="id", min_length=1, max_length=100, pattern=PHASE_ID_PATTERN)
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
@@ -567,7 +592,8 @@ class PhaseFrontmatterSchema(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model: str | None = Field(
-        default=None, description="Model to use for this phase (e.g., 'sonnet', 'opus')."
+        default=None,
+        description="Model to use for this phase (e.g., 'opus', 'sonnet'; 'gpt-sol' on codex).",
     )
     allowed_tools: str | list[str] = Field(
         default_factory=list,

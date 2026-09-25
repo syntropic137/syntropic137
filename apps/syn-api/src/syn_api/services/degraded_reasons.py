@@ -23,6 +23,7 @@ class DegradedReason(StrEnum):
     CLAUDE_PLUGIN_STORAGE = "claude_plugin_storage"
     SKILL_STORAGE = "skill_storage"
     CONVERSATION_STORAGE = "conversation_storage"
+    UI_FEEDBACK = "ui_feedback"
     SUBSCRIPTION_COORDINATOR = "subscription_coordinator"
     PROJECTION_CATCHUP = "projection_catchup"
     PROJECTION_STALLED = "projection_stalled"

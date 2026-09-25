@@ -93,6 +93,7 @@ import threading
 from dataclasses import dataclass
 
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_shared.diagnostics import name_exit_status
 from syn_shared.env_constants import (
     ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES,
     ENV_SYN_IMAGE_VERIFY_COSIGN_PATH,
@@ -232,7 +233,7 @@ def _resolve_local_image_id(image_ref: str) -> str:
         raise ImageVerificationError(msg)
 
     image_id = completed.stdout.strip()
-    if not _IMAGE_ID_PATTERN.match(image_id):
+    if not _IMAGE_ID_PATTERN.fullmatch(image_id):
         msg = (
             f"Could not read an image ID for {image_ref!r}: docker reported "
             f"{image_id!r}, which is not a sha256 image ID. Refusing to run an "
@@ -491,7 +492,7 @@ def _run_cosign_verify(
         detail = (completed.stderr or completed.stdout or "").strip()
         msg = (
             f"Signature verification FAILED for {image_ref} "
-            f"(cosign exit {completed.returncode}). Expected a signature from "
+            f"(cosign {name_exit_status(completed.returncode)}). Expected a signature from "
             f"identity matching {settings.certificate_identity_regexp!r} issued by "
             f"{settings.certificate_oidc_issuer}. The image is not run. "
             f"cosign said: {detail}"

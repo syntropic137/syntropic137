@@ -88,6 +88,7 @@ class FailExecutionCommand:
         classification: FailureClassification,
         failed_phase_duration_seconds: float | None = None,
         observed_branches: tuple[BranchObservation, ...] | None = None,
+        exit_code: int | None = None,
         failed_phase_artifact_ids: tuple[str, ...] = (),
         failed_phase_usage: PhaseUsage | None = None,
         reported_failure_reason: ReportedFailureReason | None = None,
@@ -109,6 +110,12 @@ class FailExecutionCommand:
         #: already pushed, so recording every branch would give every failure a
         #: location, and no ref records whose push moved it.
         self.observed_branches = observed_branches
+        #: What the failed phase's process exited with (#1319). None means
+        #: nothing observed a status - an execution stranded by a restart has
+        #: no process left to ask - and is NOT the same as 0. Callers that
+        #: reconcile a run they did not watch leave this absent rather than
+        #: inventing a number the reap already made unknowable.
+        self.exit_code = exit_code
         #: What the failed phase had already written, kept out of its workspace
         #: before this failure tore it down (#1321). `()` when it wrote nothing
         #: collectable, which is every failure that got this far before.
@@ -164,6 +171,27 @@ class StartPhaseCommand:
         self.phase_name = phase_name
         self.phase_order = phase_order
         self.session_id = session_id
+
+
+class RetryPhaseCommand:
+    """Command to abandon this phase's current attempt and start another (#1335).
+
+    Carries `reason` because the aggregate refuses on the budget, not on the
+    fault: whether a fault is worth another attempt is a judgement about the
+    agent harness's stream and belongs to the slice that reads it, while how
+    many attempts a phase may have is a rule about the execution and belongs
+    here. The reason travels so the event can record it either way.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
 
 
 class CompletePhaseCommand:

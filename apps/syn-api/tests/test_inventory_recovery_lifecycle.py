@@ -59,4 +59,4 @@ async def test_unavailable_archive_fails_critical_inventory_startup(
 ) -> None:
     initialize = AsyncMock(side_effect=PermissionError("archive cannot be written"))
     monkeypatch.setattr("syn_api._wiring_inventory.initialize_inventory_runtime", initialize)
-    assert isinstance(await lifecycle._init_session_inventory(), Err)
+    assert isinstance(await lifecycle.inventory_lifecycle.initialize_session_inventory(), Err)

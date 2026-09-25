@@ -69,6 +69,7 @@ class PhaseResultBuilder:
         session_id: str,
         error_message: str,
         completed_at: datetime | None = None,
+        exit_code: int | None = None,
         artifact_id: str | None = None,
         usage: PhaseUsage | None = None,
     ) -> PhaseResult:
@@ -78,6 +79,8 @@ class PhaseResultBuilder:
         used to compute the phase's duration. Reading the clock again here made
         ``completed_at - started_at`` disagree with the recorded duration.
 
+        ``exit_code`` defaults to None rather than to a number because most
+        failures have no process behind them at all, and None says so (#1319).
         ``artifact_id`` names what was kept out of the phase before the run was
         torn down (#1321). A failed phase could carry no artifact at all, which
         is why a phase that wrote a 1322-line deliverable and then botched its
@@ -106,4 +109,5 @@ class PhaseResultBuilder:
             cache_read_tokens=spent.cache_read_tokens,
             total_tokens=spent.total_tokens,
             error_message=error_message,
+            exit_code=exit_code,
         )

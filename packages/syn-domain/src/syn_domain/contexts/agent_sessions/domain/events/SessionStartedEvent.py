@@ -34,6 +34,12 @@ class SessionStartedEvent(DomainEvent):
 
     # Agent info
     agent_provider: str
+    #: The model the phase REQUESTED (often an alias such as ``opus``), fixed
+    #: when the session starts, before any harness has said what it runs. It
+    #: is NOT the model that ran: that is only known from the harness's own
+    #: report and is carried on Lane 2 observations as ``model``, with this
+    #: value repeated there as ``requested_model`` (ADR-067). Kept under its
+    #: historical name because a stored event's field cannot be renamed.
     agent_model: str | None = None
 
     # Repository context (owner/repo slugs from the workflow execution).

@@ -40,10 +40,12 @@ async def _seed_workflow_templates() -> int:
     """Seed workflow templates, returning the count of newly created ones."""
     from syn_adapters.storage import get_event_publisher, get_workflow_repository
     from syn_domain.contexts.orchestration import CreateWorkflowTemplateHandler
+    from syn_shared.settings import get_settings
 
     handler = CreateWorkflowTemplateHandler(
         repository=get_workflow_repository(),
         event_publisher=get_event_publisher(),
+        model_defaults=get_settings().phase_model_defaults,
     )
 
     count = 0

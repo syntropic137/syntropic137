@@ -4,6 +4,7 @@ Lane 1 domain truth — tokens only. Cost is Lane 2 telemetry and is merged in
 at the API boundary from the execution_cost projection.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -11,6 +12,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     BranchObservation,
     FailureClassification,
     ReportedFailureReason,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    TASK_INPUT_KEY,
 )
 
 
@@ -107,6 +111,16 @@ class PhaseExecutionDetail:
     flattening the empties would merge them again.
     """
 
+    exit_code: int | None = None
+    """What this phase's process exited with, or None if nothing observed one.
+
+    Same three-valued discipline as the field above, and the same reason for
+    it (#1319): 0 is a measured clean exit, None is the absence of any
+    measurement, and the responses they call for are opposite. Every hop
+    between the event and the HTTP response has to pass it; this is one of
+    them.
+    """
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -141,6 +155,7 @@ class PhaseExecutionDetail:
                 if self.observed_branches is None
                 else [w.model_dump() for w in self.observed_branches]
             ),
+            "exit_code": self.exit_code,
         }
 
     @classmethod
@@ -171,6 +186,7 @@ class PhaseExecutionDetail:
             error_message=data.get("error_message"),
             deliverable_recovered=bool(data.get("deliverable_recovered", False)),
             observed_branches=_observed_branches(data.get("observed_branches")),
+            exit_code=_exit_code(data.get("exit_code")),
         )
 
 
@@ -261,6 +277,29 @@ class WorkflowExecutionDetail:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
+    inputs: Mapping[str, str] = field(default_factory=dict)
+    """What this run was dispatched with, as its WorkflowExecutionStarted event
+    recorded it: the caller's inputs, the declaration defaults that filled the
+    gaps, and the task (#1307).
+
+    Verbatim, including the keys other fields here are derived from -- ``task``
+    and the ``repos`` string. A run that failed on the platform is retried by
+    dispatching these again, so anything this view edited out would have to be
+    reconstructed from the caller's own notes, which is the situation the field
+    exists to end. Empty for a run whose start event this projection never saw.
+    """
+
+    @property
+    def task(self) -> str | None:
+        """What this run was asked to do, or ``None`` if it was asked nothing.
+
+        Derived rather than stored so there is one copy and it cannot drift
+        from the inputs it was dispatched with. ``None`` is a real answer: a
+        workflow whose phases take no ``$ARGUMENTS`` is dispatched without a
+        task, and that is different from a task nobody recorded.
+        """
+        return self.inputs.get(TASK_INPUT_KEY)
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionDetail":
         """Create from dictionary data.
@@ -301,6 +340,7 @@ class WorkflowExecutionDetail:
                 data.get("reported_failure_reason")
             ),
             repos=tuple(data.get("repos", [])),
+            inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
         )
 
     @staticmethod
@@ -336,7 +376,22 @@ class WorkflowExecutionDetail:
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
             "repos": list(self.repos),
+            "inputs": dict(self.inputs),
         }
+
+
+def _exit_code(stored: object) -> int | None:
+    """Read back a stored exit status, keeping "nothing observed one" as None.
+
+    The store round-trips projection records as plain data, so a status that
+    was never written arrives as a missing key and a status of 0 arrives as
+    0 - and this is the hop that has to keep telling them apart (#1319).
+    Anything that is not an int is absent: a malformed row observed nothing
+    either. `bool` is excluded because `isinstance(True, int)` is True.
+    """
+    if isinstance(stored, bool) or not isinstance(stored, int):
+        return None
+    return stored
 
 
 def _observed_branches(stored: object) -> tuple[BranchObservation, ...] | None:

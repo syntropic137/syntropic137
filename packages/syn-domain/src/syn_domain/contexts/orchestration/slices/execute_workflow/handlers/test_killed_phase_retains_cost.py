@@ -154,7 +154,7 @@ async def _run_phase(lines: list[str], exit_code: int) -> _RecordingWriter:
         execution_id=_EXECUTION_ID,
         phase_id=_PHASE_ID,
         workspace_id="ws-1",
-        agent_model=_MODEL,
+        requested_model=_MODEL,
     )
     await AgentExecutionHandler(controller=None).handle(
         todo=TodoItem(execution_id=_EXECUTION_ID, action=TodoAction.RUN_AGENT, phase_id=_PHASE_ID),
@@ -207,6 +207,8 @@ def _phase_row_from_summary(summary: SessionSummaryData) -> _FakeRow:
         {
             "phase_id": _PHASE_ID,
             "model": summary["model"],
+            "requested_model": summary.get("requested_model"),
+            "has_requested_model": "requested_model" in summary,
             "total_input": summary["total_input_tokens"],
             "total_output": summary["total_output_tokens"],
             "cache_creation": summary["cache_creation_tokens"],
@@ -280,7 +282,10 @@ class TestKilledPhaseKeepsItsTokens:
                 output_tokens=9,
                 cache_creation_tokens=0,
                 cache_read_tokens=0,
-                model=_MODEL,
+                # This stream never names its model, so the row says unknown
+                # and carries the phase's request separately (ADR-067).
+                model=None,
+                requested_model=_MODEL,
             )
         ]
 

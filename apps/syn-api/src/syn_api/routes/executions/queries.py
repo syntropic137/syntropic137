@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
+from syn_api.model_identity import cost_by_observed_model
 from syn_api.types import (
     Err,
     ExecutionDetail,
@@ -23,6 +24,7 @@ from syn_api.types import (
     PhaseExecution,
     Result,
 )
+from syn_domain import tool_call_counts
 from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
@@ -41,6 +43,7 @@ from .phase_mapping import (
     _load_agent_session_ids,
     _map_phase_detail,
     _map_phase_to_response,
+    load_configured_models,
 )
 
 if TYPE_CHECKING:
@@ -263,12 +266,18 @@ async def _load_execution_enrichment(
 
 
 async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
-    """Query tool_execution_completed counts from agent_events.
+    """Tool calls per execution, read from the tally.
 
-    Keyed by the execution id AS agent_events holds it: the table's writer
-    sanitises the id (AgentEvent's validator), so both the ids bound here and
-    the keys of the returned mapping have to be in that spelling, or a caller
-    looks its count up under a name the result never carries (#1241).
+    This used to be a ``COUNT(*)`` over ``agent_events`` filtered on
+    ``event_type``, which is in neither of that hypertable's compression keys
+    and so could only be answered by decompressing every segment of every
+    execution on the page - 4-30s for one page of the list this serves
+    (#1322). ``tool_call_counts`` keeps the number instead of deriving it.
+
+    Keyed by the execution id AS the tally holds it: the writer sanitises the
+    id (AgentEvent's validator), so both the ids bound here and the keys of the
+    returned mapping have to be in that spelling, or a caller looks its count
+    up under a name the result never carries (#1241).
     """
     try:
         from syn_adapters.postgres_text import pg_safe
@@ -280,17 +289,9 @@ async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
         if pool is None:
             return {}
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT execution_id, COUNT(*) AS cnt "
-                "FROM agent_events "
-                "WHERE execution_id = ANY($1) "
-                "  AND event_type = 'tool_execution_completed' "
-                "GROUP BY execution_id",
-                execution_ids,
-            )
-        return {row["execution_id"]: row["cnt"] for row in rows}
+            return await tool_call_counts.by_execution(conn, execution_ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
     except Exception:
-        logger.debug("Could not query tool counts from agent_events", exc_info=True)
+        logger.debug("Could not read tool counts from the tally", exc_info=True)
         return {}
 
 
@@ -437,6 +438,8 @@ async def get(
             failure_classification=detail.failure_classification,
             reported_failure_reason=detail.reported_failure_reason,
             repos=list(detail.repos),
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -487,7 +490,7 @@ async def _enrich_costs(
         # breakdown that named only codex, and the difference was invisible.
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
-            phase.cost_by_model = dict(phase_models)
+            phase.cost_by_model = cost_by_observed_model(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(
@@ -506,7 +509,11 @@ async def get_detail(
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
     agent_sessions = await _load_agent_session_ids(execution_id)
-    phases = [await _map_phase_detail(p, manager, agent_sessions) for p in detail.phases]
+    configured_models = await load_configured_models(manager, detail.workflow_id)
+    phases = [
+        await _map_phase_detail(p, manager, agent_sessions, configured_models)
+        for p in detail.phases
+    ]
     # Folded from the phases this response already carries, so the header total
     # and the timeline below it are the same numbers by construction.
     duration = _DurationTotal.over(p.duration_seconds for p in phases)
@@ -544,6 +551,8 @@ async def get_detail(
             repos=list(detail.repos),
             total_duration_seconds=duration.seconds,
             unknown_duration_phase_count=duration.unknown_phase_count,
+            task=detail.task,
+            inputs=dict(detail.inputs),
         )
     )
 
@@ -697,4 +706,6 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         repos=list(detail.repos),
         total_duration_seconds=detail.total_duration_seconds,
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
+        task=detail.task,
+        inputs=dict(detail.inputs),
     )

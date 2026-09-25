@@ -18,9 +18,17 @@ WORKDIR /app
 COPY pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
 COPY apps/syn-dashboard-ui/package.json ./apps/syn-dashboard-ui/
+# @syn137/ui-feedback-react is a workspace dependency of the dashboard
+# (ADR-016), and pnpm-workspace.yaml lists it, so --frozen-lockfile needs its
+# manifest here to resolve the link.
+COPY lib/ui-feedback/packages/ui-feedback-react/package.json ./lib/ui-feedback/packages/ui-feedback-react/
 
 # Install dependencies (frozen lockfile for reproducibility)
-RUN pnpm install --frozen-lockfile --filter syn-dashboard-ui
+RUN pnpm install --frozen-lockfile --filter 'syn-dashboard-ui...'
+
+# The widget is consumed from source (the package's `main` is src/index.ts),
+# so the build needs it, not just its manifest.
+COPY lib/ui-feedback/packages/ui-feedback-react/ ./lib/ui-feedback/packages/ui-feedback-react/
 
 # Copy dashboard source
 COPY apps/syn-dashboard-ui/ ./apps/syn-dashboard-ui/

@@ -1887,6 +1887,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Features
+         * @description Report which optional features are enabled on this deployment.
+         */
+        get: operations["get_features_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stats
+         * @description Get aggregate statistics for feedback items.
+         */
+        get: operations["get_stats_feedback_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Feedback
+         * @description List all feedback items with optional filtering.
+         */
+        get: operations["list_feedback_feedback_get"];
+        put?: never;
+        /**
+         * Create Feedback
+         * @description Create a new feedback item.
+         */
+        post: operations["create_feedback_feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feedback
+         * @description Get a single feedback item with media metadata.
+         */
+        get: operations["get_feedback_feedback__feedback_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Feedback
+         * @description Delete a feedback item and all associated media.
+         */
+        delete: operations["delete_feedback_feedback__feedback_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Feedback
+         * @description Update a feedback item (status, priority, assignment, notes).
+         */
+        patch: operations["update_feedback_feedback__feedback_id__patch"];
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Media
+         * @description Upload a media file (screenshot or voice note).
+         */
+        post: operations["upload_media_feedback__feedback_id__media_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media/{media_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Media
+         * @description Download a media file.
+         */
+        get: operations["get_media_feedback__feedback_id__media__media_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Media
+         * @description Delete a media file.
+         */
+        delete: operations["delete_media_feedback__feedback_id__media__media_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -1897,6 +2033,12 @@ export interface paths {
         /**
          * Root
          * @description Root endpoint with API info.
+         *
+         *     Reports a null release and ``version_status: "unavailable"`` rather than
+         *     the ``"unknown"`` sentinel it used to serve. It was a flat map of
+         *     strings, so it had nowhere to put a null and nothing to name the state
+         *     with — which made it the last surface still answering "which build?"
+         *     with a literal, the thing #1380 exists to remove (see ``RootResponse``).
          */
         get: operations["root__get"];
         put?: never;
@@ -1946,6 +2088,12 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * AliasResolutionBasis
+         * @description How confident an alias -> model id resolution is.
+         * @enum {string}
+         */
+        AliasResolutionBasis: "translated" | "expected";
         /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
@@ -2104,6 +2252,12 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_upload_media_feedback__feedback_id__media_post */
+        Body_upload_media_feedback__feedback_id__media_post: {
+            /** File */
+            file: string;
+            media_type: components["schemas"]["MediaType"];
+        };
         /**
          * BranchObservationInfo
          * @description One branch of a failed phase's workspace, as git had it (#1200).
@@ -2142,6 +2296,42 @@ export interface components {
             remote_commit_at_phase_start: string | null;
             /** Unpushed Commits */
             unpushed_commits: number;
+        };
+        /**
+         * BuildInfo
+         * @description Which build is answering. Populated by ``syn_api.build_info``.
+         *
+         *     Reported in three places from that one source: this block on ``GET /health``,
+         *     the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+         *     three used to be, or were derived from, a hardcoded literal that had drifted
+         *     twenty releases behind the installed package.
+         *
+         *     The release and its status come from ``_NamesTheRunningRelease``. What this
+         *     model adds is the two build-time stamps, which only an image can supply and
+         *     only ``/health`` reports.
+         */
+        BuildInfo: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
+             */
+            version: string | null;
+            /**
+             * Image Tag
+             * @description Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one — which is a different fact from an unknown tag, and is reported as such.
+             */
+            image_tag?: string | null;
+            /**
+             * Commit
+             * @description Git commit the image was built from, stamped at image build time. Null when the build did not stamp one.
+             */
+            commit?: string | null;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
         };
         /**
          * CancelRequest
@@ -2281,6 +2471,34 @@ export interface components {
             registered_at?: string | null;
         };
         /**
+         * CodexAuthState
+         * @description Freshness of the configured codex credential.
+         * @enum {string}
+         */
+        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable";
+        /**
+         * CodexAuthStatus
+         * @description A non-secret description of the configured codex credential.
+         */
+        CodexAuthStatus: {
+            state: components["schemas"]["CodexAuthState"];
+            /**
+             * Expires In Hours
+             * @description Hours until the access token expires. Negative once expired.
+             */
+            expires_in_hours?: number | null;
+            /**
+             * Expires At
+             * @description Access token expiry, UTC.
+             */
+            expires_at?: string | null;
+            /**
+             * Detail
+             * @description Human-readable summary. Never contains token material.
+             */
+            detail: string;
+        };
+        /**
          * ConditionRequest
          * @description A single trigger condition (field operator value).
          */
@@ -2396,10 +2614,17 @@ export interface components {
             completed_at?: string | null;
             /** Model */
             model?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
             /** Success */
             success?: boolean | null;
             /** Size Bytes */
             size_bytes?: number | null;
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
         };
         /**
          * CostOutlierResponse
@@ -2596,6 +2821,14 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * DegradedReason
+         * @description Reasons the API may enter degraded mode.
+         *
+         *     StrEnum so values serialize directly to JSON in health responses.
+         * @enum {string}
+         */
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
@@ -2887,6 +3120,12 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
+            /** Task */
+            task?: string | null;
+            /** Inputs */
+            inputs?: {
+                [key: string]: string;
+            };
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -3210,6 +3449,372 @@ export interface components {
             last_seen: string;
         };
         /**
+         * FeatureDisabledDetail
+         * @description Why a flag-gated route refuses to run.
+         */
+        FeatureDisabledDetail: {
+            /**
+             * Feature
+             * @description The feature flag that governs this route.
+             */
+            feature: string;
+            /**
+             * Reason
+             * @description Human-readable explanation.
+             */
+            reason: string;
+            /**
+             * Enable With
+             * @description The setting that enables the feature, when one exists.
+             */
+            enable_with?: string | null;
+        };
+        /**
+         * FeatureDisabledResponse
+         * @description Response from an installed route while its feature is disabled.
+         */
+        FeatureDisabledResponse: {
+            detail: components["schemas"]["FeatureDisabledDetail"];
+        };
+        /**
+         * FeaturesResponse
+         * @description Which optional features this deployment has switched on.
+         */
+        FeaturesResponse: {
+            /**
+             * Ui Feedback
+             * @description In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). When false the routes answer 404 and the dashboard never loads the widget.
+             * @default false
+             */
+            ui_feedback: boolean;
+        };
+        /**
+         * FeedbackCreate
+         * @description Request model for creating feedback.
+         */
+        FeedbackCreate: {
+            /**
+             * Url
+             * @description URL where feedback was created
+             */
+            url: string;
+            /**
+             * Route
+             * @description React Router path if available
+             */
+            route?: string | null;
+            /**
+             * Viewport Width
+             * @description Viewport width in pixels
+             */
+            viewport_width?: number | null;
+            /**
+             * Viewport Height
+             * @description Viewport height in pixels
+             */
+            viewport_height?: number | null;
+            /**
+             * Click X
+             * @description X coordinate of click
+             */
+            click_x?: number | null;
+            /**
+             * Click Y
+             * @description Y coordinate of click
+             */
+            click_y?: number | null;
+            /**
+             * Css Selector
+             * @description CSS selector of clicked element
+             */
+            css_selector?: string | null;
+            /**
+             * Xpath
+             * @description XPath of clicked element
+             */
+            xpath?: string | null;
+            /**
+             * Component Name
+             * @description React component name
+             */
+            component_name?: string | null;
+            /** @description Kind of domain object the page was about (execution, session, ...) */
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /**
+             * Subject Id
+             * @description Id of the domain object the page was about
+             */
+            subject_id?: string | null;
+            /**
+             * @description Type of feedback
+             * @default bug
+             */
+            feedback_type: components["schemas"]["FeedbackType"];
+            /**
+             * Comment
+             * @description User's comment
+             */
+            comment?: string | null;
+            /**
+             * @description Priority level
+             * @default medium
+             */
+            priority: components["schemas"]["Priority"];
+            /**
+             * App Name
+             * @description Name of the application
+             */
+            app_name: string;
+            /**
+             * App Version
+             * @description Version of the application
+             */
+            app_version?: string | null;
+            /**
+             * User Agent
+             * @description Browser user agent
+             */
+            user_agent?: string | null;
+            /**
+             * Environment
+             * @description Environment name (development, staging, production)
+             */
+            environment?: string | null;
+            /**
+             * Git Commit
+             * @description Git commit hash
+             */
+            git_commit?: string | null;
+            /**
+             * Git Branch
+             * @description Git branch name
+             */
+            git_branch?: string | null;
+            /**
+             * Hostname
+             * @description Hostname where the app is running
+             */
+            hostname?: string | null;
+        };
+        /**
+         * FeedbackItem
+         * @description Response model for a feedback item (without media).
+         */
+        FeedbackItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+        };
+        /**
+         * FeedbackItemWithMedia
+         * @description Response model for a feedback item with media metadata.
+         */
+        FeedbackItemWithMedia: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+            /**
+             * Media
+             * @default []
+             */
+            media: components["schemas"]["MediaSummary"][];
+        };
+        /**
+         * FeedbackList
+         * @description Response model for listing feedback items.
+         */
+        FeedbackList: {
+            /** Items */
+            items: components["schemas"]["FeedbackItem"][];
+            /** Total */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+        };
+        /**
+         * FeedbackStats
+         * @description Aggregate statistics for feedback items.
+         */
+        FeedbackStats: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            by_status?: components["schemas"]["StatusCount"];
+            by_type?: components["schemas"]["TypeCount"];
+            by_priority?: components["schemas"]["PriorityCount"];
+            /** By App */
+            by_app?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * FeedbackType
+         * @description Type of feedback.
+         * @enum {string}
+         */
+        FeedbackType: "bug" | "feature" | "ui_ux" | "performance" | "question" | "other";
+        /**
+         * FeedbackUpdate
+         * @description Request model for updating feedback.
+         */
+        FeedbackUpdate: {
+            /** @description New status */
+            status?: components["schemas"]["Status"] | null;
+            /** @description New priority */
+            priority?: components["schemas"]["Priority"] | null;
+            /**
+             * Assigned To
+             * @description Assignee
+             */
+            assigned_to?: string | null;
+            /**
+             * Resolution Notes
+             * @description Notes about resolution
+             */
+            resolution_notes?: string | null;
+            /**
+             * Comment
+             * @description Updated comment
+             */
+            comment?: string | null;
+        };
+        /**
          * GitEventData
          * @description Structured git event data from observability hooks.
          *
@@ -3427,6 +4032,51 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthResponse
+         * @description Payload of ``GET /health``.
+         *
+         *     EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+         *     typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+         *     put ``additionalProperties: true`` in ``openapi.json`` and an
+         *     ``[key: string]: unknown`` index signature in the generated CLI types: the
+         *     fields `syn health` actually reads were invisible to every generated
+         *     consumer, and a probe could change shape without the drift check noticing.
+         *     The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+         *     declared at their source and referenced, not copied — but the fact that
+         *     /health publishes them is this model's to state.
+         *
+         *     ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+         *     ``_OmitsAbsentFields``.
+         */
+        HealthResponse: {
+            /**
+             * Status
+             * @description 'healthy' while the process is alive and accepting writes.
+             */
+            status: string;
+            /**
+             * Mode
+             * @description 'full', or 'degraded' when some subsystem is impaired.
+             */
+            mode: string;
+            /** @description Which build is answering (#1380). */
+            build: components["schemas"]["BuildInfo"];
+            /**
+             * Degraded Reasons
+             * @description Every way this instance is up but not fully serving. Omitted entirely when there are none, which is how a reader tells 'nothing is wrong' from 'something is and it is not listed here'.
+             */
+            degraded_reasons?: components["schemas"]["DegradedReason"][] | null;
+            /** @description Read-path health. Omitted when no subscription service is wired up at all, e.g. in offline mode. */
+            subscription?: components["schemas"]["SubscriptionHealth"] | null;
+            /** @description Freshness of this instance's codex credential. Omitted when the probe could not run — a credential hint must never be able to take /health down. */
+            codex_auth?: components["schemas"]["CodexAuthStatus"] | null;
+            /**
+             * Warnings
+             * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
+             */
+            warnings?: string[] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -3649,6 +4299,66 @@ export interface components {
              */
             actor: string;
         };
+        /**
+         * MediaItem
+         * @description Response model for a media item.
+         */
+        MediaItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Feedback Id
+             * Format: uuid
+             */
+            feedback_id: string;
+            media_type: components["schemas"]["MediaType"];
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /** External Url */
+            external_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaSummary
+         * @description Summary of a media item (without binary data).
+         */
+        MediaSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaType
+         * @description Type of media attachment.
+         * @enum {string}
+         */
+        MediaType: "screenshot" | "voice_note";
         /** Membership */
         Membership: {
             node: components["schemas"]["InventoryNodeRef"];
@@ -3715,6 +4425,19 @@ export interface components {
             total_artifact_bytes: number;
             /** Phases */
             phases?: components["schemas"]["PhaseMetrics"][];
+        };
+        /**
+         * ModelCostEntry
+         * @description One model's share of a cost total.
+         */
+        ModelCostEntry: {
+            /** Model */
+            model: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
         };
         /**
          * OperationInfo
@@ -3915,6 +4638,11 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Resolved Model */
+            resolved_model?: string | null;
+            resolution_basis?: components["schemas"]["AliasResolutionBasis"] | null;
+            /** Model Display */
+            model_display?: string | null;
             /** Provider */
             provider?: string | null;
             /**
@@ -3985,17 +4713,26 @@ export interface components {
             deliverable_recovered: boolean;
             /** Model */
             model?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
             };
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Exit Code */
+            exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
         };
         /**
          * PhaseMetrics
@@ -4077,6 +4814,70 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * Priority
+         * @description Feedback priority level.
+         * @enum {string}
+         */
+        Priority: "low" | "medium" | "high" | "critical";
+        /**
+         * PriorityCount
+         * @description Count of items by priority.
+         */
+        PriorityCount: {
+            /**
+             * Low
+             * @default 0
+             */
+            low: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * High
+             * @default 0
+             */
+            high: number;
+            /**
+             * Critical
+             * @default 0
+             */
+            critical: number;
+        };
+        /**
+         * ProjectionLag
+         * @description One projection's distance from the head of the event store.
+         */
+        ProjectionLag: {
+            /**
+             * Projection
+             * @description Projection name, as it appears in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Position
+             * @description Global nonce this projection's checkpoint has reached. 0 when it has no checkpoint at all, which is what a projection looks like immediately after a version bump clears it.
+             */
+            position: number;
+            /**
+             * Lag
+             * @description Events between position and the store head. Always > 0 here.
+             */
+            lag: number;
+            /**
+             * Checkpoint Age Seconds
+             * @description Seconds since this projection's checkpoint last moved. None when the projection has no checkpoint row yet. This is the evidence behind `stalled`, and the number to sample if the stall threshold needs revisiting.
+             */
+            checkpoint_age_seconds?: number | null;
+            /**
+             * Stalled
+             * @description True when this projection is behind the head and its checkpoint has not moved for longer than the stall threshold (120s by default): it is not working through a backlog, it is stuck.
+             * @default false
+             */
+            stalled: boolean;
         };
         /**
          * RegisterClaudePluginRequest
@@ -4660,6 +5461,48 @@ export interface components {
          * @enum {string}
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
+        /**
+         * RootResponse
+         * @description Payload of ``GET /`` — what this API is, and which build is serving it.
+         *
+         *     THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+         *     a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+         *     when metadata could not be read: a string in a version field, indistinguish-
+         *     able to a client from a release actually called that, and exactly the defect
+         *     #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+         *     response makes the absence a declared state instead of a word.
+         *
+         *     ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+         *     unavoidable; see the comment at that call in ``main.py``.
+         */
+        RootResponse: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
+             */
+            version: string | null;
+            /**
+             * Name
+             * @description Human-readable name of this API.
+             */
+            name: string;
+            /**
+             * Docs
+             * @description Path to the interactive API documentation.
+             */
+            docs: string;
+            /**
+             * Health
+             * @description Path to the health endpoint, which reports the full build block plus read-path status.
+             */
+            health: string;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
+        };
         /** RunIdentity */
         RunIdentity: {
             /** Source Instance Id */
@@ -4918,8 +5761,8 @@ export interface components {
             agent_provider: string | null;
             /** Agent Model */
             agent_model: string | null;
-            /** Agent Model Display */
-            agent_model_display?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -5016,6 +5859,11 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
         };
         /**
          * SessionSummaryResponse
@@ -5054,8 +5902,8 @@ export interface components {
             agent_provider: string | null;
             /** Agent Model */
             agent_model?: string | null;
-            /** Agent Model Display */
-            agent_model_display?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Repos */
             repos?: string[];
             /** Repos Display */
@@ -5116,6 +5964,11 @@ export interface components {
             started_at?: string | null;
             /** Completed At */
             completed_at?: string | null;
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
         };
         /**
          * SessionTokenMetrics
@@ -5331,6 +6184,127 @@ export interface components {
             execution_id: string;
             /** State */
             state: string;
+        };
+        /**
+         * Status
+         * @description Feedback ticket status.
+         * @enum {string}
+         */
+        Status: "open" | "in_progress" | "resolved" | "closed" | "wont_fix";
+        /**
+         * StatusCount
+         * @description Count of items by status.
+         */
+        StatusCount: {
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /**
+             * In Progress
+             * @default 0
+             */
+            in_progress: number;
+            /**
+             * Resolved
+             * @default 0
+             */
+            resolved: number;
+            /**
+             * Closed
+             * @default 0
+             */
+            closed: number;
+            /**
+             * Wont Fix
+             * @default 0
+             */
+            wont_fix: number;
+        };
+        /**
+         * SubjectKind
+         * @description The kind of domain object a page was about when feedback was left.
+         *
+         *     One pair of columns (kind + id) rather than one column per entity: the
+         *     host app decides what its pages are about, and a new page type needs no
+         *     migration, no filter and no branch here.
+         * @enum {string}
+         */
+        SubjectKind: "execution" | "session" | "workflow" | "artifact" | "trigger";
+        /**
+         * SubscriptionHealth
+         * @description The read-path block of ``GET /health``: is the subscription up, and is it behind.
+         *
+         *     FLAT, not nested, because that is the wire shape `syn health` and the deploy
+         *     runbook already read. The fields from ``running`` down are
+         *     ``CoordinatorSubscriptionService.get_status()``; the ones from
+         *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+         *     ``lifecycle._describe_subscription_health``.
+         *
+         *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+         *     rather than a default: ``lag is None`` means the coordinator is not up yet,
+         *     so there is nothing whose progress could be measured — which is not the same
+         *     as "not behind", and must not serialize as ``lag: 0``. When the probe itself
+         *     fails, ``status`` is "unknown" and nothing else is known at all.
+         *
+         *     ``ReadModelLag``'s fields are restated here because the block is flat on the
+         *     wire and a generated client has to be able to see them. That restatement is
+         *     the one place this model can drift from its producer, so
+         *     ``test_health_contract.py`` asserts the two field sets still match.
+         */
+        SubscriptionHealth: {
+            /**
+             * Status
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed.
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "stalled" | "catching_up" | "unknown";
+            /**
+             * Running
+             * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
+             */
+            running?: boolean | null;
+            /**
+             * Projection Count
+             * @description How many projections the coordinator is driving.
+             */
+            projection_count?: number | null;
+            /**
+             * Realtime Enabled
+             * @description Whether a realtime (SSE) projection is attached.
+             */
+            realtime_enabled?: boolean | null;
+            /**
+             * Is Catching Up
+             * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.
+             */
+            is_catching_up?: boolean | null;
+            /**
+             * Is Stalled
+             * @description True when a projection is behind the head and its checkpoint has stopped moving. Does NOT resolve on its own. Null when lag is unmeasurable.
+             */
+            is_stalled?: boolean | null;
+            /**
+             * Lag
+             * @description Distance of the furthest-behind projection from the store head, in lag_unit. 0 means at the head; null means not measurable.
+             */
+            lag?: number | null;
+            /**
+             * Lag Unit
+             * @description Unit of lag: event-store global-nonce positions, not seconds.
+             */
+            lag_unit?: "events" | null;
+            /**
+             * Head Position
+             * @description Global nonce of the newest event in the store.
+             */
+            head_position?: number | null;
+            /**
+             * Lagging Projections
+             * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
+             */
+            lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
         };
         /**
          * SystemActionResponse
@@ -5917,6 +6891,42 @@ export interface components {
             /** Created At */
             created_at?: string | null;
         };
+        /**
+         * TypeCount
+         * @description Count of items by type.
+         */
+        TypeCount: {
+            /**
+             * Bug
+             * @default 0
+             */
+            bug: number;
+            /**
+             * Feature
+             * @default 0
+             */
+            feature: number;
+            /**
+             * Ui Ux
+             * @default 0
+             */
+            ui_ux: number;
+            /**
+             * Performance
+             * @default 0
+             */
+            performance: number;
+            /**
+             * Question
+             * @default 0
+             */
+            question: number;
+            /**
+             * Other
+             * @default 0
+             */
+            other: number;
+        };
         /** UpdateArtifactRequest */
         UpdateArtifactRequest: {
             /** Title */
@@ -6155,9 +7165,7 @@ export interface components {
              */
             total_tool_calls: number;
             /** Top Models */
-            top_models?: {
-                [key: string]: unknown;
-            }[];
+            top_models?: components["schemas"]["ModelCostEntry"][];
             /** Top Sessions */
             top_sessions?: {
                 [key: string]: unknown;
@@ -9690,6 +10698,422 @@ export interface operations {
             };
         };
     };
+    get_features_features_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesResponse"];
+                };
+            };
+        };
+    };
+    get_stats_feedback_stats_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by app name */
+                app?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackStats"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_feedback_feedback_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by status */
+                status?: string | null;
+                /** @description Filter by type */
+                type?: string | null;
+                /** @description Filter by priority */
+                priority?: string | null;
+                /** @description Filter by app name */
+                app?: string | null;
+                /** @description Filter by the page path feedback was left on */
+                route?: string | null;
+                /** @description Filter by subject kind (execution, session, workflow, ...) */
+                subject_kind?: string | null;
+                /** @description Filter by the id of the object the page was about */
+                subject_id?: string | null;
+                /** @description Only feedback created at or after this instant (ISO 8601) */
+                created_after?: string | null;
+                /** @description Only feedback created strictly before this instant (ISO 8601) */
+                created_before?: string | null;
+                /** @description Search in comments */
+                search?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+                /** @description Field to order by */
+                order_by?: string;
+                /** @description Order descending */
+                desc?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_feedback_feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feedback_feedback__feedback_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItemWithMedia"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_feedback_feedback__feedback_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_feedback_feedback__feedback_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_media_feedback__feedback_id__media_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_media_feedback__feedback_id__media_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_media_feedback__feedback_id__media__media_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_feedback__feedback_id__media__media_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     root__get: {
         parameters: {
             query?: never;
@@ -9705,9 +11129,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["RootResponse"];
                 };
             };
         };
@@ -9727,9 +11149,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["HealthResponse"];
                 };
             };
         };

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, ExpectedVersion
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from event_sourcing.stores.memory_projection import MemoryProjectionStore
 from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
@@ -44,6 +44,7 @@ from syn_domain.contexts._shared import (
     AdmissionAnnouncementFailedError,
     AdmissionGate,
     AdmissionTicket,
+    MaintenanceMode,
 )
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
@@ -75,6 +76,38 @@ _PATIENCE = 5.0
 _HEAD_SNAPSHOT_TURNS = 50
 _EXECUTION_ID = "exec-paused-by-the-deploy"
 _TRIGGER_ID = "trg-ci-self-healing"
+
+
+class _StrictAnnouncementStore:
+    """The two append rules the production event store enforces."""
+
+    def __init__(self) -> None:
+        self.streams: set[str] = set()
+
+    async def append_events(
+        self,
+        stream_name: str,
+        events: list[EventEnvelope[DomainEvent]],
+        expected_version: int | None = None,
+    ) -> None:
+        assert expected_version == ExpectedVersion.NO_STREAM
+        assert stream_name not in self.streams
+        assert len(events) == 1
+        metadata = events[0].metadata
+        assert metadata.aggregate_nonce == 1
+        assert stream_name == f"{metadata.aggregate_type}-{metadata.aggregate_id}"
+        self.streams.add(stream_name)
+
+
+async def test_repeated_maintenance_clears_use_valid_distinct_streams() -> None:
+    store = _StrictAnnouncementStore()
+    announcer = EventStoreAdmissionAnnouncer(store)  # type: ignore[arg-type]
+    mode = MaintenanceMode(active=False, actor="deploy")
+
+    await announcer.announce_open(mode, after_restart=False)
+    await announcer.announce_open(mode, after_restart=True)
+
+    assert len(store.streams) == 2
 
 
 class _LiveEventStore:
@@ -493,7 +526,7 @@ class _RacyEventStore:
 
     def __init__(self) -> None:
         self.appended: list[EventEnvelope[DomainEvent]] = []
-        self._live: asyncio.Queue[EventEnvelope[DomainEvent]] = asyncio.Queue()
+        self._subscribers: list[asyncio.Queue[EventEnvelope[DomainEvent]]] = []
         self._next_nonce = 100
 
     async def append_events(
@@ -510,7 +543,8 @@ class _RacyEventStore:
                 metadata=envelope.metadata.model_copy(update={"global_nonce": self._next_nonce}),
             )
             self.appended.append(stamped)
-            self._live.put_nowait(stamped)
+            for subscriber in self._subscribers:
+                subscriber.put_nowait(stamped)
 
     async def read_all(
         self,
@@ -526,12 +560,22 @@ class _RacyEventStore:
         return (list(self.appended), True, self._next_nonce + 1)
 
     def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
-        del from_global_nonce
-        return self._stream()
+        subscriber: asyncio.Queue[EventEnvelope[DomainEvent]] = asyncio.Queue()
+        for envelope in self.appended:
+            nonce = envelope.metadata.global_nonce or 0
+            if nonce >= from_global_nonce:
+                subscriber.put_nowait(envelope)
+        self._subscribers.append(subscriber)
+        return self._stream(subscriber)
 
-    async def _stream(self) -> AsyncIterator[EventEnvelope[DomainEvent]]:
-        while True:
-            yield await self._live.get()
+    async def _stream(
+        self, subscriber: asyncio.Queue[EventEnvelope[DomainEvent]]
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+        try:
+            while True:
+                yield await subscriber.get()
+        finally:
+            self._subscribers.remove(subscriber)
 
 
 class _RestartedApi(NamedTuple):

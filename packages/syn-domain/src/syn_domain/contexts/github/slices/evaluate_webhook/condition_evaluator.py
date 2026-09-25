@@ -116,7 +116,7 @@ def _resolve_one_part(current: object, part: str) -> object:
     """Resolve a single path segment (plain key or array-indexed) from *current*."""
     if current is None:
         return None
-    match = _ARRAY_INDEX_RE.match(part)
+    match = _ARRAY_INDEX_RE.fullmatch(part)
     if match:
         key, index_str = match.groups()
         return _resolve_array_index(current, key, index_str)

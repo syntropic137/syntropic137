@@ -20,7 +20,15 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-from syn_domain.contexts.agent_sessions import CostCalculator
+    from syn_shared.observed_model import RecordedModel
+
+from syn_domain import tool_call_counts
+from syn_domain.contexts.agent_sessions import (
+    CostCalculator,
+    recorded_model_from_row,
+    recorded_model_group_by,
+    recorded_model_select,
+)
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
     UNATTRIBUTED_MODEL,
     UNATTRIBUTED_PHASE_ID,
@@ -30,7 +38,6 @@ from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
-    TOOL_EXECUTION_COMPLETED,
 )
 
 # OUTSTANDING AT SCALE: EVERY QUERY IN THIS FILE IS EXECUTION-KEYED (#1338).
@@ -84,9 +91,9 @@ from syn_shared.events import (
 # unpriced row. The result undercounts: tokens from both rows, cost from
 # one. Splitting on the NULL flag gives the unpriced rows their own group,
 # which _price_session_summary_row then prices from its own tokens.
-_SESSION_SUMMARY_QUERY = """
+_SESSION_SUMMARY_QUERY = f"""
 SELECT
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'total_input_tokens')::int) as total_input,
     SUM((data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -101,7 +108,7 @@ SELECT
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
-GROUP BY data->>'model', ((data->>'total_cost_usd') IS NULL)
+GROUP BY {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
 """
 
 # Fallback: aggregate from individual token_usage events when no
@@ -112,9 +119,9 @@ GROUP BY data->>'model', ((data->>'total_cost_usd') IS NULL)
 # by a Haiku worker phase). Pricing must happen per model group rather
 # than flattening all tokens into one SUM and pricing them as a single
 # model - the same class of bug as issue #788.
-_TOKEN_USAGE_FALLBACK_QUERY = """
+_TOKEN_USAGE_FALLBACK_QUERY = f"""
 SELECT
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -126,7 +133,7 @@ SELECT
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
-GROUP BY data->>'model'
+GROUP BY {recorded_model_group_by()}
 """
 
 # The true start of an execution: the earliest event of ANY type.
@@ -158,12 +165,6 @@ WHERE execution_id = $1
 # as a Complete/In Progress badge, so a confidently-wrong value is worse than an
 # unset one. Fixing it properly means reading the lifecycle projection.
 
-_TOOL_COUNT_QUERY = """
-SELECT COUNT(*)
-FROM agent_events
-WHERE execution_id = $1 AND event_type = $2
-"""
-
 _TURN_COUNT_QUERY = """
 SELECT COUNT(*)
 FROM agent_events
@@ -181,10 +182,10 @@ WHERE execution_id = $1 AND event_type = $2
 # price those rows, the two numbers then disagree on screen: the phase
 # breakdown sums to less than the total it is supposed to decompose
 # (issue #812).
-_COST_BY_PHASE_QUERY = """
+_COST_BY_PHASE_QUERY = f"""
 SELECT
     phase_id,
-    data->>'model' as model,
+    {recorded_model_select()},
     SUM((data->>'total_input_tokens')::int) as total_input,
     SUM((data->>'total_output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
@@ -194,7 +195,7 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1
   AND event_type = $2
-GROUP BY phase_id, data->>'model', ((data->>'total_cost_usd') IS NULL)
+GROUP BY phase_id, {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
 """
 
 
@@ -311,10 +312,14 @@ def _extend_time_range(
     return started_at, end_at
 
 
-def _resolve_row_model(row: asyncpg.Record) -> str | None:
-    """Extract the model for a row, or None if missing/not a string."""
-    raw_model = row.get("model")
-    return raw_model if isinstance(raw_model, str) else None
+def _resolve_row_model(row: asyncpg.Record) -> RecordedModel:
+    """Classify a grouped row's model columns (ADR-067).
+
+    Priced with ``pricing_model`` - unchanged for legacy rows, whose alias was
+    always what priced them - and attributed with ``cost_key``, the reported
+    id or the unknown bucket, never an alias.
+    """
+    return recorded_model_from_row(row)
 
 
 def _row_observation_count(row: asyncpg.Record) -> int:
@@ -360,15 +365,17 @@ def price_grouped_token_usage(
         started_at, end_at = _extend_time_range(started_at, end_at, row)
 
         model = _resolve_row_model(row)
-        pricing = cost_calculator.resolve_pricing(model)
-        if pricing is None or model is None:
+        pricing_model = model.pricing_model
+        pricing = cost_calculator.resolve_pricing(pricing_model)
+        if pricing is None or pricing_model is None:
             unpriced_observation_count += _row_observation_count(row)
             continue
         group_cost = pricing.calculate_cost(
             group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
         )
         total_cost += group_cost
-        cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + group_cost
+        key = model.cost_key
+        cost_by_model[key] = cost_by_model.get(key, Decimal("0")) + group_cost
 
     return GroupedTokenUsage(
         input_tokens=totals.input_tokens,
@@ -394,7 +401,8 @@ class _RowPricing:
     """
 
     cost: Decimal | None
-    model: str | None
+    model: RecordedModel | None
+    """The row's classified model; None only when the row went unpriced."""
     unpriced_count: int
 
 
@@ -415,8 +423,9 @@ def _price_session_summary_row(
     if raw_sdk_cost is not None:
         return _RowPricing(cost=Decimal(str(raw_sdk_cost)), model=model, unpriced_count=0)
 
-    pricing = cost_calculator.resolve_pricing(model)
-    if pricing is None or model is None:
+    pricing_model = model.pricing_model
+    pricing = cost_calculator.resolve_pricing(pricing_model)
+    if pricing is None or pricing_model is None:
         return _RowPricing(cost=None, model=None, unpriced_count=_row_observation_count(row))
 
     group_cost = pricing.calculate_cost(
@@ -486,7 +495,7 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
         # sentinel keeps sum(models_by_phase[p]) == cost_by_phase[p]; dropping
         # it made the breakdown quietly sum to less than the total it is
         # supposed to decompose.
-        model = priced.model or UNATTRIBUTED_MODEL
+        model = priced.model.cost_key if priced.model is not None else UNATTRIBUTED_MODEL
         phase_models = by_model.setdefault(phase_id, {})
         phase_models[model] = phase_models.get(model, Decimal("0")) + priced.cost
     return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model)
@@ -531,10 +540,10 @@ def price_grouped_session_summary(
             unpriced_observation_count += priced.unpriced_count
             continue
         total_cost += priced.cost
-        if priced.model is not None:
-            cost_by_model[priced.model] = (
-                cost_by_model.get(priced.model, Decimal("0")) + priced.cost
-            )
+        # Every priced row is attributed, the unreported ones to the unknown
+        # bucket, so the breakdown sums to the total it decomposes (#812).
+        key = priced.model.cost_key if priced.model is not None else UNATTRIBUTED_MODEL
+        cost_by_model[key] = cost_by_model.get(key, Decimal("0")) + priced.cost
 
     return GroupedSessionSummary(
         input_tokens=totals.input_tokens,
@@ -736,9 +745,16 @@ class TimescaleExecutionCostQuery:
             if not token_rows:
                 return None
 
+            # From the tally, not from a COUNT(*) over agent_events (#1322).
+            # One execution rather than a page, but the same scan: event_type
+            # is not in the hypertable's compression keys, so the count could
+            # only be reached by decompressing this execution's segments.
             tool_count = (
-                await conn.fetchval(_TOOL_COUNT_QUERY, execution_id, TOOL_EXECUTION_COMPLETED) or 0
-            )
+                await tool_call_counts.by_execution(
+                    conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+                    [execution_id],
+                )
+            ).get(execution_id, 0)
             execution_started_at = await conn.fetchval(_EXECUTION_START_QUERY, execution_id)
 
             if has_summary:

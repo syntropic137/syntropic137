@@ -34,6 +34,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
+    record_failure_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
@@ -47,8 +50,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome imp
     completed_phase,
     failed_phase_outcome,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
+    retry_lost_terminal_attempt,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
-    PhaseRuntime,
+    PhaseRuntimes,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace import (
     PhaseWorkspace,
@@ -117,6 +123,15 @@ class _DispatchContext:
     #: processor is shared across concurrent executions, so instance state
     #: would attribute one run's artifacts to another's failure.
     kept_artifact_ids: list[str] = field(default_factory=list)
+    #: What this run was asked to do, as `run()` was given it. Here rather than
+    #: on the processor (where it was, as `self._inputs`, until #1311) for the
+    #: third instance of the same reason: `run()` assigned it and
+    #: `_provision_workspace` read it several awaits later, so a concurrent run
+    #: starting in between replaced it and the next phase to provision built
+    #: its prompt from the OTHER run's inputs - the issue, the repo and the PR
+    #: number an agent is told to work on. Nothing downstream could detect it:
+    #: a prompt is valid whichever run's inputs it names.
+    inputs: dict[str, Any] = field(default_factory=dict)
 
 
 class WorkflowExecutionProcessor:
@@ -168,20 +183,24 @@ class WorkflowExecutionProcessor:
         self._claude_plugin_materializer = claude_plugin_materializer
         # WHY (#772): mirrors claude_plugin_materializer above but for skills; handler hard-fails (no silent skip) on unmatched skills
         self._skill_materializer = skill_materializer
-        # Infrastructure state (not domain state — ephemeral). One object, not
-        # thirteen maps: see `phase_runtime` for why they are only ever correct
-        # together, and why this processor should not know they are maps at all.
-        self._runtime = PhaseRuntime(
+        # Infrastructure state (not domain state — ephemeral). One object per
+        # RUN, not thirteen maps and not one object for the whole processor:
+        # see `phase_runtime` for why the maps are only ever correct together,
+        # why this processor should not know they are maps at all, and why one
+        # shared set of them let concurrent runs of a workflow take each
+        # other's workspaces (#1311).
+        self._runtimes = PhaseRuntimes(
             capture_port=session_capture,
             session_store=session_store,
             writer=observability_writer,
             ledger=import_ledger,
         )
-        #: This run's inputs, written by `run` before any phase is provisioned.
-        self._inputs: dict[str, Any] = {}
 
-    @property
-    def _workspaces(self) -> PhaseWorkspace:
+    def _workspaces_for(
+        self,
+        execution_id: str,
+        inputs: dict[str, Any],
+    ) -> PhaseWorkspace:
         """The storage seam of a phase: provision it, claim what it produced.
 
         Dispatching to it is a dispatch decision; how any of it is built is
@@ -205,9 +224,9 @@ class WorkflowExecutionProcessor:
             command_builder=self._command_builder,
             claude_plugin_materializer=self._claude_plugin_materializer,
             skill_materializer=self._skill_materializer,
-            runtime=self._runtime,
+            runtime=self._runtimes.of(execution_id),
             journal=self._journal,
-            inputs=self._inputs,
+            inputs=inputs,
         )
 
     async def run(
@@ -236,7 +255,6 @@ class WorkflowExecutionProcessor:
         # once PromptBuilder consumes ``RepositoryRef`` directly.
         if repos and "repos" not in inputs:
             inputs["repos"] = ",".join(r.https_url for r in repos)
-        self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 
         phase_definitions = [
@@ -275,7 +293,7 @@ class WorkflowExecutionProcessor:
         all_artifact_ids: list[str] = []
         completed_phase_ids: list[str] = []
         phase_outputs = PhaseOutputCache()
-        dispatch_ctx = _DispatchContext()
+        dispatch_ctx = _DispatchContext(inputs=inputs)
 
         try:
             await self._drain_todo_list(
@@ -328,6 +346,14 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        finally:
+            # A shutdown may cancel the minutes-long agent await before either
+            # terminal path runs. Tear down only this execution's runtime,
+            # then release its registry entry on every way out (#1311, #1319).
+            try:
+                await self._runtimes.of(execution_id).abandon_all("shutdown")
+            finally:
+                self._runtimes.release(execution_id)
 
     async def _drain_todo_list(
         self,
@@ -379,7 +405,7 @@ class WorkflowExecutionProcessor:
         # the per-run _DispatchContext, never on the shared processor.
         dispatch_ctx.current_phase_id = todo.phase_id
         if todo.action == TodoAction.PROVISION_WORKSPACE:
-            await self._workspaces.start_phase(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).start_phase(
                 todo,
                 phase,
                 aggregate,
@@ -390,7 +416,7 @@ class WorkflowExecutionProcessor:
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
-            await self._workspaces.collect(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).collect(
                 todo,
                 phase,
                 aggregate,
@@ -425,17 +451,25 @@ class WorkflowExecutionProcessor:
         is: with concurrent runs sharing this processor, anything else could
         name another execution's phase.
         """
+        runtime = self._runtimes.of(execution_id)
         # BEFORE the teardown below. `abandon_all` destroys the cancelled
         # phase's container and commits that exist only in it go with it. The
         # user asked for the run to stop, not for the work to be deleted
         # (#1231).
-        saved = await self._runtime.save_unpushed_work(phase_id, execution_id=execution_id)
-        cancellation = cancelled_execution(
-            cancel_reason, phase_results, all_artifact_ids, saved=saved
-        )
-        await self._runtime.report_cancelled(cancellation.reason)
-        await self._runtime.abandon_all("cancel")
-        return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        try:
+            saved = await runtime.save_unpushed_work(phase_id, execution_id=execution_id)
+            cancellation = cancelled_execution(
+                cancel_reason, phase_results, all_artifact_ids, saved=saved
+            )
+            try:
+                await runtime.report_cancelled(cancellation.reason)
+            except Exception:
+                logger.exception(
+                    "Could not close the sessions of execution %s as cancelled", execution_id
+                )
+            return cancellation.execution_result(workflow_id, execution_id, started_at=started_at)
+        finally:
+            await runtime.abandon_all("cancel")
 
     async def _complete_execution(
         self,
@@ -484,7 +518,8 @@ class WorkflowExecutionProcessor:
         # BEFORE any await: teardown clears both maps, so reading them
         # afterwards timed the phase to the end of cleanup and lost the
         # session_id entirely (#1036).
-        timings = self._runtime.timings()
+        runtime = self._runtimes.of(execution_id)
+        timings = runtime.timings()
         # Read in the same breath as the timings, and for the same reason: the
         # counts are the dying phase's own, and this is the last frame in which
         # anything can still ask for them (#1262). Without this the phase
@@ -496,7 +531,7 @@ class WorkflowExecutionProcessor:
         # shared across concurrent dispatches and two runs of one workflow have
         # the same phase ids, so "what did `implement` spend" names two answers.
         # The id is the run's own, so it always names this one's.
-        usage = self._runtime.usage_for(execution_id, failed_phase_id)
+        usage = runtime.usage_for(execution_id, failed_phase_id)
         # Before the teardown below, the only window in which either is
         # possible: SAVE what would die with the container (#1231), then read
         # where that leaves the branches (#1200). Saving first is what lets the
@@ -517,9 +552,9 @@ class WorkflowExecutionProcessor:
         saved = (
             SavedWork()
             if already_saved_by_the_completion_gate(error)
-            else await self._runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
+            else await runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
         )
-        observed = await self._runtime.observe(failed_phase_id)
+        observed = await runtime.observe(failed_phase_id)
         failure = failed_phase_outcome(
             error,
             failed_phase_id,
@@ -533,17 +568,15 @@ class WorkflowExecutionProcessor:
         if failure.result is not None:
             phase_results.append(failure.result)
 
-        await self._runtime.report_failed(failure.reason)
-        await self._runtime.abandon_all("failure")
-
-        fail_cmd = failure.as_command(
-            execution_id, completed_phases=len(completed_phase_ids), total_phases=len(phases)
+        await record_failure_and_release(
+            failure,
+            aggregate=aggregate,
+            journal=self._journal,
+            runtime=runtime,
+            execution_id=execution_id,
+            completed_phases=len(completed_phase_ids),
+            total_phases=len(phases),
         )
-        try:
-            aggregate.fail_execution(fail_cmd)
-            await self._journal.append(aggregate)
-        except Exception as save_err:
-            logger.error("Failed to save failure event: %s", save_err)
         return failure.execution_result(
             workflow_id,
             execution_id,
@@ -568,7 +601,8 @@ class WorkflowExecutionProcessor:
         """Dispatch RUN_AGENT."""
         assert todo.phase_id is not None
         session_id = todo.session_id or ""
-        launch = self._runtime.launch(todo.phase_id, session_id=session_id)
+        runtime = self._runtimes.of(todo.execution_id)
+        launch = runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
 
         # A BUSY UPSTREAM IS NOT A FAILED PHASE (#1303). Everything below this
@@ -587,7 +621,7 @@ class WorkflowExecutionProcessor:
             retry_policy=self._retry_policy,
         )
 
-        self._runtime.remember_leader(
+        runtime.remember_leader(
             todo.phase_id, execution_id=todo.execution_id, stream_result=result.stream_result
         )
 
@@ -598,10 +632,10 @@ class WorkflowExecutionProcessor:
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workflow_id=workflow_id,
-            model=phase.agent_config.model,
+            requested_model=phase.agent_config.model,
             started_at=launch.started_at,
         )
-        self._runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
+        runtime.record_agent_run(todo.phase_id, execution_id=todo.execution_id, result=result)
 
         if result.stream_result.interrupt_requested:
             await self._handle_cancel_signal(todo, result, aggregate)
@@ -622,6 +656,8 @@ class WorkflowExecutionProcessor:
         # a raise added later cannot forget it, and it never raises itself, so
         # the reason the phase failed always reaches the caller intact.
         try:
+            command = result.command
+            assert command is not None, "a non-cancelled run must carry its completion command"
             # THE PHASE'S OWN REPORT, on the same footing as its exit status
             # and checked before the aggregate is told the run completed
             # (#1256). A phase that wrote `TASK_RESULT: {"success": false, ...}`
@@ -637,12 +673,23 @@ class WorkflowExecutionProcessor:
             failure = phase_failure(result, phase_id=todo.phase_id)
             if failure is not None:
                 logger.error(str(failure))
+                if await retry_lost_terminal_attempt(
+                    todo,
+                    aggregate,
+                    runtime,
+                    self._journal,
+                    reason=result.stream_result.error_reason,
+                    failure=str(failure),
+                ):
+                    return
                 raise failure
 
-            aggregate.agent_execution_completed(result.command)
+            aggregate.agent_execution_completed(command)
             await self._journal.append(aggregate)
         except Exception:
-            dispatch_ctx.kept_artifact_ids = await self._workspaces.keep_unfinished_output(
+            dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
+                todo.execution_id, dispatch_ctx.inputs
+            ).keep_unfinished_output(
                 todo, phase, workspace=launch.workspace, workflow_id=workflow_id
             )
             raise
@@ -685,16 +732,17 @@ class WorkflowExecutionProcessor:
         the declaration had nowhere to arrive.
         """
         assert todo.phase_id is not None
+        runtime = self._runtimes.of(todo.execution_id)
         # FIRST, and on the real path rather than inside a try: nothing has
         # been popped, the workspace is still alive and the aggregate has not
         # been told this phase succeeded, so the raise IS the outcome (#1184).
         await refuse_to_complete_unsaved_phase(
-            self._runtime.live_workspaces,
+            runtime.live_workspaces,
             todo,
             delivers_repo_changes=phase.delivers_repo_changes,
         )
 
-        harvest = self._runtime.harvest(todo.execution_id, todo.phase_id)
+        harvest = runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
@@ -710,7 +758,7 @@ class WorkflowExecutionProcessor:
         aggregate.complete_phase(outcome.command)
         await self._journal.append(aggregate)
 
-        await self._runtime.finalize(
+        await runtime.finalize(
             todo.phase_id,
             input_tokens=outcome.input_tokens,
             output_tokens=outcome.output_tokens,

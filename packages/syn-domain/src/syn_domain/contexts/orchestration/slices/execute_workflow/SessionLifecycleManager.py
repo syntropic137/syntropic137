@@ -25,7 +25,11 @@ from syn_domain.contexts.agent_sessions import (
     SessionStatus,
     StartSessionCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
+    announced_model_from,
+)
 from syn_shared.events import SESSION_ERROR
+from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -86,9 +90,18 @@ class SessionLifecycleManager:
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._agent_provider = agent_provider
+        #: The REQUESTED model (often an alias). Never written as ``model`` on
+        #: an observation (ADR-067).
         self._agent_model = agent_model
+        #: The model the harness reported, once the stream has said.
+        self._observed_model: str | None = None
         self._repos = list(repos) if repos else []
         self._invocation: SessionInvocationState | None = None
+
+    def note_observed_model(self, model: str | None) -> None:
+        """Record the model the harness reported. First non-blank report wins."""
+        if self._observed_model is None:
+            self._observed_model = announced_model_from(model)
 
     @property
     def session(self) -> AgentSessionAggregate | None:
@@ -127,7 +140,11 @@ class SessionLifecycleManager:
                 data={
                     "status": status,
                     "error_message": error_message.strip() or _unstated_reason(status),
-                    "model": self._agent_model,
+                    # What ran, if the harness ever said - usually it had not
+                    # by the time a session dies - and what was asked for,
+                    # always as its own key (ADR-067).
+                    OBSERVED_MODEL_KEY: self._observed_model,
+                    REQUESTED_MODEL_KEY: self._agent_model,
                 },
                 execution_id=self._execution_id,
                 phase_id=self._phase_id,

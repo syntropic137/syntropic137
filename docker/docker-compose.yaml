@@ -154,6 +154,7 @@ services:
       SYN_API_HOST: "0.0.0.0"
       # ADR-030: Use explicit database URLs
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      SYN_UI_FEEDBACK_ENABLED: ${SYN_UI_FEEDBACK_ENABLED:-false}
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
@@ -198,6 +199,106 @@ services:
       SYN_WORKSPACE_DOCKER_IMAGE:
       # Note: secrets (GitHub App, Anthropic, storage) are injected via
       # overlay files (dev, selfhost, ondemand) using env_file or environment
+      # --- BEGIN GENERATED: settings forwarded from .env (just gen-compose) ---
+      # Every setting .env.example documents, forwarded so that writing one
+      # in .env has the effect the docs promise (#1101). Bare keys: compose
+      # drops an unset one, so an unwritten setting keeps its own default.
+      # Overlays may still override any of these with a fixed value.
+      OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV:
+      OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:
+      OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:
+      OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:
+      APP_NAME:
+      APP_ENVIRONMENT:
+      DATABASE_POOL_SIZE:
+      DATABASE_POOL_OVERFLOW:
+      EVENT_STORE_TENANT_ID:
+      EVENT_STORE_TIMEOUT_SECONDS:
+      EVENT_STORE_URL:
+      LOG_LEVEL:
+      LOG_FORMAT:
+      ANTHROPIC_API_KEY:
+      DEFAULT_AGENT_TIMEOUT_SECONDS:
+      DEFAULT_MAX_TOKENS:
+      ARTIFACT_STORAGE_TYPE:
+      S3_BUCKET_NAME:
+      S3_ENDPOINT_URL:
+      S3_ACCESS_KEY_ID:
+      S3_SECRET_ACCESS_KEY:
+      DEBUG:
+      ESP_EVENT_STORE_DB_URL:
+      CLAUDE_CODE_OAUTH_TOKEN:
+      CODEX_AUTH_JSON:
+      SYN_DEFAULT_CLAUDE_MODEL:
+      SYN_DEFAULT_CODEX_MODEL:
+      SETUP_PHASE_TIMEOUT_SECONDS:
+      COLLECTOR_URL:
+      COLLECTOR_API_KEY:
+      HOOK_BACKEND_URL:
+      HOOK_BATCH_SIZE:
+      HOOK_FLUSH_INTERVAL_SECONDS:
+      DASHBOARD_PORT:
+      DASHBOARD_HOST:
+      SYN_GITHUB_APP_ID:
+      SYN_GITHUB_APP_NAME:
+      SYN_GITHUB_WEBHOOK_SECRET:
+      DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED:
+      DEV__WORKFLOW_FAIL_ON_SKILL_NOT_REGISTERED:
+      SYN_WORKSPACE_ISOLATION_BACKEND:
+      SYN_WORKSPACE_POOL_SIZE:
+      SYN_WORKSPACE_MAX_CONCURRENT:
+      SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW:
+      SYN_WORKSPACE_CLOUD_PROVIDER:
+      SYN_WORKSPACE_CLOUD_API_KEY:
+      SYN_WORKSPACE_CLOUD_TEMPLATE:
+      SYN_WORKSPACE_DOCKER_RUNTIME:
+      SYN_WORKSPACE_DOCKER_NETWORK:
+      SYN_IMAGE_VERIFY_ENABLED:
+      SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP:
+      SYN_IMAGE_VERIFY_CERTIFICATE_OIDC_ISSUER:
+      SYN_IMAGE_VERIFY_NEW_BUNDLE_FORMAT:
+      SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES:
+      SYN_IMAGE_VERIFY_COSIGN_PATH:
+      SYN_IMAGE_VERIFY_TIMEOUT_SECONDS:
+      SYN_SECURITY_ALLOW_NETWORK:
+      SYN_SECURITY_ALLOWED_HOSTS:
+      SYN_SECURITY_READ_ONLY_ROOT:
+      SYN_SECURITY_MAX_WORKSPACE_SIZE:
+      SYN_SECURITY_MAX_MEMORY:
+      SYN_SECURITY_MAX_CPU:
+      SYN_SECURITY_MAX_PIDS:
+      SYN_SECURITY_MAX_EXECUTION_TIME:
+      SYN_GIT_USER_NAME:
+      SYN_GIT_USER_EMAIL:
+      SYN_GIT_TOKEN:
+      SYN_STORAGE_LOCAL_PATH:
+      SYN_STORAGE_BUCKET_NAME:
+      SYN_STORAGE_CLAUDE_PLUGIN_BUCKET_NAME:
+      SYN_STORAGE_SKILL_BUCKET_NAME:
+      SYN_STORAGE_MINIO_SECRET_KEY:
+      SYN_STORAGE_MAX_FILE_SIZE_MB:
+      SYN_STORAGE_PRESIGNED_URL_EXPIRY_SECONDS:
+      SYN_SESSION_INVENTORY_LOCAL_BODY_RETENTION_SECONDS:
+      SYN_SESSION_INVENTORY_REPLICATION_ENABLED:
+      SYN_SESSION_INVENTORY_REPLICATION_STORE_URL:
+      SYN_SESSION_INVENTORY_REPLICATION_WRITE_TOKEN:
+      SYN_SESSION_INVENTORY_CAPTURE_REPLICATION_ENABLED:
+      SYN_SESSION_INVENTORY_CAPTURE_WRITE_TOKEN:
+      SYN_SESSION_INVENTORY_EXPORTER_BINARY:
+      SYN_SESSION_STORE_READ_TOKEN:
+      SYN_SESSION_STORE_DEPLOYMENT:
+      SYN_SESSION_STORE_PROVIDER:
+      SYN_SESSION_STORE_SPOOL_DIR:
+      SYN_LOGGING_LEVEL:
+      SYN_LOGGING_FORMAT:
+      SYN_LOGGING_LOG_COMMANDS:
+      SYN_LOGGING_LOG_TOOL_CALLS:
+      SYN_LOGGING_LOG_API_CALLS:
+      SYN_LOGGING_REDACT_SECRETS:
+      SYN_LOGGING_REDACTION_PATTERNS:
+      SYN_LOGGING_LOG_FILE_PATH:
+      SYN_LOGGING_MAX_LOG_SIZE_MB:
+      # --- END GENERATED ---
     volumes:
       - session_inventory_data:/app/data/session-inventory
     depends_on:
@@ -229,7 +330,16 @@ services:
   # MINIO - S3-compatible Object Storage
   # =============================================================================
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # Our own mirror, because MinIO withdrew anonymous pulls: Docker Hub first
+    # (#1403 moved us to Quay), then quay.io/minio/minio on 2026-09-24, which
+    # broke every fresh `compose up` and the smoke test. The linux/amd64
+    # (sha256:3f97c565...) and linux/arm64 (sha256:54d3d6a0...) manifests are
+    # byte-identical to the ones upstream index
+    # quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa... lists;
+    # only the index digest differs. Unmodified AGPL-3.0 binary, source at
+    # github.com/minio/minio/tree/RELEASE.2025-04-22T22-12-26Z.
+    # See infra/README.md "MinIO image mirror" before changing this.
+    image: ghcr.io/syntropic137/minio:RELEASE.2025-04-22T22-12-26Z@sha256:bbac678936882e4033b6068efd0a19d103b219002d979087f7c5bd330172e00d
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}

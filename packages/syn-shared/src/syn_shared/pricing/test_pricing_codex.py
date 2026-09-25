@@ -92,7 +92,8 @@ def test_unknown_model_is_never_substituted() -> None:
 
 def test_aliases_track_the_current_generation() -> None:
     assert require_model_pricing("sonnet").model_id == ModelId.CLAUDE_SONNET_5
-    assert require_model_pricing("opus").model_id == ModelId.CLAUDE_OPUS_5
+    assert require_model_pricing("opus").model_id == ModelId.CLAUDE_OPUS_5_5
+    assert require_model_pricing("gpt-sol").model_id == ModelId.GPT_6_SOL
     assert require_model_pricing("haiku").model_id == ModelId.CLAUDE_HAIKU_4_5
 
 
@@ -110,13 +111,13 @@ def test_price_tokens_reports_unpriced_rather_than_zero() -> None:
 
 def test_all_current_rates_are_verified_not_placeholder() -> None:
     """No shipped rate is a guess. PLACEHOLDER exists for when one is."""
-    for model in ("gpt-5.6", "gpt-5.6-sol", "opus", "sonnet", "haiku"):
+    for model in ("gpt-5.6", "gpt-5.6-sol", "gpt-sol", "gpt-6-sol", "opus", "sonnet", "haiku"):
         assert price_tokens(model, 1_000_000, 0).status is PricingStatus.PRICED, model
 
 
 def test_priced_amount_costs_match_the_table() -> None:
     priced = price_tokens("opus", 1_000_000, 1_000_000)
     assert priced.status is PricingStatus.PRICED
-    assert priced.model == ModelId.CLAUDE_OPUS_5
-    # Opus 5: $5/M input + $25/M output
-    assert priced.cost == Decimal("30.00")
+    assert priced.model == ModelId.CLAUDE_OPUS_5_5
+    # Opus 5.5: $4/M input + $20/M output
+    assert priced.cost == Decimal("24.00")

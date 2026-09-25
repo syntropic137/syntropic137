@@ -35,7 +35,11 @@ Replace `EventSubscriptionService` with `CoordinatorSubscriptionService`, wired 
 
 ### Per-projection checkpoints via `PostgresCheckpointStore`
 
-Each `CheckpointedProjection` tracks its own position in a `projection_checkpoints` table (managed by the ESP library). The coordinator subscribes from `min(all checkpoints)` so fast projections are not held back by slow ones, and a new projection can replay independently without disturbing others.
+Each `CheckpointedProjection` tracks its own position in a `projection_checkpoints` table (managed by the ESP library).
+
+The coordinator groups the projections into **subscription tracks** by position and opens one subscription per track: the projections at the head of the stream on one, anything still replaying history on another. In steady state every projection is at head and there is exactly one track.
+
+This is what makes "not held back by slow ones" true rather than aspirational. Per-projection checkpoints alone do not deliver it: until #1318 the coordinator took `min(all checkpoints)` and drove every projection from one subscription, which cannot hand out event N+1 until every projection has taken event N. One projection replaying from 0 therefore froze all the others for the whole replay - measured at ~40 minutes on one deploy, with 23 projections stuck at an identical position while the head kept moving. Grouping is on position, not on "was a rebuild just triggered", so a replay interrupted by a reconnect stays on its own track instead of dragging the plan back to wherever it had got to.
 
 ### 12 projections registered in the factory
 
@@ -88,7 +92,7 @@ Logic lives in `coordinator_helpers.run_coordinator()`.
 
 ### Version-based automatic rebuild
 
-`CheckpointedProjection.get_version()` returns an integer. When the coordinator detects that a projection's stored checkpoint version is lower than its declared version, it clears the projection's data and resets its checkpoint to 0, triggering an independent full replay for that projection only. Other projections are unaffected.
+`CheckpointedProjection.get_version()` returns an integer. When the coordinator detects that a projection's stored checkpoint version differs from its declared version, it clears the projection's data and deletes its checkpoint, so the projection replays from 0 on the replay track. Other projections keep consuming live events on the at-head track throughout (#1318).
 
 ## Consequences
 

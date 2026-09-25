@@ -29,6 +29,55 @@ Run both: `just fitness`
 | 11 | Typed Boundaries | test_typed_cross_context_boundaries, test_typed_projection_handlers | fitness_exceptions.toml `[typed_cross_context_boundaries, typed_projection_handlers]` | Enforced |
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
 | 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
+| 14 | Answer Honesty | test_unknown_has_a_representation | fitness_exceptions.toml `[unknown_has_a_representation]` | Enforced |
+
+### 14. Answer Honesty (#1341)
+
+A value that can be unknown needs a way to say so. #1341 was three defects
+from separate reviews with one cause: unknown was represented with a token
+that already means something real - `0`, `[]` - so "we could not find out"
+reached the reader as a measurement, and every collapse pointed the unsafe
+way. The sharpest: the telemetry query behind the stall detector returns `[]`
+when it raises, so the feature built to tell "busy" from "stuck" reports
+*stuck* whenever its own telemetry breaks - and "stuck" is the verdict that
+tells an operator not to spend money retrying.
+
+The gate reads ignorance from a broad `except` handler, then asks whether the
+value it returns is a real answer of that type. `list`, `dict`, `set`, `tuple`
+and the numbers spend their entire vocabulary on answers, so there is nothing
+left over to mean "I did not find out".
+
+**The question is asked of the returned value, not the signature.** Widening
+`list[Row]` to `list[Row] | None` and leaving `return []` in place changes the
+declaration and nothing else, so the half-fix stays flagged - that loophole
+was found by mutating the gate's own union handling and is pinned by
+`test_widening_the_type_but_still_returning_empty_is_not_a_fix`. A whole fix
+returns something the answer domain does not contain.
+
+**The gate is narrower than #1341's own wording, on measurements, and says
+so.** A rule with a bad false-positive rate gets an exception entry rather
+than a fix, so three wider shapes were counted against this repo and rejected,
+each with a test pinning that the gate does not see it:
+
+| Shape | Measured | Why it is out |
+|---|---|---|
+| `except ...: return False` | 10 sites, 1 genuine | Nine are a function reporting on its own attempt (`delete`, `health_check`), where the exception IS the answer |
+| `except ...: return ''` | 1 site, 0 genuine | Whether `''` is a real answer is a domain fact, not a type fact; the one site uses it as a documented sentinel |
+| `if <source> is None: return <zero>` | 91 sites | Mostly `if not ids: return []`, where empty in means empty out. Even narrowed to non-parameter subjects, 15 remain and a quarter are correct |
+
+That last exclusion has a cost worth stating: **the gate cannot see one of
+#1341's own three sites.** `AgentExecutionHandler._detect_exit_code` turns a
+`None` exit code into `0`, so an externally removed container reads as clean
+success - with no `except` block at all, by falling through past a nullable
+local. Catching it needs dataflow, not pattern matching. It is fixed on PR
+#1330 (#1319), and `test_the_gate_does_not_see_a_fallthrough_zero` pins that
+this gate is not what caught it. #1341's third site, the health endpoint's
+`lag`, was already fixed by #1172 before #1341 was filed.
+
+Seeded with the 11 sites live on `main` when it landed - three tracked to
+#1262 (PR #1332), eight found by the gate on its first run and tracked to
+#1341. The table is the whole budget: `test_no_stale_seeded_sites` requires
+the entry to go in the diff that fixes the site.
 
 ### 11. Typed Boundaries (#1268, ADR-063)
 

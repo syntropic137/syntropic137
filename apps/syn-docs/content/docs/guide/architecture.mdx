@@ -27,17 +27,17 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 
 Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections cached in Redis.
 
-**Commands (12):** `CreateWorkflow`, `StartExecution`, `PauseExecution`, `ResumeExecution`, `CancelExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
+**Commands (44):** `CreateWorkflow`, `StartExecution`, `PauseExecution`, `ResumeExecution`, `CancelExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
 
-**Events (31):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionPaused`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
+**Events (70):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionPaused`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
 
-**Projections (14):** Pre-computed read models updated by event processors, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
+**Projections (25):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
 <CQRSFlow />
 
 ## Domain Model
 
-Syntropic137 is organized into five bounded contexts with nine aggregates:
+Syntropic137 is organized into five bounded contexts with 14 aggregates:
 
 <DomainModelFlow />
 

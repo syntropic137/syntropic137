@@ -18,6 +18,7 @@ export type {
   FeedbackProviderConfig,
   FeedbackState,
   FeedbackStats,
+  FeedbackSubject,
   FeedbackType,
   FeedbackUpdate,
   LocationContext,
@@ -27,6 +28,7 @@ export type {
   MediaUpload,
   Priority,
   Status,
+  SubjectKind,
   Theme,
   WidgetPosition,
 } from './types';

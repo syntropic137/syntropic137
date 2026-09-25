@@ -36,7 +36,7 @@ class MemoryTokenInjectionAdapter(InMemoryAdapter):
     async def inject(
         self,
         handle: IsolationHandle,
-        _execution_id: str,
+        execution_id: str,
         token_types: list[TokenType],
         *,
         ttl_seconds: int = 300,
@@ -52,6 +52,7 @@ class MemoryTokenInjectionAdapter(InMemoryAdapter):
         Returns:
             TokenInjectionResult indicating success
         """
+        del execution_id  # named for the port; unused here
         from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,

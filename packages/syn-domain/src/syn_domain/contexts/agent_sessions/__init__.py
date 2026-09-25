@@ -119,6 +119,14 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     TranscriptDeletedError,
     TranscriptIntegrityError,
 )
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
+    pick_primary_model,
+    recorded_model_from_row,
+    recorded_model_group_by,
+    recorded_model_select,
+)
 from syn_domain.contexts.agent_sessions.slices.canonical_totals import (
     CanonicalTotals,
     CanonicalUsageQueryService,
@@ -193,6 +201,8 @@ from .domain.read_models.transcript_body_state import TranscriptBodyState
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
     "CANONICAL_USAGE_EVENT_FILTER",
+    "HAS_REQUESTED_MODEL_COLUMN",
+    "REQUESTED_MODEL_COLUMN",
     "AcquisitionStatusEvidence",
     "AgentLaunch",
     "AgentLaunchedEvent",
@@ -304,6 +314,7 @@ __all__ = [
     "TranscriptIntegrityError",
     "import_phase_delegates",
     "model_from_rollout",
+    "pick_primary_model",
     "price_canonical_row",
     "record_error",
     "record_message_request",
@@ -312,6 +323,9 @@ __all__ = [
     "record_tool_blocked",
     "record_tool_completed",
     "record_tool_started",
+    "recorded_model_from_row",
+    "recorded_model_group_by",
+    "recorded_model_select",
 ]
 
 from ._shared.session_invocation import InvocationStatus, SessionInvocationState

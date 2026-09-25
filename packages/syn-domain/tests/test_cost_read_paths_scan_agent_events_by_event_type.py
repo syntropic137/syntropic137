@@ -543,10 +543,6 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
                 "The same page for sessions with no summary yet, summed per (session, model). "
                 "Same pin, same cap, same unbounded interior."
             ),
-            "_COUNT_BATCH_QUERY": _segment_discard(
-                "Tool counts for the same page. One statement per page rather than per "
-                "session (#1077), so the pin and the cap cover it exactly as above."
-            ),
             "_MIN_TIME_BATCH_QUERY": _segment_discard(
                 "started_at for the same page. `time` is compress_orderby, so the MIN is "
                 "cheap per segment - but it still visits every segment the pinned sessions "
@@ -568,10 +564,6 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
             ),
             "_TOKEN_USAGE_FALLBACK_QUERY": _full_scan(
                 "The same execution's tokens when no summary exists yet. Same shape, same debt.",
-                by=_BY_EXECUTION,
-            ),
-            "_TOOL_COUNT_QUERY": _full_scan(
-                "Tool count for one execution. A COUNT still decompresses what it counts.",
                 by=_BY_EXECUTION,
             ),
             "_TURN_COUNT_QUERY": _full_scan(
@@ -597,10 +589,6 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
                 "The token_usage fallback for that same page of ids.",
                 by=_BY_EXECUTION,
             ),
-            "_TOOL_COUNT_BY_EXECUTION_IDS_QUERY": _full_scan(
-                "Tool counts for that same page of ids.",
-                by=_BY_EXECUTION,
-            ),
             "_COST_BY_PHASE_QUERY": _full_scan(
                 "Phase breakdown for a page of ids.",
                 by=_BY_EXECUTION,
@@ -616,10 +604,6 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
                 "The same list for executions with no summary. No LIMIT anywhere: it groups "
                 "every token_usage event ever recorded, on every page view."
             ),
-            "_TOOL_COUNT_BY_EXECUTION_QUERY": _full_scan(
-                "Tool counts for that unlimited list - one GROUP BY over every "
-                "tool_execution_completed event."
-            ),
         },
     ),
     **_declared(
@@ -634,11 +618,21 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
                 "mixed pricing cannot merge (#788). No LIMIT at all - the widest read in "
                 "this file."
             ),
-            "_TOOL_COUNT_BY_SESSION_QUERY": _full_scan(
-                "Tool counts for the whole sessions list, keyed by session. Unlimited."
-            ),
             "_STARTED_AT_BY_SESSION_QUERY": _full_scan(
                 "MIN(time) per session over the whole table. Unlimited."
+            ),
+        },
+    ),
+    **_declared(
+        "packages/syn-domain/src/syn_domain/tool_call_counts.py",
+        {
+            "BACKFILL_SQL": _full_scan(
+                "The deliberate full recount used to rebuild the maintained tally. It runs "
+                "during repair or projection rebuild, never on an API read path."
+            ),
+            "_HISTORY_HAS_TOOL_CALLS_SQL": _full_scan(
+                "Startup asks whether canonical history contains any tool call before "
+                "accepting an empty tally. EXISTS may stop early, but has no storage bound."
             ),
         },
     ),
@@ -722,17 +716,6 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
                 "second filters with `event_type != ALL($4)` - a negation, so it reads nearly "
                 "every type in the segments it does open.",
                 statements=2,
-            ),
-        },
-    ),
-    **_declared(
-        f"{_API}/routes/executions/queries.py",
-        {
-            "_fetch_tool_counts": _full_scan(
-                "Tool counts for one page of the executions list, issued from the route. "
-                "Pinned to the page's execution ids, which discards no segments; the counts "
-                "come from a GROUP BY over every matching event of those executions.",
-                by=_BY_EXECUTION,
             ),
         },
     ),
@@ -827,7 +810,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 26, "\n" + "\n".join(
+    assert len(unpinned) == 23, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 
@@ -835,13 +818,13 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
 def test_the_session_cost_read_path_still_pins_the_segmentby_column() -> None:
     """The specific claim #1338's change rests on, named where a reader will look.
 
-    Four batch statements, all pinning session_id. If one loses the pin it
+    Three batch statements, all pinning session_id. If one loses the pin it
     becomes a full segment scan and the test above catches that too - this one
     says which file to open.
     """
     module = f"{_SESSION_COST}/timescale_query.py"
     scans = [scan for scan in _production_scans() if scan.identity.module == module]
-    assert len(scans) == 4
+    assert len(scans) == 3
     assert all(scan.discards_segments for scan in scans), [
         (str(scan.identity), scan.predicate) for scan in scans
     ]

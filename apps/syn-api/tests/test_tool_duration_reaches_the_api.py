@@ -377,6 +377,11 @@ class _CodexRows:
         # file - which is entirely about rows and their timestamps - reads it (#1303).
         return
 
+    def note_observed_model(self, model: str | None) -> None:
+        # Recorder protocol too (ADR-067): which model ran rides on token rows,
+        # which this file does not read.
+        return
+
     async def record_tool_started(
         self, tool_name: str, tool_use_id: str, input_preview: str
     ) -> None:
@@ -404,6 +409,7 @@ class _CodexRows:
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        model: str | None = None,
     ) -> None:
         """Lane-2 telemetry the timeline query excludes; not a row here."""
 

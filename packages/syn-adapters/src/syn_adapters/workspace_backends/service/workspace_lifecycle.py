@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration import (
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
 )
+from syn_shared.diagnostics import name_exit_status
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.workspace_service import (
@@ -168,7 +169,7 @@ async def _read_image_manifest(
 
         exit_code, output = await asyncio.to_thread(container.exec_run, ["cat", VERSION_JSON_PATH])
         if exit_code != 0:
-            logger.debug("No version manifest in image (exit=%d)", exit_code)
+            logger.debug("No version manifest in image (%s)", name_exit_status(exit_code))
             return None
 
         data = json.loads(output)

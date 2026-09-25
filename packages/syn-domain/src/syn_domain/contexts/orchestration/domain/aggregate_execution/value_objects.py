@@ -367,9 +367,10 @@ class AgentConfiguration:
 
     provider: str = AgentProvider.CLAUDE  # + codex, openai (mock in tests)
     # Declared default is None = "caller named no model". __post_init__ then
-    # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex stays
-    # None because codex does not report its own model on the wire and a
-    # synthesized value would price every codex run as Haiku (issue #788).
+    # resolves it PER PROVIDER: Claude gets DEFAULT_CLAUDE_MODEL, codex gets
+    # DEFAULT_CODEX_MODEL (a concrete priced model the platform forces with
+    # --model, never a Claude alias - issue #788). Both are static fallbacks
+    # for templates stored before defaults were persisted at install time.
     # Resolution lives here, not in a caller, so EVERY construction path gets
     # it - a caller-side default only covered phases built from YAML.
     model: str | None = None  # CLI alias - auto-resolves to latest version
@@ -478,6 +479,20 @@ class PhaseResult:
     cache_read_tokens: int = 0
     total_tokens: int = 0
     error_message: str | None = None
+    exit_code: int | None = None
+    """What killed this phase, when a process status said so (#1319).
+
+    None means nothing observed a status, and that includes every phase that
+    did NOT fail - the same contract `observed_branches` keeps on the events
+    below. A phase that succeeded has its 0 recorded durably already, on the
+    `AgentExecutionCompleted` event written on the zero-exit branch; restating
+    it here would be a second source for one fact, derived rather than read.
+
+    What had no record at all was the other direction. 124 (the phase reached
+    its time budget) and -11 (it was killed) each call for a different
+    response, and neither reached any durable store, because the exception
+    raised for a non-zero exit stops the run before that event is ever written.
+    """
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

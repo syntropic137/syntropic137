@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from syn_shared.agents import AgentProvider, normalize_phase_model
+
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
 
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
     from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
         UpdatePhasePromptCommand,
     )
+    from syn_shared.agents import PhaseModelDefaults
 
 
 class WorkflowRepository(Protocol):
@@ -43,15 +49,25 @@ class UpdateWorkflowPhaseHandler:
     2. Dispatches the command to aggregate's @command_handler
     3. Persists events via repository
     4. Publishes events for integration
+
+    Like install, this is a write boundary for the phase's model: the edit is
+    normalised against the phase's EFFECTIVE provider before it is recorded,
+    with the same rule (``normalize_phase_model``) and the operator's
+    configured ``model_defaults``. Without it a provider switch persisted the
+    old provider's model (``opus`` on a codex phase) and a legacy phase kept
+    ``model=None`` through every edit.
     """
 
     def __init__(
         self,
         repository: WorkflowRepository,
         event_publisher: EventPublisher,
+        *,
+        model_defaults: PhaseModelDefaults,
     ) -> None:
         self._repository = repository
         self._event_publisher = event_publisher
+        self._model_defaults = model_defaults
 
     async def handle(self, command: UpdatePhasePromptCommand) -> str:
         """Handle the UpdatePhasePromptCommand.
@@ -68,7 +84,12 @@ class UpdateWorkflowPhaseHandler:
             msg = f"Workflow '{command.aggregate_id}' not found"
             raise ValueError(msg)
 
-        # Dispatch command to aggregate (uses @command_handler decorator)
+        current = next((p for p in aggregate.phases if p.phase_id == command.phase_id), None)
+        if current is not None:
+            command = _normalise_model(command, current, self._model_defaults)
+
+        # Dispatch command to aggregate (uses @command_handler decorator).
+        # An unknown phase_id is left for the aggregate to refuse.
         aggregate.update_phase_prompt(command)
 
         # Persist via repository
@@ -82,3 +103,39 @@ class UpdateWorkflowPhaseHandler:
         aggregate.mark_events_as_committed()
 
         return command.aggregate_id
+
+
+def _effective_provider(provider: str | None) -> str:
+    return provider or AgentProvider.CLAUDE
+
+
+def _normalise_model(
+    command: UpdatePhasePromptCommand,
+    current: PhaseDefinition,
+    defaults: PhaseModelDefaults,
+) -> UpdatePhasePromptCommand:
+    """Resolve the model this edit leaves the phase with, and its provenance.
+
+    The candidate is the model the edit names; failing that, the stored one -
+    EXCEPT when the edit switches provider and the stored model was only a
+    default: a default is chosen per provider, so it does not survive the
+    switch (an operator default may be a string the table cannot judge, which
+    the wrong-provider check alone would keep). A declared model is carried
+    across and then judged like any other.
+    """
+    provider = command.provider if command.provider is not None else current.provider
+    switched = _effective_provider(provider) != _effective_provider(current.provider)
+    supplied = command.model is not None and bool(command.model.strip())
+    if supplied:
+        candidate: str | None = command.model
+    elif switched and current.model_defaulted:
+        candidate = None
+    else:
+        candidate = current.model
+    model, was_defaulted = normalize_phase_model(provider, candidate, defaults)
+    if not supplied and not switched and not was_defaulted:
+        # The edit did not touch the model: keep its provenance. Re-judging the
+        # stored default as "declared" would make a later reinstall that omits
+        # the model look like a removal (codex review pass 3).
+        was_defaulted = current.model_defaulted
+    return command.model_copy(update={"model": model, "model_defaulted": was_defaulted})

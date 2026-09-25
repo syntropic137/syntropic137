@@ -73,7 +73,7 @@ class InventoryRuntime:
 
 
 @dataclass(frozen=True)
-class _InventoryWork:
+class InventoryWork:
     scheduler: SchedulePendingInventoryHandler
     step: InventoryStepHandler
     recovery: CaptureRecoveryWorker | None = None
@@ -126,7 +126,7 @@ async def create_inventory_runtime(
         archive, evidence, AgenticNativeSessionEvidence(), catalog=PostgresCaptureCatalog(pool)
     )
     drain = LocalSpoolDrain(capture)
-    work = _InventoryWork(
+    work = InventoryWork(
         retention=LocalBodyRetention(
             pool,
             archive,

@@ -304,7 +304,7 @@ No migration needed - old events work as-is. Future events get richer data.
 - [ADR-008: VSA Projection Architecture](./ADR-008-vsa-projection-architecture.md)
 - [ADR-009: Agentic Execution Architecture](./ADR-009-agentic-execution-architecture.md)
 - [ADR-010: Event Subscription Architecture](./ADR-010-event-subscription-architecture.md)
-- [ADR-013: Event Sourcing Projection Consistency](./ADR-013-event-sourcing-projection-consistency.md)
+- [ADR-020: Event Sourcing Projection Consistency](./ADR-020-event-sourcing-projection-consistency.md)
 - [ADR-043: Git Hook Event Pipeline](./ADR-043-git-hook-event-pipeline.md) — how git events reach the engine via real git hooks + stderr merge
 
 ## References

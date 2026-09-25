@@ -101,9 +101,9 @@ _REPO_URL = "https://github.com/syntropic137/syntropic137"
 #: that this reaches the agent verbatim: the refusal is the agent reading THIS
 #: and declining, so a test that injected a bland placeholder would prove
 #: nothing about the decision it is supposed to protect.
-_BLOCKING_VERIFY_REPORT = """# Verification report
+_BLOCKING_REVERIFY_REPORT = """BLOCKED
 
-**Verdict: BLOCKING DEFECT.** The migration drops the `session_id` column
+The migration drops the `session_id` column
 before the projection has been rebuilt, so every in-flight execution loses its
 attribution. Do not open a PR for this.
 """
@@ -189,9 +189,11 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
     await handler.handle(ExecuteWorkflowCommand(aggregate_id=workflow_id))
 
     assert [p.phase_id for p in processor.phases] == [
-        "bootstrap",
+        "premise",
         "implement",
         "verify",
+        "fix",
+        "reverify",
         "open_pr",
     ], "the workflow's phase list changed; these assertions name phases by id"
     return {p.phase_id: p for p in processor.phases}
@@ -349,7 +351,7 @@ class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
 
 
 class TestTheRefusalSurvivesTheChange:
-    """A verify report naming a blocking defect must still stop the PR.
+    """A reverify report naming a blocking defect must still stop the PR.
 
     Refusal is the agent's decision, and this file cannot make the agent
     decide. What it CAN pin is the two inputs that decision needs, both of
@@ -359,22 +361,22 @@ class TestTheRefusalSurvivesTheChange:
     it happens to do.
     """
 
-    async def test_the_blocking_verify_report_is_in_the_workspace(self) -> None:
+    async def test_the_blocking_reverify_report_is_in_the_workspace(self) -> None:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
-        verify_inputs = {
+        reverify_inputs = {
             path: body
             for path, body in provisioned.injected.items()
-            if path.startswith("artifacts/input/verify")
+            if path.startswith("artifacts/input/reverify")
         }
-        assert verify_inputs, (
-            "the phase was given no verify artifact, so it has nothing to refuse on"
+        assert reverify_inputs, (
+            "the phase was given no reverify artifact, so it has nothing to refuse on"
         )
-        assert any(b"BLOCKING DEFECT" in body for body in verify_inputs.values())
+        assert any(b"BLOCKED" in body for body in reverify_inputs.values())
 
     async def test_the_refusal_instruction_reaches_the_agent(self) -> None:
         """Asserted on the ARGV, not on the prompt file.
@@ -387,10 +389,10 @@ class TestTheRefusalSurvivesTheChange:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
-        assert "If verification failed, or found a defect, do not open a PR." in provisioned.prompt
+        assert "If it says BLOCKED, do not open a PR." in provisioned.prompt
 
     async def test_the_happy_path_opens_a_pr_from_the_remote_branch_without_pushing(
         self,
@@ -406,7 +408,7 @@ class TestTheRefusalSurvivesTheChange:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": "# Verification report\n\nVerdict: PASS. No defects.\n"},
+            completed={"reverify": "CERTIFIED\n\nThe final head is safe to publish.\n"},
         )
 
         assert "existing remote branch" in provisioned.prompt
@@ -940,7 +942,7 @@ class TestThePromptTellsTheTruthAboutCloning:
         phases = await _executable_phases()
         provisioned = await _provision(
             phases["open_pr"],
-            completed={"verify": _BLOCKING_VERIFY_REPORT},
+            completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
         assert "pre-cloned" not in provisioned.prompt.lower()

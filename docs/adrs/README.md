@@ -38,6 +38,7 @@
 | [ADR-036](ADR-036-workspace-structure-convention.md) | Workspace Structure Convention | Accepted |
 | [ADR-048](ADR-048-workflows-as-cc-commands.md) | Workflows as Claude Code Commands | Accepted |
 | [ADR-049](ADR-049-sse-over-websocket-for-execution-streams.md) | Server-Sent Events (SSE) for Real-Time Execution Streams | Accepted |
+| [ADR-069](ADR-069-harness-neutral-phase-definition.md) | Harness-neutral Phase Definition | Accepted (partially proposed) |
 
 ### Infrastructure & Storage
 
@@ -56,6 +57,14 @@
 | [ADR-045](ADR-045-secrets-management-standard.md) | Secrets Management Standard | Accepted |
 | [ADR-052](ADR-052-docs-site-vercel-deployment.md) | Documentation Site Deployment via Vercel | Superseded |
 | [ADR-054](ADR-054-generated-docs-sync-pipeline.md) | Generated Documentation Sync Pipeline | Accepted |
+| [ADR-057](ADR-057-declarative-service-lifecycle-registry.md) | Declarative Service Lifecycle Registry | Accepted |
+| [ADR-059](ADR-059-nginx-gateway-two-port-auth-model.md) | nginx Gateway Two-Port Authentication Model | Accepted |
+| [ADR-060](ADR-060-on-demand-environment-creation.md) | On-Demand Environment Creation | Proposed |
+| [ADR-061](ADR-061-justfile-script-extraction.md) | Justfile Script Extraction | Accepted |
+| [ADR-063](ADR-063-cross-context-anti-corruption-layer.md) | Cross-Context Anti-Corruption Layer | Accepted |
+| [ADR-066](ADR-066-separation-of-concerns.md) | Separation of Concerns Across Components | Accepted |
+| [ADR-067](ADR-067-model-registry-and-cost-attribution.md) | Model Registry and Rate-at-Write Cost Attribution | Proposed |
+| [ADR-070](ADR-070-credential-rotation.md) | Credential Rotation Without a Restart | Proposed |
 
 ### Testing & Quality
 
@@ -68,6 +77,7 @@
 | [ADR-035](ADR-035-qa-workflow-standard.md) | QA Workflow Standard | Accepted |
 | [ADR-038](ADR-038-test-organization-standard.md) | Test Organization Standard | Accepted |
 | [ADR-062](ADR-062-architectural-fitness-function-standard.md) | Architectural Fitness Function Standard | Accepted |
+| [ADR-062](ADR-062-cross-context-public-api-enforcement.md) | Cross-Context Public API Enforcement | Accepted |
 
 ### GitHub Integration
 
@@ -83,7 +93,7 @@
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-016](ADR-016-ui-feedback-module.md) | UI Feedback Module | Proposed |
+| [ADR-016](ADR-016-ui-feedback-module.md) | UI Feedback Module | Accepted |
 | [ADR-044](ADR-044-cli-first-agent-native-interface.md) | CLI-First, Agent-Native Interface Design | Accepted |
 | [ADR-053](ADR-053-plugin-schema-generation-strategy.md) | Plugin Schema Generation Strategy | Accepted |
 | [ADR-064](ADR-064-observability-monitor-ui.md) | Observability Monitor UI for Sessions and Executions | Proposed |
@@ -102,6 +112,10 @@
 | [ADR-035](ADR-035-conversation-storage-architecture.md) | Agent Output Data Model and Storage | Proposed |
 | [ADR-037](ADR-037-subagent-observability.md) | Subagent Observability | Accepted |
 | [ADR-039](ADR-039-context-window-cost-tracking.md) | Context Window and Cost Tracking | Accepted |
+| [ADR-056](ADR-056-workspace-tooling-architecture.md) | Workspace Tooling Architecture | Accepted |
+| [ADR-058](ADR-058-workspace-hydration.md) | Workspace Hydration | Accepted |
+| [ADR-065](ADR-065-claude-plugin-injection.md) | Skills as the Workflow Capability Unit | Accepted |
+| [ADR-068](ADR-068-remove-interactive-tmux-path.md) | Remove the Interactive tmux Agent Path | Accepted |
 
 ### Organization & Repos
 

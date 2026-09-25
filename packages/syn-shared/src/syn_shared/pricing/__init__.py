@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from syn_shared.agents import ModelAlias, ModelId
+from syn_shared.agents import (
+    CLAUDE_MODEL_ALIAS_TARGETS,
+    CODEX_MODEL_ALIAS_TARGETS,
+    ModelId,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,13 +191,41 @@ class ModelPricing:
 # Source: https://docs.anthropic.com/en/docs/about-claude/pricing
 # Last updated: 2026-04-06
 #
-# Cache pricing multipliers (relative to base input price):
+# Cache pricing multipliers (relative to base input price) for the Claude
+# rows that FOLLOW the multipliers (not every row does - read each row):
 #   - Cache creation (5-min TTL): 1.25x
 #   - Cache read:                 0.10x
+# Opus 5.5 breaks both: its cache read is $0.20 (0.05x) and its 5-min write
+# is $5.00 (1.25x), set explicitly from the vendor page rather than derived.
+# The table carries one cache-write rate, the 5-min one; a 1-hour cache write
+# (Opus 5.5: $8.00) is not modelled and would be under-priced.
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
-    # --- Current generation (ADR-067 phase 0) ---
+    # --- Current generation (verified 2026-09-24) ---
+    # Opus 5.5: $4 in / $5 5-min cache write / $0.20 cache read / $20 out per
+    # MTok. Native 1M context with no long-context premium. Cache read is an
+    # explicit 0.05x of input, NOT the 0.10x multiplier above - do not derive it.
+    ModelId.CLAUDE_OPUS_5_5: ModelPricing(
+        model_id=ModelId.CLAUDE_OPUS_5_5,
+        input_per_million=Decimal("4.00"),
+        output_per_million=Decimal("20.00"),
+        cache_creation_per_million=Decimal("5.00"),
+        cache_read_per_million=Decimal("0.20"),
+    ),
+    # GPT-6-Sol (codex slug `gpt-6-sol`): $2 in / $0.20 cached / $10 out per
+    # MTok, SHORT-CONTEXT Standard tier; the long-context rate was not
+    # captured, so a long-context run is under-priced (same caveat as the
+    # gpt-5.6 block above). OpenAI publishes no cache-write rate; the row
+    # follows the codex convention in this table of 1.25x input.
+    ModelId.GPT_6_SOL: ModelPricing(
+        model_id=ModelId.GPT_6_SOL,
+        input_per_million=Decimal("2.00"),
+        output_per_million=Decimal("10.00"),
+        cache_creation_per_million=Decimal("2.50"),
+        cache_read_per_million=Decimal("0.20"),
+    ),
+    # --- ADR-067 phase 0 generation ---
     # ANTHROPIC ROWS ONLY: verified 2026-08-16 against the vendor pricing pages
     # and cross-checked against the OpenRouter models API; both agreed. Cache
     # rates follow Anthropic's documented multipliers (read 0.10x, 5-min write
@@ -357,10 +389,12 @@ PLACEHOLDER_PRICED_MODELS: frozenset[ModelId] = frozenset()
 # map moves with it.
 MODEL_ALIASES: dict[str, ModelId] = {
     "gpt-codex": ModelId.GPT_5_6,
-    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5,
-    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
-    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
-    ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
+    # The platform's codex aliases: what a codex phase STORES, so the
+    # requested-model pricing path (CodexStreamProcessor._estimate_cost) sees
+    # `gpt-sol`, not the slug `codex exec --model` was given.
+    **CODEX_MODEL_ALIAS_TARGETS,
+    # Claude aliases: the same map definition surfaces show (single source).
+    **CLAUDE_MODEL_ALIAS_TARGETS,
     # Undated family names the CLI also accepts. Only ids that DIFFER from a
     # ModelId value need an entry: canonical_model_id() already falls back to
     # ModelId(value), so the Claude 5 ids (which are undated) resolve on their

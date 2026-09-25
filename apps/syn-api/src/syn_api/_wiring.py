@@ -303,10 +303,9 @@ def _build_claude_command(
     prompt: str,
 ) -> list[str]:
     """Build the Claude CLI command for agent execution."""
-    # `AgentConfiguration.model` is `str | None` because a codex phase can
-    # leave it unset (see syn_shared.agents.DEFAULT_CLAUDE_MODEL).
-    # A claude-provider phase always resolves a concrete model (the domain
-    # default "haiku" when the YAML omits `model:`), so `None` here would
+    # `AgentConfiguration.model` is typed `str | None`, but a claude-provider
+    # phase always resolves a concrete model (the persisted template default,
+    # else syn_shared.agents.DEFAULT_CLAUDE_MODEL), so `None` here would
     # indicate a construction bug elsewhere, not a real "unset" case worth
     # silently tolerating - fail loudly instead of forwarding `--model None`.
     model = phase.agent_config.model

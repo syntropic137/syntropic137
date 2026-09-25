@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.29.0/phase-frontmatter.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v0.30.0-beta.7/phase-frontmatter.schema.json",
   "$defs": {
     "PhaseExecutionType": {
       "description": "How a phase should be executed.",
@@ -26,7 +26,7 @@
         }
       ],
       "default": null,
-      "description": "Model to use for this phase (e.g., 'sonnet', 'opus').",
+      "description": "Model to use for this phase (e.g., 'opus', 'sonnet'; 'gpt-sol' on codex).",
       "title": "Model"
     },
     "allowed-tools": {

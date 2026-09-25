@@ -77,7 +77,9 @@ def _attempt_is_settled(result: AgentExecutionResult) -> bool:
     non-zero and can carry a capacity reason: leave it to the retry decision
     and the phase restarts work an operator just stopped.
     """
-    return result.command.exit_code == 0 or result.stream_result.interrupt_requested
+    return result.stream_result.interrupt_requested or (
+        result.command is not None and result.command.exit_code == 0
+    )
 
 
 def _phase_got_somewhere(result: AgentExecutionResult, collector: ObservabilityCollector) -> bool:
@@ -126,7 +128,7 @@ def _invocation_outcome(result: AgentExecutionResult) -> InvocationStatus:
         return InvocationStatus.LAUNCH_FAILED
     if result.stream_result.interrupt_requested:
         return InvocationStatus.CANCELLED
-    return InvocationStatus.COMPLETED if result.command.exit_code == 0 else InvocationStatus.FAILED
+    return InvocationStatus.COMPLETED if result.exit_code == 0 else InvocationStatus.FAILED
 
 
 async def run_phase_agent(
@@ -159,7 +161,7 @@ async def run_phase_agent(
         execution_id=todo.execution_id,
         phase_id=todo.phase_id,
         workspace_id=getattr(launch.workspace, "workspace_id", None),
-        agent_model=phase.agent_config.model,
+        requested_model=phase.agent_config.model,
     )
 
     # ONE deadline for the phase, fixed here, before anything runs. Every

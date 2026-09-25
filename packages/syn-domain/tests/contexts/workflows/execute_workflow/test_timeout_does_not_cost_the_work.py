@@ -147,6 +147,7 @@ def _hold(
     workspace: GitWorkspace,
     *,
     delivers_repo_changes: bool = True,
+    execution_id: str = _EXECUTION_ID,
 ) -> None:
     """Put a workspace into the runtime exactly as `_handle_provision` leaves it.
 
@@ -156,8 +157,9 @@ def _hold(
     changes. A helper that seeded only the first would leave the declaration
     hop untested while every other assertion here stayed green.
     """
-    processor._runtime._workspaces[phase_id] = workspace  # type: ignore[assignment]  # pyright: ignore[reportPrivateUsage]
-    processor._runtime._delivers_repo_changes[phase_id] = delivers_repo_changes  # pyright: ignore[reportPrivateUsage]
+    runtime = processor._runtimes.of(execution_id)  # pyright: ignore[reportPrivateUsage]
+    runtime._workspaces[phase_id] = workspace  # type: ignore[assignment]  # pyright: ignore[reportPrivateUsage]
+    runtime._delivers_repo_changes[phase_id] = delivers_repo_changes  # pyright: ignore[reportPrivateUsage]
 
 
 async def _provisioned(
@@ -174,8 +176,9 @@ async def _provisioned(
     processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     held = workspace if workspace is not None else cast("GitWorkspace", clone.workspace)
     _hold(processor, _PHASE_ID, held, delivers_repo_changes=delivers_repo_changes)
-    await processor._runtime._starting_points.record(_PHASE_ID, held)  # pyright: ignore[reportPrivateUsage]
-    processor._runtime._started_at[_PHASE_ID] = datetime.now(UTC) - timedelta(seconds=3618.39)  # pyright: ignore[reportPrivateUsage]
+    runtime = processor._runtimes.of(_EXECUTION_ID)  # pyright: ignore[reportPrivateUsage]
+    await runtime._starting_points.record(_PHASE_ID, held)  # pyright: ignore[reportPrivateUsage]
+    runtime._started_at[_PHASE_ID] = datetime.now(UTC) - timedelta(seconds=3618.39)  # pyright: ignore[reportPrivateUsage]
     return processor
 
 
@@ -331,7 +334,12 @@ async def test_the_ref_is_named_from_the_execution_and_phase_that_died(
     clone = _clone_repository(tmp_path)
     processor = _make_processor()
     processor._journal._repository.save = AsyncMock()  # pyright: ignore[reportPrivateUsage]
-    _hold(processor, "verify", cast("GitWorkspace", clone.workspace))
+    _hold(
+        processor,
+        "verify",
+        cast("GitWorkspace", clone.workspace),
+        execution_id="exec-a-different-run",
+    )
     clone.commit("checked.py", "work from a different run\n")
 
     await processor._fail_execution(  # pyright: ignore[reportPrivateUsage]
@@ -677,7 +685,7 @@ async def test_work_the_completion_gate_already_saved_is_not_pushed_twice(
 
     with pytest.raises(UnpushedWorkQuarantinedError) as refused:
         await refuse_to_complete_unsaved_phase(
-            processor._runtime.live_workspaces,
+            processor._runtimes.of(_EXECUTION_ID).live_workspaces,
             TodoItem(
                 execution_id=_EXECUTION_ID,
                 action=TodoAction.COMPLETE_PHASE,

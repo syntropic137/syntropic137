@@ -7,7 +7,7 @@ There is no verify phase, no cross-model review, no second reader before the
 PR exists. Everything below follows from that.
 
 This workflow exists for changes whose correctness a reviewer confirms by
-LOOKING at the diff. It is not a faster version of `sdlc-implement-v1`; it is a
+LOOKING at the diff. It is not a faster version of `sdlc-implement-v2`; it is a
 different tool, and the first thing you do is decide whether the task in front
 of you is actually one of its cases.
 
@@ -70,7 +70,7 @@ safe half" of the change. Do not open a PR. Write an artifact that says
 plainly:
 
 > This task is out of scope for `sdlc-quickfix-v1` and needs
-> `sdlc-implement-v1`.
+> `sdlc-implement-v2`.
 
 then name which out-of-scope category it fell into and what you saw in the
 repository that put it there. Be specific enough that a human can agree or

@@ -34,6 +34,7 @@ async def _seed(
     from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
+    from syn_shared.settings import get_settings
 
     await connect_event_store()
 
@@ -41,6 +42,7 @@ async def _seed(
         handler = CreateWorkflowTemplateHandler(
             repository=get_workflow_repository(),
             event_publisher=get_event_publisher(),
+            model_defaults=get_settings().phase_model_defaults,
         )
         seeder = WorkflowSeeder(handler)
 

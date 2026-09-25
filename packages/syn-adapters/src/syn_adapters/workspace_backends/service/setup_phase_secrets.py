@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import shlex
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Final, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,62 @@ def _repo_full_name(url: str) -> str:
     """
     parts = url.rstrip("/").split("/")
     return f"{parts[-2]}/{parts[-1].removesuffix('.git')}"
+
+
+#: The shell variable holding a secret file's complete replacement while it is
+#: still being built. The lines handed to `_append_secret_file` write HERE and
+#: never to the destination, which is the whole of the guarantee that function
+#: makes; it is a constant so that a caller cannot spell it a second way.
+_STAGED: Final[str] = '"$syn_staged_secret"'
+
+
+def _append_secret_file(lines: list[str], *, dest: str, contents: list[str]) -> None:
+    """Append lines replacing ``dest`` with ``contents``, or leaving it untouched.
+
+    THE CREDENTIAL ALREADY IN THE CONTAINER IS THE ONLY FALLBACK THERE IS, so
+    it is never the thing put at risk by replacing it (#1396). These lines run
+    at teardown as well as at provisioning, and the teardown caller is
+    documented to push with whatever the container already holds when a
+    renewal fails - a promise worth nothing if the half-finished renewal has
+    already emptied the file. Writing in place made every failure after the
+    first byte - a full disk, a quota, a killed process - destroy a credential
+    that still worked, and let a concurrent ``git credential fill`` read the
+    gap and be answered with nothing.
+
+    So the replacement is built somewhere else and arrives in ONE step:
+
+    - ``mktemp`` in the SAME directory, because ``rename(2)`` is only atomic
+      within one filesystem;
+    - under ``umask 077``, so the token is never momentarily readable by
+      anyone else - which is also the first-write case, where the destination
+      used to be created at the shell's umask and secured only after every
+      line was already in it;
+    - ``chmod 600`` before the rename rather than after, so the mode is a
+      property of the file that arrives rather than of a file already there;
+    - ``mv``, which is ``rename(2)``, so a reader holds either the whole old
+      file or the whole new one and never a moment between them.
+
+    ``contents`` are lines that write to `_STAGED`. They are allowed to fail -
+    that is the point - and the trap takes the staged token with them. It
+    covers everything except SIGKILL, which nothing can cover: what is left
+    there then is a temporary file beside a destination that still works,
+    which is the trade this is making in every direction.
+    """
+    # The trap goes up BEFORE there is anything for it to remove, because the
+    # gap the other order leaves is real: a process killed between `mktemp` and
+    # the `trap` leaves a staged token behind with nothing arranged to delete
+    # it. Empty until `mktemp` answers, and `rm -f` is silent about both an
+    # empty operand and the renamed path the trap sees after a success.
+    lines.append("syn_staged_secret=")
+    lines.append(f"trap 'rm -f -- {_STAGED}' EXIT")
+    lines.append(f'syn_staged_secret="$(umask 077 && mktemp {dest}.XXXXXX)"')
+    lines.extend(contents)
+    lines.append(f"chmod 600 {_STAGED}")
+    lines.append(f"mv -f -- {_STAGED} {dest}")
+    # Cleared as soon as there is nothing staged, so the trap covers exactly
+    # the window in which a temporary file exists and no later command
+    # inherits a cleanup for a variable pointing at something already renamed.
+    lines.append("trap - EXIT")
 
 
 class RepoNameCollisionError(Exception):
@@ -475,40 +531,89 @@ class SetupPhaseSecrets:
             ]
         )
 
+    def build_credential_script(self) -> str:
+        """A script that installs NOTHING but this workspace's git credential.
+
+        THE SAME LINES THE SETUP PHASE WRITES, and deliberately not a second
+        spelling of them: `_append_git_credentials` is the only place that
+        knows where a credential lives, which entries git needs to route a
+        submodule correctly (#953), and that `gh` reads a different file
+        entirely. A renewal that re-derived any of that would drift from the
+        setup phase silently, and the drift would only show up as an
+        authentication failure at the moment the credential was needed - which
+        is the class of bug this exists to close (#1393).
+
+        Safe to run over a workspace that already has a credential, because
+        `_append_git_credentials` REPLACES the file rather than adding to it,
+        and replaces it atomically: a renewal that fails leaves the credential
+        that was already there intact and resolvable (#1396). See there for why
+        appending a second entry would be worse than useless.
+        """
+        lines: list[str] = ["#!/bin/bash", "set -e"]
+        self._append_git_credentials(lines)
+        return "\n".join(lines) + "\n"
+
     def _append_git_credentials(self, lines: list[str]) -> None:
         """Append per-repository GitHub credential configuration."""
-        if self.repo_tokens:
-            lines.append("")
-            lines.append("# Configure per-repo GitHub credentials (ADR-058)")
-            lines.append("git config --global credential.helper store")
-            # Without useHttpPath, git-credential-store ignores the path component and
-            # matches on host alone, so the FIRST github.com entry is handed out for
-            # every github.com request -- including a .gitmodules URL pointing at a
-            # different private repo the installation happens to cover. Verified against
-            # git 2.50.1: an unlisted repo receives the first stored token. Scoping by
-            # path makes an unlisted repo receive nothing instead. (#953)
-            lines.append("git config --global credential.https://github.com.useHttpPath true")
-            for url, token in self.repo_tokens.items():
-                full_name = _repo_full_name(url)
+        if not self.repo_tokens:
+            return
+
+        lines.append("")
+        lines.append("# Configure per-repo GitHub credentials (ADR-058)")
+        lines.append("git config --global credential.helper store")
+        # Without useHttpPath, git-credential-store ignores the path component and
+        # matches on host alone, so the FIRST github.com entry is handed out for
+        # every github.com request -- including a .gitmodules URL pointing at a
+        # different private repo the installation happens to cover. Verified against
+        # git 2.50.1: an unlisted repo receives the first stored token. Scoping by
+        # path makes an unlisted repo receive nothing instead. (#953)
+        lines.append("git config --global credential.https://github.com.useHttpPath true")
+        # A COMPLETE REPLACEMENT, NEVER AN ADDITION, because these lines run
+        # more than once over one container's life: an installation token
+        # expires after an hour while a phase may run longer, so the credential
+        # is rewritten before it is depended upon (#1393). git-credential-store
+        # hands out the FIRST entry matching the request, so appending a fresh
+        # token behind a stale one leaves the stale one winning every lookup -
+        # a renewal that changes the file and nothing else. `_append_secret_file`
+        # is what makes "replace" mean replace without the file ever being
+        # empty in between (#1396); it is also what makes the first run, where
+        # the file does not exist yet, need no separate spelling.
+        _append_secret_file(
+            lines,
+            dest="~/.git-credentials",
+            contents=[
                 # Path matching is exact, and submodule URLs commonly carry a .git
                 # suffix while canonical clone URLs do not. Store both spellings.
-                for path in (full_name, f"{full_name}.git"):
-                    credential = f"https://x-access-token:{token}@github.com/{path}"
-                    lines.append(f"printf '%s\\n' {shlex.quote(credential)} >> ~/.git-credentials")
-            lines.append("chmod 600 ~/.git-credentials")
+                f"printf '%s\\n' {shlex.quote(credential)} >> {_STAGED}"
+                for credential in self._credentials()
+            ],
+        )
 
-            # gh CLI: use first repo's token
-            first_token = next(iter(self.repo_tokens.values()))
-            lines.append("")
-            lines.append("# Configure gh CLI")
-            lines.append("mkdir -p ~/.config/gh")
-            lines.append("cat > ~/.config/gh/hosts.yml << 'GHEOF'")
-            lines.append("github.com:")
-            lines.append(f"    oauth_token: {first_token}")
-            lines.append("    user: ${GIT_AUTHOR_NAME:-syn-bot}")
-            lines.append("    git_protocol: https")
-            lines.append("GHEOF")
-            lines.append("chmod 600 ~/.config/gh/hosts.yml")
+        # gh CLI: use first repo's token
+        first_token = next(iter(self.repo_tokens.values()))
+        lines.append("")
+        lines.append("# Configure gh CLI")
+        lines.append("mkdir -p ~/.config/gh")
+        _append_secret_file(
+            lines,
+            dest="~/.config/gh/hosts.yml",
+            contents=[
+                f"cat > {_STAGED} << 'GHEOF'",
+                "github.com:",
+                f"    oauth_token: {first_token}",
+                "    user: ${GIT_AUTHOR_NAME:-syn-bot}",
+                "    git_protocol: https",
+                "GHEOF",
+            ],
+        )
+
+    def _credentials(self) -> list[str]:
+        """Every git-credential-store entry this workspace is given, in order."""
+        return [
+            f"https://x-access-token:{token}@github.com/{path}"
+            for url, token in self.repo_tokens.items()
+            for path in (_repo_full_name(url), f"{_repo_full_name(url)}.git")
+        ]
 
     def _append_repo_clones(self, lines: list[str]) -> None:
         """Append repository clone commands with idempotency guards.

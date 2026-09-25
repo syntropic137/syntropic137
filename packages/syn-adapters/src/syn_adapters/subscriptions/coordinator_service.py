@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, cast
 
@@ -128,6 +129,22 @@ class _SignalsWhenSubscribed:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SubscriptionServiceStatus:
+    """What this service can say about itself without measuring anything.
+
+    Read by ``/health`` and published there field for field, so these names are
+    part of that endpoint's contract. A frozen dataclass rather than a dict
+    because the consumer used to reach in by string key — ``status.get("running",
+    False)`` silently defaulted a missing field to "not running", which is the
+    worst possible guess for a health probe to make on its own behalf.
+    """
+
+    running: bool
+    projection_count: int
+    realtime_enabled: bool
+
+
 class CoordinatorSubscriptionService:
     """Subscription service using SubscriptionCoordinator (ADR-014).
 
@@ -180,13 +197,13 @@ class CoordinatorSubscriptionService:
         """Check if the subscription is running."""
         return self._running
 
-    def get_status(self) -> dict:
+    def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
-        return {
-            "running": self._running,
-            "projection_count": len(self._projections),
-            "realtime_enabled": self._realtime_projection is not None,
-        }
+        return SubscriptionServiceStatus(
+            running=self._running,
+            projection_count=len(self._projections),
+            realtime_enabled=self._realtime_projection is not None,
+        )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
         """How far the read models are behind, and which projection is worst.
@@ -500,8 +517,9 @@ def create_coordinator_service(
     )
     from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
+    from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (24 total - bumped for #772)
+    # Create all checkpointed projections (25 total - bumped for #1322)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -544,6 +562,13 @@ def create_coordinator_service(
             GlobalClaudePluginsProjection(projection_store),
             # --- Skill injection (issue #772) ---
             SkillLockProjection(projection_store),
+            # --- Tool-call tally (issue #1322) ---
+            # Not fed by replay: each tool call is counted in the transaction
+            # that stores the event, so this is here for the rebuild half of
+            # the lifecycle. Registered means an operator rebuilding the read
+            # models recounts this table too; unregistered, it was the one
+            # they emptied and never refilled.
+            ToolCallCountsProjection(pool=pool),  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
         ],
     )
 

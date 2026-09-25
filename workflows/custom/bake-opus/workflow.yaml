@@ -1,9 +1,11 @@
 id: bake-implement-opus-v1
 name: "Bake-off: implement phase on opus"
 description: >
-  Take a well-specified issue to a reviewed pull request. Four phases: prepare
-  the workspace, make the change, verify it independently, open the PR. The
-  verification phase is separate on purpose.
+  Take a well-specified issue to a reviewed pull request. Four phases: check the
+  task's premise, make the change, verify it independently, open the PR. The
+  first two are separate because a run built on a false premise is wasted; the
+  last two are separate because a phase that must change code AND prove it will
+  shortchange the proving.
 type: implementation
 classification: standard
 requires_repos: true
@@ -40,8 +42,8 @@ requires_repos: true
 phases:
   # Phase ids are load-bearing: a later phase reads the previous one's output at
   # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
-  - id: bootstrap
-    name: Prepare the workspace
+  - id: premise
+    name: Check the task's premise
     order: 1
     execution_type: sequential
     input_artifacts: []
@@ -62,7 +64,7 @@ phases:
     agent:
       provider: claude
       model: sonnet
-    prompt_file: phases/bootstrap.md
+    prompt_file: phases/premise.md
 
   - id: implement
     name: Make the change
@@ -104,7 +106,12 @@ phases:
     # would be accepted and never applied, so the validator refuses it.
     agent:
       provider: codex
-      model: gpt-5.6-sol
+      # `gpt-sol` is the platform's codex alias: stored as written, sent to
+      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # applies - the alias resolves to a rate). Timeouts and any timing or
+      # cost figures in this file were measured under gpt-5.6-sol
+      # (pre-2026-09-24); re-measure before tuning them against this model.
+      model: gpt-sol
     prompt_file: phases/verify.md
 
   - id: open_pr

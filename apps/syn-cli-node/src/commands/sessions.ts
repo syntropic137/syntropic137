@@ -60,7 +60,9 @@ const listCommand: CommandDef = {
       table.addRow(
         s.id.slice(0, 8) + "\u2026",
         formatStatus(s.status),
-        s.agent_model_display ?? s.agent_provider ?? "\u2014",
+        // The model that RAN, or "unknown (requested: X)" (ADR-067 D9). Never
+        // the provider: a harness name is not a model.
+        s.agent_model_display,
         formatTimestamp(s.started_at),
         s.total_tokens_display,
         s.total_cost_display,
@@ -86,7 +88,9 @@ const showCommand: CommandDef = {
     print(`  Workflow:    ${d.workflow_name ?? d.workflow_id ?? "\u2014"}`);
     print(`  Status:      ${formatStatus(d.status)}`);
     print(`  Provider:    ${d.agent_provider ?? "\u2014"}`);
-    print(`  Model:       ${d.agent_model_display ?? d.agent_model ?? "\u2014"}`);
+    print(`  Model:       ${d.agent_model_display}`);
+    // Context only when the model was observed; otherwise the display already says it.
+    if (d.agent_model && d.requested_model) print(`  Requested:   ${d.requested_model}`);
     print(`  Started:     ${formatTimestamp(d.started_at)}`);
     if (d.completed_at) print(`  Completed:   ${formatTimestamp(d.completed_at)}`);
     if (d.duration_seconds != null) print(`  Duration:    ${d.duration_display}`);

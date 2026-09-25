@@ -674,6 +674,12 @@ workspace-versions:
 check-pinned-image-channels:
     @uv run python scripts/check_pinned_image_channels.py
 
+# Every fixed (non-${VAR}) image in the compose files must pull anonymously.
+# quay.io/minio/minio withdrew public pulls on 2026-09-24 with no diff on our
+# side; only the post-merge smoke test noticed. Needs network, no credentials.
+check-compose-images-public:
+    @uv run python scripts/check_compose_images_public.py
+
 check-default-workspace-image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1008,7 +1014,7 @@ fitness-invariants:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels
+preflight: preflight-agent check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1070,7 +1076,8 @@ preflight-agent: check-agent-docs lint format-check typecheck validate-domain-ev
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Not run here (no toolchain in the image): vsa-validate, fitness,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
-    @echo "   check-default-workspace-image, check-pinned-image-channels."
+    @echo "   check-default-workspace-image, check-pinned-image-channels,"
+    @echo "   check-compose-images-public."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
@@ -1147,6 +1154,7 @@ test-unit-ci:
         --cov=packages/syn-adapters/src \
         --cov=packages/syn-shared/src \
         --cov-report=term-missing \
+        --durations=20 \
         -x -q
 
 # Mirrors ci.yml cli-node. cli-node-qa alone omits the two drift checks, which
@@ -1305,12 +1313,10 @@ vsa-validate:
 # `apss install` produces at .apss/bin/apss is NOT built here - see #807.
 _aps_bin := "lib/agent-paradise-standards-system/target/release/apss-dev"
 
-# Build APS CLI. Always delegate freshness to cargo - a shell guard keyed on
-# Cargo.lock mtime misses APSS source, manifest, and [[bin]]-name changes, so it
-# happily reuses a binary compiled from a different submodule revision.
+# Build APS CLI. Local freshness belongs to Cargo. CI can reuse an executable
+# only after an exact source/toolchain/platform cache hit and checkout validation.
 aps-build:
-    @echo "🔨 Building APS CLI..."
-    cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+    bash scripts/build-aps.sh
 
 # Regenerate .topology/ artifacts from current codebase
 topology-analyze: aps-build
@@ -1492,7 +1498,22 @@ _selfhost-preflight:
     fi
     echo ""
 
+# Exit 0 = clear, 1 = executions running, 2 = could not tell (never an all-clear).
+# Pass --force to deploy anyway. Also runnable on a host with no repo checkout:
+#   python3 infra/scripts/predeploy_check.py
+# Report what a deploy would orphan; non-zero if executions are in flight (#1179)
+predeploy-check *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
+
 # Start self-hosted Syn137 stack (no Cloudflare)
+#
+# NOT gated by predeploy-check: its normal precondition is a stopped stack, so
+# the API is unreachable and the check would fail closed on every legitimate
+# start. An operator forced to pass --force routinely stops reading it, which
+# would disarm the gate on the recipes that do need it.
 selfhost-up: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1530,10 +1551,11 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     echo "   Update: Zero Trust → Networks → Connectors → Create a tunnel → Select Cloudflared"
 
 # Stop self-host stack (auto-detects Cloudflare Tunnel)
-selfhost-down:
+selfhost-down *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "Stopping Syn137 self-host stack..."
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
@@ -1571,9 +1593,16 @@ selfhost-logs *service:
     fi
 
 # Restart specific self-host service
-selfhost-restart service:
-    @echo "Restarting {{service}}..."
-    @{{compose_selfhost}} restart {{service}}
+selfhost-restart service *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    # Every service here can orphan an execution: api and gateway directly,
+    # timescaledb/redis/event-store by dropping the connections the API is
+    # mid-execution on. Gating only some would be a carve-out to remember.
+    uv run python infra/scripts/predeploy_check.py {{args}}
+    echo "Restarting {{service}}..."
+    {{compose_selfhost}} restart {{service}}
 
 # Seed workflows and triggers into selfhost stack
 # Runs seed scripts in a temporary API container (DB ports not exposed to host)
@@ -1596,10 +1625,13 @@ selfhost-seed:
     echo "✅ Seeding complete"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
-selfhost-update:
+selfhost-update *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    # Refuse to orphan running executions (#1179). Runs before the pull so an
+    # abort leaves the checkout untouched rather than half-updated.
+    uv run python infra/scripts/predeploy_check.py {{args}}
     # Detect Cloudflare tunnel
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         COMPOSE="{{compose_selfhost_cf}}"
@@ -1629,10 +1661,11 @@ selfhost-update:
     echo "✅ Update complete!"
 
 # Full self-host reset (removes volumes - DATA LOSS!)
-selfhost-reset:
+selfhost-reset *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
+    uv run python infra/scripts/predeploy_check.py {{args}}
     echo "⚠️  WARNING: This will delete ALL data including the database!"
     echo "Press Ctrl+C within 5 seconds to cancel..."
     sleep 5
@@ -1876,12 +1909,22 @@ codex-auth-status:
 codex-auth-clip *flags:
     uv run python scripts/copy_codex_auth.py {{flags}}
 
-# Generate published Docker Compose (docker-compose.syntropic137.yaml) from base + selfhost
+# Generate the compose forwarding block, then the published compose from it.
+#
+# Order matters: settings_forwarding.py rewrites the api environment in the
+# BASE file, and generate_published_compose.py merges that base with the
+# selfhost overlay. Reversed, the published file would be a release behind
+# every new setting -- which is the #1101 gap with an extra step.
 gen-compose:
+    uv run python scripts/settings_forwarding.py
     uv run python scripts/generate_published_compose.py
 
-# Check published compose is up to date (CI mode -- fails if stale)
+# Check both compose artifacts are up to date (CI mode -- fails if stale).
+# The first check is why a setting added to a Settings class cannot ship
+# documented-but-inert: .env.example gains a line and so must the api
+# environment (#1101).
 check-compose:
+    uv run python scripts/settings_forwarding.py --check
     uv run python scripts/generate_published_compose.py --check
 
 # Plugin JSON schemas must match the Pydantic models. These are what third-party
@@ -2287,7 +2330,7 @@ _workspace-check:
 # Build and push container images to GHCR from your local machine.
 # Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
 
-# Bump version across every version-carrying file (manifests, schemas, uv.lock)
+# Bump version across every version-carrying file (manifests, schemas, uv.lock, openapi.json)
 bump-version version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2298,6 +2341,19 @@ bump-version version:
     echo ""
     echo "Regenerating uv.lock..."
     uv lock
+    echo ""
+    # openapi.json became version-carrying in #1380: info.version is now read
+    # from the installed package instead of a literal that had drifted twenty
+    # releases. That is the point of the fix, and it means the committed spec -
+    # and the CLI and dashboard types generated from it - go stale on every
+    # bump. `just codegen-check` would catch that, but only after the release
+    # PR is already open, so it is regenerated here instead.
+    #
+    # The sync is what makes the metadata report the new version; without it
+    # codegen would faithfully re-emit the old one.
+    echo "Reinstalling and regenerating the API contract..."
+    uv sync --quiet
+    just codegen
     echo ""
     python3 scripts/workflows/bump_version.py --check
 
