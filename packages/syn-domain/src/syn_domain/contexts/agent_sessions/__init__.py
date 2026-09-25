@@ -379,8 +379,10 @@ __all__ = [
     "recorded_model_from_row",
     "recorded_model_group_by",
     "recorded_model_select",
+    "save_reapplying",
 ]
 
+from ._shared.concurrent_save import save_reapplying
 from ._shared.session_invocation import InvocationStatus, SessionInvocationState
 from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryClockAggregate
 from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand

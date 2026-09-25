@@ -4238,7 +4238,10 @@ export interface components {
         };
         /** InventoryGap */
         InventoryGap: {
-            /** Reason */
+            /**
+             * Reason
+             * @description Why the inventory is incomplete or uncertain here. Resolver reasons: invocation_running, invocation_launch_failed, invocation_transport_failed_before_announce, conflicting_invocation_lifecycle, conflicting_invocation_context, unverified_invocation_context, conflicting_parentage, lineage_cycle, unresolved_parentage, conflicting_source_evidence, conflicting_native_binding, expected_body_unavailable, invocation_unsettled_at_seal, capture_unsettled_at_seal, child_context_unresolved_at_seal, parentage_unresolved_at_seal, no_host_registration; plus invocation_<outcome> for other abnormal process outcomes and producer-specific acquisition reasons.
+             */
             reason: string;
             /**
              * Node Keys

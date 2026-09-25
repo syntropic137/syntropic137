@@ -24,6 +24,7 @@ from syn_domain.contexts.agent_sessions import (
     SessionInvocationState,
     SessionStatus,
     StartSessionCommand,
+    save_reapplying,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
@@ -32,6 +33,8 @@ from syn_shared.events import SESSION_ERROR
 from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -97,6 +100,27 @@ class SessionLifecycleManager:
         self._observed_model: str | None = None
         self._repos = list(repos) if repos else []
         self._invocation: SessionInvocationState | None = None
+        #: Commands applied to ``_session`` since it was last persisted, kept
+        #: so a save rejected by a concurrent writer can re-decide them
+        #: against the current stream instead of dropping them (#1398).
+        self._pending: list[Callable[[AgentSessionAggregate], None]] = []
+
+    def _issue(self, command: Callable[[AgentSessionAggregate], None]) -> None:
+        assert self._session is not None
+        command(self._session)
+        self._pending.append(command)
+
+    async def _save(self) -> None:
+        """Persist pending commands, reapplying them over any concurrent write."""
+        assert self._session is not None and self._repo is not None
+        self._session = await save_reapplying(
+            self._repo, self._session_id, self._session, tuple(self._pending)
+        )
+        self._pending.clear()
+        if self._invocation is not None:
+            # A reapplied bind keeps whichever binding the stream already had.
+            current = {i.invocation_id: i for i in self._session.invocations}
+            self._invocation = current.get(self._invocation.invocation_id, self._invocation)
 
     def note_observed_model(self, model: str | None) -> None:
         """Record the model the harness reported. First non-blank report wins."""
@@ -187,25 +211,20 @@ class SessionLifecycleManager:
             attempt_id=str(uuid4()),
             harness=harness,
         )
-        self._session.record_invocation(
-            RecordSessionInvocationCommand(
-                aggregate_id=self._session_id,
-                invocation=invocation,
-            )
+        command = RecordSessionInvocationCommand(
+            aggregate_id=self._session_id, invocation=invocation
         )
+        self._issue(lambda session: session.record_invocation(command))
         # Failure propagates to admission: no controlled process may launch yet.
-        await self._repo.save(self._session)
+        await self._save()
         self._invocation = invocation
         return invocation
 
     def _advance_invocation(self, invocation: SessionInvocationState) -> None:
-        assert self._session is not None
-        self._session.record_invocation(
-            RecordSessionInvocationCommand(
-                aggregate_id=self._session_id,
-                invocation=invocation,
-            )
+        command = RecordSessionInvocationCommand(
+            aggregate_id=self._session_id, invocation=invocation
         )
+        self._issue(lambda session: session.record_invocation(command))
         self._invocation = invocation
 
     async def finish_invocation(
@@ -226,7 +245,7 @@ class SessionLifecycleManager:
             )
         )
         try:
-            await self._repo.save(self._session)
+            await self._save()
         except Exception:
             # Keep the uncommitted fact for the normal session completion save.
             # Post-launch recording failure must not change the work's result.
@@ -256,7 +275,8 @@ class SessionLifecycleManager:
         if self._session is None or self._repo is None:
             return
 
-        self._session.mark_agent_launched(MarkAgentLaunchedCommand(aggregate_id=self._session_id))
+        launched = MarkAgentLaunchedCommand(aggregate_id=self._session_id)
+        self._issue(lambda session: session.mark_agent_launched(launched))
         if self._invocation is not None:
             self._advance_invocation(
                 self._invocation.model_copy(
@@ -264,7 +284,7 @@ class SessionLifecycleManager:
                 )
             )
         try:
-            await self._repo.save(self._session)
+            await self._save()
         except Exception as launch_err:
             logger.warning(
                 "Failed to persist agent launch for session %s "
@@ -318,7 +338,7 @@ class SessionLifecycleManager:
         # store has never seen. The handlers would load without it and the
         # fact would be lost for good (#1047, #1065). A save with nothing
         # uncommitted does no I/O, so this costs nothing in the normal case.
-        await self._repo.save(self._session)
+        await self._save()
 
         if total_tokens > 0:
             record_cmd = RecordOperationCommand(
@@ -374,8 +394,8 @@ class SessionLifecycleManager:
                 success=False,
                 error_message=error_message,
             )
-            self._session.complete_session(complete_cmd)
-            await self._repo.save(self._session)
+            self._issue(lambda session: session.complete_session(complete_cmd))
+            await self._save()
             await self._record_terminal_status("failed", error_message)
             logger.debug("Session completed: %s (failed: %s)", self._session_id, error_message)
         except Exception as session_err:
@@ -393,8 +413,8 @@ class SessionLifecycleManager:
                 final_status=SessionStatus.CANCELLED,
                 error_message=reason,
             )
-            self._session.complete_session(complete_cmd)
-            await self._repo.save(self._session)
+            self._issue(lambda session: session.complete_session(complete_cmd))
+            await self._save()
             await self._record_terminal_status("cancelled", reason)
             logger.debug("Session completed (cancelled): %s", self._session_id)
         except Exception as sess_err:

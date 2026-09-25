@@ -191,31 +191,41 @@ it("surfaces an expired cursor with its restart hint", async () => {
   await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor } })).rejects.toThrow(/cursor_expired.*rerun without --cursor/);
 });
 
-const withCoverage = (state: string) => {
+// Completeness is the server's verdict (summary.complete), derived from the
+// sealed coverage contract and the head being current; the CLI adds only its
+// own traversal completeness (#1398 D).
+const withCoverage = (state: string, reconstruction = "current") => {
   const sealed = { ...snapshot, coverage: { state, contract_id: "syntropic-invocations/1", expected_count: 1, missing_keys: [] } };
   return {
-    status: { ...status, snapshot: sealed },
+    status: {
+      ...status, snapshot: sealed, reconstruction_status: reconstruction,
+      summary: { ...summary, coverage_state: state, complete: state === "reconciled" && reconstruction === "current" },
+    },
     page: { ...page("native", null), snapshot: sealed },
   };
 };
 
-it("require-complete passes once the host seal reconciles coverage", async () => {
+it("require-complete passes once the host seal reconciles coverage and every section is read", async () => {
   const sealed = withCoverage("reconciled");
+  serveReconciled(sealed.status);
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true, "require-complete": true } });
+  expect(JSON.parse(output())).toMatchObject({ complete: true, coverage_complete: true });
+  // The same sealed head read one page at a time is a partial view.
+  fetchMock.mockReset();
   fetchMock.mockResolvedValueOnce(response(sealed.status)).mockResolvedValueOnce(response(sealed.page));
-  await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } });
-  expect(JSON.parse(output()).pages[0].snapshot.coverage.state).toBe("reconciled");
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("read is partial");
 });
 
 it.each(["open", "missing", "unsupported", "conflicting"])("require-complete rejects %s coverage", async (state) => {
   const unsealed = withCoverage(state);
   fetchMock.mockResolvedValueOnce(response(unsealed.status)).mockResolvedValueOnce(response(unsealed.page));
-  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not reconciled");
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow(`not complete (coverage ${state}`);
 });
 
 it("require-complete rejects a reconciled revision that is no longer current", async () => {
-  const sealed = withCoverage("reconciled");
-  fetchMock.mockResolvedValueOnce(response({ ...sealed.status, reconstruction_status: "pending" })).mockResolvedValueOnce(response(sealed.page));
-  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not reconciled");
+  const stale = withCoverage("reconciled", "pending");
+  fetchMock.mockResolvedValueOnce(response(stale.status)).mockResolvedValueOnce(response(stale.page));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not complete (coverage reconciled, reconstruction pending)");
 });
 
 it("rejects nonadvancing pagination instead of looping", async () => {

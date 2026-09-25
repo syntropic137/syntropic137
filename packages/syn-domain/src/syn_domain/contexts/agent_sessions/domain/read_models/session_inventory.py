@@ -13,6 +13,8 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
+
 
 def _opaque_identifier(value: str) -> str:
     if not value.strip() or "\x00" in value:
@@ -183,7 +185,17 @@ class IdentityBinding(InventoryModel):
 
 
 class InventoryGap(InventoryModel):
-    reason: Identifier
+    # Open vocabulary: acquisition producers add their own reasons, so the wire
+    # type stays a string and the resolver's known reasons are documented.
+    reason: Identifier = Field(
+        description=(
+            "Why the inventory is incomplete or uncertain here. Resolver reasons: "
+            + ", ".join(reason.value for reason in GapReason)
+            + "; plus invocation_<outcome> for other abnormal process outcomes "
+            "and producer-specific acquisition reasons."
+        ),
+        examples=[reason.value for reason in GapReason],
+    )
     node_keys: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
 

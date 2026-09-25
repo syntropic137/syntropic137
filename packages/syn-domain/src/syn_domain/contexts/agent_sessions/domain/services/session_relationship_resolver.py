@@ -147,7 +147,10 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         }
     )
     child_memberships, context_gaps = context_memberships(evidence)
-    process_gaps = lifecycle_gaps(evidence.invocation_lifecycle)
+    process_gaps = lifecycle_gaps(
+        evidence.invocation_lifecycle,
+        bound=frozenset(claim.owner.key for claim in evidence.bindings),
+    )
     evidence = evidence.model_copy(
         update={
             "memberships": (*evidence.memberships, *child_memberships),

@@ -42,8 +42,12 @@ from syn_domain.contexts.agent_sessions import (
     RecordSessionInvocationCommand,
     RunIdentity,
     SessionInvocationState,
+    save_reapplying,
 )
 from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import ReconciliationStage
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
+    SessionInvocationBindingConflictedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     NodeEvidence,
@@ -523,6 +527,72 @@ async def test_intent_survives_crash_before_bind_then_late_bind_duplicates_and_c
         await live.close()
 
 
+async def test_racing_first_binds_keep_one_binding_and_record_the_other_as_conflict(
+    inventory_stack: InventoryStack,
+    tmp_path: Path,
+) -> None:
+    """Two writers load one unbound invocation and each propose a first binding.
+
+    The event store's expected-version check admits one save; the loser must
+    reload and re-decide, so its claim lands as a conflict event instead of
+    being dropped with the rejected append.
+    """
+    live = await _Live.start(inventory_stack, tmp_path)
+    run = RunIdentity(source_instance_id=live.runtime.source_instance_id, execution_id="race-run")
+    try:
+        writer = live.manager(run, "race-session", "claude")
+        await writer.start()
+        intent = await writer.prepare_invocation("claude")
+        assert intent is not None
+        repository = live.sessions()
+        loaded = [await repository.get_by_id("race-session") for _ in range(2)]
+        claims = dict(zip(("native-a", "native-b"), loaded, strict=True))
+
+        async def bind(native: str, aggregate: AgentSessionAggregate | None) -> None:
+            assert aggregate is not None
+            command = RecordSessionInvocationCommand(
+                aggregate_id="race-session",
+                invocation=intent.model_copy(
+                    update={"status": InvocationStatus.LAUNCHED, "native_session_id": native}
+                ),
+            )
+
+            def apply(target: AgentSessionAggregate) -> None:
+                target.record_invocation(command)
+
+            apply(aggregate)
+            await save_reapplying(repository, "race-session", aggregate, (apply,))
+
+        await asyncio.gather(*(bind(native, aggregate) for native, aggregate in claims.items()))
+
+        final = await repository.get_by_id("race-session")
+        assert final is not None
+        (invocation,) = final.invocations
+        retained = invocation.native_session_id
+        assert retained in claims
+        stream = await live.client.read_events("AgentSession-race-session")
+        conflicts = [
+            envelope.event
+            for envelope in stream
+            if isinstance(envelope.event, SessionInvocationBindingConflictedEvent)
+        ]
+        assert [
+            (c.bound_native_session_id, c.conflicting_native_session_id) for c in conflicts
+        ] == [(retained, next(native for native in claims if native != retained))]
+
+        key = _invocation_key(run, intent.invocation_id)
+        head = await live.wait_for(run, lambda h: h.coverage.state == "conflicting")
+        gaps = cast("list[InventoryGap]", await live.items(run, head, "gap"))
+        assert any(g.reason == "conflicting_native_binding" and key in g.node_keys for g in gaps)
+        natives = {
+            b.transcript.local_id
+            for b in cast("list[IdentityBinding]", await live.items(run, head, "binding"))
+        }
+        assert natives == set(claims)
+    finally:
+        await live.close()
+
+
 async def test_failed_launch_stays_distinct_from_launched_but_uncaptured_in_api(
     inventory_stack: InventoryStack,
     tmp_path: Path,
@@ -546,7 +616,12 @@ async def test_failed_launch_stays_distinct_from_launched_but_uncaptured_in_api(
         uncaptured = await lost.prepare_invocation("codex")
         await lost.mark_launched()
         await lost.finish_invocation(native_session_id=None, status=InvocationStatus.FAILED)
-        assert failed_launch is not None and uncaptured is not None
+        # Transport broke before the wrapper announced: no launch, no native id.
+        dropped = live.manager(run, "transport-dropped", "claude")
+        await dropped.start()
+        unannounced = await dropped.prepare_invocation("claude")
+        await dropped.finish_invocation(native_session_id=None, status=InvocationStatus.FAILED)
+        assert failed_launch is not None and uncaptured is not None and unannounced is not None
         await live.client.append_events(
             "WorkflowExecution-outcome-run",
             [
@@ -596,9 +671,15 @@ async def test_failed_launch_stays_distinct_from_launched_but_uncaptured_in_api(
         lost_key = _invocation_key(run, uncaptured.invocation_id)
         assert by_reason["invocation_launch_failed"] == {never_key}
         assert by_reason["invocation_failed"] == {lost_key}
-        # Only the process that ran owes a transcript it never delivered.
-        assert by_reason["capture_unsettled_at_seal"] == {lost_key}
+        # A proven launch failure owes no transcript; a process that ran does.
+        assert lost_key in by_reason["capture_unsettled_at_seal"]
+        assert never_key not in by_reason["capture_unsettled_at_seal"]
         assert never_key not in by_reason.get("invocation_unsettled_at_seal", set())
         assert lost_key not in by_reason["invocation_launch_failed"]
+        dropped_key = _invocation_key(run, unannounced.invocation_id)
+        assert by_reason["invocation_transport_failed_before_announce"] == {dropped_key}
+        assert dropped_key not in by_reason["invocation_failed"]
+        # Not proven never-ran, so unlike a signed launch failure it still owes a body.
+        assert dropped_key in by_reason["capture_unsettled_at_seal"]
     finally:
         await live.close()

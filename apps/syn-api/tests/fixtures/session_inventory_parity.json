@@ -44,8 +44,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -191,8 +194,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -298,8 +304,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -407,8 +416,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -532,8 +544,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -655,8 +670,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -751,8 +769,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -849,8 +870,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -967,8 +991,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1061,8 +1088,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1100,18 +1130,21 @@
     ],
     "items": [
      {
-      "evidence_ids": [],
-      "node_keys": [
-       "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+      "evidence_ids": [
+       "evidence-inv-build-retry-0003"
       ],
-      "reason": "unlinked_native_transcript"
+      "node_keys": [
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
+      "reason": "invocation_transport_failed_before_announce"
      },
      {
-      "evidence_ids": [
-       "evidence-capture-codex-local"
+      "evidence_ids": [],
+      "node_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
       ],
-      "node_keys": [],
-      "reason": "capture_pending"
+      "reason": "expected_body_unavailable"
      }
     ],
     "kind": "gap",
@@ -1150,8 +1183,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1273,8 +1309,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1358,8 +1397,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1465,8 +1507,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1590,8 +1635,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1688,8 +1736,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1808,8 +1859,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1835,21 +1889,8 @@
      "attempt_id": null,
      "phase_id": "phase-plan"
     },
-    "item_keys": [
-     {
-      "node_key": null,
-      "peer_key": null
-     }
-    ],
-    "items": [
-     {
-      "evidence_ids": [
-       "evidence-capture-codex-local"
-      ],
-      "node_keys": [],
-      "reason": "capture_pending"
-     }
-    ],
+    "item_keys": [],
+    "items": [],
     "kind": "gap",
     "next_cursor": null,
     "snapshot": {
@@ -1886,8 +1927,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -1982,8 +2026,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -2069,8 +2116,11 @@
      },
      "coverage": {
       "contract_id": "parity-contract",
-      "expected_count": null,
-      "missing_keys": [],
+      "expected_count": 3,
+      "missing_keys": [
+       "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+       "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+      ],
       "state": "open"
      },
      "evidence_watermark": 7,
@@ -2135,14 +2185,17 @@
   "distinct_sessions": 6,
   "gaps": [
    {
-    "node_keys": [],
-    "reason": "capture_pending"
+    "node_keys": [
+     "8b965fd1e730ea0b3af3ae7e234bb4fad63cb124e7ffc04534e23f7008b92a3c",
+     "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
+    ],
+    "reason": "expected_body_unavailable"
    },
    {
     "node_keys": [
-     "8ba0fee76c925c28717220a9b93670b77b68ed817e50aeb761d1889862b49c9c"
+     "dc1436de940f0a28b1459722ac27999178f7bd0be19ca351d6e443c0b54cb612"
     ],
-    "reason": "unlinked_native_transcript"
+    "reason": "invocation_transport_failed_before_announce"
    }
   ],
   "invocations": 1,

@@ -59,7 +59,7 @@ def source(*items: InvocationLifecycleEvidence) -> SessionEvidence:
     "status,code,reason",
     [
         ("launch_failed", None, "invocation_launch_failed"),
-        ("failed", 1, "invocation_failed"),
+        ("failed", 1, "invocation_transport_failed_before_announce"),
         ("cancelled", -15, "invocation_cancelled"),
         ("launched", None, "invocation_running"),
     ],
@@ -70,6 +70,14 @@ def test_outcomes_remain_distinct(status: str, code: int | None, reason: str) ->
     assert result.coverage.state == "open"
     assert result.coverage.missing_keys == (NODE.key,)
     assert result.bindings == ()
+
+
+def test_failure_after_an_observed_launch_is_invocation_failed() -> None:
+    records = (observation(1, "launched"), observation(2, "failed", 1))
+    for order in permutations(records):
+        reasons = {gap.reason for gap in resolve_relationships(source(*order)).gaps}
+        assert "invocation_failed" in reasons
+        assert "invocation_transport_failed_before_announce" not in reasons
 
 
 def test_process_completion_clears_running_gap_but_does_not_seal_capture() -> None:

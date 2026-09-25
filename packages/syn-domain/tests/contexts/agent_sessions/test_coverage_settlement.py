@@ -250,6 +250,22 @@ STATES: list[tuple[str, tuple[Change, ...], tuple[CoverageState, ...]]] = [
         (OPEN, MISSING, MISSING),
     ),
     (
+        "root transport failed before announce",
+        (replace(invocation_lifecycle=(lifecycle(ROOT, 1, "failed"),), bindings=(), captures=()),),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
+        "root launched then failed uncaptured",
+        (
+            replace(
+                invocation_lifecycle=(lifecycle(ROOT, 1, "launched"), lifecycle(ROOT, 2, "failed")),
+                bindings=(),
+                captures=(),
+            ),
+        ),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
         "background child running",
         (child(), add(invocation_lifecycle=(lifecycle(CHILD, 1, "launched"),))),
         (OPEN, OPEN, MISSING),
@@ -494,6 +510,42 @@ def test_coverage_state_space(
         result = resolve_relationships(build(changes, stage))
         assert result.coverage.state is expected, stage
         assert_invariant(result)
+
+
+@pytest.mark.parametrize("stage", STAGES)
+def test_transport_failure_before_announce_reads_distinct_from_launched_failure(
+    stage: tuple[RunSettlementEvidence, ...],
+) -> None:
+    """Same coverage, different reason: only the launch fact separates them."""
+    never = build(
+        (replace(invocation_lifecycle=(lifecycle(ROOT, 1, "failed"),), bindings=(), captures=()),),
+        stage,
+    )
+    ran = build(
+        (
+            replace(
+                invocation_lifecycle=(lifecycle(ROOT, 1, "launched"), lifecycle(ROOT, 2, "failed")),
+                bindings=(),
+                captures=(),
+            ),
+        ),
+        stage,
+    )
+    bound = build(
+        (replace(invocation_lifecycle=(lifecycle(ROOT, 1, "failed"),), captures=()),), stage
+    )
+    before = {gap.reason for gap in resolve_relationships(never).gaps}
+    after = {gap.reason for gap in resolve_relationships(ran).gaps}
+    claimed = {gap.reason for gap in resolve_relationships(bound).gaps}
+    assert GapReason.INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE in before
+    assert "invocation_failed" not in before
+    assert "invocation_failed" in after
+    assert GapReason.INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE not in after
+    # A native id means the agent announced itself: never "before announce".
+    assert "invocation_failed" in claimed
+    assert GapReason.INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE not in claimed
+    # Not proven never-ran (unlike a signed launch failure): still owes a body.
+    assert GapReason.INVOCATION_LAUNCH_FAILED not in before
 
 
 def test_stuck_invocation_gap_names_the_node_at_the_deadline() -> None:

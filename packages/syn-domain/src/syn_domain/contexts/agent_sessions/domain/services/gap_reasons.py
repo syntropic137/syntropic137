@@ -7,6 +7,10 @@ class GapReason(StrEnum):
     # Process outcomes (``invocation_`` + lifecycle status for the others).
     INVOCATION_RUNNING = "invocation_running"
     INVOCATION_LAUNCH_FAILED = "invocation_launch_failed"
+    # Failed with no launch ever observed and no native id ever claimed: the
+    # transport broke before the wrapper announced, so the agent is not known
+    # to have run. Distinct from a launched-then-failed ``invocation_failed``.
+    INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE = "invocation_transport_failed_before_announce"
     CONFLICTING_LIFECYCLE = "conflicting_invocation_lifecycle"
     # Child attribution through a registered attempt.
     CONFLICTING_CONTEXT = "conflicting_invocation_context"

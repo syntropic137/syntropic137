@@ -58,6 +58,7 @@ from syn_domain.contexts.agent_sessions import (
     TranscriptBodyState,
     inventory_counts,
 )
+from syn_domain.contexts.agent_sessions.domain.services.gap_reasons import GapReason
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import InventoryItem, ItemKind
@@ -118,6 +119,9 @@ def _membership(node: InventoryNodeRef, phase: str, attempt: str) -> Membership:
         confidence=EvidenceClass.REGISTERED,
         evidence=(_evidence(f"member-{node.local_id}"),),
     )
+
+
+_UNAVAILABLE = tuple(sorted((INVOCATION.key, CODEX_LEADER.key)))
 
 
 def _resolved() -> ResolvedInventory:
@@ -191,11 +195,23 @@ def _resolved() -> ResolvedInventory:
                 evidence=_evidence("capture-codex-local"),
             ),
         ),
+        # Resolver vocabulary, consistent with open coverage: the retry's
+        # transport broke before its wrapper announced, and the bodies the
+        # contract expects are not yet present (the resolver names them).
         gaps=(
-            InventoryGap(reason="unlinked_native_transcript", node_keys=(CLAUDE_CHILD.key,)),
-            InventoryGap(reason="capture_pending", evidence_ids=("evidence-capture-codex-local",)),
+            InventoryGap(
+                reason=GapReason.INVOCATION_TRANSPORT_FAILED_BEFORE_ANNOUNCE,
+                node_keys=(INVOCATION.key,),
+                evidence_ids=("evidence-inv-build-retry-0003",),
+            ),
+            InventoryGap(reason=GapReason.EXPECTED_BODY_UNAVAILABLE, node_keys=_UNAVAILABLE),
         ),
-        coverage=InventoryCoverage(state=CoverageState.OPEN, contract_id="parity-contract"),
+        coverage=InventoryCoverage(
+            state=CoverageState.OPEN,
+            contract_id="parity-contract",
+            expected_count=3,
+            missing_keys=_UNAVAILABLE,
+        ),
         retractions=(
             EvidenceRetraction(target=_evidence("stale"), evidence=_evidence("stale-correction")),
         ),
