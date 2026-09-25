@@ -46,7 +46,7 @@ has been published yet. Do not describe this as a run with no sessions.
 
 Pass the returned `snapshot_id` to read a bounded page. `kind` selects `node`,
 `membership`, `edge`, `capture`, `gap`, `binding`, or `retraction`. Keep the same
-snapshot ID and pass each `next_after` as `after` until it is null. Never combine
+snapshot ID and pass each `next_cursor` unchanged as `cursor` until it is null. Never combine
 pages from different revisions. Read memberships for phase/attempt attribution,
 edges for parentage, and captures for body availability. Preserve full IDs and
 confidence; do not infer verified relationships from names or timestamps.

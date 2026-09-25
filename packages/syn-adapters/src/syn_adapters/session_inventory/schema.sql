@@ -219,3 +219,27 @@ CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
 );
 CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
     ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));
+
+-- Row 8 (#1398): hashed query columns for membership narrowing, cross-page node
+-- lookup and keyset paging. Digests keep btree tuples bounded for opaque IDs.
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS node_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS peer_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS phase_key TEXT;
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS attempt_key TEXT;
+-- Rows written before these columns existed are backfilled by ensure_ready().
+ALTER TABLE session_inventory_items ADD COLUMN IF NOT EXISTS keys_indexed BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS session_inventory_items_unindexed
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, kind, ordinal)
+    WHERE NOT keys_indexed;
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_phase_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, phase_key, attempt_key, ordinal)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_attempt_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, attempt_key, ordinal)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_member_node_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key, phase_key, attempt_key)
+    WHERE kind = 'membership';
+CREATE INDEX IF NOT EXISTS session_inventory_items_node_key_idx
+    ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key)
+    WHERE kind = 'node';

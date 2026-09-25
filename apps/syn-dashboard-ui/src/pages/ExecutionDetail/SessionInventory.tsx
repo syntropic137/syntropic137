@@ -88,10 +88,10 @@ async function loadStatus(executionId: string, controller: AbortController, upda
   } catch (reason) { reportReadError(reason, controller, updates) }
 }
 
-async function loadPage(status: InventoryStatus, kind: InventoryKind, after: number, controller: AbortController, updates: InventoryUpdates) {
+async function loadPage(status: InventoryStatus, kind: InventoryKind, cursor: string | null, controller: AbortController, updates: InventoryUpdates) {
   if (!status.snapshot) return
   try {
-    const result = await getSessionInventoryPage(status.run.execution_id, status.snapshot.snapshot_id, kind, after, controller.signal)
+    const result = await getSessionInventoryPage(status.run.execution_id, status.snapshot.snapshot_id, kind, cursor, controller.signal)
     if (controller.signal.aborted) return
     if (result.snapshot.snapshot_id !== status.snapshot.snapshot_id) throw new Error('Inventory revision changed; load the latest revision')
     updates.setPage(result)
@@ -108,14 +108,14 @@ function InventorySummary({ status }: { status: InventoryStatus }) {
   </>
 }
 
-function InventoryPagination({ loading, page, after, onPage }: {
-  loading: boolean; page: InventoryPage | null; after: number; onPage: (after: number) => void
+function InventoryPagination({ loading, page, cursor, onPage }: {
+  loading: boolean; page: InventoryPage | null; cursor: string | null; onPage: (cursor: string | null) => void
 }) {
   if (loading) return null
-  const next = page?.next_after
+  const next = page?.next_cursor
   return <>
     {next != null && <button type="button" onClick={() => onPage(next)}>Next page</button>}
-    {after >= 0 && <button type="button" onClick={() => onPage(-1)}>First page</button>}
+    {cursor !== null && <button type="button" onClick={() => onPage(null)}>First page</button>}
   </>
 }
 
@@ -124,7 +124,7 @@ export function SessionInventory({ executionId }: { executionId: string }) {
   const [status, setStatus] = useState<InventoryStatus | null>(null)
   const [page, setPage] = useState<InventoryPage | null>(null)
   const [kind, setKind] = useState<InventoryKind>('node')
-  const [after, setAfter] = useState(-1)
+  const [cursor, setCursor] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -138,12 +138,12 @@ export function SessionInventory({ executionId }: { executionId: string }) {
   useEffect(() => {
     if (!status?.snapshot) return
     const controller = new AbortController()
-    void loadPage(status, kind, after, controller, { setStatus, setPage, setLoading, setError })
+    void loadPage(status, kind, cursor, controller, { setStatus, setPage, setLoading, setError })
     return () => controller.abort()
-  }, [status, kind, after])
+  }, [status, kind, cursor])
 
   function loadLatest() {
-    setStatus(null); setPage(null); setError(null); setAfter(-1); setLoading(true)
+    setStatus(null); setPage(null); setError(null); setCursor(null); setLoading(true)
     setReload(value => value + 1)
   }
 
@@ -156,15 +156,15 @@ export function SessionInventory({ executionId }: { executionId: string }) {
     {status && <InventorySummary status={status} />}
     {status?.snapshot && <>
       <label>Show <select aria-label="Inventory section" value={kind} disabled={loading} onChange={event => {
-        setKind(event.target.value as InventoryKind); setAfter(-1); setPage(null); setError(null); setLoading(true)
+        setKind(event.target.value as InventoryKind); setCursor(null); setPage(null); setError(null); setLoading(true)
       }}>
         {sections.map(section => <option key={section.kind} value={section.kind}>{section.label} ({status.snapshot!.counts[section.kind] ?? 0})</option>)}
       </select></label>
     </>}
     {loading && <p role="status">Loading session inventory...</p>}
     {!loading && page && <InventoryRows page={page} />}
-    <InventoryPagination loading={loading} page={page} after={after} onPage={value => {
-      setAfter(value); setPage(null); setLoading(true); setError(null)
+    <InventoryPagination loading={loading} page={page} cursor={cursor} onPage={value => {
+      setCursor(value); setPage(null); setLoading(true); setError(null)
     }} />
   </section>
 }

@@ -8,9 +8,63 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from syn_api.routes.executions import inventory
-from syn_domain.contexts.agent_sessions import InventoryNotFound, RunIdentity
+from syn_api.types import SessionInventoryPageResponse
+from syn_domain.contexts.agent_sessions import (
+    InventoryCounts,
+    InventoryCoverage,
+    InventoryFilter,
+    InventoryItemKeys,
+    InventoryNode,
+    InventoryNodeRef,
+    InventoryNotFound,
+    InventoryQueryPage,
+    InventorySnapshot,
+    ItemKind,
+    RunIdentity,
+)
 
 pytestmark = pytest.mark.unit
+
+
+def _snapshot(run: RunIdentity) -> InventorySnapshot:
+    return InventorySnapshot(
+        snapshot_id=uuid4(),
+        run=run,
+        revision="revision-one",
+        resolver_version="test/1",
+        evidence_watermark=3,
+        coverage=InventoryCoverage.model_validate({"state": "unknown"}),
+        counts=InventoryCounts(node=2, membership=0, edge=0, capture=0, gap=0),
+    )
+
+
+def _node(name: str) -> InventoryNode:
+    return InventoryNode(
+        ref=InventoryNodeRef(
+            kind="transcript", source_instance_id="installation", harness="fake", local_id=name
+        )
+    )
+
+
+def _page(
+    snapshot: InventorySnapshot,
+    kind: ItemKind,
+    *,
+    filters: InventoryFilter | None = None,
+    names: tuple[str, ...] = (),
+    last: int | None = None,
+    more: bool = False,
+) -> InventoryQueryPage:
+    items = tuple(_node(name) for name in names)
+    return InventoryQueryPage(
+        snapshot=snapshot,
+        kind=kind,
+        filters=filters or InventoryFilter(),
+        items=items,
+        item_keys=tuple(InventoryItemKeys(node_key=item.ref.key) for item in items),
+        last_ordinal=last,
+        has_more=more,
+    )
 
 
 @pytest.fixture
@@ -21,7 +75,8 @@ def setup(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Mock, AsyncMock,
     runtime.inventory.head = AsyncMock(return_value=None)
     runtime.jobs.latest = AsyncMock(return_value=None)
     runtime.evidence.watermark = AsyncMock(return_value=0)
-    runtime.inventory.page = AsyncMock(side_effect=InventoryNotFound("absent"))
+    runtime.inventory.query = AsyncMock(side_effect=InventoryNotFound("absent"))
+    runtime.inventory.node = AsyncMock(side_effect=InventoryNotFound("absent"))
     monkeypatch.setattr(inventory, "_visible_run", visible)
     monkeypatch.setattr(inventory, "get_inventory_runtime", lambda: runtime)
     app = FastAPI()
@@ -44,15 +99,21 @@ def test_no_snapshot_is_not_an_empty_success(
     runtime.inventory.head.assert_awaited_with(run)
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=501", "after=-2"])
+@pytest.mark.parametrize(
+    "query", ["limit=0", "limit=501", "cursor=", "phase_id=", "attempt_id=%20", "after=-1&kind=x"]
+)
 def test_page_bounds_reject_before_storage(
     setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
     query: str,
 ) -> None:
     client, runtime, _, _ = setup
-    response = client.get(f"/executions/run/session-inventory/{uuid4()}/node?{query}")
+    url = f"/executions/run/session-inventory/{uuid4()}/node?{query}"
+    if query.startswith("after"):
+        # The integer offset is gone; an unknown section must still fail closed.
+        url = f"/executions/run/session-inventory/{uuid4()}/unknown?{query}"
+    response = client.get(url)
     assert response.status_code == 422
-    runtime.inventory.page.assert_not_awaited()
+    runtime.inventory.query.assert_not_awaited()
 
 
 def test_unknown_snapshot_is_not_replaced_with_head(
@@ -60,9 +121,11 @@ def test_unknown_snapshot_is_not_replaced_with_head(
 ) -> None:
     client, runtime, _, run = setup
     snapshot = uuid4()
-    response = client.get(f"/executions/run/session-inventory/{snapshot}/node?after=8&limit=3")
+    response = client.get(f"/executions/run/session-inventory/{snapshot}/node?limit=3")
     assert response.status_code == 404
-    runtime.inventory.page.assert_awaited_once_with(run, snapshot, "node", after=8, limit=3)
+    runtime.inventory.query.assert_awaited_once_with(
+        run, snapshot, "node", filters=InventoryFilter(), after=-1, limit=3
+    )
     runtime.inventory.head.assert_not_awaited()
 
 
@@ -73,20 +136,18 @@ def test_visibility_is_checked_again_for_each_page(
     assert client.get("/executions/run/session-inventory").status_code == 200
     visible.side_effect = HTTPException(status_code=404, detail="Execution not found")
     assert client.get(f"/executions/run/session-inventory/{uuid4()}/node").status_code == 404
-    runtime.inventory.page.assert_not_awaited()
-    assert visible.await_count == 2
+    runtime.inventory.query.assert_not_awaited()
+    assert (
+        client.get(f"/executions/run/session-inventory/{uuid4()}/nodes/{'a' * 64}").status_code
+        == 404
+    )
+    runtime.inventory.node.assert_not_awaited()
+    assert visible.await_count == 3
 
 
 def test_published_snapshot_reports_late_evidence_without_replacing_revision(
     setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
 ) -> None:
-    from syn_domain.contexts.agent_sessions import (
-        InventoryCounts,
-        InventoryCoverage,
-        InventoryPage,
-        InventorySnapshot,
-    )
-
     client, runtime, _, run = setup
     snapshot = InventorySnapshot(
         snapshot_id=uuid4(),
@@ -107,15 +168,15 @@ def test_published_snapshot_reports_late_evidence_without_replacing_revision(
     assert response["reconstruction_status"] == "pending"
     assert response["snapshot"]["revision"] == "revision-one"
     assert response["snapshot"]["evidence_watermark"] == 3
-    runtime.inventory.page.side_effect = None
-    runtime.inventory.page.return_value = InventoryPage(snapshot=snapshot, kind="node", items=())
+    runtime.inventory.query.side_effect = None
+    runtime.inventory.query.return_value = _page(snapshot, "node")
     response = client.get(f"/executions/run/session-inventory/{snapshot.snapshot_id}/node")
     assert response.status_code == 200
     assert response.json()["snapshot"]["revision"] == "revision-one"
-    assert response.json()["next_after"] is None
+    assert response.json()["next_cursor"] is None
     from syn_domain.contexts.agent_sessions import TranscriptBodyState
 
-    runtime.inventory.page.return_value = InventoryPage(snapshot=snapshot, kind="capture", items=())
+    runtime.inventory.query.return_value = _page(snapshot, "capture")
     runtime.body_availability.overrides = AsyncMock(
         return_value=(TranscriptBodyState(archive_sha256="a" * 64, status="expired"),)
     )
@@ -325,3 +386,154 @@ def test_transcript_access_errors_never_expose_exception_details(
     assert response.status_code == status
     assert response.headers["cache-control"] == "no-store"
     assert "private-token" not in response.text
+
+
+def _pages(client: TestClient, url: str) -> list[SessionInventoryPageResponse]:
+    pages: list[SessionInventoryPageResponse] = []
+    cursor: str | None = None
+    while True:
+        # Continuations repeat the same filters; the cursor alone is not a filter.
+        response = client.get(f"{url}&cursor={cursor}" if cursor else url)
+        assert response.status_code == 200, response.text
+        body = SessionInventoryPageResponse.model_validate(response.json())
+        pages.append(body)
+        cursor = body.next_cursor
+        if cursor is None:
+            return pages
+
+
+def test_cursor_is_opaque_and_resumes_the_keyset_with_filters(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    client, runtime, _, run = setup
+    snapshot = _snapshot(run)
+    filters = InventoryFilter(phase_id="phase", attempt_id="attempt")
+    runtime.inventory.query.side_effect = [
+        _page(snapshot, "node", filters=filters, names=("a",), last=7, more=True),
+        _page(snapshot, "node", filters=filters, names=("b",), last=9, more=False),
+    ]
+    url = f"/executions/run/session-inventory/{snapshot.snapshot_id}/node?phase_id=phase&attempt_id=attempt"
+    pages = _pages(client, url)
+    assert [p.items for p in pages] == [(_node("a"),), (_node("b"),)]
+    assert pages[0].item_keys == (InventoryItemKeys(node_key=_node("a").ref.key),)
+    assert pages[0].filters == filters
+    calls = runtime.inventory.query.await_args_list
+    assert [c.kwargs["after"] for c in calls] == [-1, 7]
+    assert all(c.kwargs["filters"] == filters for c in calls)
+
+
+@pytest.mark.parametrize(
+    ("path", "query", "field"),
+    [
+        ("other-snapshot", "phase_id=phase", "revision"),
+        ("edge", "phase_id=phase", "section"),
+        ("node", "phase_id=other", "filters"),
+        ("node", "", "filters"),
+        ("node", "phase_id=phase&attempt_id=a", "filters"),
+    ],
+)
+def test_mismatched_cursor_is_rejected_with_a_typed_error(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+    path: str,
+    query: str,
+    field: str,
+) -> None:
+    client, runtime, _, run = setup
+    snapshot = _snapshot(run)
+    runtime.inventory.query.side_effect = None
+    runtime.inventory.query.return_value = _page(
+        snapshot, "node", filters=InventoryFilter(phase_id="phase"), names=("a",), last=0, more=True
+    )
+    base = f"/executions/run/session-inventory/{snapshot.snapshot_id}"
+    cursor = client.get(f"{base}/node?phase_id=phase").json()["next_cursor"]
+    runtime.inventory.query.reset_mock()
+    target = (
+        f"{base}/{path}"
+        if path != "other-snapshot"
+        else f"/executions/run/session-inventory/{uuid4()}/node"
+    )
+    response = client.get(f"{target}?{query}&cursor={cursor}")
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "cursor_mismatch"
+    assert detail["mismatched"] == [field]
+    runtime.inventory.query.assert_not_awaited()
+
+
+def test_cursor_from_another_run_or_installation_is_rejected(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    client, runtime, visible, run = setup
+    snapshot = _snapshot(run)
+    runtime.inventory.query.side_effect = None
+    runtime.inventory.query.return_value = _page(snapshot, "node", names=("a",), last=0, more=True)
+    url = f"/executions/run/session-inventory/{snapshot.snapshot_id}/node"
+    cursor = client.get(url).json()["next_cursor"]
+    for other in (
+        run.model_copy(update={"execution_id": "other-run"}),
+        run.model_copy(update={"source_instance_id": "other-installation"}),
+    ):
+        visible.return_value = other
+        detail = client.get(url, params={"cursor": cursor}).json()["detail"]
+        assert detail["code"] == "cursor_mismatch"
+        assert detail["mismatched"] == ["scope"]
+
+
+@pytest.mark.parametrize("cursor", ["not-base64!", "e30", "eyJ2IjoyfQ"])
+def test_malformed_cursor_is_rejected_before_storage(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+    cursor: str,
+) -> None:
+    client, runtime, _, _ = setup
+    response = client.get(
+        f"/executions/run/session-inventory/{uuid4()}/node", params={"cursor": cursor}
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "cursor_invalid"
+    runtime.inventory.query.assert_not_awaited()
+
+
+def test_expired_revision_returns_explicit_restart_not_a_mixed_page(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    client, runtime, _, run = setup
+    old, head = _snapshot(run), _snapshot(run)
+    runtime.inventory.query.side_effect = None
+    runtime.inventory.query.return_value = _page(old, "node", names=("a",), last=0, more=True)
+    url = f"/executions/run/session-inventory/{old.snapshot_id}/node"
+    cursor = client.get(url).json()["next_cursor"]
+    runtime.inventory.query.side_effect = InventoryNotFound("pruned")
+    runtime.inventory.head.return_value = head
+    response = client.get(url, params={"cursor": cursor})
+    assert response.status_code == 410
+    detail = response.json()["detail"]
+    assert detail["code"] == "cursor_expired"
+    assert detail["restart"] is True
+    assert detail["restart_snapshot_id"] == str(head.snapshot_id)
+    assert "items" not in response.json()
+
+
+def test_node_lookup_resolves_foreign_endpoints_without_leaking_unknown_keys(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    client, runtime, _, run = setup
+    snapshot = uuid4()
+    node = _node("parent")
+    runtime.inventory.node.side_effect = None
+    runtime.inventory.node.return_value = node
+    base = f"/executions/run/session-inventory/{snapshot}/nodes"
+    resolved = client.get(f"{base}/{node.ref.key}").json()
+    assert resolved["status"] == "resolved"
+    assert resolved["node"]["ref"]["local_id"] == "parent"
+    runtime.inventory.node.assert_awaited_with(run, snapshot, node.ref.key)
+    runtime.inventory.node.return_value = None
+    unknown = client.get(f"{base}/{'b' * 64}").json()
+    assert unknown == {
+        "snapshot_id": str(snapshot),
+        "node_key": "b" * 64,
+        "status": "unresolved",
+        "node": None,
+    }
+    assert client.get(f"{base}/NOT-A-KEY").status_code == 422
+    runtime.inventory.node.side_effect = InventoryNotFound("unpublished")
+    assert client.get(f"{base}/{'c' * 64}").status_code == 404

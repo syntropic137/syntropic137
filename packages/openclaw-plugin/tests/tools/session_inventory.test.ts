@@ -22,11 +22,11 @@ it("preserves explicit pending state without synthesizing an empty inventory", a
 });
 
 it("encodes the execution selector and forwards immutable page selectors", async () => {
-  const body = { snapshot: { snapshot_id: snapshot }, kind: "edge", items: [], next_after: null };
+  const body = { snapshot: { snapshot_id: snapshot }, kind: "edge", items: [], item_keys: [], next_cursor: null };
   mockFetch.mockResolvedValue(new Response(JSON.stringify(body)));
-  const result = await synGetSessionInventory(client, { execution_id: "run/unsafe", snapshot_id: snapshot, kind: "edge", after: 100, limit: 20 });
+  const result = await synGetSessionInventory(client, { execution_id: "run/unsafe", snapshot_id: snapshot, kind: "edge", cursor: "opaque-cursor", limit: 20 });
   expect(JSON.parse(result.content)).toEqual(body);
-  expect(mockFetch.mock.calls[0]![0]).toBe(`https://deployment.example/api/v1/executions/run%2Funsafe/session-inventory/${snapshot}/edge?after=100&limit=20`);
+  expect(mockFetch.mock.calls[0]![0]).toBe(`https://deployment.example/api/v1/executions/run%2Funsafe/session-inventory/${snapshot}/edge?limit=20&cursor=opaque-cursor`);
 });
 
 it("does not fall back to a new snapshot when an old snapshot is unavailable", async () => {

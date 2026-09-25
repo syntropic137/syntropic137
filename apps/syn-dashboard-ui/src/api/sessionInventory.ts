@@ -9,10 +9,13 @@ export function getSessionInventory(executionId: string, signal?: AbortSignal): 
   return fetchJSON(`${API_BASE}/executions/${encodeURIComponent(executionId)}/session-inventory`, { signal })
 }
 
+/** `cursor` is the opaque server `next_cursor`; null reads the first page. */
 export function getSessionInventoryPage(
-  executionId: string, snapshotId: string, kind: InventoryKind, after: number, signal?: AbortSignal,
+  executionId: string, snapshotId: string, kind: InventoryKind, cursor: string | null, signal?: AbortSignal,
 ): Promise<InventoryPage> {
-  return fetchJSON(`${API_BASE}/executions/${encodeURIComponent(executionId)}/session-inventory/${encodeURIComponent(snapshotId)}/${kind}?after=${after}&limit=100`, { signal })
+  const query = new URLSearchParams({ limit: '100' })
+  if (cursor !== null) query.set('cursor', cursor)
+  return fetchJSON(`${API_BASE}/executions/${encodeURIComponent(executionId)}/session-inventory/${encodeURIComponent(snapshotId)}/${kind}?${query}`, { signal })
 }
 
 export type LocalTranscript = components['schemas']['LocalTranscriptResponse']

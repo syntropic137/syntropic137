@@ -414,8 +414,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Session Inventory Page */
+        /**
+         * Get Session Inventory Page
+         * @description Keyset page of one pinned revision, narrowed to a phase/attempt membership in SQL.
+         *
+         *     Omit ``cursor`` for the first page, then pass ``next_cursor`` unchanged with
+         *     the same revision, section and filters. A mismatched cursor is rejected; a
+         *     cursor whose revision is no longer retained gets 410 with ``restart``.
+         */
         get: operations["get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/nodes/{node_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Inventory Node
+         * @description Resolve an edge endpoint on another page. Keys outside this revision stay opaque.
+         */
+        get: operations["get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4172,6 +4199,21 @@ export interface components {
              */
             missing_keys: string[];
         };
+        /**
+         * InventoryFilter
+         * @description Membership narrowing. Unset fields match every phase or attempt.
+         *
+         *     A filter never changes what a node is; it selects nodes with at least one
+         *     matching membership, the edges and bindings touching them, their captures,
+         *     run-level or touching gaps, and every retraction (retractions are not
+         *     node-scoped).
+         */
+        InventoryFilter: {
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+        };
         /** InventoryGap */
         InventoryGap: {
             /** Reason */
@@ -4186,6 +4228,16 @@ export interface components {
              * @default []
              */
             evidence_ids: string[];
+        };
+        /**
+         * InventoryItemKeys
+         * @description Qualified node keys an item references, so a foreign endpoint is resolvable.
+         */
+        InventoryItemKeys: {
+            /** Node Key */
+            node_key?: string | null;
+            /** Peer Key */
+            peer_key?: string | null;
         };
         /** InventoryNode */
         InventoryNode: {
@@ -5625,6 +5677,32 @@ export interface components {
             /** Completed At */
             completed_at?: string | null;
         };
+        /**
+         * SessionInventoryCursorError
+         * @description Why a continuation cursor was refused. ``restart`` means re-read the head.
+         */
+        SessionInventoryCursorError: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "cursor_invalid" | "cursor_mismatch" | "cursor_expired";
+            /** Message */
+            message: string;
+            /**
+             * Mismatched
+             * @default []
+             */
+            mismatched: ("scope" | "revision" | "section" | "filters")[];
+            /** Restart */
+            restart: boolean;
+            /** Restart Snapshot Id */
+            restart_snapshot_id?: string | null;
+        };
+        /** SessionInventoryCursorErrorResponse */
+        SessionInventoryCursorErrorResponse: {
+            detail: components["schemas"]["SessionInventoryCursorError"];
+        };
         /** SessionInventoryJobResponse */
         SessionInventoryJobResponse: {
             /** Job Id */
@@ -5647,8 +5725,29 @@ export interface components {
             failure_code: string | null;
         };
         /**
+         * SessionInventoryNodeResponse
+         * @description A node-by-key lookup within one revision. Unknown keys disclose nothing.
+         */
+        SessionInventoryNodeResponse: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Node Key */
+            node_key: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "resolved" | "unresolved";
+            node?: components["schemas"]["InventoryNode"] | null;
+        };
+        /**
          * SessionInventoryPageResponse
-         * @description Immutable evidence plus current local restrictions; absent overrides are unchecked.
+         * @description One keyset page of a pinned revision plus current local restrictions.
+         *
+         *     ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
+         *     edge endpoint on another page resolves through the node lookup route.
+         *     ``next_cursor`` is opaque and bound to this run, revision, section and filters.
+         *     Absent body overrides are unchecked.
          */
         SessionInventoryPageResponse: {
             snapshot: components["schemas"]["InventorySnapshot"];
@@ -5657,10 +5756,13 @@ export interface components {
              * @enum {string}
              */
             kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            filters: components["schemas"]["InventoryFilter"];
             /** Items */
             items: (components["schemas"]["InventoryNode"] | components["schemas"]["Membership"] | components["schemas"]["LineageEdge"] | components["schemas"]["CaptureReceipt"] | components["schemas"]["InventoryGap"] | components["schemas"]["EvidenceRetraction"] | components["schemas"]["IdentityBinding"])[];
-            /** Next After */
-            next_after?: number | null;
+            /** Item Keys */
+            item_keys: components["schemas"]["InventoryItemKeys"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
             /**
              * Body Overrides
              * @default []
@@ -7936,7 +8038,9 @@ export interface operations {
     get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get: {
         parameters: {
             query?: {
-                after?: number;
+                phase_id?: string | null;
+                attempt_id?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
             header?: never;
@@ -7956,6 +8060,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInventoryPageResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                node_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryNodeResponse"];
                 };
             };
             /** @description Validation Error */

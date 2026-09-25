@@ -5,8 +5,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_domain.contexts.agent_sessions import (
-    InventoryPage,
+    InventoryFilter,
+    InventoryItem,
+    InventoryItemKeys,
+    InventoryNode,
     InventorySnapshot,
+    ItemKind,
     RunIdentity,
     TranscriptBodyState,
 )
@@ -24,10 +28,49 @@ class SessionInventoryResponse(BaseModel):
     job_id: str | None = None
 
 
-class SessionInventoryPageResponse(InventoryPage):
-    """Immutable evidence plus current local restrictions; absent overrides are unchecked."""
+class SessionInventoryPageResponse(BaseModel):
+    """One keyset page of a pinned revision plus current local restrictions.
 
+    ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
+    edge endpoint on another page resolves through the node lookup route.
+    ``next_cursor`` is opaque and bound to this run, revision, section and filters.
+    Absent body overrides are unchecked.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    snapshot: InventorySnapshot
+    kind: ItemKind
+    filters: InventoryFilter
+    items: tuple[InventoryItem, ...]
+    item_keys: tuple[InventoryItemKeys, ...]
+    next_cursor: str | None = None
     body_overrides: tuple[TranscriptBodyState, ...] = ()
+
+
+class SessionInventoryCursorError(BaseModel):
+    """Why a continuation cursor was refused. ``restart`` means re-read the head."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    code: Literal["cursor_invalid", "cursor_mismatch", "cursor_expired"]
+    message: str
+    mismatched: tuple[Literal["scope", "revision", "section", "filters"], ...] = ()
+    restart: bool
+    restart_snapshot_id: str | None = None
+
+
+class SessionInventoryCursorErrorResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    detail: SessionInventoryCursorError
+
+
+class SessionInventoryNodeResponse(BaseModel):
+    """A node-by-key lookup within one revision. Unknown keys disclose nothing."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    snapshot_id: str
+    node_key: str
+    status: Literal["resolved", "unresolved"]
+    node: InventoryNode | None = None
 
 
 class SessionInventoryRefreshRequest(BaseModel):

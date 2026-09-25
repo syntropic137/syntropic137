@@ -13,16 +13,26 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from syn_api._wiring_inventory import get_inventory_runtime
+from syn_api.routes.executions.inventory_cursor import (
+    MAX_CURSOR_LENGTH,
+    InventoryCursor,
+    InventoryCursorInvalid,
+    issue_cursor,
+)
 from syn_api.types import (
     Err,
     LocalTranscriptResponse,
+    SessionInventoryCursorError,
+    SessionInventoryCursorErrorResponse,
     SessionInventoryJobResponse,
+    SessionInventoryNodeResponse,
     SessionInventoryPageResponse,
     SessionInventoryRefreshRequest,
     SessionInventoryRefreshResponse,
     SessionInventoryResponse,
 )
 from syn_domain.contexts.agent_sessions import (
+    InventoryFilter,
     InventoryJob,
     InventoryNotFound,
     InventorySnapshot,
@@ -100,26 +110,124 @@ async def get_session_inventory(execution_id: str) -> SessionInventoryResponse:
     )
 
 
-@router.get("/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}")
+_FilterId = Annotated[
+    str | None, Query(min_length=1, max_length=2048, pattern=r"^[^\x00]*\S[^\x00]*$")
+]
+
+
+def _cursor_error(status: int, error: SessionInventoryCursorError) -> HTTPException:
+    return HTTPException(status_code=status, detail=error.model_dump(mode="json"))
+
+
+def _resume_after(
+    cursor: str | None,
+    run: RunIdentity,
+    snapshot_id: UUID,
+    kind: ItemKind,
+    filters: InventoryFilter,
+) -> int:
+    if cursor is None:
+        return -1
+    try:
+        decoded = InventoryCursor.decode(cursor)
+    except InventoryCursorInvalid as exc:
+        raise _cursor_error(
+            400,
+            SessionInventoryCursorError(
+                code="cursor_invalid", message="Inventory cursor is malformed", restart=True
+            ),
+        ) from exc
+    mismatched = decoded.mismatches(run, snapshot_id, kind, filters)
+    if mismatched:
+        raise _cursor_error(
+            400,
+            SessionInventoryCursorError(
+                code="cursor_mismatch",
+                message="Inventory cursor belongs to another scope, revision, section or filter",
+                mismatched=mismatched,
+                restart=False,
+            ),
+        )
+    return decoded.after
+
+
+@router.get(
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}",
+    responses={
+        400: {"model": SessionInventoryCursorErrorResponse},
+        410: {"model": SessionInventoryCursorErrorResponse},
+    },
+)
 async def get_session_inventory_page(
     execution_id: str,
     snapshot_id: UUID,
     kind: ItemKind,
-    after: Annotated[int, Query(ge=-1)] = -1,
+    phase_id: _FilterId = None,
+    attempt_id: _FilterId = None,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=MAX_CURSOR_LENGTH)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> SessionInventoryPageResponse:
+    """Keyset page of one pinned revision, narrowed to a phase/attempt membership in SQL.
+
+    Omit ``cursor`` for the first page, then pass ``next_cursor`` unchanged with
+    the same revision, section and filters. A mismatched cursor is rejected; a
+    cursor whose revision is no longer retained gets 410 with ``restart``.
+    """
     run = await _visible_run(execution_id)
+    filters = InventoryFilter(phase_id=phase_id, attempt_id=attempt_id)
+    after = _resume_after(cursor, run, snapshot_id, kind, filters)
+    runtime = get_inventory_runtime()
     try:
-        page = await get_inventory_runtime().inventory.page(
-            run, snapshot_id, kind, after=after, limit=limit
+        page = await runtime.inventory.query(
+            run, snapshot_id, kind, filters=filters, after=after, limit=limit
         )
     except InventoryNotFound as exc:
-        raise HTTPException(status_code=404, detail="Published inventory not found") from exc
-    overrides = (
-        await get_inventory_runtime().body_availability.overrides(page) if kind == "capture" else ()
+        if cursor is None:
+            raise HTTPException(status_code=404, detail="Published inventory not found") from exc
+        head = await runtime.inventory.head(run)
+        raise _cursor_error(
+            410,
+            SessionInventoryCursorError(
+                code="cursor_expired",
+                message="Pinned inventory revision is no longer available; restart from the head",
+                restart=True,
+                restart_snapshot_id=str(head.snapshot_id) if head is not None else None,
+            ),
+        ) from exc
+    overrides = await runtime.body_availability.overrides(page) if kind == "capture" else ()
+    next_cursor = (
+        issue_cursor(run, snapshot_id, kind, filters, page.last_ordinal)
+        if page.has_more and page.last_ordinal is not None
+        else None
     )
-    return SessionInventoryPageResponse.model_validate(
-        {**page.model_dump(), "body_overrides": overrides}
+    return SessionInventoryPageResponse(
+        snapshot=page.snapshot,
+        kind=page.kind,
+        filters=page.filters,
+        items=page.items,
+        item_keys=page.item_keys,
+        next_cursor=next_cursor,
+        body_overrides=overrides,
+    )
+
+
+@router.get("/executions/{execution_id}/session-inventory/{snapshot_id}/nodes/{node_key}")
+async def get_session_inventory_node(
+    execution_id: str,
+    snapshot_id: UUID,
+    node_key: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
+) -> SessionInventoryNodeResponse:
+    """Resolve an edge endpoint on another page. Keys outside this revision stay opaque."""
+    run = await _visible_run(execution_id)
+    try:
+        node = await get_inventory_runtime().inventory.node(run, snapshot_id, node_key)
+    except InventoryNotFound as exc:
+        raise HTTPException(status_code=404, detail="Published inventory not found") from exc
+    return SessionInventoryNodeResponse(
+        snapshot_id=str(snapshot_id),
+        node_key=node_key,
+        status="resolved" if node is not None else "unresolved",
+        node=node,
     )
 
 

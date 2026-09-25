@@ -9,8 +9,9 @@ const snapshot = {
   coverage: { state: "unknown" }, counts: { node: 2, gap: 1 },
 };
 const status = { run, snapshot, reconstruction_status: "current", later_evidence_pending: false };
-const page = (id: string, next: number | null) => ({
-  snapshot, kind: "node", items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }], next_after: next,
+const page = (id: string, next: string | null) => ({
+  snapshot, kind: "node", filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
+  items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }], next_cursor: next,
 });
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
 const output = () => vi.mocked(process.stdout.write).mock.calls.map(c => String(c[0])).join("");
@@ -24,7 +25,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("streams all pages from the original revision with full native IDs", async () => {
   fetchMock.mockResolvedValueOnce(response(status))
-    .mockResolvedValueOnce(response(page("native-one-full-id", 0)))
+    .mockResolvedValueOnce(response(page("native-one-full-id", "server-cursor-1")))
     .mockResolvedValueOnce(response(page("native-two-full-id", null)));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, json: true, limit: "1" } });
   const result = JSON.parse(output());
@@ -34,12 +35,14 @@ it("streams all pages from the original revision with full native IDs", async ()
   const urls = fetchMock.mock.calls.map(c => new URL((c[0] as Request).url));
   expect(urls[1]!.pathname).toContain(snapshot.snapshot_id);
   expect(urls[2]!.pathname).toContain(snapshot.snapshot_id);
-  expect(urls[2]!.searchParams.get("after")).toBe("0");
+  expect(urls[1]!.searchParams.get("cursor")).toBeNull();
+  expect(urls[2]!.searchParams.get("cursor")).toBe("server-cursor-1");
+  expect(urls[2]!.searchParams.get("after")).toBeNull();
 });
 
 it("rejects a cursor from another installation before requesting a page", async () => {
   fetchMock.mockResolvedValueOnce(response(status));
-  const cursor = Buffer.from(JSON.stringify({ source: "other", execution: "execution", snapshot: snapshot.snapshot_id, after: 0 })).toString("base64url");
+  const cursor = Buffer.from(JSON.stringify({ source: "other", execution: "execution", snapshot: snapshot.snapshot_id, server: "server-cursor" })).toString("base64url");
   await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor } })).rejects.toThrow("another run or installation");
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
@@ -59,8 +62,8 @@ it("require-complete rejects unknown coverage after printing valid data", async 
 
 it("rejects nonadvancing pagination instead of looping", async () => {
   fetchMock.mockResolvedValueOnce(response(status))
-    .mockResolvedValueOnce(response(page("native", 0)))
-    .mockResolvedValueOnce(response(page("native", 0)));
+    .mockResolvedValueOnce(response(page("native", "same")))
+    .mockResolvedValueOnce(response(page("native", "same")));
   await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true } })).rejects.toThrow("did not advance");
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });
@@ -79,7 +82,7 @@ it("refresh schedules management work with the caller key and reports its durabl
 });
 
 it("preserves capture restrictions and binds continuation cursors to the section", async () => {
-  const capturePage = { snapshot, kind: "capture", items: [], next_after: 0,
+  const capturePage = { snapshot, kind: "capture", filters: {}, items: [], item_keys: [], next_cursor: "server-capture",
     body_overrides: [{ archive_sha256: "a".repeat(64), status: "expired" }] };
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(capturePage));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "capture", json: true } });
@@ -91,15 +94,17 @@ it("preserves capture restrictions and binds continuation cursors to the section
   await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, kind: "node" } })).rejects.toThrow("another section");
   expect(fetchMock).not.toHaveBeenCalled();
   vi.mocked(process.stdout.write).mockClear();
-  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({ ...capturePage, next_after: null }));
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({ ...capturePage, next_cursor: null }));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
-  expect(new URL((fetchMock.mock.calls[1]![0] as Request).url).pathname).toMatch(/\/capture$/);
+  const continued = new URL((fetchMock.mock.calls[1]![0] as Request).url);
+  expect(continued.pathname).toMatch(/\/capture$/);
+  expect(continued.searchParams.get("cursor")).toBe("server-capture");
 });
 
 it("prints historical capture availability separately from current expiry", async () => {
   const hash = "a".repeat(64);
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({
-    snapshot, kind: "capture", next_after: null,
+    snapshot, kind: "capture", filters: {}, item_keys: [], next_cursor: null,
     items: [{ node: { harness: "codex", local_id: "native" }, destination: "local", availability: "present", archived_byte_hash: hash }],
     body_overrides: [{ archive_sha256: hash, status: "expired" }],
   }));
@@ -118,12 +123,18 @@ it("rejects a response with a mismatched section", async () => {
   await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "edge" } })).rejects.toThrow("another section");
 });
 
-it("continues legacy node cursors without requiring a new section field", async () => {
-  const cursor = Buffer.from(JSON.stringify({ source: "installation", execution: "execution", snapshot: snapshot.snapshot_id, after: 0 })).toString("base64url");
+it("rejects legacy integer-offset cursors; the server cursor is required", async () => {
+  const legacy = Buffer.from(JSON.stringify({ source: "installation", execution: "execution", snapshot: snapshot.snapshot_id, after: 0 })).toString("base64url");
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor: legacy } })).rejects.toThrow("Invalid inventory cursor");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("continues node cursors without requiring a section field", async () => {
+  const cursor = Buffer.from(JSON.stringify({ source: "installation", execution: "execution", snapshot: snapshot.snapshot_id, server: "server-node" })).toString("base64url");
   fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response(page("legacy-next", null)));
   await executionSessionsCommand.handler({ positionals: ["execution"], values: { cursor, json: true } });
   expect(JSON.parse(output()).pages[0].items[0].ref.local_id).toBe("legacy-next");
   const url = new URL((fetchMock.mock.calls[1]![0] as Request).url);
   expect(url.pathname).toMatch(/\/node$/);
-  expect(url.searchParams.get("after")).toBe("0");
+  expect(url.searchParams.get("cursor")).toBe("server-node");
 });

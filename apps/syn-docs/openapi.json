@@ -1256,6 +1256,7 @@
           "executions"
         ],
         "summary": "Get Session Inventory Page",
+        "description": "Keyset page of one pinned revision, narrowed to a phase/attempt membership in SQL.\n\nOmit ``cursor`` for the first page, then pass ``next_cursor`` unchanged with\nthe same revision, section and filters. A mismatched cursor is rejected; a\ncursor whose revision is no longer retained gets 410 with ``restart``.",
         "operationId": "get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get",
         "parameters": [
           {
@@ -1296,14 +1297,59 @@
             }
           },
           {
-            "name": "after",
+            "name": "phase_id",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "minimum": -1,
-              "default": -1,
-              "title": "After"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^[^\\x00]*\\S[^\\x00]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phase Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^[^\\x00]*\\S[^\\x00]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           },
           {
@@ -1326,6 +1372,89 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionInventoryPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryCursorErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryCursorErrorResponse"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/nodes/{node_key}": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Session Inventory Node",
+        "description": "Resolve an edge endpoint on another page. Keys outside this revision stay opaque.",
+        "operationId": "get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Snapshot Id"
+            }
+          },
+          {
+            "name": "node_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Node Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryNodeResponse"
                 }
               }
             }
@@ -11249,6 +11378,38 @@
         ],
         "title": "InventoryCoverage"
       },
+      "InventoryFilter": {
+        "properties": {
+          "phase_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InventoryFilter",
+        "description": "Membership narrowing. Unset fields match every phase or attempt.\n\nA filter never changes what a node is; it selects nodes with at least one\nmatching membership, the edges and bindings touching them, their captures,\nrun-level or touching gaps, and every retraction (retractions are not\nnode-scoped)."
+      },
       "InventoryGap": {
         "properties": {
           "reason": {
@@ -11279,6 +11440,36 @@
           "reason"
         ],
         "title": "InventoryGap"
+      },
+      "InventoryItemKeys": {
+        "properties": {
+          "node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Key"
+          },
+          "peer_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InventoryItemKeys",
+        "description": "Qualified node keys an item references, so a foreign endpoint is resolvable."
       },
       "InventoryNode": {
         "properties": {
@@ -14050,6 +14241,74 @@
         "title": "SessionCostResponse",
         "description": "Cost for a single session."
       },
+      "SessionInventoryCursorError": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "cursor_invalid",
+              "cursor_mismatch",
+              "cursor_expired"
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "mismatched": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "scope",
+                "revision",
+                "section",
+                "filters"
+              ]
+            },
+            "type": "array",
+            "title": "Mismatched",
+            "default": []
+          },
+          "restart": {
+            "type": "boolean",
+            "title": "Restart"
+          },
+          "restart_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restart Snapshot Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "restart"
+        ],
+        "title": "SessionInventoryCursorError",
+        "description": "Why a continuation cursor was refused. ``restart`` means re-read the head."
+      },
+      "SessionInventoryCursorErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/SessionInventoryCursorError"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "SessionInventoryCursorErrorResponse"
+      },
       "SessionInventoryJobResponse": {
         "properties": {
           "job_id": {
@@ -14119,6 +14378,45 @@
         ],
         "title": "SessionInventoryJobResponse"
       },
+      "SessionInventoryNodeResponse": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "node_key": {
+            "type": "string",
+            "title": "Node Key"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "title": "Status"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventoryNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "node_key",
+          "status"
+        ],
+        "title": "SessionInventoryNodeResponse",
+        "description": "A node-by-key lookup within one revision. Unknown keys disclose nothing."
+      },
       "SessionInventoryPageResponse": {
         "properties": {
           "snapshot": {
@@ -14136,6 +14434,9 @@
               "binding"
             ],
             "title": "Kind"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InventoryFilter"
           },
           "items": {
             "items": {
@@ -14166,17 +14467,23 @@
             "type": "array",
             "title": "Items"
           },
-          "next_after": {
+          "item_keys": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItemKeys"
+            },
+            "type": "array",
+            "title": "Item Keys"
+          },
+          "next_cursor": {
             "anyOf": [
               {
-                "type": "integer",
-                "minimum": 0.0
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Next After"
+            "title": "Next Cursor"
           },
           "body_overrides": {
             "items": {
@@ -14192,10 +14499,12 @@
         "required": [
           "snapshot",
           "kind",
-          "items"
+          "filters",
+          "items",
+          "item_keys"
         ],
         "title": "SessionInventoryPageResponse",
-        "description": "Immutable evidence plus current local restrictions; absent overrides are unchecked."
+        "description": "One keyset page of a pinned revision plus current local restrictions.\n\n``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an\nedge endpoint on another page resolves through the node lookup route.\n``next_cursor`` is opaque and bound to this run, revision, section and filters.\nAbsent body overrides are unchecked."
       },
       "SessionInventoryRefreshRequest": {
         "properties": {

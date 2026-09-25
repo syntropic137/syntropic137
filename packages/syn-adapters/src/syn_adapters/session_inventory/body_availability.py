@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions import CaptureReceipt, TranscriptBodyState
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions import InventoryPage
+    from syn_domain.contexts.agent_sessions import InventoryPage, InventoryQueryPage
 
     from .database import Pool
 
@@ -16,7 +16,9 @@ class PostgresBodyAvailability:
     def __init__(self, pool: Pool) -> None:
         self._pool = pool
 
-    async def overrides(self, page: InventoryPage) -> tuple[TranscriptBodyState, ...]:
+    async def overrides(
+        self, page: InventoryPage | InventoryQueryPage
+    ) -> tuple[TranscriptBodyState, ...]:
         hashes = sorted(
             {
                 item.archived_byte_hash

@@ -9,9 +9,11 @@ import { print } from "../output/console.js";
 
 const kindSchema = z.enum(["node", "membership", "edge", "capture", "gap", "binding", "retraction"]);
 
+// CLI envelope: the snapshot selects the pinned route; `server` is the API's
+// opaque cursor, which the API itself binds to scope, revision, section and filters.
 const cursorSchema = z.object({
   execution: z.string(), source: z.string(), snapshot: z.string().uuid(),
-  after: z.number().int().nonnegative(), kind: kindSchema.default("node"),
+  server: z.string().min(1), kind: kindSchema.default("node"),
 }).strict();
 
 export const executionSessionsCommand: CommandDef = {
@@ -68,14 +70,14 @@ export const executionSessionsCommand: CommandDef = {
     const json = values["json"] === true;
     if (json) process.stdout.write(`{"status":${JSON.stringify(status)},"refresh":${JSON.stringify(refresh)},"pages":[`);
     else print(`Reconstruction: ${status.reconstruction_status}; coverage: ${status.snapshot?.coverage.state ?? "unknown"}`);
-    let after = cursor?.after ?? -1;
+    let server: string | undefined = cursor?.server;
     let nextCursor: string | null = null;
     let first = true;
     let complete = false;
     if (snapshotId) {
       do {
         const page: components["schemas"]["SessionInventoryPageResponse"] = unwrap(await api.GET("/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}", {
-          params: { path: { execution_id: status.run.execution_id, snapshot_id: snapshotId, kind }, query: { after, limit } },
+          params: { path: { execution_id: status.run.execution_id, snapshot_id: snapshotId, kind }, query: server === undefined ? { limit } : { limit, cursor: server } },
         }), "Failed to read inventory page");
         if (page.kind !== kind) throw new CLIError("Inventory response belongs to another section");
         if (page.snapshot.run.source_instance_id !== status.run.source_instance_id || page.snapshot.run.execution_id !== status.run.execution_id) throw new CLIError("Inventory response belongs to another run or installation");
@@ -89,11 +91,11 @@ export const executionSessionsCommand: CommandDef = {
           printInventoryItems(page);
         }
         first = false;
-        const next = page.next_after;
+        const next = page.next_cursor;
         if (next == null) { nextCursor = null; break; }
-        if (next <= after) throw new CLIError("Inventory cursor did not advance");
-        after = next;
-        nextCursor = Buffer.from(JSON.stringify({ execution: status.run.execution_id, source: status.run.source_instance_id, snapshot: snapshotId, after, kind })).toString("base64url");
+        if (next === server) throw new CLIError("Inventory cursor did not advance");
+        server = next;
+        nextCursor = Buffer.from(JSON.stringify({ execution: status.run.execution_id, source: status.run.source_instance_id, snapshot: snapshotId, server, kind })).toString("base64url");
       } while (values["all"] === true);
     }
     if (json) process.stdout.write(`],"next_cursor":${JSON.stringify(nextCursor)}}\n`);

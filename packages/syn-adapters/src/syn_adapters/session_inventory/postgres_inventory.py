@@ -6,10 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions import (
+    InventoryFilter,
     InventoryItem,
+    InventoryNode,
     InventoryNotFound,
     InventoryPage,
     InventoryPublicationConflict,
+    InventoryQueryPage,
     InventorySnapshot,
     ItemKind,
     RunIdentity,
@@ -17,6 +20,7 @@ from syn_domain.contexts.agent_sessions import (
 
 from .postgres_items import ITEM_MODELS, append_item
 from .postgres_publication import publish_snapshot
+from .postgres_queries import backfill_query_keys, lookup_node, query_page
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -35,6 +39,7 @@ class PostgresSessionInventory:
     async def ensure_ready(self) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(Path(__file__).with_name("schema.sql").read_text())
+        await backfill_query_keys(self._pool)
 
     async def stage(self, snapshot: InventorySnapshot) -> None:
         run = snapshot.run
@@ -140,3 +145,22 @@ class PostgresSessionInventory:
             items=tuple(ITEM_MODELS[kind].model_validate_json(row["payload"]) for row in visible),
             next_after=int(visible[-1]["ordinal"]) if len(rows) > limit else None,
         )
+
+    async def query(
+        self,
+        run: RunIdentity,
+        snapshot_id: UUID,
+        kind: ItemKind,
+        *,
+        filters: InventoryFilter,
+        after: int = -1,
+        limit: int = 100,
+    ) -> InventoryQueryPage:
+        return await query_page(
+            self._pool, run, snapshot_id, kind, filters=filters, after=after, limit=limit
+        )
+
+    async def node(
+        self, run: RunIdentity, snapshot_id: UUID, node_key: str
+    ) -> InventoryNode | None:
+        return await lookup_node(self._pool, run, snapshot_id, node_key)

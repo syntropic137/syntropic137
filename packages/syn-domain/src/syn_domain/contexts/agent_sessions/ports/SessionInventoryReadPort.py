@@ -10,6 +10,7 @@ from pydantic import Field
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     CaptureReceipt,
     EvidenceRetraction,
+    Identifier,
     IdentityBinding,
     InventoryCoverage,
     InventoryGap,
@@ -59,6 +60,42 @@ class InventoryPage(InventoryModel):
     next_after: int | None = Field(default=None, ge=0)
 
 
+class InventoryFilter(InventoryModel):
+    """Membership narrowing. Unset fields match every phase or attempt.
+
+    A filter never changes what a node is; it selects nodes with at least one
+    matching membership, the edges and bindings touching them, their captures,
+    run-level or touching gaps, and every retraction (retractions are not
+    node-scoped).
+    """
+
+    phase_id: Identifier | None = None
+    attempt_id: Identifier | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.phase_id is not None or self.attempt_id is not None
+
+
+class InventoryItemKeys(InventoryModel):
+    """Qualified node keys an item references, so a foreign endpoint is resolvable."""
+
+    node_key: str | None = None
+    peer_key: str | None = None
+
+
+class InventoryQueryPage(InventoryModel):
+    """One filtered keyset page. ``last_ordinal`` is the resume key, never a count."""
+
+    snapshot: InventorySnapshot
+    kind: ItemKind
+    filters: InventoryFilter
+    items: tuple[InventoryItem, ...]
+    item_keys: tuple[InventoryItemKeys, ...]
+    last_ordinal: int | None = Field(default=None, ge=0)
+    has_more: bool
+
+
 class SessionInventoryReadPort(Protocol):
     async def head(self, run: RunIdentity) -> InventorySnapshot | None: ...
 
@@ -72,4 +109,23 @@ class SessionInventoryReadPort(Protocol):
         limit: int = 100,
     ) -> InventoryPage:
         """Reject absent/unpublished snapshots; never substitute the latest head."""
+        ...
+
+    async def query(
+        self,
+        run: RunIdentity,
+        snapshot_id: UUID,
+        kind: ItemKind,
+        *,
+        filters: InventoryFilter,
+        after: int = -1,
+        limit: int = 100,
+    ) -> InventoryQueryPage:
+        """Bounded indexed keyset page of one published snapshot, narrowed in SQL."""
+        ...
+
+    async def node(
+        self, run: RunIdentity, snapshot_id: UUID, node_key: str
+    ) -> InventoryNode | None:
+        """Resolve one node of a published snapshot; None when it is not in that revision."""
         ...

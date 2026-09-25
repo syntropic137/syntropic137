@@ -36,7 +36,16 @@ from pydantic import (
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
+    SessionInventoryCursorError as SessionInventoryCursorError,
+)
+from syn_api.inventory_types import (
+    SessionInventoryCursorErrorResponse as SessionInventoryCursorErrorResponse,
+)
+from syn_api.inventory_types import (
     SessionInventoryJobResponse as SessionInventoryJobResponse,
+)
+from syn_api.inventory_types import (
+    SessionInventoryNodeResponse as SessionInventoryNodeResponse,
 )
 from syn_api.inventory_types import (
     SessionInventoryPageResponse as SessionInventoryPageResponse,
