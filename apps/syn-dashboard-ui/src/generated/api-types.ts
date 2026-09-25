@@ -2965,6 +2965,10 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Total Duration Seconds */
             total_duration_seconds?: number | null;
             /**
@@ -4469,6 +4473,16 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
+             * Cost In Progress
+             * @default false
+             */
+            cost_in_progress: boolean;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
@@ -5466,6 +5480,10 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
             /** Operations */
             operations?: components["schemas"]["OperationInfo"][];
             /** Started At */
@@ -6820,7 +6838,7 @@ export interface components {
              */
             cache_read_tokens: number;
             /** Estimated Cost Usd */
-            estimated_cost_usd?: number | null;
+            estimated_cost_usd?: string | null;
         };
     };
     responses: never;

@@ -59,7 +59,7 @@ export function TriggerDetail() {
           value={trigger.workflow_name || trigger.workflow_id.slice(0, 12) + '...'}
           icon={ExternalLink}
           href={`/workflows/${trigger.workflow_id}`}
-          subtitle="View workflow \u2192"
+          subtitle="View workflow →"
         />
       </div>
 

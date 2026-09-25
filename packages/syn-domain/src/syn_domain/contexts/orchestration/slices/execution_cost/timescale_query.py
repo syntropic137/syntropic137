@@ -39,6 +39,7 @@ from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
 )
+from syn_shared.pricing import parse_vendor_cost
 
 # OUTSTANDING AT SCALE: EVERY QUERY IN THIS FILE IS EXECUTION-KEYED (#1338).
 #
@@ -419,9 +420,9 @@ def _price_session_summary_row(
     known (issue #788).
     """
     model = _resolve_row_model(row)
-    raw_sdk_cost = row.get("sdk_cost")
-    if raw_sdk_cost is not None:
-        return _RowPricing(cost=Decimal(str(raw_sdk_cost)), model=model, unpriced_count=0)
+    sdk_cost = parse_vendor_cost(row.get("sdk_cost"))
+    if sdk_cost is not None:
+        return _RowPricing(cost=sdk_cost, model=model, unpriced_count=0)
 
     pricing_model = model.pricing_model
     pricing = cost_calculator.resolve_pricing(pricing_model)

@@ -1,8 +1,9 @@
 import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, MessageSquare, TrendingUp, Zap } from 'lucide-react'
 import type { ExecutionCost } from '../types'
-import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
+import { formatCost, formatDuration } from '../utils/formatters'
 import { costByModelKeyLabel } from '../utils/modelLabels'
+import { TokenInOut } from './TokenInOut'
 
 interface ExecutionCostSummaryProps {
   cost: ExecutionCost
@@ -66,47 +67,15 @@ function CostBreakdownRow({ cost }: { cost: ExecutionCost }) {
   )
 }
 
-function TokenSegment({ label, total, fresh, freshLabel, cached, cachedLabel, accentColor, cacheColor }: {
-  label: string; total: number; fresh: number; freshLabel: string
-  cached: number; cachedLabel: string; accentColor: string; cacheColor: string
-}) {
-  return (
-    <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
-      <div className={`flex items-center justify-between px-3 py-1.5 ${accentColor}`}>
-        <span className="text-xs font-medium">{label}</span>
-        <span className="text-sm font-semibold text-[var(--color-text-primary)]">{formatTokens(total)}</span>
-      </div>
-      <div className="px-3 py-1.5 space-y-0.5 text-xs">
-        <div className="flex justify-between">
-          <span className="text-[var(--color-text-muted)]">{freshLabel}</span>
-          <span className="text-[var(--color-text-secondary)]">{formatTokens(fresh)}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className={cacheColor}>{cachedLabel}</span>
-          <span className={cacheColor}>{formatTokens(cached)}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function MetricsGrid({ cost }: { cost: ExecutionCost }) {
   return (
     <div className="p-4 border-b border-[var(--color-border)] space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        <TokenSegment
-          label="In" total={cost.input_tokens + (cost.cache_read_tokens ?? 0)}
-          fresh={cost.input_tokens} freshLabel="Fresh"
-          cached={cost.cache_read_tokens ?? 0} cachedLabel="Cache read"
-          accentColor="bg-indigo-500/10 text-indigo-400" cacheColor="text-emerald-400"
-        />
-        <TokenSegment
-          label="Out" total={cost.output_tokens + (cost.cache_creation_tokens ?? 0)}
-          fresh={cost.output_tokens} freshLabel="Output"
-          cached={cost.cache_creation_tokens ?? 0} cachedLabel="Cache write"
-          accentColor="bg-violet-500/10 text-violet-400" cacheColor="text-amber-400"
-        />
-      </div>
+      <TokenInOut
+        fresh={cost.input_tokens}
+        cacheWrite={cost.cache_creation_tokens ?? 0}
+        cacheRead={cost.cache_read_tokens ?? 0}
+        output={cost.output_tokens}
+      />
       <div className="grid grid-cols-2 gap-3">
         <div className="text-center">
           <p className="text-lg font-semibold text-[var(--color-text-primary)]">{cost.tool_calls}</p>

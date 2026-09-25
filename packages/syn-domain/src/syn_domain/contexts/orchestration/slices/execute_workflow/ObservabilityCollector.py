@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_shared.events import SESSION_SUMMARY
 from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
+from syn_shared.pricing import cost_json_number
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -398,7 +399,11 @@ class ObservabilityCollector:
         # projection looks up by string, and a rename on one side used to be
         # invisible until a dashboard showed a zero.
         summary: SessionSummaryData = {
-            "total_cost_usd": total_cost_usd,
+            # Canonicalised at ingest: the Claude CLI reports a JS double
+            # (0.3056678 arrives as 0.30566780000000005), and this is the
+            # first point the platform controls. Stored clean, every later
+            # numeric read of the row is clean too.
+            "total_cost_usd": None if total_cost_usd is None else cost_json_number(total_cost_usd),
             "total_input_tokens": input_tokens,
             "total_output_tokens": output_tokens,
             "cache_creation_tokens": cache_creation,

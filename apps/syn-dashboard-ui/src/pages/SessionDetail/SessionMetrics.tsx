@@ -57,6 +57,8 @@ export function SessionMetrics({
           outputTokens={session.output_tokens}
           cacheCreationTokens={session.cache_creation_tokens ?? 0}
           cacheReadTokens={session.cache_read_tokens ?? 0}
+          cacheReadRateDisplay={session.cache_read_rate_display}
+          cacheWriteRateDisplay={session.cache_write_rate_display}
         />
       </section>
       {hasCostByModel && (
