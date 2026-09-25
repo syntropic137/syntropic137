@@ -42,7 +42,14 @@ export interface PhaseDefinition {
   timeout_seconds: number
   allowed_tools: string[]
   argument_hint: string | null
+  /** The model as DEFINED: often an alias (opus, gpt-sol). */
   model: string | null
+  /** Concrete id the alias resolves to; null when not an alias. Never what a run used. */
+  resolved_model?: string | null
+  /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
+  resolution_basis?: 'translated' | 'expected' | null
+  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  model_display?: string | null
   provider: string | null
 }
 

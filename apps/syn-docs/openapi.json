@@ -6295,6 +6295,15 @@
         "title": "AddGlobalClaudePluginRequest",
         "description": "Request body for ``POST /claude-plugins/global`` (Phase A redesign).\n\nTakes the display name plus version of an already-registered plugin. The\nhandler looks the entry up in the lock projection and refuses to add\nanything that has not been registered first via\n``POST /claude-plugins/registrations``."
       },
+      "AliasResolutionBasis": {
+        "type": "string",
+        "enum": [
+          "translated",
+          "expected"
+        ],
+        "title": "AliasResolutionBasis",
+        "description": "How confident an alias -> model id resolution is."
+      },
       "ArtifactActionResponse": {
         "properties": {
           "artifact_id": {
@@ -11414,6 +11423,38 @@
               }
             ],
             "title": "Model"
+          },
+          "resolved_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Model"
+          },
+          "resolution_basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AliasResolutionBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Display"
           },
           "provider": {
             "anyOf": [

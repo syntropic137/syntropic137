@@ -42,6 +42,10 @@ def _reject_alias(value: str) -> str:
 ObservedModelId = Annotated[str, AfterValidator(_reject_alias)]
 """A model id the harness REPORTED. Never an alias."""
 
+ResolvedModelId = Annotated[str, AfterValidator(_reject_alias)]
+"""The concrete id a DEFINITION's alias resolves to. Never an alias, and never
+what a run used: that is an ``ObservedModelId``."""
+
 CostModelKey = Annotated[str, AfterValidator(_reject_alias)]
 """A ``cost_by_model`` key: a reported id or ``UNKNOWN_MODEL_KEY``. Never an alias."""
 

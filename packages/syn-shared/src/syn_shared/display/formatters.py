@@ -14,6 +14,8 @@ import signal
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from syn_shared.agents import PhaseModelResolution, resolve_model_alias
+
 logger = logging.getLogger(__name__)
 
 EM_DASH = "\u2014"
@@ -380,3 +382,43 @@ def format_exit_code(exit_code: int | None) -> str:
     except ValueError:
         return f"{exit_code} (unknown signal {signal_number})"
     return f"{exit_code} ({named.name})"
+
+
+ALIAS_ARROW = "\u2192"
+"""Separates a definition's alias from its resolved id (a right arrow, never
+an em dash)."""
+
+
+def format_model_definition(model: str | None) -> str | None:
+    """Render a DEFINED model with what its alias resolves to.
+
+    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6-sol"``, ``"opus" -> "opus \u2192
+    claude-opus-5-5"``. A concrete or unknown id round-trips unchanged and
+    ``None`` stays ``None``. Definition surfaces only: a run-time surface shows
+    the OBSERVED model, never an alias target (ADR-067 D9).
+    """
+    resolution = resolve_model_alias(model)
+    if resolution is None:
+        return model
+    return f"{resolution.alias} {ALIAS_ARROW} {resolution.target}"
+
+
+#: Shown in place of a stored model that is unset.
+DEFAULT_MODEL_LABEL = "default"
+
+
+def format_phase_model_definition(resolution: PhaseModelResolution) -> str:
+    """Render a phase definition's model as the chain execution follows.
+
+    ``opus`` -> ``opus \u2192 claude-opus-5-5``; a stale ``opus`` on a codex
+    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6-sol``; unset on codex ->
+    ``default \u2192 gpt-sol \u2192 gpt-6-sol``; a concrete id -> itself.
+    """
+    parts: list[str] = []
+    if resolution.substituted:
+        stored = (resolution.stored or "").strip()
+        parts.append(stored or DEFAULT_MODEL_LABEL)
+    parts.append(resolution.effective)
+    if resolution.alias is not None:
+        parts.append(resolution.alias.target)
+    return f" {ALIAS_ARROW} ".join(parts)
