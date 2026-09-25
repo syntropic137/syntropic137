@@ -26,7 +26,7 @@ The previous structure had several issues:
 └── output/          ← Created ad-hoc, not documented
 ```
 
-1. **Split ownership**: Prompt lived in `agentic-primitives`, directory creation in Syn137's setup script
+1. **Split ownership**: Prompt lived in `agentic-primitives` (now `agentic-workspace`, 2026-09), directory creation in Syn137's setup script
 2. **Ambiguous naming**: `artifacts/` didn't distinguish input from output
 3. **No repo convention**: Agents chose arbitrary locations for git operations
 4. **Weak instructions**: Prompt said "write to artifacts/" but competing phase prompts confused agents
@@ -57,8 +57,8 @@ The previous structure had several issues:
 
 | Component | Responsibility |
 |-----------|---------------|
-| `agentic-primitives` Dockerfile | Create directory structure at build time |
-| `agentic-primitives` prompt | Document structure, provide explicit instructions |
+| `agentic-workspace` Dockerfile | Create directory structure at build time |
+| `agentic-workspace` prompt | Document structure, provide explicit instructions |
 | Syn137 WorkspaceService | Inject files to `artifacts/input/`, validate structure |
 | Syn137 WorkflowExecutionEngine | Collect from `artifacts/output/`, inject to next phase |
 
@@ -66,7 +66,7 @@ The previous structure had several issues:
 
 ## Implementation
 
-### 1. Dockerfile (agentic-primitives)
+### 1. Dockerfile (agentic-workspace)
 
 ```dockerfile
 # Create workspace directories with explicit structure
@@ -76,7 +76,7 @@ RUN mkdir -p /workspace/artifacts/input \
     && chown -R agent:agent /workspace
 ```
 
-### 2. Workspace Prompt (agentic-primitives)
+### 2. Workspace Prompt (agentic-workspace)
 
 The prompt provides conditional guidance based on task type:
 
@@ -159,7 +159,7 @@ artifacts = await workspace.collect_files(
 2. **Self-documenting** - Directory names describe purpose
 3. **Reliable artifact passing** - Framework collects from predictable location
 4. **Multi-repo support** - Complex workflows supported
-5. **Single source of truth** - Convention lives in `agentic-primitives`
+5. **Single source of truth** - Convention lives in `agentic-workspace` (moved from `agentic-primitives`, 2026-09, see #1417)
 
 ### Negative
 
@@ -169,7 +169,7 @@ artifacts = await workspace.collect_files(
 
 ### Migration
 
-1. Update `agentic-primitives` (Dockerfile + prompt)
+1. Update `agentic-workspace` (Dockerfile + prompt)
 2. Rebuild Docker image
 3. Update Syn137 inject/collect paths
 4. Update workflow prompts to reference new paths
@@ -255,8 +255,8 @@ The rest of the coding-task guidance (push code, write summary to `artifacts/out
 
 | Component | Responsibility |
 |-----------|---------------|
-| `agentic-primitives` Dockerfile | Create directory skeleton at build time (unchanged) |
-| `agentic-primitives` prompt | Document structure; updated to reflect pre-cloned repos |
+| `agentic-workspace` Dockerfile | Create directory skeleton at build time (unchanged) |
+| `agentic-workspace` prompt | Document structure; updated to reflect pre-cloned repos |
 | Syn137 `SetupPhaseSecrets.build_setup_script()` | Clones repos during setup phase |
 | Syn137 `WorkspaceProvisionHandler` | Injects `/workspace/AGENTS.md` + `/workspace/CLAUDE.md` after cloning; injects `artifacts/input/` |
 | Syn137 `WorkflowExecutionEngine` | Collects from `artifacts/output/`, injects to next phase (unchanged) |

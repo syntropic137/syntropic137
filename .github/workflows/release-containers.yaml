@@ -112,8 +112,10 @@ jobs:
             dockerfile: docker/token-injector/Dockerfile
             context: docker/token-injector
             platforms: linux/amd64,linux/arm64
-          # agentic-workspace images are built and published by agentic-primitives repo
-          # (ghcr.io/agentparadise/agentic-workspace-claude-cli). See ADR-056.
+          # Workspace images are built, signed and published by
+          # AgentParadise/agentic-workspace from its protected `release` branch
+          # (ghcr.io/agentparadise/agentic-workspace-{claude,omni-agent,buildfloor}),
+          # pinned by digest in syn_shared.settings.workspace_images. See ADR-056.
 
     # NOTE: Matrix jobs cannot have per-entry outputs — digests are passed
     # to the release-assets job via upload/download artifact instead.

@@ -151,7 +151,7 @@ Workspaces provide isolated execution environments with hooks pre-configured:
 workspace-{session-id}/
 ├── .claude/
 │   ├── settings.json          # Hook configuration
-│   └── hooks/                  # From agentic-primitives
+│   └── hooks/                  # From agentic-workspace
 │       ├── handlers/
 │       │   ├── pre-tool-use.py
 │       │   ├── post-tool-use.py
@@ -252,7 +252,7 @@ Syn137 Event Store (domain events)
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Workspace                                       │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │  .claude/hooks/ (from agentic-primitives)                                │ │
+│  │  .claude/hooks/ (from agentic-workspace)                                │ │
 │  │    - Validators run automatically via settings.json                      │ │
 │  │    - Events logged to .agentic/analytics/events.jsonl                   │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
@@ -273,7 +273,7 @@ Syn137 Event Store (domain events)
 
 ✅ **Framework Name Match**: "Syntropic137" actually uses agents
 
-✅ **Built-in Hooks**: Security and analytics via agentic-primitives
+✅ **Built-in Hooks**: Security and analytics via agentic-workspace
 
 ✅ **Provider Extensible**: New agentic SDKs plug in via protocol
 
@@ -308,4 +308,4 @@ See: `PROJECT-PLAN_20251202_AGENTIC-SDK-INTEGRATION.md`
 ## References
 
 - [claude-agent-sdk documentation](https://github.com/anthropics/claude-agent-sdk)
-- [agentic-primitives hooks](../../lib/agentic-primitives/docs/architecture/hooks-system-overview.md)
+- [agentic-workspace hooks](../../lib/agentic-workspace/docs/architecture/hooks-system-overview.md)

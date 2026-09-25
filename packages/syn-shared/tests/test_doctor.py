@@ -33,9 +33,9 @@ from syn_shared.settings.session_store import (
     usable_label,
 )
 from syn_shared.settings.workspace_images import (
+    DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
     PINNED_EXPORTER_VERSIONS,
-    WorkspaceImageProvider,
     workspace_image_name,
 )
 
@@ -420,10 +420,10 @@ def test_pinned_image_and_exporter_version_are_reported() -> None:
     """
     report = build_report(_sources())
     assert report.image_ref == (
-        f"{workspace_image_name(WorkspaceImageProvider.OMNI_AGENT)}"
-        f"@{PINNED_DIGESTS[WorkspaceImageProvider.OMNI_AGENT]}"
+        f"{workspace_image_name(DEFAULT_WORKSPACE_PROVIDER)}"
+        f"@{PINNED_DIGESTS[DEFAULT_WORKSPACE_PROVIDER]}"
     )
-    assert report.exporter_version == PINNED_EXPORTER_VERSIONS[WorkspaceImageProvider.OMNI_AGENT]
+    assert report.exporter_version == PINNED_EXPORTER_VERSIONS[DEFAULT_WORKSPACE_PROVIDER]
 
 
 def test_every_pinned_exporter_version_belongs_to_a_pinned_image() -> None:

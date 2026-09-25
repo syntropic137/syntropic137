@@ -164,7 +164,7 @@ async def test_a_failed_install_does_not_kill_the_phase(_configured: None) -> No
 def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
     """One source of truth, with a gate that says so.
 
-    agentic-primitives owns this hook. The copy here exists only because
+    agentic-workspace owns this hook. The copy here exists only because
     omni-agent images do not carry it (AgentParadise/agentic-primitives#401).
     A copy that drifts is worse than no copy: two behaviours, one name.
     """
@@ -172,21 +172,21 @@ def test_the_hook_is_a_mirror_of_the_submodule_not_a_fork() -> None:
     # makes this test SKIP rather than fail, which is the same fail-open shape
     # the hook itself is a victim of - and it happened while writing this test.
     here = Path(__file__).resolve()
-    repo_root = next((p for p in here.parents if (p / "lib/agentic-primitives").is_dir()), None)
+    repo_root = next((p for p in here.parents if (p / "lib/agentic-workspace").is_dir()), None)
     assert repo_root is not None, (
         "could not locate the repository root from this test file; the drift "
         "guard must not silently skip"
     )
     upstream = (
         repo_root
-        / "lib/agentic-primitives/providers/workspaces/claude-cli/scripts/git-hooks"
+        / "lib/agentic-workspace/implementations/docker/images/claude-cli/scripts/git-hooks"
         / HOOK_FILENAME
     )
     if not upstream.is_file():
-        pytest.skip("agentic-primitives submodule not checked out")
+        pytest.skip("agentic-workspace submodule not checked out")
 
     assert upstream.read_bytes() == attribution_hook_source(), (
-        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-primitives "
+        f"{HOOK_FILENAME} has drifted from the submodule's copy. agentic-workspace "
         f"owns this file; re-mirror it rather than editing the copy here."
     )
 

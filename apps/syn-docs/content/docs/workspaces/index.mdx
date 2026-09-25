@@ -7,26 +7,28 @@ Syntropic137 runs AI agents inside **isolated workspace containers**. Each works
 
 ## What's in a Workspace Image
 
-Workspace images are built by [agentic-primitives](https://github.com/AgentParadise/agentic-primitives) and published to GHCR. Two images matter:
+Workspace images are built by [agentic-workspace](https://github.com/AgentParadise/agentic-workspace) and published to GHCR. Three images matter:
 
 | Image | Harnesses | Notes |
 |-------|-----------|-------|
-| `ghcr.io/agentparadise/omni-agent-workspace` | claude and codex | The default. `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
-| `ghcr.io/agentparadise/agentic-workspace-claude-cli` | claude and codex | The heavier image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
+| `ghcr.io/agentparadise/agentic-workspace-buildfloor` | claude and codex | The default. `omni-agent` plus build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun). `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
+| `ghcr.io/agentparadise/agentic-workspace-omni-agent` | claude and codex | The lighter base, without the extra build/language tooling. |
+| `ghcr.io/agentparadise/agentic-workspace-claude` | claude and codex | The heaviest image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
 
-Both images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
+All three images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
 
-| Component | omni-agent | claude-cli |
-|-----------|------------|------------|
-| Claude CLI | Yes | Yes |
-| Codex CLI | Yes | Yes |
-| Python 3.12 + uv | Yes | Yes |
-| Node.js 22 LTS | Yes | Yes |
-| GitHub CLI | Yes | Yes |
-| RTK token compression | Yes | No |
-| Rust toolchain | No | Yes |
-| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | Yes |
-| Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes |
+| Component | omni-agent | buildfloor | claude |
+|-----------|------------|------------|--------|
+| Claude CLI | Yes | Yes | Yes |
+| Codex CLI | Yes | Yes | Yes |
+| Python 3.12 + uv | Yes | Yes | Yes |
+| Node.js 22 LTS | Yes | Yes | Yes |
+| GitHub CLI | Yes | Yes | Yes |
+| RTK token compression | Yes | Yes | No |
+| Build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun) | No | Yes | No |
+| Rust toolchain | No | No | Yes |
+| LSP servers (pyright, typescript-language-server, rust-analyzer) | No | No | Yes |
+| Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes | Yes |
 
 The plugins and LSP servers exist to back Claude Code features. A codex phase does not use them on either image.
 

@@ -74,7 +74,7 @@ _EVENT_TYPE_MAPPING: dict[str, str] = {
     # Subagent lifecycle events (from EventParser, pass through as-is)
     SUBAGENT_STARTED: SUBAGENT_STARTED,
     SUBAGENT_STOPPED: SUBAGENT_STOPPED,
-    # Git observability events (from agentic-primitives observability plugin)
+    # Git observability events (from agentic-workspace observability plugin)
     GIT_COMMIT: GIT_COMMIT,
     GIT_PUSH: GIT_PUSH,
     GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,

@@ -12,8 +12,8 @@ Accepted
 
 - ADR-021: Isolated Workspace Architecture
 - ADR-024: Workspace Setup Phase (secret injection lifecycle)
-- ADR-027 (agentic-primitives): Provider-Based Workspace Images
-- ADR-033 (agentic-primitives): Plugin-Native Workspace Images
+- ADR-027 (agentic-workspace): Provider-Based Workspace Images (moved from agentic-primitives, 2026-09)
+- ADR-033 (agentic-workspace): Plugin-Native Workspace Images (moved from agentic-primitives, 2026-09)
 - Issue #541: Workspace tooling gaps
 - Issue #544: OTLP receiver in syn-collector
 - Issue #545: Capture image version in events
@@ -28,13 +28,13 @@ Syntropic137 workspace images were built in-repo via `release-containers.yaml`, 
 3. **Tool compression absent.** Claude agents consumed 2-3x more tokens than necessary on Bash output because RTK (token compression) wasn't integrated.
 4. **Single-arch builds.** Images only built for amd64, blocking deployment to Mac Mini fleets (arm64).
 
-Meanwhile, the `agentic-primitives` repo (AgentParadise/agentic-primitives) was maturing as the agent-agnostic building block layer. It already owned Dockerfiles, provider manifests, and the plugin architecture.
+Meanwhile, the `agentic-primitives` repo (AgentParadise/agentic-primitives) was maturing as the agent-agnostic building block layer. It already owned Dockerfiles, provider manifests, and the plugin architecture. (2026-09: this dependency moved to `agentic-workspace`, see #1417.)
 
 ## Decision
 
-### 1. agentic-primitives owns image builds; syn137 consumes from GHCR
+### 1. agentic-workspace owns image builds; syn137 consumes from GHCR
 
-Images are built and published by agentic-primitives' CI (`build-workspace-images.yml`) to `ghcr.io/agentparadise/agentic-workspace-<provider>`. Syntropic137 references them via `DEFAULT_WORKSPACE_IMAGE` from `syn_shared.settings.workspace_images` — a single-source-of-truth module with registry constants, provider enum, and image ref builder.
+Images are built and published by agentic-workspace's CI (`release-images.yml`, protected `release` branch only) to `ghcr.io/agentparadise/agentic-workspace-{claude,omni-agent,buildfloor}`. Syntropic137 references them via `DEFAULT_WORKSPACE_IMAGE` from `syn_shared.settings.workspace_images` - a single-source-of-truth module with registry constants, provider enum, and image ref builder.
 
 The `release-containers.yaml` in syn137 no longer builds the `agentic-workspace` image.
 
@@ -113,7 +113,7 @@ Images are built for `linux/amd64` and `linux/arm64` via Docker Buildx + QEMU. S
 
 ### Negative
 
-- **Cross-repo dependency** — agentic-primitives image availability blocks syn137 deployments
+- **Cross-repo dependency** - agentic-workspace image availability blocks syn137 deployments
 - **OTLP JSON parsing** — lighter than protobuf but still a new code path to maintain
 - **arm64 build time** — RTK cargo build adds ~2-3 min to arm64 CI
 

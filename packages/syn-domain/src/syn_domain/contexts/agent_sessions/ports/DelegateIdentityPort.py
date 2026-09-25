@@ -3,7 +3,7 @@
 WHY this is a port and not an implementation (issue #895): how a harness
 announces its own session id is knowledge about a CLI, not about our domain. It
 changes when a vendor ships a new version, and per the boundary rule in
-AGENTS.md that puts it in agentic-primitives, beside the harness adapters that
+AGENTS.md that puts it in agentic-workspace, beside the harness adapters that
 already normalize to ``HarnessTranscript``. No event type or field name appears
 in this module: if a format appears here, the abstraction has failed.
 
@@ -13,7 +13,7 @@ were the reason for choosing it:
 1. **The domain is testable without the submodule.** A delegated child is bound
    to its parent by domain code that never parses a stream.
 2. **This work does not serialise behind the image.** A change in
-   agentic-primitives reaches a workspace only after merge, image build, the
+   agentic-workspace reaches a workspace only after merge, image build, the
    protected release channel and a ``PINNED_DIGESTS`` bump.
 
 The binding this feeds is two-step by necessity, and OWNERSHIP MATTERS to
@@ -51,7 +51,7 @@ class DelegateIdentityPort(Protocol):
         Implementations MUST return ``None``, never raise and never guess, for:
 
         - a line that does not announce identity, even when it carries an
-          id-shaped field. agentic-primitives already learned this the hard
+          id-shaped field. agentic-workspace already learned this the hard
           way: reading an id off ANY line let an unrelated session's id
           through (#792), which binds a child to the wrong parent while
           looking like it worked;

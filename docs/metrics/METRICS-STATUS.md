@@ -161,5 +161,5 @@ To fully implement all metrics, we need these events:
 ## Related Documents
 
 - [Agentic Analytics KPIs](./agentic-analytics-kpis.md) - Full metric definitions
-- [Agentic Events Reference](../../lib/agentic-primitives/lib/python/agentic_events/README.md) - Event types
+- [Agentic Events Reference](../../lib/agentic-workspace/lib/python/agentic_events/README.md) - Event types
 - [ADR-026: TimescaleDB for Observability](../adrs/ADR-026-timescaledb-observability-storage.md)

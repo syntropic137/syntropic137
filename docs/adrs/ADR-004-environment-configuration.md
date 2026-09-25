@@ -217,7 +217,7 @@ Run `just gen-env` to regenerate `.env.example` after any Settings change.
 
 Some settings are not consumed by Syntropic137 at all. They are a **contract
 supplied to a capability that runs inside the workspace container**, shipped by
-the agentic-primitives image. Central session capture is the first of these and
+the agentic-workspace image (moved from agentic-primitives, 2026-09). Central session capture is the first of these and
 sets the pattern.
 
 Two namespaces, deliberately distinct:
@@ -225,7 +225,7 @@ Two namespaces, deliberately distinct:
 | Namespace | Owner | Read by |
 | --- | --- | --- |
 | `SYN_SESSION_STORE_*` | this repo, a `BaseSettings` class like any other | the API, at provision time |
-| `AGENTIC_SESSION_STORE_*` | agentic-primitives (ADR-040 capability contract) | the capability, inside the container |
+| `AGENTIC_SESSION_STORE_*` | agentic-workspace (ADR-040 capability contract; moved from agentic-primitives, 2026-09) | the capability, inside the container |
 
 The API translates the first into the second when it creates a workspace. It
 never captures anything itself.

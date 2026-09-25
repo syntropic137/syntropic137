@@ -51,7 +51,7 @@ WORKSPACE_CONTEXT_DIR = WORKSPACE_ROOT / ".context"
 # Task file location - contains phase configuration for the agent
 WORKSPACE_TASK_FILE = WORKSPACE_CONTEXT_DIR / "task.json"
 
-# Analytics events from hooks (written by agentic-primitives hooks)
+# Analytics events from hooks (written by agentic-workspace hooks)
 WORKSPACE_ANALYTICS_DIR = WORKSPACE_ROOT / ".agentic" / "analytics"
 
 # Analytics events file

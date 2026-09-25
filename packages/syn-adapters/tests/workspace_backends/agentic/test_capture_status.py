@@ -1,7 +1,7 @@
 """Capture-outcome parsing, against the finalizer's real output strings.
 
 Fixtures are copied from
-lib/agentic-primitives/workspace/capabilities/session-store/seshmagic/finalize.sh
+lib/agentic-workspace/workspace/capabilities/session-store/apss/finalize.sh
 rather than invented, because a parser tested against strings the author of the
 parser made up tests only that the author is self-consistent.
 """

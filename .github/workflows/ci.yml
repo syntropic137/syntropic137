@@ -439,8 +439,8 @@ jobs:
           git submodule status
 
           # Verify submodules are initialized
-          if [ ! -f "lib/agentic-primitives/README.md" ]; then
-            echo "❌ agentic-primitives submodule not initialized"
+          if [ ! -f "lib/agentic-workspace/README.md" ]; then
+            echo "❌ agentic-workspace submodule not initialized"
             exit 1
           fi
 
@@ -480,7 +480,7 @@ jobs:
         with:
           fetch-depth: 0
           # The recipe resolves the pin by importing syn_shared, and this repo's
-          # uv workspace has editable members inside lib/agentic-primitives, so
+          # uv workspace has editable members inside lib/agentic-workspace, so
           # `uv run` cannot resolve the environment without them.
           submodules: true
 

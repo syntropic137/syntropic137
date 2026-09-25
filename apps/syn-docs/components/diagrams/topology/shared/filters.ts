@@ -11,7 +11,7 @@ function shortName(id: string): string {
 
 const CONTEXT_KEYWORDS = [
   'event-sourcing-platform',
-  'agentic-primitives',
+  'agentic-workspace',
   'orchestration',
   'observability',
   'workspace',

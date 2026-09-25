@@ -3,7 +3,7 @@
 - **Status**: Accepted (revised 2026-08-17; see "Revision history" at the end)
 - **Date**: 2026-05-04, last revised 2026-08-17
 - **Issue**: [#772](https://github.com/syntropic137/syntropic137/issues/772) (current), [#726](https://github.com/syntropic137/syntropic137/issues/726) (original claude-plugin design)
-- **Related**: ADR-020 (Bounded Context Convention), ADR-024 (Workspace Setup Phase), ADR-033 (agentic-primitives `--plugin-dir` injection), [ADR-066](ADR-066-separation-of-concerns.md) (Separation of Concerns)
+- **Related**: ADR-020 (Bounded Context Convention), ADR-024 (Workspace Setup Phase), ADR-033 (agentic-workspace `--plugin-dir` injection; moved from agentic-primitives, 2026-09), [ADR-066](ADR-066-separation-of-concerns.md) (Separation of Concerns)
 
 ## Context
 
@@ -144,7 +144,7 @@ A phase that declares skills and cannot install them fails. Running an agent wit
 - [#828](https://github.com/syntropic137/syntropic137/issues/828) -- removal of the unused `claude_plugins:` field
 - ADR-020 -- Bounded Context and Aggregate Convention
 - ADR-024 -- Workspace setup phase and secret injection
-- ADR-033 (agentic-primitives) -- `--plugin-dir` injection, still how the platform layer loads
+- ADR-033 (agentic-workspace; moved from agentic-primitives, 2026-09) -- `--plugin-dir` injection, still how the platform layer loads
 - ADR-066 -- Separation of Concerns; why git work lives in the CLI
 - `docs/superpowers/specs/2026-08-17-skills-distribution-design.md` -- the distribution design
 

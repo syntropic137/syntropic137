@@ -94,7 +94,7 @@ LIMIT 10;
 **Agentic SDK (F8-F12):**
 - `ANTHROPIC_API_KEY` environment variable set (for live agent tests)
 - `uv pip install syn-adapters[claude-agentic]` for claude-agent-sdk
-- `agentic-primitives` submodule initialized
+- `agentic-workspace` submodule initialized
 
 **Quick Setup:**
 ```bash
@@ -1073,7 +1073,7 @@ asyncio.run(test())
 
 ## Feature 9: Workspace & Hook Integration ⭐ NEW
 
-> **Requires:** `agentic-primitives` submodule initialized
+> **Requires:** `agentic-workspace` submodule initialized
 
 ### F9.1 LocalWorkspace Creation
 
@@ -1117,7 +1117,7 @@ config = WorkspaceConfig(
     base_dir=Path("/tmp/test-workspace"),
     workflow_id="wf-1",
     phase_id="p-1",
-    hooks_source=Path("lib/agentic-primitives/examples/settings.json"),
+    hooks_source=Path("lib/agentic-workspace/examples/settings.json"),
 )
 
 async with await LocalWorkspace.create(config) as ws:

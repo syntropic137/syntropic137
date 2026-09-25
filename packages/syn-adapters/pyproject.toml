@@ -8,9 +8,9 @@ dependencies = [
     "syn-shared",
     "syn-domain",
     "syn-tokens", # Token vending service (ADR-022)
-    "agentic-logging", # Structured logging (ADR-014 from agentic-primitives)
+    "agentic-logging", # Structured logging (lib/python in agentic-workspace)
     "agentic-events", # Simple event emission (ADR-029)
-    "agentic-isolation", # Workspace isolation (ADR-021 from agentic-primitives)
+    "agentic-isolation", # Workspace isolation (ADR-021; lib/python in agentic-workspace)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "pyyaml>=6.0.3",
     "pyjwt>=2.12.0",

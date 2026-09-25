@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # Public because the lane has a second implementation - the in-memory
 # timeline used in test and offline runs - and a timeline that answers a
 # different set of event types than production's is not a stand-in for it.
-# All other event types — including any new ones added to agentic-primitives —
+# All other event types — including any new ones added to agentic-workspace —
 # appear automatically without requiring changes here.
 TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 

@@ -185,7 +185,7 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
 def _build_workspace_operator_env() -> dict[str, str]:
     """Build the operator co-authorship env for workspace containers.
 
-    agentic-primitives ships a ``prepare-commit-msg`` hook and installs it into
+    agentic-workspace ships a ``prepare-commit-msg`` hook and installs it into
     every workspace at container start, but the hook reads SYN_OPERATOR_NAME and
     SYN_OPERATOR_EMAIL and exits immediately when either is missing. Nothing
     here set them, so the hook has been shipping and no-opping: every agent

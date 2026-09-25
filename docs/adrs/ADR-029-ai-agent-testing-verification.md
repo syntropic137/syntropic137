@@ -170,7 +170,7 @@ class ContinuousVerifier:
 
 ## Implementation
 
-### 0. CLI Tool Mocking Architecture (agentic-primitives)
+### 0. CLI Tool Mocking Architecture (agentic-workspace)
 
 Agents use external CLI tools (`gh`, `git`, `aws`, etc.) that need to be mockable for testing.
 
@@ -191,7 +191,7 @@ In tests, we need to:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Level 1: Unit Tests (agentic-primitives)                   │
+│  Level 1: Unit Tests (agentic-workspace)                     │
 │  - Mock CLI binary returns expected responses               │
 │  - Verify command argument parsing                          │
 │  - Test error handling for each tool                        │
@@ -212,10 +212,10 @@ In tests, we need to:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-#### Mock Registry Pattern (agentic-primitives)
+#### Mock Registry Pattern (agentic-workspace)
 
 ```python
-# lib/agentic-primitives/lib/python/agentic_events/mocks/cli_tools.py
+# lib/agentic-workspace/lib/python/agentic_events/mocks/cli_tools.py
 
 class CLIToolMockRegistry:
     """Registry for mock CLI tool responses during testing.

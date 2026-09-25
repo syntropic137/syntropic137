@@ -9,7 +9,7 @@ Usage:
 
 Covered: the Python manifest of every uv workspace member, the Node manifests
 we version in lockstep, the three plugin schema `$id` values, and uv.lock.
-Submodules (event-sourcing-platform, agentic-primitives) and
+Submodules (event-sourcing-platform, agentic-workspace) and
 packages/openclaw-plugin have independent versioning and are never touched.
 
 All files are pre-validated before any writes occur. If the target version is

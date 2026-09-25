@@ -4,6 +4,7 @@
 - **Date**: 2026-08-16
 - **Issue**: #780 (placeholder GPT-5.6 rates), #812 (phase cost disagreement); class-level follow-up to #788
 - **Related**: ADR-018 in agentic-primitives (model registry), ADR-020 (bounded contexts), ADR-060 (restart-safe adapters), ADR-066 (separation of concerns)
+- **Note (2026-09)**: The workspace submodule moved from `agentic-primitives` to `agentic-workspace` (#1417). The model registry this ADR builds on did NOT move: agentic-workspace carries no model registry, so every registry reference below still means agentic-primitives.
 
 ## Context
 

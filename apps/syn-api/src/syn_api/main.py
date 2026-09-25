@@ -42,7 +42,7 @@ from syn_api.types import Err, FeatureDisabledResponse, HealthResponse, Ok, Root
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-# Initialize structured logging from agentic-primitives
+# Initialize structured logging from agentic-workspace
 # Configure via env vars: LOG_LEVEL, LOG_FORMAT (json/human), LOG_LEVEL_<COMPONENT>
 setup_logging()
 logger = get_logger(__name__)

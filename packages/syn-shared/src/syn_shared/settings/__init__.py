@@ -58,6 +58,7 @@ from syn_shared.settings.github import (
 )
 from syn_shared.settings.image_verification import (
     AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
+    AGENTIC_WORKSPACE_IDENTITY_REGEXP,
     GITHUB_ACTIONS_OIDC_ISSUER,
     ImageVerificationSettings,
 )
@@ -89,6 +90,7 @@ from syn_shared.settings.workspace_security import (
 
 __all__ = [
     "AGENTIC_PRIMITIVES_IDENTITY_REGEXP",
+    "AGENTIC_WORKSPACE_IDENTITY_REGEXP",
     "DEFAULT_SPOOL_DIR",
     "DEFAULT_WORKSPACE_IMAGE",
     "GITHUB_ACTIONS_OIDC_ISSUER",

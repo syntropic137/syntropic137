@@ -151,7 +151,7 @@ syntropic137/
 │   └── syn-shared/           # Shared utilities (logging, settings)
 ├── lib/
 │   ├── event-sourcing-platform/  # Event sourcing SDK (submodule)
-│   └── agentic-primitives/       # Primitives library (submodule)
+│   └── agentic-workspace/        # Workspace/isolation library (submodule)
 ├── workflows/
 │   ├── examples/             # Example workflow YAML files
 │   └── custom/               # Custom workflows (gitignored)
