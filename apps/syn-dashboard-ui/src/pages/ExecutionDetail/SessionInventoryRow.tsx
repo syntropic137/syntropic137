@@ -56,7 +56,7 @@ function LineageChild({ link, lookup }: { link: LineageLink; lookup: Lookup | un
   let where = 'in this view'
   if (lookup?.state === 'loading') where = 'resolving...'
   else if (lookup?.state === 'failed') where = `lookup failed: ${lookup.message}`
-  else if (lookup?.state === 'done') where = lookup.result.status === 'resolved' ? 'in this revision, outside the current filter' : 'not in this revision'
+  else if (lookup?.state === 'done') where = lookup.result.status === 'resolved' ? 'in this revision, not loaded here (filtered out or not yet paged in)' : 'not in this revision'
   const href = platformSessionHref(link.ref)
   return <li>
     {link.relation} ({link.confidence}): <span className="si-muted">{namespaceOf(link.ref)}</span>{' '}

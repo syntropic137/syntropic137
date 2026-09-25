@@ -9,7 +9,7 @@ import {
 } from '../../../api/sessionInventory'
 
 vi.mock('../../../api/sessionInventory', () => ({
-  getSessionInventory: vi.fn(), getSessionInventoryPage: vi.fn(), getSessionInventoryNode: vi.fn(), getLocalTranscript: vi.fn(),
+  INVENTORY_PAGE_LIMIT: 500, getSessionInventory: vi.fn(), getSessionInventoryPage: vi.fn(), getSessionInventoryNode: vi.fn(), getLocalTranscript: vi.fn(),
 }))
 
 type Snapshot = NonNullable<InventoryStatus['snapshot']>
@@ -179,7 +179,7 @@ it('resolves a lineage endpoint outside the loaded set through the node lookup',
   vi.mocked(getSessionInventoryNode).mockResolvedValue({ snapshot_id: 'snapshot-one', node_key: key('c'), status: 'resolved', node: { ref: child, evidence: [] } })
   renderAt()
   fireEvent.click(await screen.findByText('Show lineage (1)'))
-  expect(await screen.findByText(/in this revision, outside the current filter/)).toBeTruthy()
+  expect(await screen.findByText(/in this revision, not loaded here/)).toBeTruthy()
   expect(getSessionInventoryNode).toHaveBeenCalledWith('run', 'snapshot-one', key('c'))
 })
 
@@ -220,4 +220,36 @@ it('ignores a late response after leaving the run', async () => {
   view.unmount()
   resolve(status)
   await waitFor(() => expect(getSessionInventoryPage).not.toHaveBeenCalled())
+})
+
+it('shows a truncated read as provisional and resumes every section from its stored cursor', async () => {
+  render(<MemoryRouter initialEntries={['/executions/run']}>
+    <Routes><Route path="/executions/:id" element={<SessionInventory executionId="run" budget={1} />} /></Routes>
+  </MemoryRouter>)
+  const notice = await screen.findByText(/More available in this revision/)
+  expect(notice.textContent).toContain('node 1 of 3')
+  expect(screen.getByText(/provisional until everything is loaded/)).toBeTruthy()
+  expect(screen.getByText("Unbound or unlinked (1) (provisional)")).toBeTruthy()
+  expect(vi.mocked(getSessionInventoryPage).mock.calls).toHaveLength(1)
+  for (let round = 0; round < 10 && screen.queryByText('Load more'); round++) {
+    fireEvent.click(screen.getByText('Load more'))
+    await waitFor(() => expect(screen.queryByText('Loading more...')).toBeNull())
+  }
+  expect(screen.queryByText(/More available/)).toBeNull()
+  const calls = vi.mocked(getSessionInventoryPage).mock.calls
+  expect(calls[1]![2]).toBe('node')
+  expect(calls[1]![3]).toBe('node-cursor')
+  expect(calls.every(call => call[1] === 'snapshot-one' && call[6] === 1)).toBe(true)
+  expect(screen.getByText('native-child-id')).toBeTruthy()
+})
+
+it('an expired cursor during Load more shows the expired state', async () => {
+  render(<MemoryRouter initialEntries={['/executions/run']}>
+    <Routes><Route path="/executions/:id" element={<SessionInventory executionId="run" budget={1} />} /></Routes>
+  </MemoryRouter>)
+  await screen.findByText(/More available in this revision/)
+  vi.mocked(getSessionInventoryPage).mockRejectedValue(new ApiError(410, { code: 'cursor_expired', message: 'gone', restart: true }))
+  fireEvent.click(screen.getByText('Load more'))
+  expect((await screen.findByRole('alert')).dataset.state).toBe('expired')
+  expect(screen.queryByText('platform-session-full-id')).toBeNull()
 })

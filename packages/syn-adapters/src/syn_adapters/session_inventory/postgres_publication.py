@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from syn_domain.contexts.agent_sessions import (
     InventoryNotFound,
     InventoryPublicationConflict,
     InventorySnapshot,
+    NamespaceKey,
     RunIdentity,
+    namespace_counts,
 )
 
 if TYPE_CHECKING:
@@ -46,6 +48,8 @@ async def publish_snapshot(
         raise InventoryNotFound("no unpublished snapshot in this run")
     snapshot = InventorySnapshot.model_validate_json(raw)
     await _validate_snapshot_complete(conn, run, snapshot_id, snapshot)
+    if snapshot.counts.namespaces is None:
+        snapshot = await _complete_derived_counts(conn, run, snapshot)
     counts = snapshot.counts
     sequence = 1
     if expected_head is not None:
@@ -106,6 +110,54 @@ async def publish_snapshot(
         snapshot_id,
         snapshot.evidence_watermark,
     )
+
+
+_NODE_KINDS: dict[str, Literal["platform", "invocation", "transcript"]] = {
+    "platform": "platform",
+    "invocation": "invocation",
+    "transcript": "transcript",
+}
+
+
+async def _complete_derived_counts(
+    conn: Connection, run: RunIdentity, snapshot: InventorySnapshot
+) -> InventorySnapshot:
+    """Derive namespace counts for a revision staged before they were recorded.
+
+    Deterministic: computed from the snapshot's own immutable node items, which
+    the caller has just proven complete, so the revision is unchanged.
+    """
+    rows = await conn.fetch(
+        """SELECT payload->'ref'->>'kind' AS kind, payload->'ref'->>'harness' AS harness,
+        count(*)::text AS n FROM session_inventory_items
+        WHERE source_instance_id=$1 AND execution_id=$2 AND snapshot_id=$3 AND kind='node'
+        GROUP BY 1,2""",
+        run.source_instance_id,
+        run.execution_id,
+        snapshot.snapshot_id,
+    )
+    tally: dict[NamespaceKey, int] = {}
+    for row in rows:
+        kind = _NODE_KINDS.get(row["kind"])
+        if kind is None:
+            raise InventoryPublicationConflict("stored node has an unknown identity kind")
+        tally[(kind, row["harness"])] = int(row["n"])
+    completed = snapshot.model_copy(
+        update={
+            "counts": snapshot.counts.model_copy(update={"namespaces": namespace_counts(tally)})
+        }
+    )
+    # Re-validate: model_copy skips validation, and the stored form must round-trip.
+    completed = InventorySnapshot.model_validate_json(completed.model_dump_json())
+    await conn.execute(
+        """UPDATE session_inventory_snapshots SET metadata=$4::jsonb
+        WHERE source_instance_id=$1 AND execution_id=$2 AND snapshot_id=$3 AND NOT published""",
+        run.source_instance_id,
+        run.execution_id,
+        snapshot.snapshot_id,
+        completed.model_dump_json(),
+    )
+    return completed
 
 
 async def _validate_snapshot_complete(

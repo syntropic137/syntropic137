@@ -12,6 +12,7 @@ from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInv
 from syn_domain.contexts.agent_sessions import (
     InventoryCounts,
     InventoryCoverage,
+    InventoryNamespaceCount,
     InventoryNode,
     InventoryNotFound,
     InventoryPublicationConflict,
@@ -207,7 +208,19 @@ def snapshot(run: RunIdentity, count: int = 3, watermark: int = 1) -> InventoryS
         resolver_version="test/1",
         evidence_watermark=watermark,
         coverage=InventoryCoverage(state=CoverageState.UNKNOWN),
-        counts=InventoryCounts(node=count, membership=0, edge=0, capture=0, gap=0),
+        counts=InventoryCounts(
+            node=count,
+            membership=0,
+            edge=0,
+            capture=0,
+            gap=0,
+            # What the current build derives from nodes(); legacy shape via without_derived_counts().
+            namespaces=(
+                (InventoryNamespaceCount(kind="transcript", harness="third-harness", count=count),)
+                if count
+                else ()
+            ),
+        ),
     )
 
 
@@ -623,3 +636,85 @@ async def test_local_revision_read_uses_real_archive_and_current_revocation(
             await conn.execute(
                 "DELETE FROM session_capture_catalog WHERE source_instance_id=$1", source
             )
+
+
+async def _stage_as_older_build(
+    store: PostgresSessionInventory, db_pool: asyncpg.Pool, item: InventorySnapshot
+) -> None:
+    """Stage exactly what a build before namespace counts wrote: no `namespaces` key."""
+    await ready(store, item)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_inventory_snapshots SET metadata = metadata #- '{counts,namespaces}'
+            WHERE source_instance_id=$1 AND execution_id=$2 AND snapshot_id=$3""",
+            item.run.source_instance_id,
+            item.run.execution_id,
+            item.snapshot_id,
+        )
+        raw = await conn.fetchval(
+            "SELECT metadata->'counts' ? 'namespaces' FROM session_inventory_snapshots "
+            "WHERE source_instance_id=$1 AND snapshot_id=$2",
+            item.run.source_instance_id,
+            item.snapshot_id,
+        )
+    assert raw is False  # The hazard is really the old shape, not a null field.
+
+
+async def test_revision_staged_by_older_build_resumes_and_publishes_after_upgrade(
+    inventory: PostgresSessionInventory,
+    db_pool: asyncpg.Pool,
+    run: RunIdentity,
+) -> None:
+    current = snapshot(run)
+    legacy = current.without_derived_counts()
+    await _stage_as_older_build(inventory, db_pool, legacy)
+    await db_pool.expire_connections()
+    upgraded = PostgresSessionInventory(db_pool)
+    # The resumed job re-stages with the new metadata shape: an upgrade, not a conflict.
+    await ready(upgraded, current)
+    await upgraded.publish(run, current.snapshot_id, None)
+    await upgraded.publish(run, current.snapshot_id, None)  # lost-response retry
+    head = await upgraded.head(run)
+    assert head == current
+    assert head is not None and head.without_derived_counts() == legacy.without_derived_counts()
+    page = await upgraded.page(run, current.snapshot_id, "node")
+    assert page.items == nodes(run, 3)
+
+
+async def test_revision_staged_by_older_build_publishes_without_restaging(
+    inventory: PostgresSessionInventory,
+    db_pool: asyncpg.Pool,
+    run: RunIdentity,
+) -> None:
+    current = snapshot(run)
+    legacy = current.without_derived_counts()
+    await _stage_as_older_build(inventory, db_pool, legacy)
+    upgraded = PostgresSessionInventory(db_pool)
+    await upgraded.publish(run, legacy.snapshot_id, None)
+    head = await upgraded.head(run)
+    # Counts are completed deterministically from the stored node items.
+    assert head == current
+
+
+async def test_newer_metadata_survives_an_older_build_retry_and_real_changes_conflict(
+    inventory: PostgresSessionInventory,
+    run: RunIdentity,
+) -> None:
+    current = snapshot(run)
+    await ready(inventory, current)
+    # An older build (no namespace counts) retrying the same revision is compatible.
+    await inventory.stage(current.without_derived_counts())
+    with pytest.raises(InventoryPublicationConflict, match="metadata"):
+        await inventory.stage(
+            current.model_copy(
+                update={
+                    "counts": current.counts.model_copy(
+                        update={"namespaces": (InventoryNamespaceCount(kind="platform", count=3),)}
+                    )
+                }
+            )
+        )
+    with pytest.raises(InventoryPublicationConflict, match="metadata"):
+        await inventory.stage(current.without_derived_counts().model_copy(update={"revision": "x"}))
+    await inventory.publish(run, current.snapshot_id, None)
+    assert await inventory.head(run) == current

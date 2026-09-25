@@ -141,7 +141,7 @@ async def test_publication_checks_lease_and_inventory_head_in_one_transaction(
         revision="r1",
         resolver_version="test/1",
         coverage=InventoryCoverage(state=CoverageState.UNKNOWN),
-        counts=InventoryCounts(node=0, membership=0, edge=0, capture=0, gap=0),
+        counts=InventoryCounts(node=0, membership=0, edge=0, capture=0, gap=0, namespaces=()),
     )
     await inventory.stage(snapshot)
     lease = await store.claim(lease_seconds=60)

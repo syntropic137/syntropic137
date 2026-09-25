@@ -125,8 +125,10 @@ from syn_domain.contexts.agent_sessions.ports.SessionInventoryReadPort import (
     InventoryQueryPage,
     InventorySnapshot,
     ItemKind,
+    NamespaceKey,
     SessionInventoryReadPort,
     inventory_counts,
+    namespace_counts,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryWritePort import (
     InventoryNotFound,
@@ -307,6 +309,7 @@ __all__ = [
     "MarkAgentLaunchedCommand",
     "MarkAgentLaunchedHandler",
     "Membership",
+    "NamespaceKey",
     "NativeRelationshipFact",
     "NativeSessionEvidencePort",
     "NativeTranscriptFacts",
@@ -359,6 +362,7 @@ __all__ = [
     "import_phase_delegates",
     "inventory_counts",
     "model_from_rollout",
+    "namespace_counts",
     "pick_primary_model",
     "price_canonical_row",
     "record_error",

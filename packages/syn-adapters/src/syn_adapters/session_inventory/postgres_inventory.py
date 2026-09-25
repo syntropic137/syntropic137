@@ -25,7 +25,7 @@ from .postgres_queries import backfill_query_keys, lookup_node, query_page
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from .database import Pool
+    from .database import Connection, Pool
 
 _SCOPE = "source_instance_id=$1 AND execution_id=$2 AND snapshot_id=$3"
 
@@ -56,10 +56,12 @@ class PostgresSessionInventory:
                 snapshot.snapshot_id,
                 snapshot.model_dump_json(),
             )
-            if actual is None or InventorySnapshot.model_validate_json(actual) != snapshot:
-                raise InventoryPublicationConflict(
-                    "snapshot identity reused with different metadata"
-                )
+            if actual is None:
+                raise InventoryPublicationConflict("snapshot staging returned no metadata")
+            stored = InventorySnapshot.model_validate_json(actual)
+            if stored == snapshot:
+                return
+            await _reconcile_staged_shape(conn, stored, snapshot)
 
     async def append(
         self,
@@ -164,3 +166,29 @@ class PostgresSessionInventory:
         self, run: RunIdentity, snapshot_id: UUID, node_key: str
     ) -> InventoryNode | None:
         return await lookup_node(self._pool, run, snapshot_id, node_key)
+
+
+async def _reconcile_staged_shape(
+    conn: Connection, stored: InventorySnapshot, staged: InventorySnapshot
+) -> None:
+    """A retry across an upgrade is the same revision, never a conflict.
+
+    Only the derived namespace counts may differ, and only by one side lacking
+    them. A revision staged by an older build is completed in place while it is
+    unpublished; an older build retrying a newer build's staging keeps the
+    richer metadata. Anything else is a genuinely different revision.
+    """
+    if stored.without_derived_counts() != staged.without_derived_counts():
+        raise InventoryPublicationConflict("snapshot identity reused with different metadata")
+    if stored.counts.namespaces is not None and staged.counts.namespaces is not None:
+        raise InventoryPublicationConflict("snapshot identity reused with different metadata")
+    if stored.counts.namespaces is None:
+        run = staged.run
+        await conn.execute(
+            f"UPDATE session_inventory_snapshots SET metadata=$4::jsonb WHERE {_SCOPE} "
+            "AND NOT published",
+            run.source_instance_id,
+            run.execution_id,
+            staged.snapshot_id,
+            staged.model_dump_json(),
+        )
