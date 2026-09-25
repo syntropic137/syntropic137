@@ -15,46 +15,48 @@ from syn_api.types import PhaseDefinitionResponse
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     PhaseDefinitionDetail,
 )
+from syn_shared.agents import AliasResolutionBasis
 
 pytestmark = pytest.mark.unit
 
 
-def _served(model: str | None, provider: str | None = None) -> dict[str, object]:
+def _served(model: str | None, provider: str | None = None) -> PhaseDefinitionResponse:
+    """The phase as served: mapped, then round-tripped through its JSON."""
     (phase,) = _map_phases(
         [PhaseDefinitionDetail(id="p1", name="P1", model=model, provider=provider)]
     )
-    return phase.model_dump(mode="json")
+    return PhaseDefinitionResponse.model_validate_json(phase.model_dump_json())
 
 
 def test_codex_alias_is_served_with_its_translation() -> None:
     served = _served("gpt-sol", provider="codex")
-    assert served["model"] == "gpt-sol"
-    assert served["resolved_model"] == "gpt-6-sol"
-    assert served["resolution_basis"] == "translated"
-    assert served["model_display"] == "gpt-sol → gpt-6-sol"
+    assert served.model == "gpt-sol"
+    assert served.resolved_model == "gpt-6-sol"
+    assert served.resolution_basis is AliasResolutionBasis.TRANSLATED
+    assert served.model_display == "gpt-sol → gpt-6-sol"
 
 
 def test_claude_alias_is_served_with_its_expected_target() -> None:
     served = _served("opus", provider="claude")
-    assert served["model"] == "opus"
-    assert served["resolved_model"] == "claude-opus-5-5"
-    assert served["resolution_basis"] == "expected"
-    assert served["model_display"] == "opus → claude-opus-5-5"
+    assert served.model == "opus"
+    assert served.resolved_model == "claude-opus-5-5"
+    assert served.resolution_basis is AliasResolutionBasis.EXPECTED
+    assert served.model_display == "opus → claude-opus-5-5"
 
 
 @pytest.mark.parametrize("model", ["claude-sonnet-5", "some-future-model"])
 def test_concrete_or_unknown_model_has_no_resolution(model: str) -> None:
     served = _served(model)
-    assert served["resolved_model"] is None
-    assert served["resolution_basis"] is None
-    assert served["model_display"] == model
+    assert served.resolved_model is None
+    assert served.resolution_basis is None
+    assert served.model_display == model
 
 
 def test_unset_model_serves_nulls() -> None:
     served = _served(None)
-    assert served["model"] is None
-    assert served["resolved_model"] is None
-    assert served["model_display"] is None
+    assert served.model is None
+    assert served.resolved_model is None
+    assert served.model_display is None
 
 
 def test_resolved_model_can_never_hold_an_alias() -> None:
