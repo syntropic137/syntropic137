@@ -66,13 +66,17 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
     from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
     from syn_adapters.session_inventory.postgres_spools import PostgresCaptureSpools
-    from syn_adapters.session_inventory.recovery_worker import SpoolRecoveryPort
+    from syn_adapters.session_inventory.recovery_worker import SpoolRecoveryPort, SpoolReleasePort
     from syn_adapters.session_inventory.replication_supervisor import (
         InventoryReplicationWorkPort,
         ReplicationSupervisor,
     )
     from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
     from syn_adapters.session_inventory.runtime import InventoryWork
+    from syn_adapters.session_inventory.spool_release import (
+        CaptureSpoolRetention,
+        SpoolVolumePort,
+    )
     from syn_adapters.session_inventory.transcript_access import InstallationTranscriptAccess
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
@@ -381,6 +385,7 @@ if TYPE_CHECKING:
         history_source: PostgresHistoricalEvidenceSource,
         history_receipts: PostgresBackfillReceipts,
         history_queue: PostgresHistoryBackfillQueue,
+        spool_release: CaptureSpoolRetention,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
@@ -400,6 +405,8 @@ if TYPE_CHECKING:
         _spools: SessionCaptureSpoolPort = spools
         _access: SessionTranscriptAccessPort = access
         _recovery: SpoolRecoveryPort = recovery
+        _volumes: SpoolVolumePort = recovery
+        _release: SpoolReleasePort = spool_release
         _work: InventoryWorkPort = work
         _dispatch: InventoryReplicationDispatchPort = supervisor
         _inventory_lane: InventoryReplicationWorkPort = inventory_replication

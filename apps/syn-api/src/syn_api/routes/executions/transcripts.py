@@ -60,10 +60,9 @@ def _identity(run: RunIdentity, harness: str, native_id: str) -> QualifiedSessio
 
 
 async def _catalogued(
-    execution_id: str, archive_hash: str, identity: TranscriptIdentityRequest
+    run: RunIdentity, archive_hash: str, identity: TranscriptIdentityRequest
 ) -> CataloguedCapture:
     """The exact revision must belong to this visible run; otherwise 404, no metadata."""
-    run = await _visible_run(execution_id)
     qualified = _identity(run, identity.harness, identity.native_id)
     try:
         capture = await get_inventory_runtime().catalog.get_revision(run, qualified, archive_hash)
@@ -125,7 +124,8 @@ async def delete_local_transcript_revision(
     re-uploads cannot restore the bytes. Session history stays discoverable.
     """
     response.headers["Cache-Control"] = "no-store"
-    capture = await _catalogued(execution_id, archive_hash, request)
+    run = await _visible_run(execution_id)
+    capture = await _catalogued(run, archive_hash, request)
     try:
         state, created = await get_inventory_runtime().deletions.request(capture, request.reason)
     except PermissionError as exc:
@@ -145,8 +145,9 @@ async def get_local_transcript_deletion(
 ) -> TranscriptDeletionResponse:
     """Local erasure and replica propagation state of an existing tombstone."""
     response.headers["Cache-Control"] = "no-store"
+    run = await _visible_run(execution_id)
     capture = await _catalogued(
-        execution_id, archive_hash, TranscriptIdentityRequest(harness=harness, native_id=native_id)
+        run, archive_hash, TranscriptIdentityRequest(harness=harness, native_id=native_id)
     )
     try:
         state = await get_inventory_runtime().deletions.state(capture)
@@ -168,7 +169,8 @@ async def revoke_local_transcript_revision(
 ) -> TranscriptRevocationResponse:
     """Withhold reads of exact bytes for every sharing run; bytes are retained."""
     response.headers["Cache-Control"] = "no-store"
-    capture = await _catalogued(execution_id, archive_hash, request)
+    run = await _visible_run(execution_id)
+    capture = await _catalogued(run, archive_hash, request)
     try:
         created = await get_inventory_runtime().access.revoke(capture.archive)
     except OSError as exc:

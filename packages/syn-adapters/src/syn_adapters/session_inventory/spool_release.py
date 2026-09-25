@@ -21,16 +21,14 @@ import json
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.agent_sessions import (
+    AcquisitionGapEvidence,
     CaptureSpool,
     EvidenceBatch,
     EvidenceReference,
+    InventoryGap,
     InventoryNodeRef,
-)
-from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
-    AcquisitionGapEvidence,
     SessionEvidence,
 )
-from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import InventoryGap
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import CaptureSpoolLease

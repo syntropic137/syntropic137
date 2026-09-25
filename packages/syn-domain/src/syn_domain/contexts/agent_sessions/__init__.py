@@ -234,6 +234,7 @@ __all__ = [
     "CANONICAL_USAGE_EVENT_FILTER",
     "HAS_REQUESTED_MODEL_COLUMN",
     "REQUESTED_MODEL_COLUMN",
+    "AcquisitionGapEvidence",
     "AcquisitionStatusEvidence",
     "AgentLaunch",
     "AgentLaunchedEvent",
@@ -383,6 +384,7 @@ from .domain.aggregate_inventory_clock.InventoryClockAggregate import InventoryC
 from .domain.commands.ObserveInventoryClockCommand import ObserveInventoryClockCommand
 from .domain.commands.RecordSessionInvocationCommand import RecordSessionInvocationCommand
 from .domain.read_models.session_evidence import (
+    AcquisitionGapEvidence,
     AcquisitionStatusEvidence,
     CaptureEvidence,
     IdentityBindingEvidence,
