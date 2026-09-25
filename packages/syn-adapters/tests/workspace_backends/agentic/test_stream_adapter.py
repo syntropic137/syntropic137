@@ -14,6 +14,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationHandle,
 )
 
+# CI runs ``pytest -m unit``: an unmarked module is deselected there and only
+# fails on a bare local ``pytest`` run.
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.asyncio
 async def test_claude_stream_uses_devnull_stdin_and_yields_output() -> None:
@@ -26,6 +30,10 @@ async def test_claude_stream_uses_devnull_stdin_and_yields_output() -> None:
     process = MagicMock(spec=asyncio.subprocess.Process)
     process.stdout = MagicMock()
     process.stdout.readline = AsyncMock(side_effect=[b'{"type":"result"}\n', b""])
+    # A real Process.wait() returns the int status. With only ``spec=`` the
+    # mock's wait() resolves to another mock, which the signal-death check
+    # (#1295) cannot compare to an int.
+    process.wait = AsyncMock(return_value=0)
     process.returncode = 0
 
     with patch(
@@ -42,3 +50,5 @@ async def test_claude_stream_uses_devnull_stdin_and_yields_output() -> None:
 
     assert lines == ['{"type":"result"}']
     assert create_process.await_args.kwargs["stdin"] is asyncio.subprocess.DEVNULL
+    assert adapter.last_exit_code == 0
+    assert adapter.last_signal_death is None
