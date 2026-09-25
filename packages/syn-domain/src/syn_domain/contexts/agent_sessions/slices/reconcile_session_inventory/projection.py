@@ -47,7 +47,8 @@ class InventoryWorkPort(Protocol):
 
 class InventoryReconciliationProcessManager(ProcessManager):
     PROJECTION_NAME = "session_inventory_jobs"
-    VERSION = 1
+    # 2: replay execution terminal events into settlement evidence (#1398).
+    VERSION = 2
 
     def __init__(
         self,
@@ -90,6 +91,16 @@ class InventoryReconciliationProcessManager(ProcessManager):
         checkpoint_store: ProjectionCheckpointStore,
         context: DispatchContext | None = None,  # noqa: ARG002
     ) -> ProjectionResult:
+        # To-do writes only, as in the pre-existing SessionStarted/invocation
+        # path this extends. The evidence journal is this process manager's
+        # own durable to-do input (its outbox is what process_pending()
+        # schedules from); spools, settlement deadlines and the latest
+        # recorded clock time are its own to-do tables. Every write is keyed by
+        # the source event's identity or the run, first-write-wins or
+        # monotonic, so catch-up replay converges on the same rows. Nothing
+        # pending is processed here: releasing due settlement deadlines,
+        # scheduling and job execution all happen in process_pending(), which
+        # the coordinator never calls while catching up.
         if self._host_evidence is not None:
             await self._host_evidence.handle(envelope)
         if envelope.metadata.event_type == InventoryReconciliationChangedEvent.event_type:
@@ -128,6 +139,9 @@ class InventoryReconciliationProcessManager(ProcessManager):
         return ProjectionResult.SUCCESS
 
     async def process_pending(self) -> int:
+        if self._host_evidence is not None:
+            # Before scheduling, so a released deadline is reconciled this tick.
+            await self._host_evidence.release_deadlines()
         await self._work.schedule()
         processed = 0
         for _ in range(self._max_jobs):

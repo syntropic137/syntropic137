@@ -60,6 +60,33 @@ it("require-complete rejects unknown coverage after printing valid data", async 
   expect(JSON.parse(output()).pages).toHaveLength(1);
 });
 
+const withCoverage = (state: string) => {
+  const sealed = { ...snapshot, coverage: { state, contract_id: "syntropic-invocations/1", expected_count: 1, missing_keys: [] } };
+  return {
+    status: { ...status, snapshot: sealed },
+    page: { ...page("native", null), snapshot: sealed },
+  };
+};
+
+it("require-complete passes once the host seal reconciles coverage", async () => {
+  const sealed = withCoverage("reconciled");
+  fetchMock.mockResolvedValueOnce(response(sealed.status)).mockResolvedValueOnce(response(sealed.page));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } });
+  expect(JSON.parse(output()).pages[0].snapshot.coverage.state).toBe("reconciled");
+});
+
+it.each(["open", "missing", "unsupported", "conflicting"])("require-complete rejects %s coverage", async (state) => {
+  const unsealed = withCoverage(state);
+  fetchMock.mockResolvedValueOnce(response(unsealed.status)).mockResolvedValueOnce(response(unsealed.page));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not reconciled");
+});
+
+it("require-complete rejects a reconciled revision that is no longer current", async () => {
+  const sealed = withCoverage("reconciled");
+  fetchMock.mockResolvedValueOnce(response({ ...sealed.status, reconstruction_status: "pending" })).mockResolvedValueOnce(response(sealed.page));
+  await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true, "require-complete": true } })).rejects.toThrow("not reconciled");
+});
+
 it("rejects nonadvancing pagination instead of looping", async () => {
   fetchMock.mockResolvedValueOnce(response(status))
     .mockResolvedValueOnce(response(page("native", "same")))

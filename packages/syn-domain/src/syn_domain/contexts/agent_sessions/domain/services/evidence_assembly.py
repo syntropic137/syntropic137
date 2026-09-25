@@ -16,6 +16,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
     MembershipEvidence,
     NativeTranscriptObservation,
     NodeEvidence,
+    RunSettlementEvidence,
     SessionEvidence,
 )
 
@@ -47,6 +48,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
     captures: list[CaptureEvidence] = []
     bindings: list[IdentityBindingEvidence] = []
     retractions: list[EvidenceRetraction] = []
+    settlement: list[RunSettlementEvidence] = []
     expected: dict[str, InventoryNodeRef] = {}
     contract: CoverageContract | None = None
     supported = True
@@ -69,6 +71,7 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         captures.extend(evidence.captures)
         bindings.extend(evidence.bindings)
         retractions.extend(evidence.retractions)
+        settlement.extend(evidence.run_settlement)
         if evidence.coverage_contract is not None:
             incoming = evidence.coverage_contract
             if contract is not None and incoming.contract_id != contract.contract_id:
@@ -97,4 +100,5 @@ def assemble_evidence(run: RunIdentity, batches: Iterable[StoredEvidenceBatch]) 
         bindings=tuple(bindings),
         retractions=tuple(retractions),
         coverage_contract=contract,
+        run_settlement=tuple(settlement),
     )

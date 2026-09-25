@@ -104,7 +104,8 @@ def test_capture_failure_does_not_erase_registered_parentage() -> None:
     )
     assert result.edges[0].confidence is EvidenceClass.REGISTERED
     assert result.coverage.state is CoverageState.MISSING
-    assert result.coverage.missing_keys == (node("b").key,)
+    # The known parent is accountable too: it is expected and has no body.
+    assert result.coverage.missing_keys == tuple(sorted((node("a").key, node("b").key)))
 
 
 def test_downloaded_bodies_without_inventory_never_establish_complete_capture() -> None:
@@ -245,7 +246,7 @@ def test_reused_source_record_identity_cannot_silently_replace_provenance() -> N
         resolve_relationships(SessionEvidence(run=RUN, edges=(first, second)))
 
 
-def test_lineage_conflicts_do_not_change_independent_capture_coverage() -> None:
+def test_lineage_conflicts_make_otherwise_captured_coverage_conflicting() -> None:
     evidence = SessionEvidence(
         run=RUN,
         edges=(edge("a", "child"), edge("b", "child")),
@@ -263,7 +264,9 @@ def test_lineage_conflicts_do_not_change_independent_capture_coverage() -> None:
         ),
     )
     result = resolve_relationships(evidence)
-    assert result.coverage.state is CoverageState.RECONCILED
+    # Every body may be present, but a run whose parentage conflicts cannot
+    # be certified complete (#1398 review): conflict outranks reconciliation.
+    assert result.coverage.state is CoverageState.CONFLICTING
     assert all(e.confidence is EvidenceClass.CONFLICTING for e in result.edges)
 
 

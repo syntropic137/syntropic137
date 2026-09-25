@@ -5,9 +5,15 @@ from typing import Protocol
 from syn_domain.contexts.agent_sessions.domain.read_models.native_session_evidence import (
     NativeRelationshipFact,
     NativeTranscriptFacts,
+    UnsupportedEvidenceIssue,
 )
 
-__all__ = ["NativeRelationshipFact", "NativeSessionEvidencePort", "NativeTranscriptFacts"]
+__all__ = [
+    "NativeRelationshipFact",
+    "NativeSessionEvidencePort",
+    "NativeTranscriptFacts",
+    "UnsupportedEvidenceIssue",
+]
 
 
 class NativeSessionEvidencePort(Protocol):

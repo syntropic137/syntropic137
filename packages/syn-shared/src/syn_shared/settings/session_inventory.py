@@ -31,6 +31,12 @@ class SessionInventorySettings(BaseSettings):
         le=3600,
         description="Interval between durable inventory recovery signals.",
     )
+    settlement_grace_seconds: int = Field(
+        default=1800,
+        ge=0,
+        le=604800,
+        description="Bounded wait after an execution ends for its descendants and captures to settle. After it, anything still unsettled becomes an explicit coverage gap instead of holding coverage open forever.",
+    )
     lease_seconds: int = Field(
         default=120,
         ge=30,

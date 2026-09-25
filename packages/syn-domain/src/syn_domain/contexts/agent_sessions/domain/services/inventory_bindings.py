@@ -14,6 +14,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryGap,
 )
 
+from .gap_reasons import GapReason
 from .inventory_resolution import RANK, references
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ def resolve_bindings(
                 result[index] = result[index].model_copy(
                     update={"confidence": EvidenceClass.CONFLICTING}
                 )
-        gaps.append(InventoryGap(reason="conflicting_native_binding", node_keys=(owner,)))
+        gaps.append(InventoryGap(reason=GapReason.CONFLICTING_BINDING, node_keys=(owner,)))
     return tuple(result), tuple(gaps)
 
 

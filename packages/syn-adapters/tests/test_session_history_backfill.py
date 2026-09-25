@@ -12,11 +12,13 @@ import hashlib
 import json
 import random
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
+from event_sourcing import EventEnvelope, EventMetadata
 
 from syn_adapters.events import AgentEventStore
 from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
@@ -29,6 +31,7 @@ from syn_adapters.session_inventory.history_source import PostgresHistoricalEvid
 from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
 from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
 from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
+from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
 )
@@ -45,6 +48,9 @@ from syn_domain.contexts.agent_sessions import (
     RefreshSessionInventoryHandler,
     RunIdentity,
 )
+from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
+    InventoryReconciliationSweepEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     CoverageState,
     EvidenceClass,
@@ -59,7 +65,13 @@ from syn_domain.contexts.agent_sessions.import_identity import platform_session_
 from syn_domain.contexts.agent_sessions.slices.canonical_totals.query_service import (
     CanonicalUsageQueryService,
 )
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.HostSessionEvidenceProjector import (
+    HostSessionEvidenceProjector,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
+from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+    WorkflowCompletedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     TimescaleExecutionCostQuery,
 )
@@ -413,6 +425,8 @@ async def test_fixture_history_recovers_membership_and_parentage_without_inventi
         "unsupported_harness_evidence",
     } <= gaps
     # Old unsupported observations stay unknown; legacy data never seals coverage.
+    # Unknown until the execution's terminal fact is present; then unsupported
+    # with no_host_registration (see the terminal test below). Never reconciled.
     assert snapshot.coverage.state is CoverageState.UNKNOWN
     assert view.coverage == "unknown"
 
@@ -523,3 +537,83 @@ async def test_bulk_queue_is_durable_idempotent_and_drained_by_the_live_worker(
     for run in runs:
         assert len(await stack.receipts.existing(run)) > 0
         assert await stack.evidence.watermark(run) > 0
+
+
+_ENDED = datetime(2026, 9, 25, 12, tzinfo=UTC)
+
+
+async def _terminate(stack: Stack, run: RunIdentity) -> HostSessionEvidenceProjector:
+    """The historical execution's terminal event through the live host projector."""
+    settlements = PostgresSettlementDeadlines(stack.pool, run.source_instance_id)
+    projector = HostSessionEvidenceProjector(
+        stack.evidence,
+        run.source_instance_id,
+        settlements=settlements,
+        settlement_grace=timedelta(minutes=5),
+    )
+    event = WorkflowCompletedEvent(
+        workflow_id="definition",
+        execution_id=run.execution_id,
+        completed_at=_ENDED,
+        total_phases=1,
+        completed_phases=1,
+        total_input_tokens=0,
+        total_output_tokens=0,
+        total_tokens=0,
+        total_duration_seconds=1.0,
+        artifact_ids=[],
+    )
+    await projector.handle(
+        EventEnvelope(
+            event=event,
+            metadata=EventMetadata(
+                event_id=f"terminal-{run.execution_id}",
+                timestamp=_ENDED,
+                aggregate_id=run.execution_id,
+                aggregate_type="WorkflowExecution",
+                aggregate_nonce=9,
+                global_nonce=9,
+                event_type=WorkflowCompletedEvent.event_type,
+            ),
+        )
+    )
+    return projector
+
+
+@pytest.mark.parametrize("terminal_first", [True, False])
+async def test_terminal_history_without_host_registration_is_unsupported_never_reconciled(
+    stack: Stack, terminal_first: bool
+) -> None:
+    run = _run()
+    await _seed(stack, run)
+    if terminal_first:
+        projector = await _terminate(stack, run)
+    snapshot, view = await _backfill_and_publish(stack, run)
+    if not terminal_first:
+        # Terminal fact arrives after the backfill (e.g. PM replay lags it).
+        projector = await _terminate(stack, run)
+        result = await stack.handler().handle(run, "history-after-terminal")
+        snapshot = await stack.publish(run, result.job_id)
+        view = await _view(stack, run, snapshot)
+    assert snapshot.coverage.state is CoverageState.UNSUPPORTED
+    assert "no_host_registration" in {reason for reason, _ in view.gaps}
+    # The bounded deadline passing never promotes legacy data to reconciled.
+    await projector.handle(
+        EventEnvelope(
+            event=InventoryReconciliationSweepEvent(observed_at=_ENDED + timedelta(hours=1)),
+            metadata=EventMetadata(
+                event_id=f"tick-{run.execution_id}",
+                timestamp=_ENDED + timedelta(hours=1),
+                aggregate_id="clock",
+                aggregate_type="SessionInventoryClock",
+                aggregate_nonce=10,
+                global_nonce=10,
+                event_type=InventoryReconciliationSweepEvent.event_type,
+            ),
+        )
+    )
+    assert await projector.release_deadlines() >= 1
+    result = await stack.handler().handle(run, "history-after-deadline")
+    settled = await stack.publish(run, result.job_id)
+    assert settled.coverage.state is CoverageState.UNSUPPORTED
+    assert settled.coverage.state is not CoverageState.RECONCILED

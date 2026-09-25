@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
+    InventoryReconciliationSweepEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
     SessionInvocationRecordedEvent,
 )
@@ -13,6 +17,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence impo
     LineageEvidence,
     MembershipEvidence,
     NodeEvidence,
+    RunSettlementStage,
     SessionEvidence,
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
@@ -23,7 +28,15 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
 )
 from syn_domain.contexts.agent_sessions.ports.SessionCaptureSpoolPort import CaptureSpool
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import EvidenceBatch
+from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import SettlementDeadline
 
+from .execution_settlement import (
+    DEADLINE_BATCH,
+    SETTLEMENT_PRODUCER,
+    ExecutionTerminal,
+    ExecutionTerminalEventType,
+    settlement_batch,
+)
 from .invocation_evidence import invocation_evidence
 
 if TYPE_CHECKING:
@@ -35,6 +48,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
         SessionEvidenceWritePort,
     )
+    from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import (
+        SessionSettlementPort,
+    )
+
+# Deadlines released per clock observation; the rest follow on later ticks.
+_DEADLINES_PER_SWEEP = 100
+_TERMINAL_EVENT_TYPES = frozenset(ExecutionTerminalEventType)
 
 
 class HostSessionEvidenceProjector:
@@ -42,6 +62,14 @@ class HostSessionEvidenceProjector:
 
     Historical sessions remain platform nodes. A SessionStarted event does not
     prove a native invocation, capture completeness, or a native parent ID.
+
+    Settlement: a terminal execution appends an EXECUTION_TERMINAL fact and
+    durably fixes one deadline ``settlement_grace`` after the event's own
+    timestamp (first terminal fact wins). A clock event only records its
+    observed time. ``release_deadlines()`` runs from the process manager's
+    live ``process_pending()`` and appends SETTLEMENT_DEADLINE facts for
+    deadlines at or before the latest RECORDED clock time, never the wall
+    clock, so replay reproduces the same batches.
     """
 
     def __init__(
@@ -49,17 +77,38 @@ class HostSessionEvidenceProjector:
         evidence: SessionEvidenceWritePort,
         source_instance_id: str,
         spools: SessionCaptureSpoolPort | None = None,
+        *,
+        settlements: SessionSettlementPort | None = None,
+        settlement_grace: timedelta = timedelta(minutes=30),
     ) -> None:
+        if settlement_grace < timedelta(0):
+            raise ValueError("settlement grace cannot be negative")
         self._evidence = evidence
         self._source = source_instance_id
         self._spools = spools
+        self._settlements = settlements
+        self._grace = settlement_grace
 
     def get_subscribed_event_types(self) -> set[str]:
-        return {SessionStartedEvent.event_type, SessionInvocationRecordedEvent.event_type}
+        types = {
+            SessionStartedEvent.event_type,
+            SessionInvocationRecordedEvent.event_type,
+            *ExecutionTerminalEventType,
+        }
+        if self._settlements is not None:
+            types.add(InventoryReconciliationSweepEvent.event_type)
+        return types
 
     async def handle(self, envelope: EventEnvelope[DomainEvent]) -> None:
-        if envelope.metadata.event_type == SessionInvocationRecordedEvent.event_type:
+        event_type = envelope.metadata.event_type
+        if event_type == SessionInvocationRecordedEvent.event_type:
             await self._project_invocation(envelope)
+            return
+        if event_type in _TERMINAL_EVENT_TYPES:
+            await self._project_terminal(envelope)
+            return
+        if event_type == InventoryReconciliationSweepEvent.event_type:
+            await self._record_clock(envelope)
             return
         if envelope.metadata.event_type != SessionStartedEvent.event_type:
             return
@@ -167,3 +216,69 @@ class HostSessionEvidenceProjector:
                 ),
             )
         )
+
+    async def _project_terminal(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        event = ExecutionTerminal.model_validate_json(envelope.event.model_dump_json())
+        if not event.execution_id:
+            return
+        metadata = envelope.metadata
+        run = RunIdentity(source_instance_id=self._source, execution_id=event.execution_id)
+        reference = EvidenceReference(
+            producer_id=SETTLEMENT_PRODUCER,
+            evidence_id=metadata.event_id,
+            source_revision=str(metadata.aggregate_nonce),
+            locator=f"{metadata.aggregate_type}-{metadata.aggregate_id}",
+            extractor_version="host-execution-settlement/1",
+        )
+        due_at = None
+        if self._settlements is not None:
+            # First terminal fact per run fixes the deadline durably. Replay
+            # reads that record back, so changing the grace setting later
+            # never changes an existing run's facts or revisions.
+            fixed = await self._settlements.schedule(
+                SettlementDeadline(
+                    run=run, due_at=metadata.timestamp + self._grace, terminal=reference
+                )
+            )
+            due_at = fixed.due_at
+        await self._evidence.append(
+            settlement_batch(
+                run,
+                reference,
+                RunSettlementStage.EXECUTION_TERMINAL,
+                f"terminal:{metadata.event_id}",
+                due_at,
+            )
+        )
+
+    async def _record_clock(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        if self._settlements is None:
+            return
+        sweep = InventoryReconciliationSweepEvent.model_validate_json(
+            envelope.event.model_dump_json()
+        )
+        await self._settlements.observe_clock(sweep.observed_at)
+
+    async def release_deadlines(self) -> int:
+        """Live-only work: call from ``process_pending()``, never during catch-up.
+
+        Idempotent: the deadline batch is keyed by run, and a crash between the
+        durable fact and ``settle()`` re-appends a byte-identical batch.
+        """
+        if self._settlements is None:
+            return 0
+        page = await self._settlements.due(limit=_DEADLINES_PER_SWEEP)
+        for deadline in page.items:
+            if deadline.run.source_instance_id != self._source:
+                raise ValueError("settlement deadline belongs to another installation")
+            await self._evidence.append(
+                settlement_batch(
+                    deadline.run,
+                    deadline.terminal,
+                    RunSettlementStage.SETTLEMENT_DEADLINE,
+                    DEADLINE_BATCH,
+                    deadline.due_at,
+                )
+            )
+            await self._settlements.settle(deadline)
+        return len(page.items)

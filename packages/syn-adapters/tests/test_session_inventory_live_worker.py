@@ -279,7 +279,10 @@ async def test_live_clock_recovers_pending_inventory_after_full_runtime_restart(
         assert controlled.counts.node == 4
         assert controlled.counts.binding == 1
         assert controlled.coverage.state == "open"
-        assert controlled.coverage.expected_count == 1
+        # The pre-restart platform session is a known node of this run (WP-A
+        # seal): it must settle too, so the contract expects it alongside the
+        # registered invocation.
+        assert controlled.coverage.expected_count == 2
         await runtime.clock.stop()
         await coordinator.stop()
         await runtime.evidence.append(_batch(run, "arrived-while-stopped"))

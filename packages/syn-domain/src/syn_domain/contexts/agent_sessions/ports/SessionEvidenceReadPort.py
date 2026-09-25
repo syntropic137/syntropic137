@@ -37,6 +37,7 @@ class EvidenceBatch(InventoryModel):
                 source.retractions,
                 source.acquisition_gaps,
                 source.acquisition_statuses,
+                source.run_settlement,
             )
         )
         count += sum(1 + len(item.facts.relationships) for item in source.native_transcripts)

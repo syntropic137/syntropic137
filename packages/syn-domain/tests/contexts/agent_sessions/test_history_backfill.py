@@ -28,9 +28,13 @@ from syn_domain.contexts.agent_sessions.domain.read_models.native_session_eviden
     NativeRelationshipFact,
     NativeTranscriptFacts,
 )
+from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
+    RunSettlementStage,
+)
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     CoverageState,
     EvidenceClass,
+    EvidenceReference,
     RunIdentity,
 )
 from syn_domain.contexts.agent_sessions.domain.services.evidence_assembly import assemble_evidence
@@ -43,6 +47,10 @@ from syn_domain.contexts.agent_sessions.slices.backfill_session_inventory.legacy
     plan_receipts,
     qualify,
     receipt_evidence,
+)
+from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.execution_settlement import (
+    SETTLEMENT_PRODUCER,
+    settlement_batch,
 )
 
 pytestmark = pytest.mark.unit
@@ -146,6 +154,36 @@ def test_unsupported_and_unqualified_history_stays_explicitly_unknown() -> None:
     edge = resolved.edges[0]
     assert (edge.parent.local_id, edge.child.local_id) == ("root", "child")
     assert edge.confidence is EvidenceClass.CORROBORATED
+
+
+@pytest.mark.parametrize(
+    "stages", [(RunSettlementStage.EXECUTION_TERMINAL,), tuple(RunSettlementStage)]
+)
+def test_terminal_history_without_registration_is_unsupported_never_reconciled(
+    stages: tuple[RunSettlementStage, ...],
+) -> None:
+    receipts = plan_receipts(RUN, uuid4(), qualify(_acquisition()), ())
+    batches = [
+        StoredEvidenceBatch(sequence=index, batch=receipt_evidence(item))
+        for index, item in enumerate(receipts, start=1)
+    ]
+    reference = EvidenceReference(
+        producer_id=SETTLEMENT_PRODUCER,
+        evidence_id="terminal",
+        source_revision="1",
+        locator="WorkflowExecution-run",
+        extractor_version="t/1",
+    )
+    for offset, stage in enumerate(stages, start=len(batches) + 1):
+        batches.append(
+            StoredEvidenceBatch(
+                sequence=offset,
+                batch=settlement_batch(RUN, reference, stage, f"{stage}", None),
+            )
+        )
+    resolved = resolve_relationships(assemble_evidence(RUN, batches))
+    assert resolved.coverage.state is CoverageState.UNSUPPORTED
+    assert "no_host_registration" in {gap.reason for gap in resolved.gaps}
 
 
 def test_delegate_alias_keeps_the_fixed_platform_identity() -> None:

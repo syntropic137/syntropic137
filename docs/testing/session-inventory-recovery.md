@@ -208,3 +208,46 @@ no longer need delivery. The real remote replication test verifies physical
 outbox cleanup, remote absence, delayed-upload rejection and retained catalog
 metadata. Workspace source volumes are separate and are not reclaimed by this
 policy yet.
+
+## Coverage seal and bounded settlement
+
+Coverage becomes `reconciled` or `missing` only through the host seal
+(`coverage_settlement.py`, #1364). Invariant: `reconciled` only if every node
+the run's evidence names (registration, child intent or context, edge,
+platform session, binding, capture, transcript) is accounted for, settled and
+non-conflicting. Known but unaccounted blocks it: `open` before the deadline,
+`missing` or `conflicting` after.
+
+- Expected nodes: every known node, except a transcript bound to an expected
+  owner and a platform session named by the same host record as an expected
+  invocation (those are accounted by their owner). The exemption lapses once
+  such a node has its own receipt, lifecycle or owned binding.
+- Settled: terminal process (completed, failed, cancelled, launch_failed) and
+  a non-pending latest local capture receipt. Unverified child attempts,
+  unresolved parentage and an unreadable child journal are unsettled.
+- The seal needs the execution's terminal event (`WorkflowCompleted`,
+  `WorkflowFailed`, `ExecutionCancelled`, `WorkflowInterrupted`) AND everything
+  settled. A parent finishing is never enough.
+- Bounded settlement: the first terminal event per run durably fixes a
+  deadline `SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS` (default 1800)
+  after its timestamp. Replay reads that record back, so changing the setting
+  never changes an existing run's facts. Clock sweeps only record their
+  observed time (also during catch-up). The live-only `process_pending()` step
+  then appends one `settlement_deadline` fact per due run, compared against
+  that recorded time, never the wall clock. Then unsettled processes, captures and
+  child claims become explicit `*_at_seal` gaps (`missing`); unresolved
+  parentage becomes `parentage_unresolved_at_seal` (`conflicting`).
+- Any conflicting lifecycle, child attempt, parentage, cycle, binding or source
+  claim makes coverage `conflicting`. Unsupported capture gives `unsupported`.
+- A run with no host registration is `unknown` while running and `unsupported`
+  with a `no_host_registration` gap once terminal. Never reconciled.
+- Late evidence publishes a new revision; published revisions never change.
+
+Unit and real-Postgres coverage:
+
+```sh
+uv run pytest -m unit packages/syn-domain/tests/contexts/agent_sessions/test_coverage_settlement.py \
+  packages/syn-domain/tests/contexts/agent_sessions/test_execution_settlement_projection.py
+TEST_DATABASE_URL=postgresql://... uv run pytest -m integration \
+  packages/syn-adapters/tests/test_session_inventory_pipeline.py
+```

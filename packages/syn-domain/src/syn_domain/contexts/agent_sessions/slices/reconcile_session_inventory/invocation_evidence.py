@@ -61,7 +61,9 @@ def invocation_evidence(
         ),
         bindings=bindings,
         # Independent expectation exists before any native ID or bytes arrive.
-        # Process exit alone never seals descendant/capture coverage.
+        # Process exit alone never seals descendant/capture coverage: the host
+        # seal is derived from execution settlement facts by the resolver
+        # (coverage_settlement.py), never asserted by one invocation's event.
         coverage_contract=CoverageContract(
             contract_id="syntropic-invocations/1",
             expected_nodes=(invocation,),

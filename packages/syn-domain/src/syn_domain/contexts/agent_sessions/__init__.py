@@ -337,11 +337,14 @@ __all__ = [
     "SessionInventoryReadPort",
     "SessionInventoryWritePort",
     "SessionInvocationState",
+    "SessionSettlementPort",
     "SessionStartedEvent",
     "SessionStatus",
     "SessionStorePort",
     "SessionSummaryData",
     "SessionTranscriptArchivePort",
+    "SettlementDeadline",
+    "SettlementDeadlinePage",
     "StartSessionCommand",
     "StartSessionHandler",
     "StoredEvidenceBatch",
@@ -352,6 +355,7 @@ __all__ = [
     "TranscriptBodyState",
     "TranscriptDeletedError",
     "TranscriptIntegrityError",
+    "UnsupportedEvidenceIssue",
     "import_phase_delegates",
     "model_from_rollout",
     "pick_primary_model",
@@ -392,6 +396,7 @@ from .ports.NativeSessionEvidencePort import (
     NativeRelationshipFact,
     NativeSessionEvidencePort,
     NativeTranscriptFacts,
+    UnsupportedEvidenceIssue,
 )
 from .ports.QualifiedSessionStorePort import QualifiedSessionIdentity
 from .ports.SessionCaptureCatalogPort import CataloguedCapture, SessionCaptureCatalogPort
@@ -400,6 +405,11 @@ from .ports.SessionCaptureSpoolPort import (
     CaptureSpoolLease,
     CaptureSpoolLeaseLost,
     SessionCaptureSpoolPort,
+)
+from .ports.SessionSettlementPort import (
+    SessionSettlementPort,
+    SettlementDeadline,
+    SettlementDeadlinePage,
 )
 from .slices.capture_local_transcript.CaptureLocalTranscriptHandler import (
     CaptureLocalTranscriptHandler,

@@ -243,3 +243,22 @@ CREATE INDEX IF NOT EXISTS session_inventory_items_member_node_idx
 CREATE INDEX IF NOT EXISTS session_inventory_items_node_key_idx
     ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key)
     WHERE kind = 'node';
+-- Bounded coverage settlement (#1364): the first terminal fact per run and the
+-- recorded clock observation at or after which its deadline fact is appended.
+CREATE TABLE IF NOT EXISTS session_settlement_deadlines (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    due_at TIMESTAMPTZ NOT NULL,
+    payload JSONB NOT NULL,
+    settled BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY(source_instance_id,execution_id)
+);
+CREATE INDEX IF NOT EXISTS session_settlement_deadlines_due
+    ON session_settlement_deadlines(source_instance_id,due_at,execution_id)
+    WHERE NOT settled;
+-- Latest recorded clock observation (a to-do watermark, monotonic). Deadline
+-- release compares against this, never the wall clock.
+CREATE TABLE IF NOT EXISTS session_settlement_clock (
+    source_instance_id TEXT PRIMARY KEY,
+    observed_at TIMESTAMPTZ NOT NULL
+);

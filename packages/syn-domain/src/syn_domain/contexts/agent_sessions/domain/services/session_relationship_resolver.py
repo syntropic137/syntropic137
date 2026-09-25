@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     BodyAvailability,
-    CaptureReceipt,
     CoverageState,
     EvidenceClass,
     EvidenceReference,
@@ -39,6 +38,13 @@ from syn_domain.contexts.agent_sessions.domain.services.inventory_resolution imp
 )
 
 from .acquisition_status import acquisition_gaps
+from .coverage_settlement import (
+    Settlement,
+    SettlementInput,
+    expected_capture_states,
+    settle_coverage,
+)
+from .gap_reasons import GapReason
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
@@ -50,7 +56,7 @@ from .invocation_contexts import context_coverage, context_memberships
 from .invocation_lifecycle import lifecycle_gaps
 from .native_relationships import native_relationships
 
-RESOLVER_VERSION = "syn-session-relationships/7"
+RESOLVER_VERSION = "syn-session-relationships/8"
 
 
 def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
@@ -87,19 +93,6 @@ def _nodes(evidence: SessionEvidence) -> tuple[InventoryNode, ...]:
     )
 
 
-def _latest_capture_states(receipts: list[CaptureReceipt]) -> set[BodyAvailability]:
-    # Sequences are comparable only within one producer's receipt stream.
-    latest: dict[str, int] = {}
-    for item in receipts:
-        producer = item.evidence.producer_id
-        latest[producer] = max(latest.get(producer, -1), item.receipt_sequence)
-    return {
-        item.availability
-        for item in receipts
-        if item.receipt_sequence == latest[item.evidence.producer_id]
-    }
-
-
 def _coverage_state(
     *, supported: bool, conflicting: bool, sealed: bool, missing: bool
 ) -> CoverageState:
@@ -113,28 +106,21 @@ def _coverage_state(
 
 
 def _coverage(
-    evidence: SessionEvidence, bindings: tuple[IdentityBinding, ...]
+    evidence: SessionEvidence, bindings: tuple[IdentityBinding, ...], settlement: Settlement
 ) -> InventoryCoverage:
-    contract = evidence.coverage_contract
+    contract = settlement.contract
     if contract is None:
-        return InventoryCoverage(state=CoverageState.UNKNOWN)
+        return InventoryCoverage(
+            state=CoverageState.UNSUPPORTED if settlement.uninstrumented else CoverageState.UNKNOWN
+        )
     expected = {ref.key for ref in contract.expected_nodes}
-    grouped: dict[str, list[CaptureReceipt]] = defaultdict(list)
-    for item in evidence.captures:
-        if item.destination == "local":
-            grouped[item.node.key].append(item)
-    aliases = {
-        binding.owner.key: binding.transcript.key
-        for binding in bindings
-        if binding.confidence in (EvidenceClass.REGISTERED, EvidenceClass.CORROBORATED)
-    }
-    states = {key: _latest_capture_states(grouped[aliases.get(key, key)]) for key in expected}
+    states = expected_capture_states(evidence, bindings, expected)
     present = {key for key, values in states.items() if values == {BodyAvailability.PRESENT}}
-    missing = tuple(sorted(expected - present))
+    missing = tuple(sorted((expected - present) | set(settlement.unsettled_keys)))
     return InventoryCoverage(
         state=_coverage_state(
             supported=contract.supported,
-            conflicting=any(len(s) > 1 for s in states.values()),
+            conflicting=settlement.conflicting or any(len(s) > 1 for s in states.values()),
             sealed=contract.sealed,
             missing=bool(missing or evidence.acquisition_gaps),
         ),
@@ -162,23 +148,18 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     )
     child_memberships, context_gaps = context_memberships(evidence)
     process_gaps = lifecycle_gaps(evidence.invocation_lifecycle)
-    unsettled = tuple(
-        gap
-        for gap in process_gaps
-        if gap.reason in {"invocation_running", "conflicting_invocation_lifecycle"}
-    )
     evidence = evidence.model_copy(
         update={
             "memberships": (*evidence.memberships, *child_memberships),
             "coverage_contract": context_coverage(
-                evidence.coverage_contract, child_memberships, (*context_gaps, *unsettled)
+                evidence.coverage_contract, child_memberships, context_gaps
             ),
         }
     )
+    bindings, binding_gaps = resolve_bindings(evidence.bindings)
     nodes = _nodes(evidence)
     resolved_edges, conflict_gaps = resolve_parent_conflicts(lineage(evidence.edges))
     cycles = cyclic_edges(resolved_edges)
-    bindings, binding_gaps = resolve_bindings(evidence.bindings)
     gaps = [
         *context_gaps,
         *process_gaps,
@@ -189,7 +170,7 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
     if cycles:
         gaps.append(
             InventoryGap(
-                reason="lineage_cycle",
+                reason=GapReason.LINEAGE_CYCLE,
                 node_keys=tuple(sorted({vertex[0] for pair in cycles for vertex in pair})),
             )
         )
@@ -203,7 +184,7 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         if edge.confidence == EvidenceClass.CANDIDATE:
             gaps.append(
                 InventoryGap(
-                    reason="unresolved_parentage",
+                    reason=GapReason.UNRESOLVED_PARENTAGE,
                     node_keys=(edge.parent.key, edge.child.key),
                     evidence_ids=tuple(ref.evidence_id for ref in edge.evidence),
                 )
@@ -212,13 +193,26 @@ def resolve_relationships(evidence: SessionEvidence) -> ResolvedInventory:
         if claim.confidence is EvidenceClass.CONFLICTING:
             gaps.append(
                 InventoryGap(
-                    reason="conflicting_source_evidence", evidence_ids=(claim.evidence.evidence_id,)
+                    reason=GapReason.CONFLICTING_SOURCE,
+                    evidence_ids=(claim.evidence.evidence_id,),
                 )
             )
-    coverage = _coverage(evidence, bindings)
+    settlement = settle_coverage(
+        SettlementInput(
+            evidence=evidence,
+            contract=evidence.coverage_contract,
+            nodes=nodes,
+            bindings=bindings,
+            gaps=tuple(gaps),
+        )
+    )
+    gaps.extend(settlement.gaps)
+    coverage = _coverage(evidence, bindings, settlement)
     if coverage.missing_keys:
         gaps.append(
-            InventoryGap(reason="expected_body_unavailable", node_keys=coverage.missing_keys)
+            InventoryGap(
+                reason=GapReason.EXPECTED_BODY_UNAVAILABLE, node_keys=coverage.missing_keys
+            )
         )
     unique_gaps = {gap.model_dump_json(): gap for gap in gaps}
     result = ResolvedInventory(

@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
     from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
+    from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
     from syn_adapters.session_inventory.postgres_spools import PostgresCaptureSpools
     from syn_adapters.session_inventory.recovery_worker import SpoolRecoveryPort
     from syn_adapters.session_inventory.replication_supervisor import (
@@ -161,6 +162,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import (
+        SessionSettlementPort,
     )
     from syn_domain.contexts.agent_sessions.ports.SessionTranscriptAccessPort import (
         SessionTranscriptAccessPort,
@@ -381,6 +385,7 @@ if TYPE_CHECKING:
         history_source: PostgresHistoricalEvidenceSource,
         history_receipts: PostgresBackfillReceipts,
         history_queue: PostgresHistoryBackfillQueue,
+        settlements: PostgresSettlementDeadlines,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
@@ -408,3 +413,4 @@ if TYPE_CHECKING:
         _history_source: HistoricalEvidenceSourcePort = history_source
         _history_receipts: BackfillReceiptPort = history_receipts
         _history_queue: HistoryBackfillQueuePort = history_queue
+        _settlements: SessionSettlementPort = settlements
