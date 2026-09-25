@@ -30,6 +30,22 @@ Run both: `just fitness`
 | 12 | Request Contract Honesty | test_unknown_query_params_rejected | routes discovered from the live app | Enforced |
 | 13 | Pointer Reachability | test_submodule_pointer_is_reachable_from_its_default_branch | submodules discovered from .gitmodules | Enforced |
 | 14 | Answer Honesty | test_unknown_has_a_representation | fitness_exceptions.toml `[unknown_has_a_representation]` | Enforced |
+| 15 | Harness Format Boundary (#1398) | test_harness_format_boundary | fitness_exceptions.toml `[harness_format_boundary]` | Enforced |
+
+### 15. Harness Format Boundary (#1398)
+
+Harness formats change when a vendor ships a CLI; the domain must not. Vendor
+transcript parsing and harness-format imports stay behind
+`syn_adapters.session_inventory.native_evidence` (agentic-primitives readers).
+The check forbids vendor record keys/format literals in the API, clients and
+agent_sessions context; `agentic_isolation` / vendor stream imports there and in
+replication modules; adapter or I/O imports in the inventory domain services;
+any import of those services outside the reconcile slice (duplicated
+inference); and harness-name literals in resolver, inventory slices, the
+inventory route and replication modules. Exemptions are exact counts and fail
+when stale. Its own parametrized mutation tests plant each violation class in a
+copy of the tree and assert it is caught. Companion contract:
+`apps/syn-api/tests/test_1398_fake_third_harness_contract.py`.
 
 ### 14. Answer Honesty (#1341)
 
@@ -313,6 +329,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_layer_separation | Domain doesn't import adapters/API at runtime | 2, 8 |
 | test_error_propagation | No silent except: pass handlers | 2 |
 | test_in_memory_state_audit | Every in-memory state var is classified | 9 |
+| test_harness_format_boundary | Vendor formats only in adapters; one inference owner; no harness branches | 15 |
 
 ### API (`ci/fitness/api/`)
 

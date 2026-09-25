@@ -476,3 +476,22 @@ allowed_prefixes = [
 # A collection failure makes an unfinished phase report zero artifacts kept,
 # which is also what a phase that wrote nothing reports.
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py:ArtifactCollector.collect_from_unfinished_phase" = { issue = "#1341" }
+
+[harness_format_boundary]
+# ci/fitness/code_quality/test_harness_format_boundary.py (#1398, acceptance row 14).
+# Vendor transcript parsing / harness-format imports outside adapters, duplicated
+# relationship inference, and harness-name branches in inventory modules.
+# path = { violations = N, issue = "#NNN" }. Counts are EXACT: one more fails,
+# one fewer fails as stale. Zero tolerance for any file not listed here.
+
+# TODO(#1284): transcript_usage.py parses stored Claude/Codex transcripts in the
+# domain (SourceFormat literals, lines ~58-59; codex event_msg/turn_context readers,
+# lines ~260-345). Move the parsers behind the agentic-primitives extraction port.
+"packages/syn-domain/src/syn_domain/contexts/agent_sessions/transcript_usage.py" = { violations = 4, issue = "#1284" }
+
+# TODO(#1424): the API conversation log parses Claude message content and Codex
+# stream items (imports syn_shared.codex_stream). Predates #1398.
+"apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
+
+# TODO(#1424): client-side local transcript preview reads Codex response_item rows.
+"apps/syn-dashboard-ui/src/pages/ExecutionDetail/transcriptPreview.ts" = { violations = 1, issue = "#1424" }
