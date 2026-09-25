@@ -61,6 +61,17 @@ async def _docker(
             await process.wait()
 
 
+async def volume_unreferenced(volume: str) -> bool:
+    """True only when no container, running or stopped, references the volume.
+
+    A failed query is treated as referenced: release must never be optimistic.
+    """
+    users = await _docker(
+        ["ps", "-aq", "--no-trunc", "--filter", f"volume={volume}"], max_bytes=65536
+    )
+    return users.exit_code == 0 and not users.stdout.strip()
+
+
 class DockerSpoolRecovery:
     def __init__(self, image: str) -> None:
         self._image = image
@@ -74,11 +85,7 @@ class DockerSpoolRecovery:
             raise FileNotFoundError("Registered capture volume is not available")
         # Checked before our helper attaches: any other reference (a running or
         # stopped workspace) could still write, so this traversal cannot release.
-        users = await _docker(
-            ["ps", "-aq", "--no-trunc", "--filter", f"volume={location.volume_name}"],
-            max_bytes=65536,
-        )
-        exclusive = users.exit_code == 0 and not users.stdout.strip()
+        exclusive = await volume_unreferenced(location.volume_name)
         image = await verify_image_async(self._image)
         name = f"syn-capture-recovery-{uuid4().hex}"
         try:

@@ -8,7 +8,11 @@ from uuid import uuid4
 
 import pytest
 
-from syn_adapters.session_inventory.docker_recovery import DockerSpoolRecovery, _docker
+from syn_adapters.session_inventory.docker_recovery import (
+    DockerSpoolRecovery,
+    _docker,
+    volume_unreferenced,
+)
 from syn_adapters.session_inventory.workspace_location import workspace_capture_location
 from syn_domain.contexts.agent_sessions import CaptureSpool, RunIdentity
 
@@ -30,6 +34,7 @@ async def test_remove_refuses_attached_volume_then_removes_and_is_idempotent() -
     if image.exit_code != 0:
         pytest.skip(f"{IMAGE} is not available locally")
     assert (await _docker(["volume", "create", volume])).exit_code == 0
+    assert await volume_unreferenced(volume)
     name = f"syn-spool-release-test-{uuid4().hex}"
     try:
         # A stopped container still references the volume, like a workspace
@@ -37,9 +42,12 @@ async def test_remove_refuses_attached_volume_then_removes_and_is_idempotent() -
         created = await _docker(["create", "--name", name, "-v", f"{volume}:/spool", IMAGE, "true"])
         assert created.exit_code == 0
         recovery = DockerSpoolRecovery(IMAGE)
+        # Recovery opened now would not be exclusive, so it could not release.
+        assert not await volume_unreferenced(volume)
         assert not await recovery.remove(spool)
         assert (await _docker(["volume", "inspect", volume])).exit_code == 0
         assert (await _docker(["rm", "-f", name])).exit_code == 0
+        assert await volume_unreferenced(volume)
         assert await recovery.remove(spool)
         assert (await _docker(["volume", "inspect", volume])).exit_code != 0
         assert await recovery.remove(spool)  # already absent: idempotent
