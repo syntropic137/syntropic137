@@ -234,6 +234,8 @@ export interface PhaseMetrics {
    * Non-zero means `cost_usd` is INCOMPLETE, not that the work was free (#890).
    */
   unpriced_observation_count: number
+  /** True while a run of this phase is open: `cost_usd` is a lower bound "so far" (#1048). */
+  cost_in_progress: boolean
   /** Nullable: the API returns null when the duration is genuinely unknown. */
   duration_seconds: number | null
   artifact_count: number

@@ -64,7 +64,11 @@ function PhaseCard({
         <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
           <span>{phaseMetric.total_tokens.toLocaleString()} tok</span>
           {/* Unpriced work must not read as a confident $0 (#890). */}
-          <span>{formatCostWithCoverage(phaseMetric.cost_usd, phaseMetric.unpriced_observation_count)}</span>
+          {/* A phase still running has no attributed cost for that run yet: a lower bound (#1048). */}
+          <span title={phaseMetric.cost_in_progress ? 'Counted so far; this phase is still running' : undefined}>
+            {formatCostWithCoverage(phaseMetric.cost_usd, phaseMetric.unpriced_observation_count)}
+            {phaseMetric.cost_in_progress ? ' so far' : ''}
+          </span>
         </div>
       )}
     </div>

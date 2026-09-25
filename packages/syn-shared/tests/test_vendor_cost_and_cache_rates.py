@@ -69,6 +69,8 @@ def test_canonical_form_has_no_exponent_or_trailing_zeros(raw: object, expected:
     result = canonical_cost_usd(raw)  # type: ignore[arg-type]  # parametrized over the accepted union
     if expected == "1E-10":
         # The smallest non-zero value is exactly one quantum; compare by value.
+        # str() of any Decimal under 1e-6 is scientific (Python's rule, not
+        # ours), so this case serializes as "1E-10"; see canonical_cost_usd.
         assert result == VENDOR_COST_QUANTUM
         assert "E" not in format(result, "f")
         return

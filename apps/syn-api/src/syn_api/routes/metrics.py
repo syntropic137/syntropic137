@@ -63,6 +63,14 @@ class PhaseMetrics(BaseModel):
     Non-zero means ``cost_usd`` is incomplete: a lower bound, not the total. A
     phase with ``cost_usd == 0`` and a non-zero count is UNKNOWN, not free.
     """
+    cost_in_progress: bool = False
+    """True while any execution still has this phase open.
+
+    A running phase's cost is only attributed once its session summary lands;
+    until then ``cost_by_phase`` has no entry for it, so ``cost_usd`` omits the
+    run in flight. True means ``cost_usd`` is a lower bound "so far", never a
+    settled figure (the workflow-level form of #1048).
+    """
     duration_seconds: float | None = None
     """Seconds this phase has run in total, or ``None`` when nothing knows.
 
@@ -216,6 +224,7 @@ async def _build_phase_metrics(workflow_id: str, execution_ids: set[str]) -> lis
                 unpriced_observation_count=costs.get(
                     phase.phase_id, _NO_PHASE_COST
                 ).unpriced_observation_count,
+                cost_in_progress=bool(phase.active_runs),
                 # Resolved at read time, by the phase itself: a running phase
                 # has no recorded duration to read back, and the 0.0 this used
                 # to pass through was the projection's seed value, not a

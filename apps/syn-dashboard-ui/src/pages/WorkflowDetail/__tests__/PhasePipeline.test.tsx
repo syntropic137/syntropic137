@@ -52,6 +52,7 @@ function metric(overrides: Partial<PhaseMetrics> & { phase_id: string }): PhaseM
     total_tokens: 68233,
     cost_usd: '0',
     unpriced_observation_count: 0,
+    cost_in_progress: false,
     duration_seconds: 26.6,
     artifact_count: 1,
     ...overrides,
@@ -103,5 +104,27 @@ describe('workflow Phase Pipeline card', () => {
       />,
     )
     expect(screen.getByText('≥$0.1324 (partial)')).toBeTruthy()
+  })
+
+  it('marks a running phase cost as counted so far, not settled', () => {
+    render(
+      <PhasePipeline
+        phases={[IMPLEMENT]}
+        phaseMetrics={[metric({ phase_id: 'implement', status: 'running', cost_usd: '0.1324232', cost_in_progress: true })]}
+      />,
+    )
+    const cost = screen.getByTitle('Counted so far; this phase is still running')
+    expect(cost.textContent).toBe('$0.1324 so far')
+  })
+
+  it('shows a settled phase cost without the so-far marker', () => {
+    render(
+      <PhasePipeline
+        phases={[IMPLEMENT]}
+        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0.1324232' })]}
+      />,
+    )
+    expect(screen.getByText('$0.1324')).toBeTruthy()
+    expect(screen.queryByText(/so far/)).toBeNull()
   })
 })

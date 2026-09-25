@@ -591,7 +591,11 @@ def canonical_cost_usd(raw: Decimal | float | int | str | None) -> Decimal | Non
     ``VENDOR_COST_QUANTUM`` so double noise (``0.30566780000000005``) never
     reaches an API response, then strips trailing zeros WITHOUT exponent
     notation: ``Decimal.normalize()`` alone turns ``100`` into ``1E+2``, which
-    pydantic would serialize verbatim.
+    pydantic would serialize verbatim. The one exception is a non-zero value
+    under 1e-6 (at most a few quanta): Python's ``Decimal.__str__`` always
+    renders those in scientific form (``1E-10``) whatever the exponent, so no
+    Decimal value can avoid it and JSON clients must accept that form. No real
+    phase, session or execution cost is that small.
 
     ``None`` means the harness reported no cost and stays ``None``; it is not
     zero (see ``PricedAmount``).

@@ -206,3 +206,38 @@ async def test_workflow_without_executions_does_not_query_costs(
 
     assert [p.cost_usd for p in phases] == [Decimal("0")]
     assert query.asked == []
+
+
+@pytest.mark.asyncio
+async def test_a_running_phase_marks_its_cost_as_so_far(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A phase still open has no attributed cost for that run yet (#1048).
+
+    ``cost_by_phase`` gains an entry only once a session summary lands, so the
+    running run is missing from ``cost_usd``. The flag is what stops a client
+    presenting that lower bound as the settled figure.
+    """
+    from syn_api._wiring import get_projection_mgr
+    from syn_api.routes import metrics
+
+    await _start_phases("plan", "build")
+    await get_projection_mgr().workflow_phase_metrics.on_phase_completed(
+        {
+            "workflow_id": WORKFLOW,
+            "phase_id": "plan",
+            "success": True,
+            "duration_seconds": 26.6,
+            "completed_at": "2026-09-25T00:00:27+00:00",
+        }
+    )
+    monkeypatch.setattr(
+        metrics, "get_execution_cost_query", lambda: _FakeCostQuery(_two_executions())
+    )
+
+    phases = {
+        p.phase_id: p for p in await metrics._build_phase_metrics(WORKFLOW, {"exec-1", "exec-2"})
+    }
+
+    assert phases["plan"].cost_in_progress is False
+    assert phases["build"].cost_in_progress is True

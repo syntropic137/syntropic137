@@ -4478,6 +4478,11 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /**
+             * Cost In Progress
+             * @default false
+             */
+            cost_in_progress: boolean;
             /** Duration Seconds */
             duration_seconds?: number | null;
             /**
