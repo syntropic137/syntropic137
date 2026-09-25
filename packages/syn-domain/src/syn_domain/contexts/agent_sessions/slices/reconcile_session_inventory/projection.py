@@ -47,7 +47,8 @@ class InventoryWorkPort(Protocol):
 
 class InventoryReconciliationProcessManager(ProcessManager):
     PROJECTION_NAME = "session_inventory_jobs"
-    VERSION = 1
+    # 2: replay execution terminal events into settlement evidence (#1398).
+    VERSION = 2
 
     def __init__(
         self,

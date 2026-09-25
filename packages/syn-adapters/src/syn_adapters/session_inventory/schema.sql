@@ -219,3 +219,17 @@ CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
 );
 CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
     ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));
+
+-- Bounded coverage settlement (#1364): the first terminal fact per run and the
+-- recorded clock observation at or after which its deadline fact is appended.
+CREATE TABLE IF NOT EXISTS session_settlement_deadlines (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    due_at TIMESTAMPTZ NOT NULL,
+    payload JSONB NOT NULL,
+    settled BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY(source_instance_id,execution_id)
+);
+CREATE INDEX IF NOT EXISTS session_settlement_deadlines_due
+    ON session_settlement_deadlines(source_instance_id,due_at,execution_id)
+    WHERE NOT settled;

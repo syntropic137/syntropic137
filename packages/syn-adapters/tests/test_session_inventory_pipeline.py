@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
-from typing import TYPE_CHECKING
-from uuid import uuid4
+from typing import TYPE_CHECKING, Literal
+from uuid import UUID, uuid4
 
 import pytest
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
 
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
 from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
-from syn_domain.contexts.agent_sessions import EvidenceBatch, InventoryNotFound, RunIdentity
+from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
+from syn_domain.contexts.agent_sessions import (
+    EvidenceBatch,
+    HostSessionEvidenceProjector,
+    InventoryNotFound,
+    InventoryReconciliationSweepEvent,
+    InventorySnapshot,
+    RunIdentity,
+)
 from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
     ReconciliationRequest,
+)
+from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
+    SessionInvocationRecordedEvent,
 )
 from syn_domain.contexts.agent_sessions.domain.read_models.session_evidence import (
     CaptureEvidence,
@@ -31,12 +45,18 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryGap,
     InventoryNodeRef,
 )
+from syn_domain.contexts.agent_sessions.domain.services.coverage_settlement import (
+    INVOCATION_UNSETTLED_AT_SEAL,
+)
 from syn_domain.contexts.agent_sessions.domain.services.session_relationship_resolver import (
     RESOLVER_VERSION,
 )
 from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.BuildInventorySnapshotHandler import (
     BuildInventorySnapshotHandler,
     EvidenceQuotaExceeded,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+    WorkflowCompletedEvent,
 )
 
 if TYPE_CHECKING:
@@ -602,3 +622,218 @@ async def test_host_launch_failure_replays_without_rewriting_identity_batch(
     assert "invocation_launch_failed" in {gap.reason for gap in result.gaps}
     assert result.bindings == ()
     assert result.coverage.state is CoverageState.OPEN
+
+
+ENDED = datetime(2026, 9, 25, 12, tzinfo=UTC)
+
+
+def _host_envelope(
+    event: DomainEvent, *, event_id: str, nonce: int, aggregate: str, kind: str
+) -> EventEnvelope[DomainEvent]:
+    return EventEnvelope(
+        event=event,
+        metadata=EventMetadata(
+            event_id=event_id,
+            timestamp=ENDED,
+            aggregate_id=aggregate,
+            aggregate_type="AgentSession",
+            aggregate_nonce=nonce,
+            global_nonce=nonce,
+            event_type=kind,
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class _HostRun:
+    run: RunIdentity
+    journal: PostgresSessionEvidence
+    projector: HostSessionEvidenceProjector
+    builder: BuildInventorySnapshotHandler
+
+    async def snapshot(self, head: UUID | None = None) -> InventorySnapshot:
+        return await self.builder.handle(
+            ReconciliationRequest(
+                run=self.run,
+                evidence_watermark=await self.journal.watermark(self.run),
+                expected_head=head,
+                snapshot_id=uuid4(),
+                resolver_version=RESOLVER_VERSION,
+            )
+        )
+
+    async def terminate(self) -> None:
+        event = WorkflowCompletedEvent(
+            workflow_id="definition",
+            execution_id=self.run.execution_id,
+            completed_at=ENDED,
+            total_phases=1,
+            completed_phases=1,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_tokens=0,
+            total_duration_seconds=1.0,
+            artifact_ids=[],
+        )
+        await self.projector.handle(
+            _host_envelope(
+                event,
+                event_id="terminal",
+                nonce=99,
+                aggregate=self.run.execution_id,
+                kind=WorkflowCompletedEvent.event_type,
+            )
+        )
+
+    async def tick(self, at: datetime) -> None:
+        await self.projector.handle(
+            _host_envelope(
+                InventoryReconciliationSweepEvent(observed_at=at),
+                event_id=f"tick-{at.isoformat()}",
+                nonce=100,
+                aggregate="clock",
+                kind=InventoryReconciliationSweepEvent.event_type,
+            )
+        )
+
+
+async def _host_run(
+    db_pool: asyncpg.Pool,
+    tmp_path: Path,
+    prefix: str,
+    statuses: tuple[Literal["registered", "launched", "completed"], ...],
+) -> _HostRun:
+    run = RunIdentity(source_instance_id=f"{prefix}-{uuid4()}", execution_id="run")
+    journal = PostgresSessionEvidence(db_pool)
+    await journal.ensure_ready()
+    projector = HostSessionEvidenceProjector(
+        journal,
+        run.source_instance_id,
+        settlements=PostgresSettlementDeadlines(db_pool, run.source_instance_id),
+        settlement_grace=timedelta(minutes=5),
+    )
+    for nonce, status in enumerate(statuses, start=1):
+        event = SessionInvocationRecordedEvent(
+            session_id="platform",
+            execution_id=run.execution_id,
+            phase_id="phase",
+            invocation_id="root",
+            attempt_id="attempt",
+            harness="claude",
+            status=status,
+            native_session_id="root-native",
+        )
+        await projector.handle(
+            _host_envelope(
+                event,
+                event_id=f"invocation-{nonce}",
+                nonce=nonce,
+                aggregate="platform",
+                kind=SessionInvocationRecordedEvent.event_type,
+            )
+        )
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    await archive.ensure_ready()
+    body = await archive.put(b"root transcript")
+    root_native = InventoryNodeRef(
+        kind="transcript",
+        source_instance_id=run.source_instance_id,
+        harness="claude",
+        local_id="root-native",
+    )
+    await journal.append(
+        EvidenceBatch(
+            batch_id="root-body",
+            producer_id="capture",
+            evidence=SessionEvidence(
+                run=run,
+                captures=(
+                    CaptureEvidence(
+                        node=root_native,
+                        availability=BodyAvailability.PRESENT,
+                        receipt_sequence=1,
+                        evidence=reference("root-body"),
+                        archived_byte_hash=body.sha256,
+                    ),
+                ),
+            ),
+        )
+    )
+    builder = BuildInventorySnapshotHandler(
+        journal,
+        PostgresSessionInventory(db_pool),
+        max_evidence_records=500,
+        max_evidence_batches=100,
+    )
+    return _HostRun(run, journal, projector, builder)
+
+
+async def test_host_seal_reconciles_then_late_child_reopens_new_revision(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    from agentic_isolation.child_journal import ChildCall, ChildChange, ChildIntent
+
+    from syn_adapters.session_inventory.child_journal import child_evidence
+
+    host = await _host_run(db_pool, tmp_path, "host-seal", ("registered", "launched", "completed"))
+    inventory = PostgresSessionInventory(db_pool)
+    assert (await host.snapshot()).coverage.state is CoverageState.OPEN
+    await host.terminate()
+    await host.terminate()  # Replay appends nothing new.
+    sealed = await host.snapshot()
+    assert sealed.coverage.state is CoverageState.RECONCILED
+    assert sealed.coverage.missing_keys == ()
+    await inventory.publish(host.run, sealed.snapshot_id, None)
+    change = ChildChange(
+        sequence=1,
+        intent=ChildIntent(
+            sequence=1,
+            child_invocation_id="background-child",
+            child_native_id=None,
+            status="launched",
+            call=ChildCall(
+                invocation_id="root",
+                attempt_id="attempt",
+                harness="claude",
+                parent_native_id="root-native",
+                tool_call_id="call",
+            ),
+        ),
+    )
+    await host.journal.append(child_evidence(change, host.run, "spool"))
+    restarted = _HostRun(host.run, PostgresSessionEvidence(db_pool), host.projector, host.builder)
+    reopened = await restarted.snapshot(sealed.snapshot_id)
+    assert reopened.coverage.state is CoverageState.OPEN
+    assert reopened.coverage.expected_count == 2
+    await inventory.publish(host.run, reopened.snapshot_id, sealed.snapshot_id)
+    old = await inventory.page(host.run, sealed.snapshot_id, "node")
+    assert old.snapshot.coverage.state is CoverageState.RECONCILED
+    assert old.snapshot.coverage.expected_count == 1
+
+
+async def test_host_seal_turns_stuck_invocation_into_missing_after_recorded_deadline(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    host = await _host_run(db_pool, tmp_path, "host-stuck", ("registered", "launched"))
+    await host.terminate()
+    await host.tick(ENDED + timedelta(minutes=1))
+    assert (await host.snapshot()).coverage.state is CoverageState.OPEN
+    await host.tick(ENDED + timedelta(minutes=6))
+    watermark = await host.journal.watermark(host.run)
+    await host.tick(ENDED + timedelta(minutes=7))  # A settled deadline is not re-released.
+    assert await host.journal.watermark(host.run) == watermark
+    missing = await _HostRun(
+        host.run, PostgresSessionEvidence(db_pool), host.projector, host.builder
+    ).snapshot()
+    assert missing.coverage.state is CoverageState.MISSING
+    root = InventoryNodeRef(
+        kind="invocation", source_instance_id=host.run.source_instance_id, local_id="root"
+    )
+    assert root.key in missing.coverage.missing_keys
+    inventory = PostgresSessionInventory(db_pool)
+    await inventory.publish(host.run, missing.snapshot_id, None)
+    page = await inventory.page(host.run, missing.snapshot_id, "gap")
+    assert any(
+        isinstance(item, InventoryGap) and item.reason == INVOCATION_UNSETTLED_AT_SEAL
+        for item in page.items
+    )

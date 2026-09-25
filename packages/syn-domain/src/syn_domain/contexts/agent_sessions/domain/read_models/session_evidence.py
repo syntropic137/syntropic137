@@ -6,6 +6,7 @@ Claims retain producer identity so a repeated delivery is not a new fact.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -80,6 +81,26 @@ class InvocationLifecycleEvidence(InventoryModel):
         if not expected[self.status]:
             raise ValueError("lifecycle status and exit code disagree")
         return self
+
+
+class RunSettlementStage(StrEnum):
+    """Host facts that bound when coverage may seal (#1364).
+
+    EXECUTION_TERMINAL: the workflow execution reached a terminal status. A
+    parent finishing proves nothing about background descendants, so this
+    alone seals only once every expected node has also settled.
+    SETTLEMENT_DEADLINE: the host's bounded grace after EXECUTION_TERMINAL
+    elapsed (passage of time). Anything still unsettled then becomes an
+    explicit gap instead of holding coverage open forever.
+    """
+
+    EXECUTION_TERMINAL = "execution_terminal"
+    SETTLEMENT_DEADLINE = "settlement_deadline"
+
+
+class RunSettlementEvidence(InventoryModel):
+    stage: RunSettlementStage
+    evidence: EvidenceReference
 
 
 class NodeEvidence(InventoryModel):
@@ -171,6 +192,7 @@ class SessionEvidence(InventoryModel):
     acquisition_gaps: tuple[AcquisitionGapEvidence, ...] = ()
     acquisition_statuses: tuple[AcquisitionStatusEvidence, ...] = ()
     native_transcripts: tuple[NativeTranscriptObservation, ...] = ()
+    run_settlement: tuple[RunSettlementEvidence, ...] = ()
 
     @model_validator(mode="after")
     def _scope(self) -> SessionEvidence:

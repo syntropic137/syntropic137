@@ -208,3 +208,37 @@ no longer need delivery. The real remote replication test verifies physical
 outbox cleanup, remote absence, delayed-upload rejection and retained catalog
 metadata. Workspace source volumes are separate and are not reclaimed by this
 policy yet.
+
+## Coverage seal and bounded settlement
+
+Coverage becomes `reconciled` or `missing` only through the host seal
+(`coverage_settlement.py`, #1364). The resolver derives it from recorded facts:
+
+- Expected nodes: registered invocations, children attributed through an exact
+  registered attempt, and every non-conflicting spawn/fork descendant of an
+  expected node (child journals and native child relationships).
+- A node is settled when its process is terminal (completed, failed, cancelled,
+  launch_failed) and its latest local capture receipt is not pending.
+- The seal needs the execution's terminal event (`WorkflowCompleted`,
+  `WorkflowFailed`, `ExecutionCancelled`, `WorkflowInterrupted`) AND every
+  expected node settled. A parent finishing is never enough.
+- Bounded settlement: the terminal event schedules a durable deadline
+  `SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS` (default 1800) after its own
+  timestamp. The first recorded clock sweep at or past it appends a
+  `settlement_deadline` fact. Anything still unsettled then becomes an explicit
+  `invocation_unsettled_at_seal` or `capture_unsettled_at_seal` gap and coverage
+  is `missing`. Timestamps bound waiting only; they never decide parentage.
+- Late evidence publishes a new revision. Before the deadline a running late
+  child reopens coverage to `open`; after it, the child is a gap until it
+  settles. Published revisions are never rewritten.
+- `unsupported` comes from an unsupported capture mechanism; `conflicting`
+  from contradictory process outcomes or child attempt claims.
+
+Unit and real-Postgres coverage:
+
+```sh
+uv run pytest -m unit packages/syn-domain/tests/contexts/agent_sessions/test_coverage_settlement.py \
+  packages/syn-domain/tests/contexts/agent_sessions/test_execution_settlement_projection.py
+TEST_DATABASE_URL=postgresql://... uv run pytest -m integration \
+  packages/syn-adapters/tests/test_session_inventory_pipeline.py
+```

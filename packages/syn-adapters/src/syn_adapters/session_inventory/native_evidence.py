@@ -3,7 +3,11 @@
 from agentic_isolation.harnesses import EvidenceHarnessPlugin, get_harness
 from agentic_isolation.harnesses.envelope_evidence import EnvelopeEvidenceReader
 
-from syn_domain.contexts.agent_sessions import NativeRelationshipFact, NativeTranscriptFacts
+from syn_domain.contexts.agent_sessions import (
+    NativeRelationshipFact,
+    NativeTranscriptFacts,
+    UnsupportedEvidenceIssue,
+)
 
 
 class AgenticNativeSessionEvidence:
@@ -19,7 +23,7 @@ class AgenticNativeSessionEvidence:
             return NativeTranscriptFacts(
                 native_id=None,
                 supported=False,
-                issues=("unsupported_harness_evidence",),
+                issues=(UnsupportedEvidenceIssue.HARNESS,),
                 extractor_version="agentic-evidence/1",
                 byte_count=len(content),
             )
@@ -29,7 +33,7 @@ class AgenticNativeSessionEvidence:
                 return NativeTranscriptFacts(
                     native_id=None,
                     supported=False,
-                    issues=("unsupported_envelope_evidence",),
+                    issues=(UnsupportedEvidenceIssue.ENVELOPE,),
                     extractor_version="agentic-evidence/1",
                     byte_count=len(content),
                 )

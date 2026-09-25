@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from event_sourcing import RepositoryFactory
@@ -34,6 +35,7 @@ from .local_archive import LocalSessionTranscriptArchive
 from .native_evidence import AgenticNativeSessionEvidence
 from .postgres_inventory import PostgresSessionInventory
 from .postgres_jobs import PostgresSessionInventoryJobs
+from .postgres_settlements import PostgresSettlementDeadlines
 from .postgres_spools import PostgresCaptureSpools
 from .recovery_worker import CaptureRecoveryWorker
 from .replication_runtime import create_replication_manager
@@ -174,7 +176,13 @@ async def create_inventory_runtime(
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             max_jobs_per_tick=settings.max_jobs_per_tick,
-            host_evidence=HostSessionEvidenceProjector(evidence, source_id, spools),
+            host_evidence=HostSessionEvidenceProjector(
+                evidence,
+                source_id,
+                spools,
+                settlements=PostgresSettlementDeadlines(pool, source_id),
+                settlement_grace=timedelta(seconds=settings.settlement_grace_seconds),
+            ),
         ),
         clock=InventoryRecoveryClock(event_store, interval_seconds=settings.sweep_interval_seconds),
     )

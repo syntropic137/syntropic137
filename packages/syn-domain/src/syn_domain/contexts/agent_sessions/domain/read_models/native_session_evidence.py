@@ -1,10 +1,21 @@
 """Normalized observations of a native transcript, independent of source format."""
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field
 
 from .session_inventory import Identifier, InventoryModel
+
+
+class UnsupportedEvidenceIssue(StrEnum):
+    """Capture issues meaning no supported mechanism can prove this body.
+
+    Coverage reports these as `unsupported`, never as merely `missing`.
+    """
+
+    HARNESS = "unsupported_harness_evidence"
+    ENVELOPE = "unsupported_envelope_evidence"
 
 
 class NativeRelationshipFact(InventoryModel):
