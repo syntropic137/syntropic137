@@ -315,6 +315,63 @@ CODEX_MODEL_ALIAS_TARGETS: dict[CodexModelAlias, ModelId] = {
 """What each codex alias runs as today. One entry per ``CodexModelAlias``."""
 
 
+CLAUDE_MODEL_ALIAS_TARGETS: dict[ModelAlias, ModelId] = {
+    # claude-code 2.1.280 moved `opus` to Opus 5.5; probed on 2.1.281, the CLI
+    # reports it as exactly `claude-opus-5-5` (no `[1m]` suffix).
+    ModelAlias.OPUS: ModelId.CLAUDE_OPUS_5_5,
+    ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5,
+    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
+    ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
+}
+"""What the pinned ``claude`` CLI is EXPECTED to resolve each alias to.
+
+Unlike ``CODEX_MODEL_ALIAS_TARGETS`` the platform does not translate these:
+the alias itself reaches ``claude --model`` and the CLI picks. So this is an
+expectation that must track the pinned CLI (ADR-067 phase 0), and a run's
+observed model always wins over it. One entry per ``ModelAlias``; pricing's
+``MODEL_ALIASES`` is built from this map, never a second copy of it."""
+
+
+class AliasResolutionBasis(StrEnum):
+    """How confident an alias -> model id resolution is."""
+
+    TRANSLATED = "translated"
+    """The platform itself rewrites the alias before the CLI sees it (codex
+    ``--model gpt-6-sol``): the target IS what runs."""
+
+    EXPECTED = "expected"
+    """The alias reaches the CLI verbatim and the CLI resolves it (claude):
+    the target is what the pinned CLI is expected to pick."""
+
+
+@dataclass(frozen=True)
+class ModelAliasResolution:
+    """A platform model alias and the concrete model id it stands for."""
+
+    alias: str
+    target: ModelId
+    basis: AliasResolutionBasis
+
+
+def resolve_model_alias(model: str | None) -> ModelAliasResolution | None:
+    """Resolve a platform alias (``opus``, ``gpt-sol``) to its concrete id.
+
+    ``None`` for anything that is not an alias: a concrete id, an unknown
+    string, or no model. The single source of truth for alias targets on
+    DEFINITION surfaces, the codex command builder and pricing alike. Never
+    use it to label what a run DID: that is the observed model (ADR-067 D9).
+    """
+    if model is None:
+        return None
+    for claude_alias, claude_target in CLAUDE_MODEL_ALIAS_TARGETS.items():
+        if model == claude_alias:
+            return ModelAliasResolution(model, claude_target, AliasResolutionBasis.EXPECTED)
+    for codex_alias, codex_target in CODEX_MODEL_ALIAS_TARGETS.items():
+        if model == codex_alias:
+            return ModelAliasResolution(model, codex_target, AliasResolutionBasis.TRANSLATED)
+    return None
+
+
 def resolve_codex_model_alias(model: str) -> str:
     """Return the concrete codex slug for ``model``; non-aliases pass through."""
     for alias, target in CODEX_MODEL_ALIAS_TARGETS.items():

@@ -2004,6 +2004,12 @@ export interface components {
             version: string;
         };
         /**
+         * AliasResolutionBasis
+         * @description How confident an alias -> model id resolution is.
+         * @enum {string}
+         */
+        AliasResolutionBasis: "translated" | "expected";
+        /**
          * ArtifactActionResponse
          * @description Response for artifact update/delete actions.
          */
@@ -4336,6 +4342,11 @@ export interface components {
             argument_hint?: string | null;
             /** Model */
             model?: string | null;
+            /** Resolved Model */
+            resolved_model?: string | null;
+            resolution_basis?: components["schemas"]["AliasResolutionBasis"] | null;
+            /** Model Display */
+            model_display?: string | null;
             /** Provider */
             provider?: string | null;
             /**

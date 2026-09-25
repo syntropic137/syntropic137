@@ -34,9 +34,10 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
-from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
+from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_shared.agents import AliasResolutionBasis  # noqa: TC001
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.observed_model import format_observed_model
 
@@ -433,6 +434,18 @@ class PhaseDefinitionResponse(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    """The model as DEFINED: often a platform alias (``opus``, ``gpt-sol``)."""
+    resolved_model: ResolvedModelId | None = None
+    """The concrete id ``model`` resolves to when it is an alias, else ``None``
+    (already concrete, unknown, or unset). A definition-time expectation, not
+    what a run used: runs report their observed model (ADR-067 D9)."""
+    resolution_basis: AliasResolutionBasis | None = None
+    """``translated``: the platform rewrites the alias itself (codex), so the
+    target is what runs. ``expected``: the CLI resolves it (claude), so the
+    target is what the pinned CLI is expected to pick. ``None`` with no alias."""
+    model_display: str | None = None
+    """``model`` plus its resolution, e.g. ``gpt-sol → gpt-6-sol``; the bare
+    model when there is nothing to resolve. Render verbatim."""
     provider: str | None = None
     # Stored since #1012, readable since #1013. `allow_delegation` is
     # security-relevant -- it stages both agent auths -- so a caller must be

@@ -272,7 +272,10 @@ describe("workflow crud commands", () => {
             name: "Test Workflow",
             workflow_type: "custom",
             classification: "single-phase",
-            phases: [{ name: "build" }, { name: "test" }],
+            phases: [
+              { name: "build", model: "gpt-sol", model_display: "gpt-sol → gpt-6-sol" },
+              { name: "test" },
+            ],
             input_declarations: [
               { name: "pr_number", required: true, description: "Pull request number" },
               { name: "branch", required: false, description: "Target branch", default: "main" },
@@ -290,6 +293,8 @@ describe("workflow crud commands", () => {
       expect(out).toContain("Workflow Details");
       expect(out).toContain("build");
       expect(out).toContain("test");
+      // A definition surface shows what its alias resolves to.
+      expect(out).toContain("gpt-sol → gpt-6-sol");
       // Regression: show must display required inputs so users know what --input flags to pass
       expect(out).toContain("pr_number");
       expect(out).toContain("required");
