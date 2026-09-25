@@ -168,6 +168,26 @@ async def test_every_terminal_status_records_one_replay_stable_fact(
     assert deadlines.rows["run"].due_at == ENDED + timedelta(minutes=5)
 
 
+@pytest.mark.parametrize("kind", list(ExecutionTerminalEventType))
+async def test_execution_terminal_settles_every_spool_of_the_run(
+    kind: ExecutionTerminalEventType,
+) -> None:
+    """One terminal notion: the fact that starts coverage settlement also ends
+    every capture spool of the run, even a session that never reported
+    SessionCompleted (killed with its container)."""
+    from syn_domain.contexts.agent_sessions import RunIdentity
+
+    journal, spools = AsyncMock(), AsyncMock()
+    projector = HostSessionEvidenceProjector(journal, "installation", spools)
+    assert kind in projector.get_subscribed_event_types()
+    await projector.handle(_terminal(kind))
+    await projector.handle(_terminal(kind))  # replay is idempotent
+    run = RunIdentity(source_instance_id="installation", execution_id="run")
+    assert [call.args for call in spools.settle_run.await_args_list] == [(run,), (run,)]
+    spools.settle.assert_not_awaited()
+    spools.project.assert_not_awaited()
+
+
 def _processor(projector: HostSessionEvidenceProjector) -> InventoryReconciliationProcessManager:
     jobs = AsyncMock()
     jobs.claim.return_value = None

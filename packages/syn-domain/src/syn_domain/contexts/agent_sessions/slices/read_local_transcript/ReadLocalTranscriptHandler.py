@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class LocalTranscriptRead:
-    status: Literal["present", "not_captured", "missing", "expired", "too_large"]
+    status: Literal["present", "not_captured", "missing", "expired", "deleted", "too_large"]
     capture: CataloguedCapture | None = None
     body: bytes | None = field(default=None, repr=False)
 
@@ -52,11 +52,21 @@ class ReadLocalTranscriptHandler:
         if capture is None:
             return LocalTranscriptRead(status="not_captured")
         await self._access.require_read(capture)
+        # A durable tombstone wins over bytes that a pending deletion has not
+        # removed yet; the body is never served once removal was requested.
+        tombstone = await self._access.tombstone(capture)
+        if tombstone is not None:
+            return LocalTranscriptRead(status=tombstone, capture=capture)
         if capture.archive.size > self._max_bytes:
             return LocalTranscriptRead(status="too_large", capture=capture)
         # Integrity and storage errors propagate; neither means confirmed absence.
         body = await self._archive.get(capture.archive)
         if body is None:
+            # A deletion request marks the archive before its SQL tombstone
+            # commits; ask again so the absence is labelled by its cause.
+            tombstone = await self._access.tombstone(capture)
+            if tombstone is not None:
+                return LocalTranscriptRead(status=tombstone, capture=capture)
             deleted = await self._archive.is_deleted(capture.archive)
             return LocalTranscriptRead(status="expired" if deleted else "missing", capture=capture)
         return LocalTranscriptRead(status="present", capture=capture, body=body)

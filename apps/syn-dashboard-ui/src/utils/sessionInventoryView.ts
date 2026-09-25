@@ -13,6 +13,7 @@ type Membership = components['schemas']['Membership']
 type LineageEdge = components['schemas']['LineageEdge']
 type CaptureReceipt = components['schemas']['CaptureReceipt']
 type IdentityBinding = components['schemas']['IdentityBinding']
+type TranscriptBodyState = components['schemas']['TranscriptBodyState']
 export type InventoryGap = components['schemas']['InventoryGap']
 
 export interface LineageLink {
@@ -22,11 +23,21 @@ export interface LineageLink {
   confidence: LineageEdge['confidence']
 }
 
+/** One receipt hash under the name of the representation it holds. */
+export interface RevisionHash {
+  label: string
+  value: string
+}
+
 export interface CaptureState {
   /** Availability recorded by the latest local receipt, or null if none. */
   local: CaptureReceipt['availability'] | null
-  /** Current restriction on the local body (expired/withheld), separate from the receipt. */
-  current: 'expired' | 'withheld' | null
+  /** Current restriction on the local body (expired/deleted/withheld), separate from the receipt. */
+  current: TranscriptBodyState['status'] | null
+  /** Current restriction on the replica body, matched by source-content hash. */
+  remoteCurrent: TranscriptBodyState['status'] | null
+  /** Hashes of the newest receipts, each named by its representation; never compare kinds. */
+  hashes: RevisionHash[]
   /** The newest local present receipt a transcript can be opened from. */
   openable: CaptureReceipt | null
   /** Remote replication of this session's transcript. */
@@ -75,21 +86,57 @@ function isCapture(item: KeyedItem['item']): item is CaptureReceipt { return 'av
 function isBinding(item: KeyedItem['item']): item is IdentityBinding { return 'owner' in item && 'transcript' in item }
 function isGap(item: KeyedItem['item']): item is InventoryGap { return 'reason' in item }
 
-function captureState(receipts: CaptureReceipt[], data: InventoryData): CaptureState {
-  const newest = (destination: 'local' | 'remote') => receipts
-    .filter(r => (r.destination ?? 'local') === destination)
-    .sort((a, b) => b.receipt_sequence - a.receipt_sequence)[0] ?? null
-  const local = newest('local')
-  const remote = newest('remote')
-  const current = local?.archived_byte_hash
-    ? data.bodyOverrides.find(state => state.archive_sha256 === local.archived_byte_hash)?.status ?? null
+const REVISION_LABELS: Record<string, string> = {
+  archived_bytes_sha256: 'Archived bytes SHA-256',
+  source_content_hash: 'Source content hash',
+  unqualified: 'Transcript revision (unqualified)',
+}
+
+/**
+ * Current body state matched by the hash the receipt actually carries: archived
+ * bytes locally, the APSS source-content hash at a replica. Never cross-matched.
+ */
+function currentBody(receipt: CaptureReceipt | null, data: InventoryData): TranscriptBodyState['status'] | null {
+  if (!receipt) return null
+  if ((receipt.destination ?? 'local') === 'local') {
+    return receipt.archived_byte_hash
+      ? data.bodyOverrides.find(state => state.archive_sha256 === receipt.archived_byte_hash)?.status ?? null
+      : null
+  }
+  const revision = receipt.transcript_revision
+  return revision
+    ? data.bodyOverrides.find(state => state.source_content_hash != null && state.source_content_hash === revision)?.status ?? null
     : null
+}
+
+function revisionHash(entry: CaptureEntry | null): RevisionHash | null {
+  if (!entry?.receipt.transcript_revision) return null
+  const kind = entry.hashes?.transcript_revision_kind ?? 'unqualified'
+  return { label: REVISION_LABELS[kind] ?? REVISION_LABELS.unqualified, value: entry.receipt.transcript_revision }
+}
+
+interface CaptureEntry {
+  receipt: CaptureReceipt
+  hashes: KeyedItem['hashes']
+}
+
+function captureState(entries: CaptureEntry[], data: InventoryData): CaptureState {
+  const newest = (destination: 'local' | 'remote') => entries
+    .filter(e => (e.receipt.destination ?? 'local') === destination)
+    .sort((a, b) => b.receipt.receipt_sequence - a.receipt.receipt_sequence)[0] ?? null
+  const localEntry = newest('local')
+  const remoteEntry = newest('remote')
+  const local = localEntry?.receipt ?? null
+  const remote = remoteEntry?.receipt ?? null
+  const current = currentBody(local, data)
   let replication: CaptureState['replication'] = 'not_replicated'
   if (remote) replication = remote.availability === 'present' ? 'replicated' : remote.availability
   else if (data.status.summary.remote_replication === 'disabled') replication = 'disabled'
   return {
     local: local?.availability ?? null,
     current,
+    remoteCurrent: currentBody(remote, data),
+    hashes: [revisionHash(localEntry), revisionHash(remoteEntry)].filter((h): h is RevisionHash => h !== null),
     openable: local && local.availability === 'present' && !current && local.archived_byte_hash ? local : null,
     replication,
   }
@@ -104,7 +151,7 @@ type RowIndex = Map<string, SessionRow>
 function emptyRow(key: string, ref: NodeRef): SessionRow {
   return {
     key, ref, memberships: [], parents: [], children: [], bindings: [],
-    capture: { local: null, current: null, openable: null, replication: 'not_replicated' },
+    capture: { local: null, current: null, remoteCurrent: null, hashes: [], openable: null, replication: 'not_replicated' },
   }
 }
 
@@ -142,10 +189,10 @@ function attachBindings(rows: RowIndex, entries: KeyedItem[]): void {
   }
 }
 
-function receiptsByNode(entries: KeyedItem[]): Map<string, CaptureReceipt[]> {
-  const receipts = new Map<string, CaptureReceipt[]>()
-  for (const { item, keys } of entries) {
-    if (isCapture(item) && keys.node_key) receipts.set(keys.node_key, [...(receipts.get(keys.node_key) ?? []), item])
+function receiptsByNode(entries: KeyedItem[]): Map<string, CaptureEntry[]> {
+  const receipts = new Map<string, CaptureEntry[]>()
+  for (const { item, keys, hashes } of entries) {
+    if (isCapture(item) && keys.node_key) receipts.set(keys.node_key, [...(receipts.get(keys.node_key) ?? []), { receipt: item, hashes }])
   }
   return receipts
 }

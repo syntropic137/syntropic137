@@ -25,6 +25,8 @@ class SpoolDrainProgress:
     next_after: int | None
     captured: int
     deleted: int = 0
+    staged_bytes: int = 0
+    """Spool bytes this page read; counted toward the retained spool quota."""
 
 
 class LocalSpoolDrain:
@@ -84,4 +86,10 @@ class LocalSpoolDrain:
             except TranscriptDeletedError:
                 deleted += 1
         next_after = entries[-1].sequence if len(entries) < len(page.entries) else page.next_after
-        return SpoolDrainProgress(page.watermark, next_after, len(entries) - deleted, deleted)
+        return SpoolDrainProgress(
+            page.watermark,
+            next_after,
+            len(entries) - deleted,
+            deleted,
+            sum(entry.byte_count for entry in entries),
+        )

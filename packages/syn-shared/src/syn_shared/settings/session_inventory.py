@@ -72,6 +72,22 @@ class SessionInventorySettings(BaseSettings):
         description="Optional local body lifetime since first catalog acquisition. Disabled by default. Expiry permanently deletes exact shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination.",
     )
 
+    local_body_max_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional byte quota for distinct local transcript bodies. Disabled by default. When exceeded, the oldest bodies are tombstoned and erased like age expiry; discovery history is retained.",
+    )
+    spool_retention_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional lifetime of a staged workspace capture spool since registration. Disabled by default. Applies only after the session completed. Expiry records an inventory gap before the volume is removed. Archived spools are released without it.",
+    )
+    spool_max_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional byte quota for retained staged spool bytes. Disabled by default. When exceeded, the oldest settled spools expire with a recorded gap; a non-terminal spool is evicted only when settled spools cannot satisfy the quota.",
+    )
+
     replication_enabled: bool = Field(
         default=False,
         description="Enable optional workflow inventory replication through the standard exporter.",

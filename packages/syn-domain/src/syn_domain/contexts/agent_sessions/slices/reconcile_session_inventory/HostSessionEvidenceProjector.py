@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
     InventoryReconciliationSweepEvent,
 )
+from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+    SessionCompletedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationBindingConflictedEvent import (
     SessionInvocationBindingConflictedEvent,
 )
@@ -73,6 +76,13 @@ class HostSessionEvidenceProjector:
     live ``process_pending()`` and appends SETTLEMENT_DEADLINE facts for
     deadlines at or before the latest RECORDED clock time, never the wall
     clock, so replay reproduces the same batches.
+
+    Capture spools share the same terminal notion. A spool settles on its own
+    session's ``SessionCompleted`` OR on its execution's terminal fact (the one
+    that starts settlement above): once the run can never execute again, no
+    session of it can resume, even one killed before reporting completion.
+    Settling never reads or removes bytes; release still needs a later
+    complete traversal.
     """
 
     def __init__(
@@ -99,6 +109,8 @@ class HostSessionEvidenceProjector:
             SessionInvocationBindingConflictedEvent.event_type,
             *ExecutionTerminalEventType,
         }
+        if self._spools is not None:
+            types.add(SessionCompletedEvent.event_type)
         if self._settlements is not None:
             types.add(InventoryReconciliationSweepEvent.event_type)
         return types
@@ -113,9 +125,18 @@ class HostSessionEvidenceProjector:
             SessionInvocationRecordedEvent.event_type: self._project_invocation,
             SessionInvocationBindingConflictedEvent.event_type: self._project_binding_conflict,
             InventoryReconciliationSweepEvent.event_type: self._record_clock,
+            SessionCompletedEvent.event_type: self._settle_session_spool,
         }.get(event_type or "")
         if project is not None:
             await project(envelope)
+
+    async def _settle_session_spool(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        # A settled spool may be released only after a later complete
+        # traversal; settling itself never deletes or reads staged bytes.
+        if self._spools is None:
+            return
+        completed = SessionCompletedEvent.model_validate_json(envelope.event.model_dump_json())
+        await self._spools.settle(completed.session_id)
 
     async def _project_session(self, envelope: EventEnvelope[DomainEvent]) -> None:
         event = SessionStartedEvent.model_validate_json(envelope.event.model_dump_json())
@@ -246,6 +267,10 @@ class HostSessionEvidenceProjector:
             return
         metadata = envelope.metadata
         run = RunIdentity(source_instance_id=self._source, execution_id=event.execution_id)
+        if self._spools is not None:
+            # Same terminal fact that starts coverage settlement: no session of
+            # this run can resume, so none of its spools may stay live.
+            await self._spools.settle_run(run)
         reference = EvidenceReference(
             producer_id=SETTLEMENT_PRODUCER,
             evidence_id=metadata.event_id,

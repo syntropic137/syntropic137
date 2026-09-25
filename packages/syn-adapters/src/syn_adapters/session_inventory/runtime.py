@@ -31,6 +31,7 @@ from .body_retention import LocalBodyRetention
 from .capture_catalog import PostgresCaptureCatalog
 from .child_journal import ChildJournalDrain
 from .clock import InventoryRecoveryClock
+from .deletion_fence import DeletionFence
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
 from .history_receipts import PostgresBackfillReceipts, PostgresHistoryBackfillQueue
@@ -43,9 +44,15 @@ from .postgres_jobs import PostgresSessionInventoryJobs
 from .postgres_settlements import PostgresSettlementDeadlines
 from .postgres_spools import PostgresCaptureSpools
 from .recovery_worker import CaptureRecoveryWorker
-from .replication_runtime import create_replication_manager
+from .replication_runtime import (
+    capture_destination_id,
+    capture_outboxes,
+    create_replication_manager,
+)
 from .spool_drain import LocalSpoolDrain
+from .spool_release import CaptureSpoolRetention
 from .transcript_access import InstallationTranscriptAccess
+from .transcript_deletions import PostgresTranscriptDeletions
 
 if TYPE_CHECKING:
     from event_sourcing import EventStoreClient
@@ -84,6 +91,10 @@ class InventoryRuntime:
     drain: LocalSpoolDrain
     spools: PostgresCaptureSpools
     history_queue: PostgresHistoryBackfillQueue
+    catalog: PostgresCaptureCatalog
+    access: InstallationTranscriptAccess
+    deletions: PostgresTranscriptDeletions
+    fence: DeletionFence
     replication: InventoryReplicationProcessManager | None = None
     history: BackfillSessionInventoryHandler | None = None
     """None when no observability reader is wired; explicit backfill is then unavailable."""
@@ -96,13 +107,26 @@ class InventoryWork:
     recovery: CaptureRecoveryWorker | None = None
     retention: LocalBodyRetention | None = None
     history: ProcessHistoryBackfillQueueHandler | None = None
+    spool_release: CaptureSpoolRetention | None = None
 
     async def schedule(self) -> None:
         if self.retention is not None:
             try:
-                await self.retention.step()
-            except Exception:
-                logger.exception("Local body expiry failed; durable deletion remains pending")
+                await self.retention.drain()
+            except Exception as exc:
+                # Type only: messages can name archive paths or exporter output.
+                logger.error(
+                    "Local body deletion failed (%s); durable request remains pending",
+                    type(exc).__name__,
+                )
+        if self.spool_release is not None:
+            try:
+                await self.spool_release.step()
+            except Exception as exc:
+                logger.error(
+                    "Capture spool release failed (%s); durable intent remains pending",
+                    type(exc).__name__,
+                )
         if self.recovery is not None:
             await self.recovery.step()
         if self.history is not None:
@@ -154,6 +178,22 @@ async def create_inventory_runtime(
         archive, evidence, AgenticNativeSessionEvidence(), catalog=PostgresCaptureCatalog(pool)
     )
     drain = LocalSpoolDrain(capture)
+    recovery = DockerSpoolRecovery(recovery_image) if recovery_image is not None else None
+    spool_release = (
+        CaptureSpoolRetention(
+            pool,
+            source_id,
+            recovery,
+            evidence,
+            age_seconds=settings.spool_retention_seconds,
+            max_bytes=settings.spool_max_bytes,
+        )
+        if recovery is not None
+        else None
+    )
+    catalog = PostgresCaptureCatalog(pool)
+    access = InstallationTranscriptAccess(pool, source_id)
+    fence = DeletionFence(pool, source_id)
     history = (
         BackfillSessionInventoryHandler(
             PostgresHistoricalEvidenceSource(
@@ -182,24 +222,26 @@ async def create_inventory_runtime(
         )
         if history is not None
         else None,
+        # Always present: owner deletions run even without automatic retention.
         retention=LocalBodyRetention(
             pool,
             archive,
             source_id,
             age_seconds=settings.local_body_retention_seconds,
+            max_bytes=settings.local_body_max_bytes,
             exporter_binary=settings.exporter_binary,
-        )
-        if settings.local_body_retention_seconds is not None
-        else None,
+        ),
+        spool_release=spool_release,
         recovery=CaptureRecoveryWorker(
             spools,
-            DockerSpoolRecovery(recovery_image),
+            recovery,
             drain,
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             children=ChildJournalDrain(evidence),
+            release=spool_release,
         )
-        if recovery_image is not None
+        if recovery is not None
         else None,
         scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository),
         step=InventoryStepHandler(
@@ -221,9 +263,18 @@ async def create_inventory_runtime(
         jobs=jobs,
         archive=archive,
         body_availability=PostgresBodyAvailability(pool),
-        transcripts=ReadLocalTranscriptHandler(
-            PostgresCaptureCatalog(pool), archive, InstallationTranscriptAccess(pool, source_id)
+        transcripts=ReadLocalTranscriptHandler(catalog, archive, access),
+        catalog=catalog,
+        access=access,
+        deletions=PostgresTranscriptDeletions(
+            pool,
+            source_id,
+            capture_destination_id(settings),
+            archive=archive,
+            fence=fence,
+            outboxes=capture_outboxes(settings, source_id),
         ),
+        fence=fence,
         repository=repository,
         processor=InventoryReconciliationProcessManager(
             jobs,

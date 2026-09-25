@@ -40,9 +40,14 @@ function Details({ row }: { row: SessionRow }) {
     <dt>Phase attempt</dt><dd>{phases.length ? phases.join(', ') : 'none (unlinked)'}</dd>
     <dt>Parent</dt><dd>{row.parents.length ? row.parents.map(p => `${p.relation} from ${namespaceOf(p.ref)} ${p.ref.local_id}`).join(', ') : 'none'}</dd>
     <dt>Local transcript</dt><dd>{row.capture.local ? `recorded ${row.capture.local}${row.capture.current ? `; now ${row.capture.current}` : ''}` : 'no local receipt'}</dd>
-    <dt>Replication</dt><dd>{row.capture.replication.replace('_', ' ')}</dd>
+    <dt>Replication</dt><dd>{row.capture.replication.replace('_', ' ')}{row.capture.remoteCurrent ? `; replica now ${row.capture.remoteCurrent}` : ''}</dd>
+    {row.capture.hashes.map(hash => <FragmentHash key={`${hash.label}:${hash.value}`} label={hash.label} value={hash.value} />)}
     {row.bindings.map(binding => <FragmentBinding key={`${binding.role}:${namespaceOf(binding.ref)}:${binding.ref.local_id}`} binding={binding} />)}
   </dl>
+}
+
+function FragmentHash({ label, value }: { label: string; value: string }) {
+  return <><dt>{label}</dt><dd><code className="si-id">{value}</code></dd></>
 }
 
 function FragmentBinding({ binding }: { binding: SessionRow['bindings'][number] }) {

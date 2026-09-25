@@ -9,7 +9,7 @@
  */
 import {
   INVENTORY_PAGE_LIMIT, getSessionInventory, getSessionInventoryPage,
-  type InventoryFilters, type InventoryItem, type InventoryItemKeys, type InventoryKind,
+  type CaptureRevisionHashes, type InventoryFilters, type InventoryItem, type InventoryItemKeys, type InventoryKind,
   type InventorySnapshot, type InventoryStatus, type TranscriptBodyState,
 } from './sessionInventory'
 
@@ -21,6 +21,8 @@ export const DEFAULT_INVENTORY_BUDGET = 5000
 export interface KeyedItem {
   item: InventoryItem
   keys: InventoryItemKeys
+  /** Capture pages only: names the representation behind each receipt's hashes. */
+  hashes?: CaptureRevisionHashes
 }
 
 export type InventorySections = Record<InventoryKind, KeyedItem[]>
@@ -60,7 +62,7 @@ async function readPage(context: ReadContext, kind: InventoryKind, cursor: strin
   signal?.throwIfAborted()
   if (page.kind !== kind) throw new Error('Inventory response belongs to another section')
   if (page.snapshot.snapshot_id !== snapshot.snapshot_id) throw new Error('Inventory revision changed; load the latest revision')
-  page.items.forEach((item, index) => data.sections[kind].push({ item, keys: page.item_keys[index] ?? {} }))
+  page.items.forEach((item, index) => data.sections[kind].push({ item, keys: page.item_keys[index] ?? {}, hashes: page.capture_hashes?.[index] }))
   data.bodyOverrides.push(...(page.body_overrides ?? []))
   context.remaining -= page.items.length
   const next: string | null = page.next_cursor ?? null

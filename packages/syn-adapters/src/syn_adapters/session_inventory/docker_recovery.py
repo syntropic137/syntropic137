@@ -61,6 +61,17 @@ async def _docker(
             await process.wait()
 
 
+async def volume_unreferenced(volume: str) -> bool:
+    """True only when no container, running or stopped, references the volume.
+
+    A failed query is treated as referenced: release must never be optimistic.
+    """
+    users = await _docker(
+        ["ps", "-aq", "--no-trunc", "--filter", f"volume={volume}"], max_bytes=65536
+    )
+    return users.exit_code == 0 and not users.stdout.strip()
+
+
 class DockerSpoolRecovery:
     def __init__(self, image: str) -> None:
         self._image = image
@@ -72,6 +83,9 @@ class DockerSpoolRecovery:
         exists = await _docker(["volume", "inspect", location.volume_name], max_bytes=65536)
         if exists.exit_code != 0:
             raise FileNotFoundError("Registered capture volume is not available")
+        # Checked before our helper attaches: any other reference (a running or
+        # stopped workspace) could still write, so this traversal cannot release.
+        exclusive = await volume_unreferenced(location.volume_name)
         image = await verify_image_async(self._image)
         name = f"syn-capture-recovery-{uuid4().hex}"
         try:
@@ -124,6 +138,21 @@ class DockerSpoolRecovery:
                 children=WorkspaceChildJournalReader(
                     execute, f"/spool/.agentic-session-store/{location.partition}/children.sqlite"
                 ),
+                exclusive=exclusive,
             )
         finally:
             await _docker(["rm", "-f", name], timeout=15, max_bytes=65536)
+
+    async def remove(self, spool: CaptureSpool) -> bool:
+        """Remove a released capture volume. Docker refuses while any container uses it."""
+        location = workspace_capture_location(spool.run, spool.session_id)
+        result = await _docker(["volume", "rm", location.volume_name], max_bytes=65536)
+        if result.exit_code == 0:
+            return True
+        detail = result.stderr.lower()
+        if "no such volume" in detail:
+            return True
+        if "in use" in detail:
+            return False
+        # Never echo daemon output: it can carry host paths.
+        raise RuntimeError("Capture volume removal failed")

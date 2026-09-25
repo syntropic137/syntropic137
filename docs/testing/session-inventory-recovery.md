@@ -206,8 +206,8 @@ The current exporter removes deleted envelopes from its outbox spool during
 bounded drain steps. Shared bytes remain until other pending qualified identities
 no longer need delivery. The real remote replication test verifies physical
 outbox cleanup, remote absence, delayed-upload rejection and retained catalog
-metadata. Workspace source volumes are separate and are not reclaimed by this
-policy yet.
+metadata. Workspace source volumes are reclaimed by the spool release owner
+described below.
 
 ## Coverage seal and bounded settlement
 
@@ -251,3 +251,118 @@ uv run pytest -m unit packages/syn-domain/tests/contexts/agent_sessions/test_cov
 TEST_DATABASE_URL=postgresql://... uv run pytest -m integration \
   packages/syn-adapters/tests/test_session_inventory_pipeline.py
 ```
+
+## Transcript authorization, deletion and retention (rows 10 and 11)
+
+Scope: Syntropic137 has no per-user principal (ADR-059). The boundary is the
+gateway-authenticated installation plus current execution visibility. Raw-token
+scope differences are proven on the SeshMagic side.
+
+Whole-object policy. Revocation and deletion are keyed by the archived byte
+SHA-256, so a decision taken through one run applies to every run whose
+membership shares those bytes. The exact revision must be catalogued for the
+addressed, currently visible run; otherwise the API answers `not_captured` (read)
+or 404 (write) without size, format or bytes. Identifiers are opaque lookup keys,
+never paths or fetch URLs.
+
+Routes (all `Cache-Control: no-store`, fixed error strings):
+
+- `GET /executions/{id}/session-transcripts/{archive_hash}`: exact bytes or an
+  explicit `not_captured`, `missing`, `expired`, `deleted` or `too_large` status.
+  Revoked objects answer 403.
+- `POST .../{archive_hash}/revocation`: withhold reads; bytes are retained.
+- `POST .../{archive_hash}/deletion` (`reason`: `deletion` or `retraction`):
+  idempotent durable tombstone, 202. The body is withheld from that commit on,
+  delivery jobs are cancelled, and a later tick erases bytes.
+- `GET .../{archive_hash}/deletion`: local erasure and per-destination replica
+  propagation state.
+
+Redaction. Bodies can contain whatever the agent saw. The API serves exactly the
+archived bytes (`redaction: "source"`): only redaction the capturing source
+applied before archival. The server never rewrites or slices bytes. Error bodies
+and background-task logs carry fixed text or an exception class name, never an
+exception message, path, token or payload.
+
+Hash naming. `archive_sha256`, `archived_byte_hash` and `archived_bytes_sha256`
+are SHA-256 of archived bytes. `source_content_hash` is the APSS original-content
+hash (`sha256:` prefix) used by replicas. Capture pages add `capture_hashes[i]`
+naming what `items[i].transcript_revision` holds, because local and remote
+receipts store different representations in that field.
+
+Deletion fence. After a deletion request commits, withdrawn bytes never leave
+this host again, are never served and never yield derived facts. The request
+holds an installation-wide exclusive advisory lock while it writes the archive
+marker (every local read and put of those bytes now fails), commits the SQL
+tombstone and discards every queued exporter copy. Byte consumers hold the
+shared side across their tombstone check and the use of the bytes: handing an
+envelope to the exporter, sending it, receipt lookups, historical backfill and
+the transcript read route, which renders its response before releasing the
+lock. Each use either completed before the request or observes the tombstone.
+
+Per-capture outboxes. The standard exporter cannot cancel a queued upload, so
+every capture gets its own exporter outbox directory, owned by Syntropic137.
+Discarding a queued upload is removing that directory; Syntropic137 never reads
+or edits the exporter's files inside it. The drain sends one capture's outbox at
+a time under the shared fence and discards (never sends) a withdrawn one. The
+pre-1398 shared outbox mixed captures and cannot be partially cancelled: it is
+never drained again. On first use it is retired: undelivered, non-withdrawn
+captures are redelivered through their own outboxes, then it is removed.
+
+Replica deletion. The APSS source-content hash is recorded on the delivery job
+before the envelope reaches the exporter, so replica deletion never needs local
+bytes. Deletes use their own outbox. Replica state per destination: `pending`
+(not handed to the exporter), `queued` (durable in the deletion outbox),
+`propagated` (a drain that emptied the deletion outbox acknowledged it; one
+deletion is in flight per destination so acknowledgements are attributable; an
+unacknowledged drop is requeued) or `unresolvable` (a legacy delivery with no
+recorded content hash and no local bytes left to derive one).
+
+Anti-resurrection. Once tombstoned, bytes cannot return through archive re-put,
+spool replay, capture retry, a new destination or a replica retry. Catalog
+rows, inventory revisions and body overrides keep the session discoverable with
+`expired`, `deleted` or `withheld`, including replica receipts matched by
+content hash.
+
+Quotas (all disabled by default, ADR-004 settings forwarded through compose):
+
+- `SYN_SESSION_INVENTORY_LOCAL_BODY_MAX_BYTES`: distinct archived objects are
+  counted once; the oldest are tombstoned as `retention_quota` until the newest
+  fit. Owner deletions run whether or not any quota is set.
+- `SYN_SESSION_INVENTORY_SPOOL_RETENTION_SECONDS`: a settled spool (completed
+  session or terminal execution) past this age expires.
+- `SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES`: settled spools are evicted oldest
+  first; a non-terminal spool only when settled ones cannot satisfy the quota.
+
+Every expiry journals a `capture_spool_expired` gap before the volume is removed.
+
+Spool release. A workspace spool volume is removed as `archived` only with a
+durable terminal fact: the session completed (`SessionCompleted`) or its
+execution reached the terminal event that also starts coverage settlement
+(`WorkflowCompleted`, `WorkflowFailed`, `ExecutionCancelled`,
+`WorkflowInterrupted`; one terminal notion, so a session killed before reporting
+completion is not left live), a complete
+transcript and child traversal began after that, and no other container was
+attached when the volume was opened. An unattached workspace without a terminal
+fact may be paused and resume, so it is never released as archived. Docker
+refuses to remove an attached volume; an interrupted archived release reopens
+the spool for capture. `release_reason` is committed before removal and
+`released_at` after, so a crash repeats an idempotent removal. The cleanup owner
+runs only from the live inventory tick, never from replay.
+
+Known limits: sessions completed before this change are not settled
+retroactively (the projection version is unchanged, to avoid a full replay).
+Their spools are retained until the byte quota forces an expiry with a gap. The
+archive byte quota scans the installation's catalog each tick. A request
+waits for in-flight hand-offs under the shared fence (each bounded by the
+exporter timeout).
+
+Tests: `test_transcript_authz_postgres.py` (API matrix: shared membership,
+malformed/traversal/NUL IDs, foreign run and installation, revoked, deleted,
+expired, missing, too large, resurrection, planted secrets),
+`test_transcript_deletion_postgres.py` (whole-object tombstones, quota),
+`test_deletion_fence_postgres.py` (both enqueue/delete orders, in-flight enqueue
+and drain, legacy queued upload without hash or bytes, lost local bytes,
+unacknowledged drops, backfill with held erasure; a recording exporter logs
+every hand-off and send), `test_spool_release_postgres.py` (settlement, exclusivity,
+expiry gaps, byte quota), `test_docker_spool_release.py` (real Docker in-use
+refusal), plus unit tests for the recovery worker and projector.

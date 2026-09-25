@@ -71,18 +71,32 @@ function join(pages: readonly Page[]): Joined {
   return joined;
 }
 
+/**
+ * Current body state for one receipt, matched by the hash it actually carries:
+ * archived bytes locally, the APSS source-content hash at a replica. The two
+ * representations are never comparable.
+ */
+function currentBody(capture: Capture, overrides: Joined["overrides"] | undefined): string | undefined {
+  if ((capture.destination ?? "local") === "local") {
+    return overrides?.find(state => state.archive_sha256 === capture.archived_byte_hash)?.status;
+  }
+  return overrides?.find(state => state.source_content_hash != null && state.source_content_hash === capture.transcript_revision)?.status;
+}
+
+function withCurrent(capture: Capture, overrides: Joined["overrides"]): string {
+  const current = currentBody(capture, overrides);
+  return current ? `${capture.availability} (now ${current})` : capture.availability;
+}
+
 function localAvailability(captures: readonly Capture[], overrides: Joined["overrides"]): string {
   const local = captures.filter(capture => (capture.destination ?? "local") === "local");
   if (local.length === 0) return "not captured";
-  return local.map(capture => {
-    const current = overrides.find(state => state.archive_sha256 === capture.archived_byte_hash)?.status;
-    return current ? `${capture.availability} (now ${current})` : capture.availability;
-  }).join(", ");
+  return local.map(capture => withCurrent(capture, overrides)).join(", ");
 }
 
-function replication(captures: readonly Capture[], remote: Remote): string {
+function replication(captures: readonly Capture[], remote: Remote, overrides: Joined["overrides"]): string {
   const replicated = captures.filter(capture => capture.destination === "remote");
-  if (replicated.length > 0) return replicated.map(capture => capture.availability).join(", ");
+  if (replicated.length > 0) return replicated.map(capture => withCurrent(capture, overrides)).join(", ");
   return remote === "disabled" ? "remote replication disabled" : "not replicated";
 }
 
@@ -98,7 +112,7 @@ function nodeLines(key: string, joined: Joined, remote: Remote): string[] {
   }
   const captures = joined.captures.get(key) ?? [];
   if (node.ref.kind === "transcript" || captures.length > 0) {
-    lines.push(`    local: ${localAvailability(captures, joined.overrides)}; replication: ${replication(captures, remote)}`);
+    lines.push(`    local: ${localAvailability(captures, joined.overrides)}; replication: ${replication(captures, remote, joined.overrides)}`);
   }
   return lines;
 }
@@ -158,10 +172,13 @@ export function renderInventory(pages: readonly Page[], remote: Remote): string[
 
 function captureLines(item: Capture, page: Page, remote: Remote): string[] {
   const local = (item.destination ?? "local") === "local";
-  const current = local ? page.body_overrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status : undefined;
+  const current = currentBody(item, page.body_overrides);
   const where = local ? "local" : `remote (replication ${remote})`;
   const lines = [`${qualified(item.node)}\t${where}: recorded=${item.availability}; current=${current ?? "unchecked"}`];
-  if (item.archived_byte_hash) lines.push(`Archive: ${item.archived_byte_hash}`);
+  // The server names each hash's representation; print them under their own names.
+  const hashes = page.capture_hashes?.[page.items.indexOf(item)];
+  if (item.archived_byte_hash) lines.push(`Archived bytes SHA-256: ${item.archived_byte_hash}`);
+  if (hashes?.source_content_hash) lines.push(`Source content hash: ${hashes.source_content_hash}`);
   return lines;
 }
 

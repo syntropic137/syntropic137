@@ -262,3 +262,65 @@ CREATE TABLE IF NOT EXISTS session_settlement_clock (
     source_instance_id TEXT PRIMARY KEY,
     observed_at TIMESTAMPTZ NOT NULL
 );
+
+-- Rows 10/11 (#1398): why a body left the archive. An owner deletion or
+-- retraction is not retention; both withhold the body from the moment of request.
+ALTER TABLE session_body_deletions ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL
+    DEFAULT 'retention_age'
+    CHECK (reason IN ('retention_age','retention_quota','deletion','retraction'));
+CREATE INDEX IF NOT EXISTS session_body_deletions_content_hash
+    ON session_body_deletions(source_instance_id,content_hash) WHERE content_hash IS NOT NULL;
+
+-- Staged spool bytes are released only after a complete traversal archived them
+-- (release_reason='archived') or retention recorded a gap first ('expired').
+-- release_reason is durable intent; released_at acknowledges volume removal.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS registered_at
+    TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS drained_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS staged_bytes BIGINT NOT NULL
+    DEFAULT 0 CHECK (staged_bytes >= 0);
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS release_reason TEXT
+    CHECK (release_reason IN ('archived','expired'));
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS session_capture_spools_retained
+    ON session_capture_spools(source_instance_id,registered_at,session_id)
+    WHERE released_at IS NULL;
+
+-- Review pass 1 (#1398): the APSS source-content hash is durable before an
+-- envelope can reach the exporter, so replica deletion never depends on local
+-- bytes still existing. Deletion checkpoints distinguish queued from
+-- authoritatively acknowledged.
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS content_hash TEXT
+    CHECK (content_hash ~ '^sha256:[a-f0-9]{64}$');
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS content_hash TEXT;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledged
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_deletion_checkpoints ADD COLUMN IF NOT EXISTS acknowledgements
+    INTEGER NOT NULL DEFAULT 0 CHECK (acknowledgements >= 0);
+CREATE INDEX IF NOT EXISTS session_capture_deletion_unacknowledged
+    ON session_capture_deletion_checkpoints(source_instance_id,destination_id)
+    WHERE NOT acknowledged;
+
+-- Review pass 2 (#1398): per-capture exporter outboxes. outbox_drained means the
+-- capture's own outbox was emptied (delivered, rejected or discarded).
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS outbox_drained
+    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE session_capture_delivery_jobs ADD COLUMN IF NOT EXISTS drain_at
+    TIMESTAMPTZ NOT NULL DEFAULT '-infinity';
+CREATE INDEX IF NOT EXISTS session_capture_outbox_pending
+    ON session_capture_delivery_jobs(destination_id,source_instance_id,drain_at)
+    WHERE queued AND NOT outbox_drained;
+CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    retired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source_instance_id,destination_id)
+);
+
+-- One terminal notion (#1398): a terminal execution settles every spool of the
+-- run, so a session killed before its own SessionCompleted is not left live.
+CREATE INDEX IF NOT EXISTS session_capture_spools_run_unsettled
+    ON session_capture_spools(source_instance_id,(payload->'run'->>'execution_id'))
+    WHERE settled_at IS NULL;

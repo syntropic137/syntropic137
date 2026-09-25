@@ -10,6 +10,7 @@ export type InventoryItem = InventoryPage['items'][number]
 export type InventoryItemKeys = components['schemas']['InventoryItemKeys']
 export type InventoryNodeLookup = components['schemas']['SessionInventoryNodeResponse']
 export type TranscriptBodyState = components['schemas']['TranscriptBodyState']
+export type CaptureRevisionHashes = components['schemas']['CaptureRevisionHashes']
 
 /** Membership narrowing; unset fields match every phase or attempt. */
 export interface InventoryFilters {
