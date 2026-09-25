@@ -36,6 +36,15 @@ from pydantic import (
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
+    SessionHistoryBackfillSummary as SessionHistoryBackfillSummary,
+)
+from syn_api.inventory_types import (
+    SessionInventoryBackfillRequest as SessionInventoryBackfillRequest,
+)
+from syn_api.inventory_types import (
+    SessionInventoryBackfillResponse as SessionInventoryBackfillResponse,
+)
+from syn_api.inventory_types import (
     SessionInventoryJobResponse as SessionInventoryJobResponse,
 )
 from syn_api.inventory_types import (

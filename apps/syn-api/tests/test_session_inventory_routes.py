@@ -325,3 +325,64 @@ def test_transcript_access_errors_never_expose_exception_details(
     assert response.status_code == status
     assert response.headers["cache-control"] == "no-store"
     assert "private-token" not in response.text
+
+
+def test_history_refresh_backfills_then_returns_the_reconciliation_job(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    from syn_domain.contexts.agent_sessions import BackfillResult
+
+    client, runtime, _, run = setup
+    runtime.history.handle = AsyncMock(
+        return_value=BackfillResult(job_id="job", receipts=4, materialized=0, evidence_watermark=9)
+    )
+    response = client.post(
+        "/executions/run/session-inventory/reconcile",
+        json={"idempotency_key": "history", "include_history": True},
+    )
+    assert response.status_code == 202
+    assert response.json() == {
+        "job_id": "job",
+        "history": {"receipts": 4, "materialized": 0, "evidence_watermark": 9},
+    }
+    runtime.history.handle.assert_awaited_once_with(run, "history")
+
+
+def test_history_quota_is_a_visible_failure_not_a_truncated_backfill(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+) -> None:
+    from syn_domain.contexts.agent_sessions import HistoricalAcquisitionQuotaExceeded
+
+    client, runtime, _, _ = setup
+    runtime.history.handle = AsyncMock(side_effect=HistoricalAcquisitionQuotaExceeded("quota"))
+    response = client.post(
+        "/executions/run/session-inventory/reconcile",
+        json={"idempotency_key": "history", "include_history": True},
+    )
+    assert response.status_code == 422
+    runtime.history = None
+    response = client.post(
+        "/executions/run/session-inventory/reconcile",
+        json={"idempotency_key": "history", "include_history": True},
+    )
+    assert response.status_code == 503
+
+
+def test_bulk_backfill_durably_queues_every_known_execution(
+    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from syn_api import _wiring
+
+    client, runtime, _, _ = setup
+    runtime.source_instance_id = "installation"
+    runtime.history_queue.enqueue = AsyncMock(return_value=2)
+    manager = Mock()
+    manager.store.get_by_prefix = AsyncMock(return_value=[("b", {}), ("a", {}), ("a", {})])
+    monkeypatch.setattr(_wiring, "get_projection_mgr", lambda: manager)
+    response = client.post("/session-inventory/backfill", json={"idempotency_key": "bulk"})
+    assert response.status_code == 202
+    assert response.json() == {"executions": 2, "enqueued": 2}
+    (items,) = runtime.history_queue.enqueue.await_args.args
+    assert [item.run.execution_id for item in items] == ["a", "b"]
+    assert {item.idempotency_key for item in items} == {"bulk"}

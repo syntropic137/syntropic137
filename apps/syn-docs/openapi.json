@@ -1395,6 +1395,48 @@
         }
       }
     },
+    "/session-inventory/backfill": {
+      "post": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Backfill All Session Inventories",
+        "description": "Queue every known execution. The live inventory worker drains the durable list.",
+        "operationId": "backfill_all_session_inventories_session_inventory_backfill_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionInventoryBackfillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInventoryBackfillResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/session-inventory-jobs/{job_id}": {
       "get": {
         "tags": [
@@ -14050,6 +14092,73 @@
         "title": "SessionCostResponse",
         "description": "Cost for a single session."
       },
+      "SessionHistoryBackfillSummary": {
+        "properties": {
+          "receipts": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Receipts"
+          },
+          "materialized": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Materialized"
+          },
+          "evidence_watermark": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Evidence Watermark"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "receipts",
+          "materialized",
+          "evidence_watermark"
+        ],
+        "title": "SessionHistoryBackfillSummary",
+        "description": "Receipts are reused across retries, so a resumed backfill reports the same total."
+      },
+      "SessionInventoryBackfillRequest": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "SessionInventoryBackfillRequest"
+      },
+      "SessionInventoryBackfillResponse": {
+        "properties": {
+          "executions": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Executions"
+          },
+          "enqueued": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Enqueued"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "executions",
+          "enqueued"
+        ],
+        "title": "SessionInventoryBackfillResponse",
+        "description": "Durably queued per-execution backfills; the live inventory worker drains them."
+      },
       "SessionInventoryJobResponse": {
         "properties": {
           "job_id": {
@@ -14205,6 +14314,11 @@
             "minLength": 1,
             "pattern": "^[^\\x00]+$",
             "title": "Idempotency Key"
+          },
+          "include_history": {
+            "type": "boolean",
+            "title": "Include History",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -14219,6 +14333,16 @@
           "job_id": {
             "type": "string",
             "title": "Job Id"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionHistoryBackfillSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

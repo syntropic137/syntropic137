@@ -56,6 +56,11 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
     from syn_adapters.session_inventory.docker_recovery import DockerSpoolRecovery
     from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
+    from syn_adapters.session_inventory.history_receipts import (
+        PostgresBackfillReceipts,
+        PostgresHistoryBackfillQueue,
+    )
+    from syn_adapters.session_inventory.history_source import PostgresHistoricalEvidenceSource
     from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
     from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
@@ -122,6 +127,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptPort
+    from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
+        HistoricalEvidenceSourcePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
+        HistoryBackfillQueuePort,
+    )
     from syn_domain.contexts.agent_sessions.ports.NativeSessionEvidencePort import (
         NativeSessionEvidencePort,
     )
@@ -366,6 +378,9 @@ if TYPE_CHECKING:
         inventory_replication: InventoryReplicationWorker,
         capture_delivery: CaptureDeliveryWorker,
         session_store: HttpSessionStore,
+        history_source: PostgresHistoricalEvidenceSource,
+        history_receipts: PostgresBackfillReceipts,
+        history_queue: PostgresHistoryBackfillQueue,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
@@ -390,3 +405,6 @@ if TYPE_CHECKING:
         _inventory_lane: InventoryReplicationWorkPort = inventory_replication
         _capture_lane: InventoryReplicationWorkPort = capture_delivery
         _qualified: QualifiedSessionStorePort = session_store
+        _history_source: HistoricalEvidenceSourcePort = history_source
+        _history_receipts: BackfillReceiptPort = history_receipts
+        _history_queue: HistoryBackfillQueuePort = history_queue

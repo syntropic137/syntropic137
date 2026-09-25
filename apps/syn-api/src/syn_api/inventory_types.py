@@ -33,11 +33,36 @@ class SessionInventoryPageResponse(InventoryPage):
 class SessionInventoryRefreshRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     idempotency_key: str = Field(min_length=1, max_length=200, pattern=r"^[^\x00]+$")
+    include_history: bool = False
+    """Also backfill existing historical evidence first. Local reads only; no billing."""
+
+
+class SessionHistoryBackfillSummary(BaseModel):
+    """Receipts are reused across retries, so a resumed backfill reports the same total."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    receipts: int = Field(ge=0)
+    materialized: int = Field(ge=0)
+    evidence_watermark: int = Field(ge=0)
 
 
 class SessionInventoryRefreshResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     job_id: str
+    history: SessionHistoryBackfillSummary | None = None
+
+
+class SessionInventoryBackfillRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    idempotency_key: str = Field(min_length=1, max_length=200, pattern=r"^[^\x00]+$")
+
+
+class SessionInventoryBackfillResponse(BaseModel):
+    """Durably queued per-execution backfills; the live inventory worker drains them."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    executions: int = Field(ge=0)
+    enqueued: int = Field(ge=0)
 
 
 class SessionInventoryJobResponse(BaseModel):
