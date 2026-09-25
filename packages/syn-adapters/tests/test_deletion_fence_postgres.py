@@ -216,13 +216,16 @@ async def test_request_waits_for_an_in_flight_drain(stack: Stack) -> None:
     drain = asyncio.create_task(stack.worker.drain_step())
     await started.wait()
     request = asyncio.create_task(stack.deletions.request(capture, "deletion"))
-    await asyncio.sleep(0.2)
-    # The tombstone cannot take effect while a send it would forbid is in flight.
-    assert not request.done()
-    assert await stack.archive.get(capture.archive) is not None
-    release.set()
-    await drain
-    await request
+    try:
+        await asyncio.sleep(0.2)
+        # The tombstone cannot take effect while a send it would forbid is in flight.
+        assert not request.done()
+        assert await stack.archive.get(capture.archive) is not None
+    finally:
+        # Fail fast rather than hang with the fence held if an assertion trips.
+        release.set()
+        await asyncio.wait_for(drain, 10)
+        await asyncio.wait_for(request, 10)
     # The upload finished before the request took effect; deletion then follows.
     assert stack.replica.received == [b'{"raw":"racing"}']
     await stack.worker.enqueue_step()
