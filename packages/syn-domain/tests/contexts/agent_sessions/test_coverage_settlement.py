@@ -114,6 +114,23 @@ def capture(
     )
 
 
+def own_receipt(
+    node: InventoryNodeRef, availability: BodyAvailability, sequence: int = 1
+) -> CaptureEvidence:
+    """A receipt on an owner-covered node itself, from its own producer."""
+    return CaptureEvidence(
+        node=node,
+        availability=availability,
+        receipt_sequence=sequence,
+        evidence=proof(f"own-{node.local_id}-{sequence}", "own-capture"),
+        archived_byte_hash=HASH if availability is BodyAvailability.PRESENT else None,
+    )
+
+
+SESSION = platform("session")
+PENDING_SESSION = own_receipt(SESSION, BodyAvailability.PENDING)
+
+
 def spawn(parent: str, child: str, confidence: EvidenceClass) -> LineageEvidence:
     return LineageEvidence(
         parent=transcript(parent),
@@ -318,6 +335,66 @@ STATES: list[tuple[str, tuple[Change, ...], tuple[CoverageState, ...]]] = [
         (CONFLICTING, CONFLICTING, CONFLICTING),
     ),
     ("platform session without invocation", (LEGACY_PLATFORM,), (OPEN, OPEN, MISSING)),
+    # Owner-covered nodes lose their exemption once they carry evidence of their own.
+    (
+        "owner-covered platform receipt pending",
+        (add(captures=(PENDING_SESSION,)),),
+        (OPEN, OPEN, MISSING),
+    ),
+    (
+        "owner-covered platform receipt failed",
+        (add(captures=(own_receipt(SESSION, BodyAvailability.MISSING),)),),
+        (OPEN, MISSING, MISSING),
+    ),
+    (
+        "owner-covered platform receipt corrected to present",
+        (add(captures=(PENDING_SESSION, own_receipt(SESSION, BodyAvailability.PRESENT, 2))),),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "owner-covered platform receipt retracted",
+        (
+            add(
+                captures=(PENDING_SESSION,),
+                retractions=(
+                    EvidenceRetraction(
+                        target=PENDING_SESSION.evidence,
+                        evidence=PENDING_SESSION.evidence.model_copy(
+                            update={"evidence_id": "retract-own"}
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "owner-bound transcript receipt pending",
+        (add(captures=(own_receipt(transcript("root-native"), BodyAvailability.PENDING, 1),)),),
+        (CONFLICTING, CONFLICTING, CONFLICTING),  # Two producers disagree on one body.
+    ),
+    (
+        "owner-bound transcript receipt failed",
+        (replace(captures=(own_receipt(transcript("root-native"), BodyAvailability.MISSING),)),),
+        (OPEN, MISSING, MISSING),
+    ),
+    (
+        "owner-bound transcript receipt corrected to present",
+        (
+            replace(
+                captures=(
+                    own_receipt(transcript("root-native"), BodyAvailability.PENDING, 1),
+                    own_receipt(transcript("root-native"), BodyAvailability.PRESENT, 2),
+                )
+            ),
+        ),
+        (OPEN, RECONCILED, RECONCILED),
+    ),
+    (
+        "owner-covered platform owns a binding with no body",
+        (add(bindings=(binding(SESSION, "session-native"),)),),
+        (OPEN, OPEN, MISSING),
+    ),
     (
         "captured unbound transcript",
         (add(captures=(capture("stray"),)),),
@@ -475,10 +552,11 @@ def test_late_child_after_seal_reopens_in_a_new_revision() -> None:
     )
     assert late.revision != sealed.revision
     assert late.coverage.state is OPEN
-    assert late.coverage.expected_count == 2
+    # root, its captured transcript (own receipt), and the late child.
+    assert late.coverage.expected_count == 3
     # The earlier revision is an immutable value; nothing rewrote it.
     assert sealed.coverage.state is RECONCILED
-    assert sealed.coverage.expected_count == 1
+    assert sealed.coverage.expected_count == 2
 
 
 def test_settlement_is_order_independent_and_survives_corrections() -> None:

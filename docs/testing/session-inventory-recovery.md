@@ -220,7 +220,8 @@ non-conflicting. Known but unaccounted blocks it: `open` before the deadline,
 
 - Expected nodes: every known node, except a transcript bound to an expected
   owner and a platform session named by the same host record as an expected
-  invocation (those are accounted by their owner).
+  invocation (those are accounted by their owner). The exemption lapses once
+  such a node has its own receipt, lifecycle or owned binding.
 - Settled: terminal process (completed, failed, cancelled, launch_failed) and
   a non-pending latest local capture receipt. Unverified child attempts,
   unresolved parentage and an unreadable child journal are unsettled.
@@ -230,8 +231,10 @@ non-conflicting. Known but unaccounted blocks it: `open` before the deadline,
 - Bounded settlement: the first terminal event per run durably fixes a
   deadline `SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS` (default 1800)
   after its timestamp. Replay reads that record back, so changing the setting
-  never changes an existing run's facts. The first recorded clock sweep past it
-  appends a `settlement_deadline` fact. Then unsettled processes, captures and
+  never changes an existing run's facts. Clock sweeps only record their
+  observed time (also during catch-up). The live-only `process_pending()` step
+  then appends one `settlement_deadline` fact per due run, compared against
+  that recorded time, never the wall clock. Then unsettled processes, captures and
   child claims become explicit `*_at_seal` gaps (`missing`); unresolved
   parentage becomes `parentage_unresolved_at_seal` (`conflicting`).
 - Any conflicting lifecycle, child attempt, parentage, cycle, binding or source

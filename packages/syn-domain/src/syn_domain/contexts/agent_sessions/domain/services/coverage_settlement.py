@@ -12,7 +12,9 @@ Rule (pure; recomputed on every reconstruction, never mutating a revision):
    evidence names, except aliases that another expected node already accounts
    for: a native transcript bound (registered or corroborated) to an expected
    owner, and a platform session named by the same host record as an expected
-   invocation. Everything else must prove itself.
+   invocation. The exemption lapses as soon as the alias has evidence of its
+   own (a receipt, lifecycle or owned binding): it then settles on its own
+   terms. Everything else must prove itself.
 2. A node is SETTLED when its process is terminal (an invocation's latest
    lifecycle is completed, failed, cancelled or launch_failed) and its capture
    is terminal (the latest local receipt through its binding is not pending;
@@ -149,14 +151,28 @@ def _expected(data: SettlementInput, contract: CoverageContract) -> dict[str, In
         if binding.confidence in _VERIFIED
     }
     links = _platform_links(data.evidence)
+    own = _own_evidence(data.evidence)
     expected: dict[str, InventoryNodeRef] = {}
     for key, ref in known.items():
-        if ref.kind == "transcript" and owners.get(key) in known:
-            continue  # Its owner accounts for it; capture resolves through the binding.
-        if ref.kind == "platform" and links.get(key, set()) & known.keys():
-            continue  # Represented by the invocation its own host record names.
+        # An owner-covered node is exempt only while it has no evidence of its
+        # own. Any receipt, lifecycle or owned binding on it must settle on its
+        # own terms, so it cannot hide behind its owner's settled state.
+        if key not in own:
+            if ref.kind == "transcript" and owners.get(key) in known:
+                continue  # Its owner accounts for it through the binding.
+            if ref.kind == "platform" and links.get(key, set()) & known.keys():
+                continue  # Represented by the invocation its own host record names.
         expected[key] = ref
     return expected
+
+
+def _own_evidence(evidence: SessionEvidence) -> set[str]:
+    """Nodes carrying a receipt, a lifecycle or a binding they own."""
+    return {
+        *(item.node.key for item in evidence.captures),
+        *(item.node.key for item in evidence.invocation_lifecycle),
+        *(item.owner.key for item in evidence.bindings),
+    }
 
 
 def _gap_keys(gaps: tuple[InventoryGap, ...], *reasons: GapReason) -> set[str]:

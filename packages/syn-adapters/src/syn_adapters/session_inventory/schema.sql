@@ -233,3 +233,9 @@ CREATE TABLE IF NOT EXISTS session_settlement_deadlines (
 CREATE INDEX IF NOT EXISTS session_settlement_deadlines_due
     ON session_settlement_deadlines(source_instance_id,due_at,execution_id)
     WHERE NOT settled;
+-- Latest recorded clock observation (a to-do watermark, monotonic). Deadline
+-- release compares against this, never the wall clock.
+CREATE TABLE IF NOT EXISTS session_settlement_clock (
+    source_instance_id TEXT PRIMARY KEY,
+    observed_at TIMESTAMPTZ NOT NULL
+);

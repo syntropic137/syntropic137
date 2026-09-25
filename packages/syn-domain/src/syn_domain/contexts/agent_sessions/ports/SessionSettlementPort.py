@@ -35,8 +35,15 @@ class SessionSettlementPort(Protocol):
         """
         ...
 
-    async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:
-        """Unsettled deadlines at or before a recorded clock observation."""
+    async def observe_clock(self, observed_at: datetime) -> None:
+        """To-do only: remember the latest RECORDED clock time (monotonic max).
+
+        Safe during catch-up; it releases nothing.
+        """
+        ...
+
+    async def due(self, *, limit: int) -> SettlementDeadlinePage:
+        """Unsettled deadlines at or before the latest recorded clock time."""
         ...
 
     async def settle(self, deadline: SettlementDeadline) -> None:

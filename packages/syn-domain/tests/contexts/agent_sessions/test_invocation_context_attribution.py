@@ -235,7 +235,8 @@ def test_child_capture_does_not_reseal_contract_that_omitted_its_intent() -> Non
         }
     )
     resolved = resolve_relationships(captured)
-    assert resolved.coverage.expected_count == 2
+    # root, child, and the child's bound transcript (it has its own receipt).
+    assert resolved.coverage.expected_count == 3
     assert resolved.coverage.missing_keys == ()
     assert resolved.coverage.state == "open"
     # Only a new host contract accounting for the child can seal this set.

@@ -8,6 +8,7 @@ from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
 
 from syn_domain.contexts.agent_sessions import (
     HostSessionEvidenceProjector,
+    InventoryReconciliationProcessManager,
     InventoryReconciliationSweepEvent,
     SettlementDeadline,
     SettlementDeadlinePage,
@@ -90,15 +91,22 @@ class _Deadlines:
     def __init__(self) -> None:
         self.rows: dict[str, SettlementDeadline] = {}
         self.settled: set[str] = set()
+        self.clock: datetime | None = None
 
     async def schedule(self, deadline: SettlementDeadline) -> SettlementDeadline:
         return self.rows.setdefault(deadline.run.execution_id, deadline)
 
-    async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:
+    async def observe_clock(self, observed_at: datetime) -> None:
+        self.clock = observed_at if self.clock is None else max(self.clock, observed_at)
+
+    async def due(self, *, limit: int) -> SettlementDeadlinePage:
+        clock = self.clock
+        if clock is None:
+            return SettlementDeadlinePage(items=())
         items = [
             row
             for key, row in sorted(self.rows.items())
-            if key not in self.settled and row.due_at <= observed_at
+            if key not in self.settled and row.due_at <= clock
         ]
         return SettlementDeadlinePage(items=tuple(items[:limit]))
 
@@ -160,22 +168,86 @@ async def test_every_terminal_status_records_one_replay_stable_fact(
     assert deadlines.rows["run"].due_at == ENDED + timedelta(minutes=5)
 
 
-async def test_deadline_is_released_only_by_a_recorded_clock_at_or_after_it() -> None:
+def _processor(projector: HostSessionEvidenceProjector) -> InventoryReconciliationProcessManager:
+    jobs = AsyncMock()
+    jobs.claim.return_value = None
+    return InventoryReconciliationProcessManager(
+        jobs,
+        AsyncMock(),
+        lease_seconds=30,
+        retry_seconds=1,
+        max_jobs_per_tick=1,
+        host_evidence=projector,
+    )
+
+
+def _deadline_facts(journal: AsyncMock) -> list[EvidenceBatch]:
+    return [
+        call.args[0]
+        for call in journal.append.await_args_list
+        if call.args[0].evidence.run_settlement
+        and call.args[0].evidence.run_settlement[0].stage is RunSettlementStage.SETTLEMENT_DEADLINE
+    ]
+
+
+async def _catch_up(
+    manager: InventoryReconciliationProcessManager, *events: EventEnvelope[DomainEvent]
+) -> None:
+    for envelope in events:
+        await manager.handle_event(envelope, AsyncMock())
+
+
+async def test_catch_up_records_the_clock_but_releases_nothing() -> None:
     journal, deadlines = AsyncMock(), _Deadlines()
-    projector = _projector(journal, deadlines)
-    await projector.handle(_terminal(ExecutionTerminalEventType.COMPLETED))
-    journal.reset_mock()
-    await projector.handle(_sweep(ENDED + timedelta(minutes=4)))
-    journal.append.assert_not_awaited()
-    await projector.handle(_sweep(ENDED + timedelta(minutes=5)))
-    batch = journal.append.await_args.args[0]
-    assert isinstance(batch, EvidenceBatch)
-    assert batch.evidence.run_settlement[0].stage is RunSettlementStage.SETTLEMENT_DEADLINE
+    manager = _processor(_projector(journal, deadlines))
+    await _catch_up(
+        manager,
+        _terminal(ExecutionTerminalEventType.COMPLETED),
+        _sweep(ENDED + timedelta(minutes=4)),
+        _sweep(ENDED + timedelta(hours=1)),
+        _sweep(ENDED + timedelta(minutes=2)),  # Out-of-order ticks never move it back.
+    )
+    assert _deadline_facts(journal) == []
+    assert deadlines.settled == set()
+    assert deadlines.clock == ENDED + timedelta(hours=1)
+    await manager.process_pending()  # Live only: the coordinator's boundary.
+    released = _deadline_facts(journal)
+    assert len(released) == 1
+    assert released[0].evidence.run_settlement[0].due_at == ENDED + timedelta(minutes=5)
     assert deadlines.settled == {"run"}
-    # Later ticks never re-release a settled deadline.
-    journal.reset_mock()
-    await projector.handle(_sweep(ENDED + timedelta(hours=1)))
-    journal.append.assert_not_awaited()
+    await manager.process_pending()
+    assert len(_deadline_facts(journal)) == 1  # Exactly once.
+
+
+async def test_recorded_clock_before_the_deadline_releases_nothing_live() -> None:
+    journal, deadlines = AsyncMock(), _Deadlines()
+    manager = _processor(_projector(journal, deadlines))
+    await _catch_up(
+        manager,
+        _terminal(ExecutionTerminalEventType.COMPLETED),
+        _sweep(ENDED + timedelta(minutes=4)),
+    )
+    await manager.process_pending()
+    assert _deadline_facts(journal) == []
+    await _catch_up(manager, _sweep(ENDED + timedelta(minutes=5)))
+    await manager.process_pending()
+    assert len(_deadline_facts(journal)) == 1
+
+
+async def test_replaying_twice_yields_the_same_facts() -> None:
+    events = (
+        _terminal(ExecutionTerminalEventType.FAILED),
+        _sweep(ENDED + timedelta(minutes=9)),
+    )
+    runs = []
+    for _ in range(2):
+        journal, deadlines = AsyncMock(), _Deadlines()
+        manager = _processor(_projector(journal, deadlines))
+        await _catch_up(manager, *events)
+        await manager.process_pending()
+        runs.append([call.args[0] for call in journal.append.await_args_list])
+    assert runs[0] == runs[1]
+    assert len(runs[0]) == 2
 
 
 async def test_later_terminal_fact_never_postpones_the_first_deadline() -> None:
@@ -193,12 +265,13 @@ async def test_later_terminal_fact_never_postpones_the_first_deadline() -> None:
 
 async def test_crash_between_deadline_fact_and_settle_replays_identically() -> None:
     journal, deadlines = AsyncMock(), _Deadlines()
-    await _projector(journal, deadlines).handle(_terminal(ExecutionTerminalEventType.CANCELLED))
+    projector = _projector(journal, deadlines)
+    await projector.handle(_terminal(ExecutionTerminalEventType.CANCELLED))
+    await projector.handle(_sweep(ENDED + timedelta(minutes=10)))
     journal.reset_mock()
-    tick = _sweep(ENDED + timedelta(minutes=10))
-    await _projector(journal, deadlines).handle(tick)
+    await projector.release_deadlines()
     deadlines.settled.clear()  # settle() never became durable.
-    await _projector(journal, deadlines).handle(tick)
+    await projector.release_deadlines()
     first, second = (call.args[0] for call in journal.append.await_args_list)
     assert first == second
 
@@ -214,6 +287,7 @@ async def test_terminal_without_execution_is_ignored_and_no_port_means_no_deadli
     await projector.handle(_terminal(ExecutionTerminalEventType.COMPLETED))
     assert journal.append.await_count == 1
     await projector.handle(_sweep(ENDED + timedelta(days=1)))
+    assert await projector.release_deadlines() == 0
     assert journal.append.await_count == 1
 
 
@@ -234,12 +308,14 @@ async def test_replay_under_a_different_grace_setting_yields_identical_facts() -
     )
     await first.handle(terminal)
     await first.handle(tick)
+    await first.release_deadlines()
     deadlines.settled.clear()  # Rebuild: the to-do is re-derived from recorded events.
     replay = HostSessionEvidenceProjector(
         replay_journal, "installation", settlements=deadlines, settlement_grace=timedelta(hours=9)
     )
     await replay.handle(terminal)
     await replay.handle(tick)
+    await replay.release_deadlines()
     first_batches = [call.args[0] for call in first_journal.append.await_args_list]
     replay_batches = [call.args[0] for call in replay_journal.append.await_args_list]
     assert len(first_batches) == 2

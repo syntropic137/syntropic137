@@ -64,10 +64,12 @@ class HostSessionEvidenceProjector:
     prove a native invocation, capture completeness, or a native parent ID.
 
     Settlement: a terminal execution appends an EXECUTION_TERMINAL fact and
-    schedules one durable deadline ``settlement_grace`` after the event's own
-    timestamp. A recorded clock observation at or past it appends the
-    SETTLEMENT_DEADLINE fact. Both derive from recorded events only, so replay
-    reproduces the same batches; the resolver decides the seal from them.
+    durably fixes one deadline ``settlement_grace`` after the event's own
+    timestamp (first terminal fact wins). A clock event only records its
+    observed time. ``release_deadlines()`` runs from the process manager's
+    live ``process_pending()`` and appends SETTLEMENT_DEADLINE facts for
+    deadlines at or before the latest RECORDED clock time, never the wall
+    clock, so replay reproduces the same batches.
     """
 
     def __init__(
@@ -106,7 +108,7 @@ class HostSessionEvidenceProjector:
             await self._project_terminal(envelope)
             return
         if event_type == InventoryReconciliationSweepEvent.event_type:
-            await self._release_deadlines(envelope)
+            await self._record_clock(envelope)
             return
         if envelope.metadata.event_type != SessionStartedEvent.event_type:
             return
@@ -249,17 +251,26 @@ class HostSessionEvidenceProjector:
             )
         )
 
-    async def _release_deadlines(self, envelope: EventEnvelope[DomainEvent]) -> None:
+    async def _record_clock(self, envelope: EventEnvelope[DomainEvent]) -> None:
         if self._settlements is None:
             return
         sweep = InventoryReconciliationSweepEvent.model_validate_json(
             envelope.event.model_dump_json()
         )
-        page = await self._settlements.due(sweep.observed_at, limit=_DEADLINES_PER_SWEEP)
+        await self._settlements.observe_clock(sweep.observed_at)
+
+    async def release_deadlines(self) -> int:
+        """Live-only work: call from ``process_pending()``, never during catch-up.
+
+        Idempotent: the deadline batch is keyed by run, and a crash between the
+        durable fact and ``settle()`` re-appends a byte-identical batch.
+        """
+        if self._settlements is None:
+            return 0
+        page = await self._settlements.due(limit=_DEADLINES_PER_SWEEP)
         for deadline in page.items:
             if deadline.run.source_instance_id != self._source:
                 raise ValueError("settlement deadline belongs to another installation")
-            # Durable fact first; a crash before settle() re-appends identically.
             await self._evidence.append(
                 settlement_batch(
                     deadline.run,
@@ -270,3 +281,4 @@ class HostSessionEvidenceProjector:
                 )
             )
             await self._settlements.settle(deadline)
+        return len(page.items)

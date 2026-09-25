@@ -45,16 +45,26 @@ class PostgresSettlementDeadlines:
             raise RuntimeError("settlement deadline vanished after scheduling")
         return SettlementDeadline.model_validate_json(raw)
 
-    async def due(self, observed_at: datetime, *, limit: int) -> SettlementDeadlinePage:
+    async def observe_clock(self, observed_at: datetime) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO session_settlement_clock (source_instance_id,observed_at)
+                VALUES ($1,$2) ON CONFLICT (source_instance_id) DO UPDATE
+                SET observed_at=GREATEST(session_settlement_clock.observed_at,EXCLUDED.observed_at)""",
+                self._source,
+                observed_at,
+            )
+
+    async def due(self, *, limit: int) -> SettlementDeadlinePage:
         if not 1 <= limit <= 500:
             raise ValueError("invalid settlement page bound")
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT payload::text FROM session_settlement_deadlines
-                WHERE source_instance_id=$1 AND NOT settled AND due_at<=$2
-                ORDER BY due_at,execution_id LIMIT $3""",
+                """SELECT d.payload::text FROM session_settlement_deadlines d
+                JOIN session_settlement_clock c ON c.source_instance_id=d.source_instance_id
+                WHERE d.source_instance_id=$1 AND NOT d.settled AND d.due_at<=c.observed_at
+                ORDER BY d.due_at,d.execution_id LIMIT $2""",
                 self._source,
-                observed_at,
                 limit,
             )
         return SettlementDeadlinePage(

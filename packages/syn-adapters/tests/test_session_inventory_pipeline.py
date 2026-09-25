@@ -683,7 +683,13 @@ class _HostRun:
             )
         )
 
-    async def tick(self, at: datetime) -> None:
+    async def tick(self, at: datetime, *, live: bool = True) -> None:
+        """Deliver a clock event; ``live`` also runs the live-only release step."""
+        await self.observe(at)
+        if live:
+            await self.projector.release_deadlines()
+
+    async def observe(self, at: datetime) -> None:
         await self.projector.handle(
             _host_envelope(
                 InventoryReconciliationSweepEvent(observed_at=at),
@@ -802,11 +808,11 @@ async def test_host_seal_reconciles_then_late_child_reopens_new_revision(
     restarted = _HostRun(host.run, PostgresSessionEvidence(db_pool), host.projector, host.builder)
     reopened = await restarted.snapshot(sealed.snapshot_id)
     assert reopened.coverage.state is CoverageState.OPEN
-    assert reopened.coverage.expected_count == 2
+    assert reopened.coverage.expected_count == 3  # root, its transcript, the child
     await inventory.publish(host.run, reopened.snapshot_id, sealed.snapshot_id)
     old = await inventory.page(host.run, sealed.snapshot_id, "node")
     assert old.snapshot.coverage.state is CoverageState.RECONCILED
-    assert old.snapshot.coverage.expected_count == 1
+    assert old.snapshot.coverage.expected_count == 2
 
 
 async def test_host_seal_turns_stuck_invocation_into_missing_after_recorded_deadline(
@@ -860,3 +866,23 @@ async def test_replay_under_another_grace_reads_the_durable_deadline(
     assert await host.journal.watermark(host.run) == watermark
     await replay.tick(ENDED + timedelta(minutes=6))
     assert (await replay.snapshot()).coverage.state is CoverageState.MISSING
+
+
+async def test_catch_up_clock_leaves_deadline_pending_until_live_release(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    host = await _host_run(db_pool, tmp_path, "host-catch-up", ("registered", "launched"))
+    await host.terminate()
+    before = await host.journal.watermark(host.run)
+    # Catch-up: recorded clock events only record the clock.
+    await host.tick(ENDED + timedelta(hours=2), live=False)
+    await host.tick(ENDED + timedelta(minutes=1), live=False)
+    assert await host.journal.watermark(host.run) == before
+    assert (await host.snapshot()).coverage.state is CoverageState.OPEN
+    # Live processing releases it exactly once, from the recorded clock.
+    assert await host.projector.release_deadlines() == 1
+    released = await host.journal.watermark(host.run)
+    assert released == before + 1
+    assert await host.projector.release_deadlines() == 0
+    assert await host.journal.watermark(host.run) == released
+    assert (await host.snapshot()).coverage.state is CoverageState.MISSING
