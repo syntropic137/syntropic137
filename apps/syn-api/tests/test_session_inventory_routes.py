@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from syn_api.routes.executions import inventory
+from syn_api.routes.executions import inventory, transcripts
 from syn_api.types import SessionInventoryPageResponse
 from syn_domain.contexts.agent_sessions import (
     InventoryCounts,
@@ -81,6 +81,20 @@ def setup(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Mock, AsyncMock,
     monkeypatch.setattr(inventory, "get_inventory_runtime", lambda: runtime)
     app = FastAPI()
     app.include_router(inventory.router)
+    return TestClient(app), runtime, visible, run
+
+
+@pytest.fixture
+def transcript_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[TestClient, Mock, AsyncMock, RunIdentity]:
+    run = RunIdentity(source_instance_id="installation", execution_id="run")
+    visible = AsyncMock(return_value=run)
+    runtime = Mock()
+    monkeypatch.setattr(transcripts, "_visible_run", visible)
+    monkeypatch.setattr(transcripts, "get_inventory_runtime", lambda: runtime)
+    app = FastAPI()
+    app.include_router(transcripts.router)
     return TestClient(app), runtime, visible, run
 
 
@@ -183,7 +197,9 @@ def test_published_snapshot_reports_late_evidence_without_replacing_revision(
     restricted = client.get(
         f"/executions/run/session-inventory/{snapshot.snapshot_id}/capture"
     ).json()
-    assert restricted["body_overrides"] == [{"archive_sha256": "a" * 64, "status": "expired"}]
+    assert restricted["body_overrides"] == [
+        {"archive_sha256": "a" * 64, "source_content_hash": None, "status": "expired"}
+    ]
     assert restricted["snapshot"]["revision"] == "revision-one"
 
 
@@ -332,7 +348,7 @@ def test_job_prefix_route_checks_source_and_current_execution_visibility(
 
 
 def test_local_transcript_returns_exact_bytes_without_caching(
-    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+    transcript_setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
 ) -> None:
     import base64
 
@@ -342,7 +358,7 @@ def test_local_transcript_returns_exact_bytes_without_caching(
         LocalTranscriptRead,
     )
 
-    client, runtime, visible, run = setup
+    client, runtime, visible, run = transcript_setup
     body = b"opaque\r\n\x00\xff"
     capture = CataloguedCapture(
         run=run,
@@ -375,9 +391,11 @@ def test_local_transcript_returns_exact_bytes_without_caching(
     "failure,status", [(PermissionError("private-token"), 403), (OSError("private-token"), 503)]
 )
 def test_transcript_access_errors_never_expose_exception_details(
-    setup: tuple[TestClient, Mock, AsyncMock, RunIdentity], failure: Exception, status: int
+    transcript_setup: tuple[TestClient, Mock, AsyncMock, RunIdentity],
+    failure: Exception,
+    status: int,
 ) -> None:
-    client, runtime, _, _ = setup
+    client, runtime, _, _ = transcript_setup
     runtime.transcripts.handle = AsyncMock(side_effect=failure)
     response = client.get(
         "/executions/run/session-transcripts/" + "a" * 64,

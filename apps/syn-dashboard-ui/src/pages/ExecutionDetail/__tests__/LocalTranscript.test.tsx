@@ -68,3 +68,13 @@ it('explains expired bodies without offering a download', async () => {
   expect(screen.queryByRole('link')).toBeNull()
   expect(URL.createObjectURL).not.toHaveBeenCalled()
 })
+
+it('explains deleted bodies separately from retention expiry', async () => {
+  vi.mocked(getLocalTranscript).mockResolvedValue({ status: 'deleted', archive_sha256: revision, size: bytes.length, content_format: 'native', content_base64: null })
+  render(<LocalTranscript {...props} />)
+  fireEvent.click(screen.getByText('Open local transcript'))
+  const alert = (await screen.findByRole('alert')).textContent
+  expect(alert).toContain('deleted or retracted')
+  expect(alert).toContain('Session history remains available')
+  expect(screen.queryByRole('link')).toBeNull()
+})

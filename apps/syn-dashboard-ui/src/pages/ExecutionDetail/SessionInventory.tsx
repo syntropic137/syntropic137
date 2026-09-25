@@ -14,19 +14,34 @@ const sections: { kind: InventoryKind; label: string }[] = [
 
 type Capture = Extract<InventoryPage['items'][number], { availability: unknown }>
 
-function CaptureItem({ item, executionId, current }: { item: Capture; executionId: string; current?: string }) {
+type CaptureHashes = NonNullable<InventoryPage['capture_hashes']>[number]
+
+// The server names each hash's representation; never compare kinds client-side.
+const revisionLabels: Record<string, string> = {
+  archived_bytes_sha256: 'Archived bytes SHA-256',
+  source_content_hash: 'Source content hash',
+  unqualified: 'Transcript revision (unqualified)',
+}
+
+function CaptureItem({ item, executionId, current, hashes }: { item: Capture; executionId: string; current?: string; hashes?: CaptureHashes }) {
+  const label = revisionLabels[hashes?.transcript_revision_kind ?? 'unqualified'] ?? revisionLabels.unqualified
   return <>
     <code className="break-all">{item.node.local_id}</code>
     <p>{item.destination ?? 'local'} availability recorded at capture: {item.availability}</p>
-    {current && <p>Current local body: {current}</p>}
-    {item.transcript_revision && <p className="break-all">Transcript revision: {item.transcript_revision}</p>}
+    {current && <p>Current {item.destination === 'remote' ? 'replica' : 'local'} body: {current}</p>}
+    {item.transcript_revision && <p className="break-all">{label}: {item.transcript_revision}</p>}
     {!current && (item.destination ?? 'local') === 'local' && item.archived_byte_hash && item.node.harness && <LocalTranscript
       key={JSON.stringify([executionId, item.node.source_instance_id, item.node.harness, item.node.local_id, item.archived_byte_hash])} executionId={executionId} harness={item.node.harness}
       nativeId={item.node.local_id} revision={item.archived_byte_hash} />}
   </>
 }
 
-function InventoryItem({ item, executionId, bodyOverrides }: { item: InventoryPage['items'][number]; executionId: string; bodyOverrides: InventoryPage['body_overrides'] }) {
+function currentBody(item: Capture, bodyOverrides: InventoryPage['body_overrides']): string | undefined {
+  if ((item.destination ?? 'local') === 'local') return bodyOverrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status
+  return bodyOverrides?.find(state => state.source_content_hash != null && state.source_content_hash === item.transcript_revision)?.status
+}
+
+function InventoryItem({ item, executionId, bodyOverrides, hashes }: { item: InventoryPage['items'][number]; executionId: string; bodyOverrides: InventoryPage['body_overrides']; hashes?: CaptureHashes }) {
   if ('ref' in item) return <>
     <span>{item.ref.kind} {item.ref.harness ?? ''}</span>
     <code className="block break-all select-all">{item.ref.local_id}</code>
@@ -37,7 +52,7 @@ function InventoryItem({ item, executionId, bodyOverrides }: { item: InventoryPa
     <p className="break-all">Parent: <code>{item.parent.local_id}</code></p>
     <p className="break-all">Child: <code>{item.child.local_id}</code></p>
   </>
-  if ('availability' in item) return <CaptureItem item={item} executionId={executionId} current={item.destination === 'local' ? bodyOverrides?.find(state => state.archive_sha256 === item.archived_byte_hash)?.status : undefined} />
+  if ('availability' in item) return <CaptureItem item={item} executionId={executionId} current={currentBody(item, bodyOverrides)} hashes={hashes} />
   if ('run' in item) return <>
     <code className="break-all">{item.node.local_id}</code>
     <p>Phase: {item.phase_id ?? 'Unassigned'}. Attempt: {item.attempt_id ?? 'Unknown'}. Confidence: {item.confidence}.</p>
@@ -59,7 +74,7 @@ function InventoryRows({ page }: { page: InventoryPage }) {
   if (page.items.length === 0) return <p>No {sections.find(s => s.kind === page.kind)?.label.toLowerCase()} in this revision.</p>
   return <ul className="space-y-2">
     {page.items.map((item, index) => <li key={index} className="rounded border border-[var(--color-border)] p-3">
-      <InventoryItem item={item} executionId={page.snapshot.run.execution_id} bodyOverrides={page.body_overrides} />
+      <InventoryItem item={item} executionId={page.snapshot.run.execution_id} bodyOverrides={page.body_overrides} hashes={page.capture_hashes?.[index]} />
     </li>)}
   </ul>
 }

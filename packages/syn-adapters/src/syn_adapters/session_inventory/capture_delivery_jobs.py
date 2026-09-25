@@ -60,10 +60,17 @@ class PostgresCaptureDeliveryJobs:
         async with self._pool.acquire() as conn:
             raw = await conn.fetchval(
                 """WITH candidate AS (
-                SELECT destination_id,source_instance_id,producer_id,capture_id FROM session_capture_delivery_jobs
-                WHERE destination_id=$1 AND source_instance_id=$2 AND NOT cancelled AND NOT queued
-                AND leased_until<=now() AND retry_at<=now() ORDER BY retry_at,producer_id,capture_id
-                FOR UPDATE SKIP LOCKED LIMIT 1
+                SELECT j.destination_id,j.source_instance_id,j.producer_id,j.capture_id
+                FROM session_capture_delivery_jobs j JOIN session_capture_catalog k
+                USING(source_instance_id,producer_id,capture_id)
+                WHERE j.destination_id=$1 AND j.source_instance_id=$2 AND NOT j.cancelled
+                AND NOT j.queued AND j.leased_until<=now() AND j.retry_at<=now()
+                -- A tombstone recorded before cancellation still wins over a retry.
+                AND NOT EXISTS (SELECT 1 FROM session_body_deletions d
+                    WHERE d.source_instance_id=k.source_instance_id
+                    AND d.archive_sha256=k.payload->'archive'->>'sha256')
+                ORDER BY j.retry_at,j.producer_id,j.capture_id
+                FOR UPDATE OF j SKIP LOCKED LIMIT 1
             ), claimed AS (
                 UPDATE session_capture_delivery_jobs j SET lease_token=j.lease_token+1,
                 leased_until=now()+$3::double precision*interval '1 second'

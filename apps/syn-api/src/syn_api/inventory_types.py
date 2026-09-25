@@ -11,9 +11,39 @@ from syn_domain.contexts.agent_sessions import (
     InventoryNode,
     InventorySnapshot,
     ItemKind,
+    OwnerDeletionReason,
     RunIdentity,
     TranscriptBodyState,
+    TranscriptDeletion,
 )
+
+_ARCHIVE_SHA256 = r"^[a-f0-9]{64}$"
+_CONTENT_HASH = r"^sha256:[a-f0-9]{64}$"
+
+
+class CaptureRevisionHashes(BaseModel):
+    """Names the representation behind each hash one capture receipt carries.
+
+    ``transcript_revision`` is not self-describing: a local receipt stores the
+    archived byte SHA-256 there, a remote receipt the APSS original-content hash.
+    ``transcript_revision_kind`` says which, or ``unqualified`` when the value
+    matches neither known form. Never compare hashes of different kinds.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    transcript_revision_kind: (
+        Literal["archived_bytes_sha256", "source_content_hash", "unqualified"] | None
+    ) = None
+    archived_bytes_sha256: str | None = Field(
+        default=None,
+        pattern=_ARCHIVE_SHA256,
+        description="SHA-256 of the exact archived bytes; the local transcript read key.",
+    )
+    source_content_hash: str | None = Field(
+        default=None,
+        pattern=_CONTENT_HASH,
+        description="APSS original-content hash reported by a replica receipt.",
+    )
 
 
 class SessionInventoryResponse(BaseModel):
@@ -34,7 +64,8 @@ class SessionInventoryPageResponse(BaseModel):
     ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
     edge endpoint on another page resolves through the node lookup route.
     ``next_cursor`` is opaque and bound to this run, revision, section and filters.
-    Absent body overrides are unchecked.
+    Absent body overrides are unchecked. On capture pages ``capture_hashes[i]``
+    names the hash representations of ``items[i]``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -45,6 +76,7 @@ class SessionInventoryPageResponse(BaseModel):
     item_keys: tuple[InventoryItemKeys, ...]
     next_cursor: str | None = None
     body_overrides: tuple[TranscriptBodyState, ...] = ()
+    capture_hashes: tuple[CaptureRevisionHashes, ...] = ()
 
 
 class SessionInventoryCursorError(BaseModel):
@@ -121,11 +153,58 @@ class SessionInventoryJobResponse(BaseModel):
 
 
 class LocalTranscriptResponse(BaseModel):
-    """Exact archive bytes, base64 encoded without parsing provider content."""
+    """Exact archive bytes, base64 encoded without parsing provider content.
+
+    Redaction policy: the body is served exactly as archived. Any redaction was
+    applied by the capturing source before archival; the server neither redacts,
+    rewrites nor slices bytes, and never serves a partial range as the revision.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-    status: Literal["present", "not_captured", "missing", "expired", "too_large"]
-    archive_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    status: Literal["present", "not_captured", "missing", "expired", "deleted", "too_large"]
+    archive_sha256: str = Field(
+        pattern=_ARCHIVE_SHA256,
+        description="SHA-256 of the exact archived bytes, not the APSS content hash.",
+    )
     content_format: Literal["native", "envelope"] | None = None
-    size: int | None = Field(default=None, ge=0)
+    size: int | None = Field(default=None, ge=0, description="Archived byte length.")
+    redaction: Literal["source"] = Field(
+        default="source",
+        description="Only source-applied redaction; the server serves archived bytes unchanged.",
+    )
     content_base64: str | None = Field(default=None, repr=False)
+
+
+class TranscriptIdentityRequest(BaseModel):
+    """Qualified native identity of one archived revision in the addressed run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    harness: str = Field(min_length=1, max_length=2048, pattern=r"^[^\x00]+$")
+    native_id: str = Field(min_length=1, max_length=2048, pattern=r"^[^\x00]+$")
+
+
+class TranscriptDeletionRequest(TranscriptIdentityRequest):
+    reason: OwnerDeletionReason = "deletion"
+
+
+class TranscriptDeletionResponse(BaseModel):
+    """Durable tombstone for exact bytes shared by every membership of the object.
+
+    ``created`` is false when a tombstone already existed; the original reason
+    is kept. Session history remains discoverable with a deleted body state.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    deletion: TranscriptDeletion
+    created: bool
+
+
+class TranscriptRevocationResponse(BaseModel):
+    """Access to the exact bytes is withheld; stored bytes are retained."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    archive_sha256: str = Field(
+        pattern=_ARCHIVE_SHA256, description="SHA-256 of the exact archived bytes."
+    )
+    status: Literal["withheld"] = "withheld"
+    created: bool

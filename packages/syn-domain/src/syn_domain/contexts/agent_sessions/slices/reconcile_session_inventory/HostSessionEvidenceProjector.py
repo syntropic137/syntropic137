@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+    SessionCompletedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionInvocationRecordedEvent import (
     SessionInvocationRecordedEvent,
 )
@@ -55,11 +58,23 @@ class HostSessionEvidenceProjector:
         self._spools = spools
 
     def get_subscribed_event_types(self) -> set[str]:
-        return {SessionStartedEvent.event_type, SessionInvocationRecordedEvent.event_type}
+        types = {SessionStartedEvent.event_type, SessionInvocationRecordedEvent.event_type}
+        if self._spools is not None:
+            types.add(SessionCompletedEvent.event_type)
+        return types
 
     async def handle(self, envelope: EventEnvelope[DomainEvent]) -> None:
         if envelope.metadata.event_type == SessionInvocationRecordedEvent.event_type:
             await self._project_invocation(envelope)
+            return
+        if envelope.metadata.event_type == SessionCompletedEvent.event_type:
+            # A settled spool may be released only after a later complete
+            # traversal; settling itself never deletes or reads staged bytes.
+            if self._spools is not None:
+                completed = SessionCompletedEvent.model_validate_json(
+                    envelope.event.model_dump_json()
+                )
+                await self._spools.settle(completed.session_id)
             return
         if envelope.metadata.event_type != SessionStartedEvent.event_type:
             return

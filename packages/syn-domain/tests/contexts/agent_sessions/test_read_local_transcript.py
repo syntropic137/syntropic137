@@ -17,7 +17,17 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.parametrize(
     "outcome",
-    ["present", "missing", "expired", "not_captured", "denied", "too_large", "unavailable"],
+    [
+        "present",
+        "missing",
+        "expired",
+        "not_captured",
+        "denied",
+        "too_large",
+        "unavailable",
+        "tombstone_expired",
+        "tombstone_deleted",
+    ],
 )
 async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
     run = RunIdentity(source_instance_id="source", execution_id="run")
@@ -54,6 +64,8 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
         return None if outcome in ("missing", "expired") else b"exact"
 
     access.require_read.side_effect = authorize
+    tombstone = outcome.removeprefix("tombstone_") if outcome.startswith("tombstone_") else None
+    access.tombstone.return_value = tombstone
     archive.get.side_effect = read
     handler = ReadLocalTranscriptHandler(
         catalog, archive, access, max_bytes=4 if outcome == "too_large" else 5
@@ -63,11 +75,14 @@ async def test_exact_revision_access_and_storage_outcomes(outcome: str) -> None:
             await handler.handle(run, identity, "a" * 64)
     else:
         result = await handler.handle(run, identity, "a" * 64)
-        assert result.status == outcome
+        assert result.status == (tombstone or outcome)
         assert result.body == (b"exact" if outcome == "present" else None)
         assert "exact" not in repr(result)
     catalog.get_revision.assert_awaited_once_with(run, identity, "a" * 64)
-    if outcome in ("denied", "not_captured", "too_large"):
+    if tombstone is not None:
+        # A recorded tombstone withholds bytes even while they still exist.
+        access.tombstone.assert_awaited_once_with(capture)
+    if outcome in ("denied", "not_captured", "too_large") or tombstone is not None:
         archive.get.assert_not_awaited()
         archive.is_deleted.assert_not_awaited()
     if outcome == "not_captured":

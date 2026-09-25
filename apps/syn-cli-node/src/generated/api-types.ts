@@ -512,10 +512,65 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Local Transcript Revision */
+        /**
+         * Get Local Transcript Revision
+         * @description Serve one exact archived revision after current whole-object authorization.
+         *
+         *     Bytes are returned exactly as archived (source redaction only). Deleted,
+         *     expired, missing and oversized bodies are explicit statuses, never content.
+         */
         get: operations["get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Transcript Deletion
+         * @description Local erasure and replica propagation state of an existing tombstone.
+         */
+        get: operations["get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get"];
+        put?: never;
+        /**
+         * Delete Local Transcript Revision
+         * @description Durably tombstone exact bytes, then erase them asynchronously.
+         *
+         *     Idempotent: repeating the request returns the existing tombstone. The body is
+         *     withheld from the moment of the request for every run sharing the object.
+         *     Deletion propagates to the configured replica; retries, replays and
+         *     re-uploads cannot restore the bytes. Session history stays discoverable.
+         */
+        post: operations["delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/revocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Local Transcript Revision
+         * @description Withhold reads of exact bytes for every sharing run; bytes are retained.
+         */
+        post: operations["revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2405,6 +2460,29 @@ export interface components {
             transcript_revision?: string | null;
             /** Archived Byte Hash */
             archived_byte_hash?: string | null;
+        };
+        /**
+         * CaptureRevisionHashes
+         * @description Names the representation behind each hash one capture receipt carries.
+         *
+         *     ``transcript_revision`` is not self-describing: a local receipt stores the
+         *     archived byte SHA-256 there, a remote receipt the APSS original-content hash.
+         *     ``transcript_revision_kind`` says which, or ``unqualified`` when the value
+         *     matches neither known form. Never compare hashes of different kinds.
+         */
+        CaptureRevisionHashes: {
+            /** Transcript Revision Kind */
+            transcript_revision_kind?: ("archived_bytes_sha256" | "source_content_hash" | "unqualified") | null;
+            /**
+             * Archived Bytes Sha256
+             * @description SHA-256 of the exact archived bytes; the local transcript read key.
+             */
+            archived_bytes_sha256?: string | null;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash reported by a replica receipt.
+             */
+            source_content_hash?: string | null;
         };
         /**
          * CaptureStatusEntry
@@ -4322,19 +4400,36 @@ export interface components {
         /**
          * LocalTranscriptResponse
          * @description Exact archive bytes, base64 encoded without parsing provider content.
+         *
+         *     Redaction policy: the body is served exactly as archived. Any redaction was
+         *     applied by the capturing source before archival; the server neither redacts,
+         *     rewrites nor slices bytes, and never serves a partial range as the revision.
          */
         LocalTranscriptResponse: {
             /**
              * Status
              * @enum {string}
              */
-            status: "present" | "not_captured" | "missing" | "expired" | "too_large";
-            /** Archive Sha256 */
+            status: "present" | "not_captured" | "missing" | "expired" | "deleted" | "too_large";
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
             archive_sha256: string;
             /** Content Format */
             content_format?: ("native" | "envelope") | null;
-            /** Size */
+            /**
+             * Size
+             * @description Archived byte length.
+             */
             size?: number | null;
+            /**
+             * Redaction
+             * @description Only source-applied redaction; the server serves archived bytes unchanged.
+             * @default source
+             * @constant
+             */
+            redaction: "source";
             /** Content Base64 */
             content_base64?: string | null;
         };
@@ -5794,7 +5889,8 @@ export interface components {
          *     ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
          *     edge endpoint on another page resolves through the node lookup route.
          *     ``next_cursor`` is opaque and bound to this run, revision, section and filters.
-         *     Absent body overrides are unchecked.
+         *     Absent body overrides are unchecked. On capture pages ``capture_hashes[i]``
+         *     names the hash representations of ``items[i]``.
          */
         SessionInventoryPageResponse: {
             snapshot: components["schemas"]["InventorySnapshot"];
@@ -5815,6 +5911,11 @@ export interface components {
              * @default []
              */
             body_overrides: components["schemas"]["TranscriptBodyState"][];
+            /**
+             * Capture Hashes
+             * @default []
+             */
+            capture_hashes: components["schemas"]["CaptureRevisionHashes"][];
         };
         /** SessionInventoryRefreshRequest */
         SessionInventoryRefreshRequest: {
@@ -6801,15 +6902,148 @@ export interface components {
             /** Executions */
             executions?: components["schemas"]["ToolTimelineEntry"][];
         };
-        /** TranscriptBodyState */
+        /**
+         * TranscriptBodyState
+         * @description A current restriction overlaid on an immutable inventory page.
+         *
+         *     Each hash names its representation. ``archive_sha256`` is the SHA-256 of the
+         *     exact archived bytes (a local receipt's ``archived_byte_hash``).
+         *     ``source_content_hash`` is the APSS original-content hash a remote receipt
+         *     reports as its ``transcript_revision``; it is absent until known.
+         */
         TranscriptBodyState: {
-            /** Archive Sha256 */
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
             archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash of the same revision, when recorded.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Status
+             * @description expired: retention removed the body. deleted: an owner deleted or retracted it. withheld: access was revoked while bytes are retained.
+             * @enum {string}
+             */
+            status: "expired" | "deleted" | "withheld";
+        };
+        /**
+         * TranscriptDeletion
+         * @description A durable body tombstone. Catalog and inventory history remain discoverable.
+         */
+        TranscriptDeletion: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes this tombstone covers.
+             */
+            archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash used to delete replicated envelopes.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "retention_age" | "retention_quota" | "deletion" | "retraction";
+            /**
+             * Local Status
+             * @enum {string}
+             */
+            local_status: "pending" | "deleted";
+            /**
+             * Requested At
+             * @description ISO 8601 UTC time the tombstone was recorded.
+             */
+            requested_at: string;
+            /**
+             * Deleted At
+             * @description ISO 8601 UTC time local bytes were erased.
+             */
+            deleted_at?: string | null;
+            /**
+             * Replication
+             * @enum {string}
+             */
+            replication: "disabled" | "propagate" | "not_applicable";
+            /**
+             * Replicas
+             * @default []
+             */
+            replicas: components["schemas"]["TranscriptDeletionReplica"][];
+        };
+        /**
+         * TranscriptDeletionReplica
+         * @description Propagation of one body deletion to one configured replication destination.
+         */
+        TranscriptDeletionReplica: {
+            /**
+             * Destination Id
+             * @description Server-derived opaque destination identity.
+             */
+            destination_id: string;
             /**
              * Status
              * @enum {string}
              */
-            status: "expired" | "withheld";
+            status: "pending" | "propagated";
+        };
+        /** TranscriptDeletionRequest */
+        TranscriptDeletionRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+            /**
+             * Reason
+             * @default deletion
+             * @enum {string}
+             */
+            reason: "deletion" | "retraction";
+        };
+        /**
+         * TranscriptDeletionResponse
+         * @description Durable tombstone for exact bytes shared by every membership of the object.
+         *
+         *     ``created`` is false when a tombstone already existed; the original reason
+         *     is kept. Session history remains discoverable with a deleted body state.
+         */
+        TranscriptDeletionResponse: {
+            deletion: components["schemas"]["TranscriptDeletion"];
+            /** Created */
+            created: boolean;
+        };
+        /**
+         * TranscriptIdentityRequest
+         * @description Qualified native identity of one archived revision in the addressed run.
+         */
+        TranscriptIdentityRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+        };
+        /**
+         * TranscriptRevocationResponse
+         * @description Access to the exact bytes is withheld; stored bytes are retained.
+         */
+        TranscriptRevocationResponse: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes.
+             */
+            archive_sha256: string;
+            /**
+             * Status
+             * @default withheld
+             * @constant
+             */
+            status: "withheld";
+            /** Created */
+            created: boolean;
         };
         /**
          * TriggerActionResponse
@@ -8298,6 +8532,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LocalTranscriptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptIdentityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptRevocationResponse"];
                 };
             };
             /** @description Validation Error */

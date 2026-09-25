@@ -7,6 +7,10 @@ import pytest
 from event_sourcing import EventEnvelope, EventMetadata
 
 from syn_domain.contexts.agent_sessions import HostSessionEvidenceProjector
+from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus
+from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
+    SessionCompletedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import EvidenceBatch
 
@@ -129,3 +133,46 @@ async def test_host_lifecycle_uses_separate_replay_stable_producer_without_inven
     writer.append.reset_mock()
     await projector.handle(envelope)
     assert [call.args[0] for call in writer.append.await_args_list] == [first, lifecycle]
+
+
+def _completed(session_id: str) -> EventEnvelope[SessionCompletedEvent]:
+    return EventEnvelope(
+        event=SessionCompletedEvent(
+            session_id=session_id,
+            status=SessionStatus.COMPLETED,
+            completed_at=datetime.now(UTC),
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_tokens=0,
+            operation_count=0,
+        ),
+        metadata=EventMetadata(
+            event_id="completion",
+            aggregate_id=session_id,
+            aggregate_type="AgentSession",
+            aggregate_nonce=2,
+            global_nonce=18,
+            event_type=SessionCompletedEvent.event_type,
+        ),
+    )
+
+
+async def test_completion_settles_spool_without_evidence_and_is_replay_safe() -> None:
+    journal, spools = AsyncMock(), AsyncMock()
+    projector = HostSessionEvidenceProjector(journal, "installation", spools)
+    assert SessionCompletedEvent.event_type in projector.get_subscribed_event_types()
+    event = _completed("child")
+    await projector.handle(event)
+    await projector.handle(event)
+    assert [call.args for call in spools.settle.await_args_list] == [("child",), ("child",)]
+    # Settling never reads, releases or journals: release needs a later traversal.
+    journal.append.assert_not_awaited()
+    spools.project.assert_not_awaited()
+
+
+async def test_completion_is_not_subscribed_without_capture_spools() -> None:
+    journal = AsyncMock()
+    projector = HostSessionEvidenceProjector(journal, "installation")
+    assert SessionCompletedEvent.event_type not in projector.get_subscribed_event_types()
+    await projector.handle(_completed("child"))
+    journal.append.assert_not_awaited()

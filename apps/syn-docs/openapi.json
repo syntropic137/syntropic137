@@ -1614,6 +1614,7 @@
           "executions"
         ],
         "summary": "Get Local Transcript Revision",
+        "description": "Serve one exact archived revision after current whole-object authorization.\n\nBytes are returned exactly as archived (source redaction only). Deleted,\nexpired, missing and oversized bodies are explicit statuses, never content.",
         "operationId": "get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get",
         "parameters": [
           {
@@ -1667,6 +1668,207 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LocalTranscriptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/deletion": {
+      "post": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Delete Local Transcript Revision",
+        "description": "Durably tombstone exact bytes, then erase them asynchronously.\n\nIdempotent: repeating the request returns the existing tombstone. The body is\nwithheld from the moment of the request for every run sharing the object.\nDeletion propagates to the configured replica; retries, replays and\nre-uploads cannot restore the bytes. Session history stays discoverable.",
+        "operationId": "delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "archive_hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Archive Hash"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptDeletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptDeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Local Transcript Deletion",
+        "description": "Local erasure and replica propagation state of an existing tombstone.",
+        "operationId": "get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "archive_hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Archive Hash"
+            }
+          },
+          {
+            "name": "harness",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^[^\\x00]+$",
+              "title": "Harness"
+            }
+          },
+          {
+            "name": "native_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^[^\\x00]+$",
+              "title": "Native Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptDeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/revocation": {
+      "post": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Revoke Local Transcript Revision",
+        "description": "Withhold reads of exact bytes for every sharing run; bytes are retained.",
+        "operationId": "revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "archive_hash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Archive Hash"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptIdentityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptRevocationResponse"
                 }
               }
             }
@@ -7398,6 +7600,56 @@
         ],
         "title": "CaptureReceipt"
       },
+      "CaptureRevisionHashes": {
+        "properties": {
+          "transcript_revision_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "archived_bytes_sha256",
+                  "source_content_hash",
+                  "unqualified"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript Revision Kind"
+          },
+          "archived_bytes_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Bytes Sha256",
+            "description": "SHA-256 of the exact archived bytes; the local transcript read key."
+          },
+          "source_content_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Hash",
+            "description": "APSS original-content hash reported by a replica receipt."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CaptureRevisionHashes",
+        "description": "Names the representation behind each hash one capture receipt carries.\n\n``transcript_revision`` is not self-describing: a local receipt stores the\narchived byte SHA-256 there, a remote receipt the APSS original-content hash.\n``transcript_revision_kind`` says which, or ``unqualified`` when the value\nmatches neither known form. Never compare hashes of different kinds."
+      },
       "CaptureStatusEntry": {
         "properties": {
           "session_id": {
@@ -11693,6 +11945,7 @@
               "not_captured",
               "missing",
               "expired",
+              "deleted",
               "too_large"
             ],
             "title": "Status"
@@ -11700,7 +11953,8 @@
           "archive_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
-            "title": "Archive Sha256"
+            "title": "Archive Sha256",
+            "description": "SHA-256 of the exact archived bytes, not the APSS content hash."
           },
           "content_format": {
             "anyOf": [
@@ -11727,7 +11981,15 @@
                 "type": "null"
               }
             ],
-            "title": "Size"
+            "title": "Size",
+            "description": "Archived byte length."
+          },
+          "redaction": {
+            "type": "string",
+            "const": "source",
+            "title": "Redaction",
+            "description": "Only source-applied redaction; the server serves archived bytes unchanged.",
+            "default": "source"
           },
           "content_base64": {
             "anyOf": [
@@ -11748,7 +12010,7 @@
           "archive_sha256"
         ],
         "title": "LocalTranscriptResponse",
-        "description": "Exact archive bytes, base64 encoded without parsing provider content."
+        "description": "Exact archive bytes, base64 encoded without parsing provider content.\n\nRedaction policy: the body is served exactly as archived. Any redaction was\napplied by the capturing source before archival; the server neither redacts,\nrewrites nor slices bytes, and never serves a partial range as the revision."
       },
       "MaintenanceModeResponse": {
         "properties": {
@@ -14601,6 +14863,14 @@
             "type": "array",
             "title": "Body Overrides",
             "default": []
+          },
+          "capture_hashes": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureRevisionHashes"
+            },
+            "type": "array",
+            "title": "Capture Hashes",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -14613,7 +14883,7 @@
           "item_keys"
         ],
         "title": "SessionInventoryPageResponse",
-        "description": "One keyset page of a pinned revision plus current local restrictions.\n\n``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an\nedge endpoint on another page resolves through the node lookup route.\n``next_cursor`` is opaque and bound to this run, revision, section and filters.\nAbsent body overrides are unchecked."
+        "description": "One keyset page of a pinned revision plus current local restrictions.\n\n``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an\nedge endpoint on another page resolves through the node lookup route.\n``next_cursor`` is opaque and bound to this run, revision, section and filters.\nAbsent body overrides are unchecked. On capture pages ``capture_hashes[i]``\nnames the hash representations of ``items[i]``."
       },
       "SessionInventoryRefreshRequest": {
         "properties": {
@@ -16366,15 +16636,31 @@
           "archive_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$",
-            "title": "Archive Sha256"
+            "title": "Archive Sha256",
+            "description": "SHA-256 of the exact archived bytes, not the APSS content hash."
+          },
+          "source_content_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Hash",
+            "description": "APSS original-content hash of the same revision, when recorded."
           },
           "status": {
             "type": "string",
             "enum": [
               "expired",
+              "deleted",
               "withheld"
             ],
-            "title": "Status"
+            "title": "Status",
+            "description": "expired: retention removed the body. deleted: an owner deleted or retracted it. withheld: access was revoked while bytes are retained."
           }
         },
         "additionalProperties": false,
@@ -16383,7 +16669,226 @@
           "archive_sha256",
           "status"
         ],
-        "title": "TranscriptBodyState"
+        "title": "TranscriptBodyState",
+        "description": "A current restriction overlaid on an immutable inventory page.\n\nEach hash names its representation. ``archive_sha256`` is the SHA-256 of the\nexact archived bytes (a local receipt's ``archived_byte_hash``).\n``source_content_hash`` is the APSS original-content hash a remote receipt\nreports as its ``transcript_revision``; it is absent until known."
+      },
+      "TranscriptDeletion": {
+        "properties": {
+          "archive_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Archive Sha256",
+            "description": "SHA-256 of the exact archived bytes this tombstone covers."
+          },
+          "source_content_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Hash",
+            "description": "APSS original-content hash used to delete replicated envelopes."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "retention_age",
+              "retention_quota",
+              "deletion",
+              "retraction"
+            ],
+            "title": "Reason"
+          },
+          "local_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "deleted"
+            ],
+            "title": "Local Status"
+          },
+          "requested_at": {
+            "type": "string",
+            "title": "Requested At",
+            "description": "ISO 8601 UTC time the tombstone was recorded."
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At",
+            "description": "ISO 8601 UTC time local bytes were erased."
+          },
+          "replication": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "propagate",
+              "not_applicable"
+            ],
+            "title": "Replication"
+          },
+          "replicas": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptDeletionReplica"
+            },
+            "type": "array",
+            "title": "Replicas",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "archive_sha256",
+          "reason",
+          "local_status",
+          "requested_at",
+          "replication"
+        ],
+        "title": "TranscriptDeletion",
+        "description": "A durable body tombstone. Catalog and inventory history remain discoverable."
+      },
+      "TranscriptDeletionReplica": {
+        "properties": {
+          "destination_id": {
+            "type": "string",
+            "title": "Destination Id",
+            "description": "Server-derived opaque destination identity."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "propagated"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "destination_id",
+          "status"
+        ],
+        "title": "TranscriptDeletionReplica",
+        "description": "Propagation of one body deletion to one configured replication destination."
+      },
+      "TranscriptDeletionRequest": {
+        "properties": {
+          "harness": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Harness"
+          },
+          "native_id": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Native Id"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "deletion",
+              "retraction"
+            ],
+            "title": "Reason",
+            "default": "deletion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "harness",
+          "native_id"
+        ],
+        "title": "TranscriptDeletionRequest"
+      },
+      "TranscriptDeletionResponse": {
+        "properties": {
+          "deletion": {
+            "$ref": "#/components/schemas/TranscriptDeletion"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "deletion",
+          "created"
+        ],
+        "title": "TranscriptDeletionResponse",
+        "description": "Durable tombstone for exact bytes shared by every membership of the object.\n\n``created`` is false when a tombstone already existed; the original reason\nis kept. Session history remains discoverable with a deleted body state."
+      },
+      "TranscriptIdentityRequest": {
+        "properties": {
+          "harness": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Harness"
+          },
+          "native_id": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "Native Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "harness",
+          "native_id"
+        ],
+        "title": "TranscriptIdentityRequest",
+        "description": "Qualified native identity of one archived revision in the addressed run."
+      },
+      "TranscriptRevocationResponse": {
+        "properties": {
+          "archive_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Archive Sha256",
+            "description": "SHA-256 of the exact archived bytes."
+          },
+          "status": {
+            "type": "string",
+            "const": "withheld",
+            "title": "Status",
+            "default": "withheld"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "archive_sha256",
+          "created"
+        ],
+        "title": "TranscriptRevocationResponse",
+        "description": "Access to the exact bytes is withheld; stored bytes are retained."
       },
       "TriggerActionResponse": {
         "properties": {

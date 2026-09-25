@@ -34,6 +34,7 @@ from pydantic import (
 # rather than restated - the probe that produces a shape is the only place
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
+from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
     SessionHistoryBackfillSummary as SessionHistoryBackfillSummary,
@@ -68,6 +69,10 @@ from syn_api.inventory_types import (
 from syn_api.inventory_types import (
     SessionInventoryResponse as SessionInventoryResponse,
 )
+from syn_api.inventory_types import TranscriptDeletionRequest as TranscriptDeletionRequest
+from syn_api.inventory_types import TranscriptDeletionResponse as TranscriptDeletionResponse
+from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdentityRequest
+from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason

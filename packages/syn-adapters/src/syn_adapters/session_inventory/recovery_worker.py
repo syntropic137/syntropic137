@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from syn_domain.contexts.agent_sessions import CaptureSpoolLeaseLost
 
@@ -31,6 +31,15 @@ logger = logging.getLogger(__name__)
 class RecoveryReaders:
     transcripts: WorkspaceSpoolReader
     children: WorkspaceChildJournalReader
+    exclusive: bool = False
+    """No other container referenced the volume when it was opened, so nothing
+    else could write during this traversal. Release requires it."""
+
+
+class SpoolReleasePort(Protocol):
+    async def after_drain(self, lease: CaptureSpoolLease, *, exclusive: bool) -> bool:
+        """Release staged bytes a complete traversal archived; False keeps them."""
+        ...
 
 
 class SpoolRecoveryPort(Protocol):
@@ -49,9 +58,11 @@ class CaptureRecoveryWorker:
         lease_seconds: int,
         retry_seconds: int,
         children: ChildJournalDrain | None = None,
+        release: SpoolReleasePort | None = None,
     ) -> None:
         self._spools, self._recovery, self._drain = spools, recovery, drain
         self._children = children
+        self._release = release
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
 
     async def step(self) -> bool:
@@ -85,7 +96,7 @@ class CaptureRecoveryWorker:
                 watermark=lease.watermark,
                 renew=renew,
             )
-            child_pending = await self._recover_children(lease, readers)
+            children = await self._recover_children(lease, readers)
             await self._spools.advance(
                 lease,
                 after=progress.next_after
@@ -93,13 +104,23 @@ class CaptureRecoveryWorker:
                 else progress.watermark,
                 watermark=progress.watermark if progress.next_after is not None else None,
                 retry_seconds=0
-                if progress.next_after is not None or child_pending
+                if progress.next_after is not None or children == "more"
                 else self._retry_seconds,
+                staged_bytes=progress.staged_bytes,
             )
+            complete = progress.next_after is None and children == "complete"
+        # Release after the helper container is gone: its mount would block removal.
+        if complete:
+            await self._spools.mark_drained(lease)
+            if self._release is not None:
+                await self._release.after_drain(lease, exclusive=readers.exclusive)
 
-    async def _recover_children(self, lease: CaptureSpoolLease, readers: RecoveryReaders) -> bool:
+    async def _recover_children(
+        self, lease: CaptureSpoolLease, readers: RecoveryReaders
+    ) -> Literal["complete", "more", "failed"]:
+        """ "complete" only when a child traversal finished during this lease."""
         if self._children is None:
-            return False
+            return "complete"
         try:
             await self._spools.renew(lease, lease_seconds=self._lease_seconds)
             progress = await self._children.page(
@@ -117,11 +138,11 @@ class CaptureRecoveryWorker:
                 else progress.watermark,
                 watermark=progress.watermark if progress.next_after is not None else None,
             )
-            return progress.next_after is not None
+            return "complete" if progress.next_after is None else "more"
         except CaptureSpoolLeaseLost:
             raise
         except Exception:
             # Transcript and child sequences are independent. Retain the child
             # cursor for retry while allowing durable transcript work to advance.
             logger.exception("Child journal recovery failed; child cursor remains retryable")
-            return False
+            return "failed"

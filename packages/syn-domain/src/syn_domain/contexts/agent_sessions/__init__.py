@@ -221,7 +221,13 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     model_from_rollout,
 )
 
-from .domain.read_models.transcript_body_state import TranscriptBodyState
+from .domain.read_models.transcript_body_state import (
+    BodyDeletionReason,
+    OwnerDeletionReason,
+    TranscriptBodyState,
+    TranscriptDeletion,
+    TranscriptDeletionReplica,
+)
 
 __all__ = [
     "CANONICAL_SESSION_USAGE_CTE",
@@ -240,6 +246,7 @@ __all__ = [
     "BackfillSessionInventoryHandler",
     "BilledUsage",
     "BodyAvailability",
+    "BodyDeletionReason",
     "BuildInventorySnapshotHandler",
     "CanonicalTotals",
     "CanonicalUsageQueryService",
@@ -312,6 +319,7 @@ __all__ = [
     "OperationRecord",
     "OperationRecordedEvent",
     "OperationType",
+    "OwnerDeletionReason",
     "PendingEvidence",
     "PricedUsage",
     "ProcessHistoryBackfillQueueHandler",
@@ -351,6 +359,8 @@ __all__ = [
     "TokenUsageData",
     "TranscriptBodyState",
     "TranscriptDeletedError",
+    "TranscriptDeletion",
+    "TranscriptDeletionReplica",
     "TranscriptIntegrityError",
     "import_phase_delegates",
     "model_from_rollout",

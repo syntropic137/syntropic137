@@ -6,13 +6,13 @@ access credential. Reads never launch capture, reconciliation, or remote I/O.
 
 from __future__ import annotations
 
-import base64
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Query, Response
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from syn_api._wiring_inventory import get_inventory_runtime
+from syn_api.routes.executions.capture_hashes import capture_revision_hashes
 from syn_api.routes.executions.inventory_cursor import (
     MAX_CURSOR_LENGTH,
     InventoryCursor,
@@ -21,7 +21,6 @@ from syn_api.routes.executions.inventory_cursor import (
 )
 from syn_api.types import (
     Err,
-    LocalTranscriptResponse,
     SessionHistoryBackfillSummary,
     SessionInventoryBackfillRequest,
     SessionInventoryBackfillResponse,
@@ -42,10 +41,8 @@ from syn_domain.contexts.agent_sessions import (
     InventoryNotFound,
     InventorySnapshot,
     ItemKind,
-    QualifiedSessionIdentity,
     RefreshSessionInventoryHandler,
     RunIdentity,
-    TranscriptIntegrityError,
 )
 
 router = APIRouter(tags=["executions"])
@@ -213,6 +210,7 @@ async def get_session_inventory_page(
         item_keys=page.item_keys,
         next_cursor=next_cursor,
         body_overrides=overrides,
+        capture_hashes=capture_revision_hashes(page.items) if kind == "capture" else (),
     )
 
 
@@ -338,48 +336,4 @@ async def get_session_inventory_job(job_id: str) -> SessionInventoryJobResponse:
         resolver_version=state.request.resolver_version,
         revision=state.revision,
         failure_code=state.failure_code,
-    )
-
-
-@router.get("/executions/{execution_id}/session-transcripts/{archive_hash}")
-async def get_local_transcript_revision(
-    execution_id: str,
-    archive_hash: Annotated[str, Path(pattern=r"^[a-f0-9]{64}$")],
-    harness: Annotated[str, Query(min_length=1, max_length=2048, pattern=r"^[^\x00]+$")],
-    native_id: Annotated[str, Query(min_length=1, max_length=2048, pattern=r"^[^\x00]+$")],
-    response: Response,
-) -> LocalTranscriptResponse:
-    response.headers["Cache-Control"] = "no-store"
-    run = await _visible_run(execution_id)
-    try:
-        identity = QualifiedSessionIdentity(
-            kind="transcript",
-            source_instance_id=run.source_instance_id,
-            harness=harness,
-            local_id=native_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Invalid transcript identity") from exc
-    try:
-        result = await get_inventory_runtime().transcripts.handle(run, identity, archive_hash)
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail="Transcript access denied",
-            headers={"Cache-Control": "no-store"},
-        ) from exc
-    except (OSError, TranscriptIntegrityError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Transcript storage unavailable",
-            headers={"Cache-Control": "no-store"},
-        ) from exc
-    return LocalTranscriptResponse(
-        status=result.status,
-        archive_sha256=archive_hash,
-        content_format=result.capture.content_format if result.capture is not None else None,
-        size=result.capture.archive.size if result.capture is not None else None,
-        content_base64=base64.b64encode(result.body).decode("ascii")
-        if result.body is not None
-        else None,
     )

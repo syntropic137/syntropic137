@@ -46,9 +46,10 @@ class PostgresCaptureSpools:
                 """WITH candidate AS (
                     SELECT source_instance_id,session_id FROM session_capture_spools
                     WHERE leased_until<=now() AND retry_at<=now() AND source_instance_id=$2
+                    AND release_reason IS NULL
                     ORDER BY retry_at,source_instance_id,session_id FOR UPDATE SKIP LOCKED LIMIT 1
                 ) UPDATE session_capture_spools s SET lease_token=s.lease_token+1,
-                    leased_until=now()+$1::double precision*interval '1 second'
+                    leased_until=now()+$1::double precision*interval '1 second',claimed_at=now()
                 FROM candidate c WHERE s.source_instance_id=c.source_instance_id AND s.session_id=c.session_id
                 RETURNING s.payload::text,s.lease_token::text,s.after_sequence::text,s.watermark::text,
                     s.child_after_sequence::text,s.child_watermark::text""",
@@ -90,14 +91,18 @@ class PostgresCaptureSpools:
         after: int,
         watermark: int | None,
         retry_seconds: int,
+        staged_bytes: int = 0,
     ) -> None:
         if lease.spool.run.source_instance_id != self._source:
             raise ValueError("Capture lease belongs to another installation")
+        if staged_bytes < 0:
+            raise ValueError("Staged byte count cannot be negative")
         _validate_progress(lease, after, watermark, retry_seconds)
         async with self._pool.acquire() as conn:
             changed = await conn.fetchval(
                 """UPDATE session_capture_spools SET after_sequence=$4,watermark=$5,
-                leased_until='-infinity',retry_at=now()+$6::double precision*interval '1 second'
+                leased_until='-infinity',retry_at=now()+$6::double precision*interval '1 second',
+                staged_bytes=staged_bytes+$7
                 WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3 AND leased_until>now()
                 RETURNING session_id""",
                 lease.spool.run.source_instance_id,
@@ -106,9 +111,35 @@ class PostgresCaptureSpools:
                 after,
                 watermark,
                 retry_seconds,
+                staged_bytes,
             )
         if changed is None:
             raise CaptureSpoolLeaseLost("Capture cursor lease expired or was superseded")
+
+    async def settle(self, session_id: str) -> None:
+        """Idempotent and replay-safe: the first settlement time is kept."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_capture_spools SET settled_at=now()
+                WHERE source_instance_id=$1 AND session_id=$2 AND settled_at IS NULL""",
+                self._source,
+                session_id,
+            )
+
+    async def mark_drained(self, lease: CaptureSpoolLease) -> None:
+        """Stamp the traversal start, not its end: bytes written after the claim
+        are not proven archived by this traversal."""
+        if lease.spool.run.source_instance_id != self._source:
+            raise ValueError("Capture lease belongs to another installation")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE session_capture_spools SET drained_at=claimed_at
+                WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3
+                AND claimed_at IS NOT NULL""",
+                self._source,
+                lease.spool.session_id,
+                lease.token,
+            )
 
     async def advance_children(
         self, lease: CaptureSpoolLease, *, after: int, watermark: int | None

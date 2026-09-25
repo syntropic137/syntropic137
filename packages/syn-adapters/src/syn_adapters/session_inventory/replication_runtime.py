@@ -28,6 +28,19 @@ if TYPE_CHECKING:
     from .database import Pool
 
 
+def replication_destination_id(url: str) -> str:
+    """Opaque server-derived destination identity; never the caller-visible URL."""
+    return hashlib.sha256(url.rstrip("/").encode()).hexdigest()
+
+
+def capture_destination_id(settings: SessionInventorySettings) -> str | None:
+    """Destination that receives body deletions, or None when capture delivery is off."""
+    url = settings.replication_store_url
+    if not (settings.replication_enabled and settings.capture_replication_enabled) or url is None:
+        return None
+    return replication_destination_id(url)
+
+
 def create_replication_manager(
     pool: Pool,
     inventory: SessionInventoryReadPort,
@@ -43,7 +56,7 @@ def create_replication_manager(
         raise ValueError("inventory replication configuration is incomplete")
     if not settings.exporter_binary.is_file():
         raise ValueError("configured inventory exporter binary does not exist")
-    destination = hashlib.sha256(url.rstrip("/").encode()).hexdigest()
+    destination = replication_destination_id(url)
     source = hashlib.sha256(source_id.encode()).hexdigest()
     transport = ExporterInventoryTransport(
         ExporterConfig(

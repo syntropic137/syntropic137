@@ -243,3 +243,28 @@ CREATE INDEX IF NOT EXISTS session_inventory_items_member_node_idx
 CREATE INDEX IF NOT EXISTS session_inventory_items_node_key_idx
     ON session_inventory_items (source_instance_id, execution_id, snapshot_id, node_key)
     WHERE kind = 'node';
+
+-- Rows 10/11 (#1398): why a body left the archive. An owner deletion or
+-- retraction is not retention; both withhold the body from the moment of request.
+ALTER TABLE session_body_deletions ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL
+    DEFAULT 'retention_age'
+    CHECK (reason IN ('retention_age','retention_quota','deletion','retraction'));
+CREATE INDEX IF NOT EXISTS session_body_deletions_content_hash
+    ON session_body_deletions(source_instance_id,content_hash) WHERE content_hash IS NOT NULL;
+
+-- Staged spool bytes are released only after a complete traversal archived them
+-- (release_reason='archived') or retention recorded a gap first ('expired').
+-- release_reason is durable intent; released_at acknowledges volume removal.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS registered_at
+    TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS drained_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS staged_bytes BIGINT NOT NULL
+    DEFAULT 0 CHECK (staged_bytes >= 0);
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS release_reason TEXT
+    CHECK (release_reason IN ('archived','expired'));
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS session_capture_spools_retained
+    ON session_capture_spools(source_instance_id,registered_at,session_id)
+    WHERE released_at IS NULL;
