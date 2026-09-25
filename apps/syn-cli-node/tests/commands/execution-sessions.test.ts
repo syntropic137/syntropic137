@@ -281,6 +281,29 @@ it("prints historical capture availability separately from current expiry", asyn
   expect(output()).toContain(hash);
 });
 
+it("names each capture hash by representation and matches replica deletions by content hash", async () => {
+  const hash = "a".repeat(64);
+  const contentHash = `sha256:${"c".repeat(64)}`;
+  const node = { kind: "transcript", source_instance_id: "installation", harness: "codex", local_id: "native" };
+  fetchMock.mockResolvedValueOnce(response(status)).mockResolvedValueOnce(response({
+    snapshot, kind: "capture", filters: {}, item_keys: [], next_cursor: null,
+    items: [
+      { node, destination: "local", availability: "present", receipt_sequence: 1, transcript_revision: hash, archived_byte_hash: hash },
+      { node, destination: "remote", availability: "present", receipt_sequence: 0, transcript_revision: contentHash },
+    ],
+    capture_hashes: [
+      { transcript_revision_kind: "archived_bytes_sha256", archived_bytes_sha256: hash, source_content_hash: null },
+      { transcript_revision_kind: "source_content_hash", archived_bytes_sha256: null, source_content_hash: contentHash },
+    ],
+    body_overrides: [{ archive_sha256: hash, source_content_hash: contentHash, status: "deleted" }],
+  }));
+  await executionSessionsCommand.handler({ positionals: ["execution"], values: { kind: "capture" } });
+  expect(output()).toContain("transcript:codex/native\tlocal: recorded=present; current=deleted");
+  expect(output()).toMatch(/transcript:codex\/native\tremote \(replication \w+\): recorded=present; current=deleted/);
+  expect(output()).toContain(`Archived bytes SHA-256: ${hash}`);
+  expect(output()).toContain(`Source content hash: ${contentHash}`);
+});
+
 it("human --all output groups by phase/attempt with full IDs, parent, local and replication state", async () => {
   const leader = { kind: "transcript", source_instance_id: "installation", harness: "claude", local_id: "claude-leader-full-id" };
   const child = { kind: "transcript", source_instance_id: "installation", harness: "claude", local_id: "claude-child-full-id" };

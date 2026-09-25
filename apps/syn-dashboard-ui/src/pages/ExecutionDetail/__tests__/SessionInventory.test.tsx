@@ -255,26 +255,23 @@ it('an expired cursor during Load more shows the expired state', async () => {
 })
 
 it('labels each hash by representation and matches replica deletions by content hash', async () => {
-  render(<SessionInventory executionId="run" />)
-  await screen.findByText('native-full-id')
   const contentHash = 'sha256:' + 'c'.repeat(64)
-  const evidence = { producer_id: 'test', evidence_id: 'one', source_revision: '1', locator: 'test', extractor_version: '1' }
-  const node = { kind: 'transcript' as const, source_instance_id: 'source', local_id: 'native', harness: 'codex' }
-  vi.mocked(getSessionInventoryPage).mockResolvedValue({
-    snapshot, kind: 'capture', filters: {}, item_keys: [], next_cursor: null,
+  serve('capture', page('capture', [
+    { node: native, destination: 'local', availability: 'present', receipt_sequence: 1, transcript_revision: 'a'.repeat(64), archived_byte_hash: 'a'.repeat(64), evidence },
+    { node: native, destination: 'remote', availability: 'present', receipt_sequence: 0, transcript_revision: contentHash, evidence },
+  ], [{ node_key: key('n') }, { node_key: key('n') }], null, {
     body_overrides: [{ archive_sha256: 'a'.repeat(64), source_content_hash: contentHash, status: 'deleted' }],
     capture_hashes: [
       { transcript_revision_kind: 'archived_bytes_sha256', archived_bytes_sha256: 'a'.repeat(64), source_content_hash: null },
       { transcript_revision_kind: 'source_content_hash', archived_bytes_sha256: null, source_content_hash: contentHash },
     ],
-    items: [
-      { node, destination: 'local', availability: 'present', receipt_sequence: 1, transcript_revision: 'a'.repeat(64), archived_byte_hash: 'a'.repeat(64), evidence },
-      { node, destination: 'remote', availability: 'present', receipt_sequence: 0, transcript_revision: contentHash, evidence },
-    ],
-  })
-  fireEvent.change(screen.getByLabelText('Inventory section'), { target: { value: 'capture' } })
-  expect(await screen.findByText('Current local body: deleted')).toBeTruthy()
-  expect(screen.getByText('Current replica body: deleted')).toBeTruthy()
-  expect(screen.getByText(`Archived bytes SHA-256: ${'a'.repeat(64)}`)).toBeTruthy()
-  expect(screen.getByText(`Source content hash: ${contentHash}`)).toBeTruthy()
+  }))
+  renderAt()
+  expect(await screen.findByText('recorded present; now deleted')).toBeTruthy()
+  expect(screen.getByText('replicated; replica now deleted')).toBeTruthy()
+  expect(screen.getByText('Archived bytes SHA-256')).toBeTruthy()
+  expect(screen.getByText('a'.repeat(64))).toBeTruthy()
+  expect(screen.getByText('Source content hash')).toBeTruthy()
+  expect(screen.getByText(contentHash)).toBeTruthy()
+  expect(screen.queryByText('Open local transcript')).toBeNull()
 })
