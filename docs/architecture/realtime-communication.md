@@ -34,12 +34,12 @@ C4Container
     
     Container_Boundary(core, "Domain Core") {
         Container(controller, "ExecutionController", "Python", "Control signal processing")
-        Container(state_machine, "State Machine", "Python", "Valid state transitions")
+        Container(aggregate, "WorkflowExecutionAggregate", "Python", "Decides which control requests are admissible")
         Container(executor, "WorkflowExecutor", "Python", "Executes workflows")
     }
     
     Container_Boundary(state, "State Management") {
-        Container(control_state, "Control State Store", "Redis/In-Memory", "Current execution states")
+        Container(event_store, "Event Store", "gRPC", "Execution event streams")
         Container(signal_queue, "Signal Queue", "Redis/In-Memory", "Pending control signals")
     }
     
@@ -49,12 +49,11 @@ C4Container
     
     Rel(ws_endpoint, controller, "Enqueue control signal")
     Rel(rest_api, controller, "Enqueue control signal")
-    Rel(controller, state_machine, "Validate transition")
-    Rel(controller, control_state, "Read/write state")
+    Rel(controller, event_store, "Rehydrate execution")
+    Rel(controller, aggregate, "Ask accepts_control")
     Rel(controller, signal_queue, "Publish signal")
     
     Rel(executor, signal_queue, "Poll for signals at yield points")
-    Rel(executor, state_machine, "Check valid transition")
     Rel(executor, sse_endpoint, "Emit execution events")
     Rel(sse_endpoint, dashboard, "Stream events", "SSE")
     
@@ -310,18 +309,17 @@ flowchart TB
     
     subgraph core["Domain Core (Pure Logic)"]
         controller[ExecutionController]
-        state_machine[StateMachine]
+        aggregate[WorkflowExecutionAggregate.accepts_control]
         commands[Command Types]
     end
     
     subgraph adapters["Storage Adapters (Outbound Ports)"]
-        state_store[ControlStatePort]
+        executions[WorkflowExecutionRepositoryPort]
         signal_queue[SignalQueuePort]
     end
     
     subgraph impl["Implementations"]
-        mem_state[InMemoryStateAdapter]
-        redis_state[RedisStateAdapter]
+        event_store[EventStoreRepository]
         mem_queue[InMemoryQueueAdapter]
         redis_queue[RedisQueueAdapter]
     end
@@ -329,14 +327,13 @@ flowchart TB
     ws --> controller
     rest --> controller
     
-    controller --> state_machine
+    controller --> aggregate
     controller --> commands
     
-    controller --> state_store
+    controller --> executions
     controller --> signal_queue
     
-    state_store -.->|dev| mem_state
-    state_store -.->|prod| redis_state
+    executions --> event_store
     signal_queue -.->|dev| mem_queue
     signal_queue -.->|prod| redis_queue
     

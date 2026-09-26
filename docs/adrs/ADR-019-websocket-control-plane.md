@@ -6,6 +6,8 @@ Accepted — **Updated 2026-03-21**
 
 > **ISS-262 note:** The bidirectional WebSocket control endpoint (`/ws/control/{execution_id}`) was removed. It was redundant — all control actions (pause, resume, cancel, inject) are fully covered by the HTTP POST endpoints described in this ADR, which remain the canonical interfaces. Observation streams (execution events) are now served via SSE; see ADR-049.
 
+> **ADR-014 section 7 note (2026-09-26):** The control state machine (`state_machine.py`), `ControlStatePort` and its adapters were removed. They decided admission from the execution detail projection, which lags the event stream, so a request against an execution the aggregate had already cancelled could be admitted. Admission is now `WorkflowExecutionAggregate.accepts_control`, asked of the aggregate rehydrated through `WorkflowExecutionRepositoryPort` on every request, and the controller fails closed when the execution is unknown or the store cannot be read. The sections below describe the original design.
+
 ## Date
 
 2024-12-09

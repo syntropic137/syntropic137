@@ -822,18 +822,16 @@ def get_controller() -> ExecutionController:
     redis://localhost:6379/0). Falls back to _NullSignalQueueAdapter only
     if Redis is explicitly unavailable (no URL and no connection possible).
 
-    Wraps: ExecutionController(ProjectionControlStateAdapter, signal_adapter)
+    Wraps: ExecutionController(execution repository, signal_adapter). Admission
+    is decided by the execution aggregate loaded from its stream, never by a
+    projection, which can lag a cancel (ADR-014 section 7).
     """
     global _controller_singleton
     if _controller_singleton is not None:
         return _controller_singleton
 
     from syn_adapters.control import ExecutionController
-    from syn_adapters.control.adapters.projection import ProjectionControlStateAdapter
-    from syn_adapters.projection_stores import get_projection_store
-
-    state_adapter = ProjectionControlStateAdapter(get_projection_store())
-
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_shared.settings import get_settings
 
     redis_url = get_settings().redis_url
@@ -853,7 +851,7 @@ def get_controller() -> ExecutionController:
         signal_adapter = _NullSignalQueueAdapter()
 
     _controller_singleton = ExecutionController(
-        state_port=state_adapter,
+        executions=get_workflow_execution_repository(),
         signal_port=signal_adapter,
     )
     return _controller_singleton
