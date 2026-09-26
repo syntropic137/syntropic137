@@ -137,12 +137,26 @@ phases:
     # No `allowed_tools`: codex enforces a FILESYSTEM SANDBOX, not a tool
     # vocabulary, so a tool list is accepted and never applied. The loader
     # rejects it rather than letting it read as scoping that is not there.
-    # `workspace-write` rather than `read-only` because the phase writes its
-    # own deliverable, and read-only cannot.
+    #
+    # NO `sandbox` EITHER, which is a measured decision and not an oversight.
+    # `sandbox: workspace-write` killed exec-8e22dc43f351 at this phase:
+    #
+    #   Workspace commands failed before execution because bwrap could not
+    #   create a namespace; patch writes to artifacts/output also failed
+    #
+    # codex implements workspace-write with bubblewrap, which needs to create a
+    # namespace, and it cannot inside the workspace container. Every codex
+    # phase that works on this deployment declares nothing and inherits
+    # DEFAULT_PHASE_SANDBOX (full-access), which does not use bwrap -
+    # sdlc-decision-record-v1's two codex phases both have sandbox=None and
+    # that workflow completed.
+    #
+    # The schema accepts workspace-write, so this is not something validation
+    # catches: the level is valid and the HOST cannot honour it. Until the
+    # image can, a codex phase here has one usable level.
     agent:
       provider: codex
       model: gpt-sol
-      sandbox: workspace-write
     skills:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
@@ -234,12 +248,26 @@ phases:
     # No `allowed_tools`: codex enforces a FILESYSTEM SANDBOX, not a tool
     # vocabulary, so a tool list is accepted and never applied. The loader
     # rejects it rather than letting it read as scoping that is not there.
-    # `workspace-write` rather than `read-only` because the phase writes its
-    # own deliverable, and read-only cannot.
+    #
+    # NO `sandbox` EITHER, which is a measured decision and not an oversight.
+    # `sandbox: workspace-write` killed exec-8e22dc43f351 at this phase:
+    #
+    #   Workspace commands failed before execution because bwrap could not
+    #   create a namespace; patch writes to artifacts/output also failed
+    #
+    # codex implements workspace-write with bubblewrap, which needs to create a
+    # namespace, and it cannot inside the workspace container. Every codex
+    # phase that works on this deployment declares nothing and inherits
+    # DEFAULT_PHASE_SANDBOX (full-access), which does not use bwrap -
+    # sdlc-decision-record-v1's two codex phases both have sandbox=None and
+    # that workflow completed.
+    #
+    # The schema accepts workspace-write, so this is not something validation
+    # catches: the level is valid and the HOST cannot honour it. Until the
+    # image can, a codex phase here has one usable level.
     agent:
       provider: codex
       model: gpt-sol
-      sandbox: workspace-write
     skills:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
