@@ -454,6 +454,7 @@ class WorkspaceProvisionHandler:
             can_open_pr=can_open_pr,
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
+            ledger=workspace.issuance_ledger,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:

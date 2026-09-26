@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
     from datetime import datetime
 
+    from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
     from syn_shared.settings.github import GitHubAppSettings
 
 logger = logging.getLogger(__name__)
@@ -248,7 +249,6 @@ class _GitHubClientProtocol(Protocol):
         can_open_pr: bool,
         repositories: Collection[str] | None = None,
     ) -> _MintedToken: ...
-    async def revoke_installation_token(self, token: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -267,6 +267,7 @@ async def _resolve_github_auth(
     repos: list[str],
     require_github: bool,
     can_open_pr: bool,
+    ledger: IssuanceLedger,
 ) -> _GitHubAuth:
     """Resolve the workspace's GitHub App credential: git's per-repo tokens and gh's one.
 
@@ -288,7 +289,7 @@ async def _resolve_github_auth(
     # as long as a phase runs, and each owns an httpx connection pool (#725).
     try:
         return await _resolve_with_client(
-            client, github_settings, repos, require_github, can_open_pr
+            client, github_settings, repos, require_github, can_open_pr, ledger
         )
     finally:
         await client.close()
@@ -300,10 +301,11 @@ async def _resolve_with_client(
     repos: list[str],
     require_github: bool,
     can_open_pr: bool,
+    ledger: IssuanceLedger,
 ) -> _GitHubAuth:
     """`_resolve_github_auth` once the client exists; the caller owns closing it."""
     if not repos:
-        gh_token, issued = await _mint_repo_less_gh_token(client, can_open_pr)
+        gh_token, issued = await _mint_repo_less_gh_token(client, can_open_pr, ledger)
         return _GitHubAuth(
             gh_token=gh_token,
             issued=issued,
@@ -312,7 +314,7 @@ async def _resolve_with_client(
         )
     url_to_installation = await _lookup_installations(client, repos, require_github)
     repo_tokens, issued = await _mint_tokens_per_installation(
-        client, url_to_installation, can_open_pr
+        client, url_to_installation, can_open_pr, ledger
     )
     return _GitHubAuth(
         repo_tokens=repo_tokens,
@@ -350,7 +352,7 @@ def _gh_token_for_repo_under_work(repos: list[str], repo_tokens: dict[str, str])
 
 
 async def _mint_repo_less_gh_token(
-    client: _GitHubClientProtocol, can_open_pr: bool
+    client: _GitHubClientProtocol, can_open_pr: bool, ledger: IssuanceLedger
 ) -> tuple[str | None, tuple[IssuedToken, ...]]:
     """gh's credential for a workflow that names no repository.
 
@@ -378,14 +380,14 @@ async def _mint_repo_less_gh_token(
     except Exception as exc:
         logger.warning("Could not mint a gh credential for a repo-less workflow: %s", exc)
         return None, ()
-    return minted.token, (
-        IssuedToken(
-            token=minted.token,
-            installation_id=installation_id,
-            repositories=(),
-            expires_at=minted.expires_at,
-        ),
+    issued = IssuedToken(
+        token=minted.token,
+        installation_id=installation_id,
+        repositories=(),
+        expires_at=minted.expires_at,
     )
+    ledger.record((issued,))
+    return minted.token, (issued,)
 
 
 async def _lookup_installations(
@@ -424,6 +426,7 @@ async def _mint_tokens_per_installation(
     client: _GitHubClientProtocol,
     url_to_installation: dict[str, str],
     can_open_pr: bool,
+    ledger: IssuanceLedger,
 ) -> tuple[dict[str, str], tuple[IssuedToken, ...]]:
     """Mint one token per unique installation, scoped to that installation's repos.
 
@@ -443,62 +446,27 @@ async def _mint_tokens_per_installation(
 
     tokens_by_installation: dict[str, str] = {}
     issued: list[IssuedToken] = []
-    try:
-        await _mint_each_installation(
-            client, installation_to_urls, can_open_pr, tokens_by_installation, issued
-        )
-    except BaseException:
-        # A mint that fails part-way raises out of `SetupPhaseSecrets.create`,
-        # so the tokens already minted never reach a container OR a ledger -
-        # and each stays live for its full hour. Nobody else can revoke them,
-        # so this does, before the failure propagates (#725).
-        await _revoke_orphans(client, issued)
-        raise
-
-    repo_tokens = {
-        url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()
-    }
-    return repo_tokens, tuple(issued)
-
-
-async def _revoke_orphans(client: _GitHubClientProtocol, issued: list[IssuedToken]) -> None:
-    """Best-effort revocation of tokens minted by a batch that then failed."""
-    for orphan in issued:
-        try:
-            await client.revoke_installation_token(orphan.token)
-        except Exception as exc:
-            logger.warning(
-                "Could not revoke a token minted for installation %s before a later "
-                "mint failed; it stays live until %s (%s)",
-                orphan.installation_id,
-                orphan.expires_at.isoformat(),
-                type(exc).__name__,
-            )
-
-
-async def _mint_each_installation(
-    client: _GitHubClientProtocol,
-    installation_to_urls: dict[str, list[str]],
-    can_open_pr: bool,
-    tokens_by_installation: dict[str, str],
-    issued: list[IssuedToken],
-) -> None:
-    """Mint one token per installation, appending to ``issued`` as each succeeds."""
     for inst_id, urls in installation_to_urls.items():
         minted = await client.mint_agent_token(
             inst_id,
             can_open_pr=can_open_pr,
             repositories=sorted({_repo_name(url) for url in urls}),
         )
-        tokens_by_installation[inst_id] = minted.token
-        issued.append(
-            IssuedToken(
-                token=minted.token,
-                installation_id=inst_id,
-                repositories=tuple(sorted({_repo_full_name(url) for url in urls})),
-                expires_at=minted.expires_at,
-            )
+        token = IssuedToken(
+            token=minted.token,
+            installation_id=inst_id,
+            repositories=tuple(sorted({_repo_full_name(url) for url in urls})),
+            expires_at=minted.expires_at,
         )
+        # THE LEDGER OWNS A TOKEN FROM THE MOMENT IT EXISTS (#725). Recorded
+        # here, before the next await, so no later failure - a second
+        # installation's mint, closing the client, a cancellation, the setup
+        # script - can separate a live token from the teardown that revokes
+        # it. Codex review of #1448 found a partial batch and a cancelled
+        # close each stranding tokens while this happened on return instead.
+        ledger.record((token,))
+        tokens_by_installation[inst_id] = minted.token
+        issued.append(token)
         logger.info(
             "Generated token for installation %s (%d repo(s), can_open_pr=%s, expires_at=%s)",
             inst_id,
@@ -506,6 +474,11 @@ async def _mint_each_installation(
             can_open_pr,
             minted.expires_at.isoformat(),
         )
+
+    repo_tokens = {
+        url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()
+    }
+    return repo_tokens, tuple(issued)
 
 
 @dataclass
@@ -597,6 +570,7 @@ class SetupPhaseSecrets:
         can_open_pr: bool = False,
         require_github: bool = True,
         include_codex_auth: bool = False,
+        ledger: IssuanceLedger,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets using GitHub App.
 
@@ -617,6 +591,10 @@ class SetupPhaseSecrets:
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
+            ledger: The workspace's issuance ledger. Required, with no default:
+                every token is recorded here the moment it is minted, so a
+                failure anywhere after that still leaves it for teardown to
+                revoke (#725). A caller with nowhere to record would strand it.
 
         Returns:
             SetupPhaseSecrets with repo_tokens and repositories populated.
@@ -629,7 +607,7 @@ class SetupPhaseSecrets:
         repos = repositories or []
         # Repo-less workflows resolve too: they get no git credential, but gh
         # still needs one, and hosts.yml is now the only place gh finds it.
-        github = await _resolve_github_auth(repos, require_github, can_open_pr)
+        github = await _resolve_github_auth(repos, require_github, can_open_pr, ledger)
 
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
         # Scope the codex credential to codex phases only: a claude phase's agent

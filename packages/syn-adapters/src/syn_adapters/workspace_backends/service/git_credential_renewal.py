@@ -119,6 +119,7 @@ async def renew_git_credential(
             clone_repos=False,
             can_open_pr=source.can_open_pr,
             require_github=bool(source.repositories),
+            ledger=ledger,
         )
     except Exception as unmintable:
         raise CredentialRenewalFailedError(
@@ -132,10 +133,8 @@ async def renew_git_credential(
         # not be reported as one.
         logger.debug("No git credential to renew for workspace %s", workspace.workspace_id)
         return ()
-    # Before the install, not after it: a token whose installation fails is
-    # every bit as live as one that succeeds, and teardown can only revoke
-    # what it was told about.
-    ledger.record(secrets.issued)
+    # Already in the ledger: `create` records each token as it is minted, so a
+    # token whose installation fails below is still teardown's to revoke.
 
     try:
         result = await _install(workspace, secrets.build_credential_script())

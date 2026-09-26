@@ -42,7 +42,7 @@ from syn_adapters.workspace_backends.service.credential_keeper import (
     FIRST_RENEWAL,
     keep_credential_fresh,
 )
-from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
+from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger, IssuedToken
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -88,6 +88,8 @@ class _GitHub:
         self.refuse_to_mint: set[str] = set()
         self.clients_opened = 0
         self.clients_closed = 0
+        #: Raised from `close()`, standing in for a cancellation that lands there.
+        self.close_raises: BaseException | None = None
         self._reach: dict[str, frozenset[str]] = {}
 
     def reaches(self, token: str | None, full_name: str) -> bool:
@@ -180,6 +182,8 @@ class _AppClient:
 
     async def close(self) -> None:
         self._http.clients_closed += 1
+        if self._http.close_raises is not None:
+            raise self._http.close_raises
 
 
 @dataclass(frozen=True)
@@ -301,7 +305,10 @@ async def _provisioned(tmp_path: Path, repos: list[str]) -> tuple[ManagedWorkspa
     container = _Container(tmp_path)
     workspace = _workspace(container)
     secrets = await SetupPhaseSecrets.create(
-        repositories=repos, clone_repos=False, require_github=bool(repos)
+        repositories=repos,
+        clone_repos=False,
+        require_github=bool(repos),
+        ledger=workspace.issuance_ledger,
     )
     result = await workspace.run_setup_phase(secrets)
     assert result.exit_code == 0, result.stderr
@@ -502,11 +509,14 @@ class TestTeardownRevokesWhatIsStillLive:
 
         monkeypatch.setenv("APP_ENVIRONMENT", "test")
         service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
-        secrets = await SetupPhaseSecrets.create(repositories=[_A], clone_repos=False)
         revoked_inside: list[str] = []
 
         with pytest.raises(RuntimeError, match="the phase failed"):
             async with service.create_workspace(execution_id="exec-725") as workspace:
+                # Minted with the workspace's own ledger, as provisioning does.
+                secrets = await SetupPhaseSecrets.create(
+                    repositories=[_A], clone_repos=False, ledger=workspace.issuance_ledger
+                )
                 await workspace.run_setup_phase(secrets)
                 revoked_inside.extend(github.revoked)
                 raise RuntimeError("the phase failed")
@@ -516,50 +526,73 @@ class TestTeardownRevokesWhatIsStillLive:
 
 
 class TestAFailedBatchLeavesNothingLive:
-    """A mint that fails part-way must not strand the tokens it already minted.
+    """No failure after a mint may separate a live token from teardown.
 
-    `SetupPhaseSecrets.create` raises, so its tokens never reach a container
-    or a workspace ledger; if it does not revoke them, nothing ever will, and
-    each stays live for its full hour (codex review of #1448).
+    Codex review of #1448, twice: a batch that failed part-way, and then a
+    revoke or a cancelled `close()` after it, each stranded tokens while they
+    were recorded only once `create` returned. They are now recorded in the
+    workspace's ledger the moment they are minted, and teardown revokes them.
     """
 
-    async def test_a_partial_mint_revokes_what_it_already_minted(self, github: _GitHub) -> None:
+    async def test_a_partial_batch_is_in_the_ledger_and_teardown_revokes_it(
+        self, github: _GitHub
+    ) -> None:
         github.refuse_to_mint = {"inst-2"}
+        ledger = IssuanceLedger()
 
         with pytest.raises(GitHubAppError):
             await SetupPhaseSecrets.create(
-                repositories=[_A, _X], clone_repos=False, require_github=True
+                repositories=[_A, _X], clone_repos=False, require_github=True, ledger=ledger
             )
 
         (orphan,) = github.minted
-        assert orphan.startswith("ghs_inst-1_")
-        assert orphan in github.revoked
+        assert [t.token for t in ledger.issued] == [orphan]
+        await ledger.revoke_unexpired(_AppClient(github).revoke_installation_token)
+        assert github.revoked == [orphan]
 
-    async def test_a_failed_revocation_still_raises_the_mint_failure(self, github: _GitHub) -> None:
-        github.refuse_to_mint = {"inst-2"}
-        github.refuse_to_revoke = {"ghs_inst-1_1"}
+    async def test_a_cancellation_while_closing_the_client_strands_nothing(
+        self, github: _GitHub
+    ) -> None:
+        github.close_raises = asyncio.CancelledError()
+        ledger = IssuanceLedger()
 
-        with pytest.raises(GitHubAppError):
+        with pytest.raises(asyncio.CancelledError):
             await SetupPhaseSecrets.create(
-                repositories=[_A, _X], clone_repos=False, require_github=True
+                repositories=[_A, _X], clone_repos=False, require_github=True, ledger=ledger
             )
 
-        assert github.revoked == []
+        assert sorted(t.token for t in ledger.issued) == sorted(github.minted)
+        assert len(ledger.issued) == 2
 
-    async def test_a_complete_batch_revokes_nothing(self, github: _GitHub) -> None:
-        await SetupPhaseSecrets.create(
-            repositories=[_A, _X], clone_repos=False, require_github=True
-        )
+    async def test_a_repo_less_mint_is_recorded_before_the_client_closes(
+        self, github: _GitHub
+    ) -> None:
+        github.close_raises = asyncio.CancelledError()
+        ledger = IssuanceLedger()
 
-        assert len(github.minted) == 2
-        assert github.revoked == []
+        with pytest.raises(asyncio.CancelledError):
+            await SetupPhaseSecrets.create(
+                repositories=[], clone_repos=False, require_github=False, ledger=ledger
+            )
+
+        assert [t.token for t in ledger.issued] == github.minted
+        assert len(ledger.issued) == 1
+
+    async def test_a_setup_records_each_token_once(self, github: _GitHub, tmp_path: Path) -> None:
+        """Recording moved into `create`; the setup run must not record again."""
+        workspace, _ = await _provisioned(tmp_path, [_A, _X])
+
+        assert len(workspace.issued_tokens) == 2
+        assert sorted(t.token for t in workspace.issued_tokens) == sorted(github.minted)
 
 
 class TestEveryClientIsClosed:
     """A renewal builds a client every 40 minutes; each owns a connection pool."""
 
     async def test_after_a_successful_mint(self, github: _GitHub) -> None:
-        await SetupPhaseSecrets.create(repositories=[_A], clone_repos=False, require_github=True)
+        await SetupPhaseSecrets.create(
+            ledger=IssuanceLedger(), repositories=[_A], clone_repos=False, require_github=True
+        )
 
         assert github.clients_opened == 1
         assert github.clients_closed == 1
@@ -569,7 +602,7 @@ class TestEveryClientIsClosed:
 
         with pytest.raises(GitHubAppError):
             await SetupPhaseSecrets.create(
-                repositories=[_A], clone_repos=False, require_github=True
+                ledger=IssuanceLedger(), repositories=[_A], clone_repos=False, require_github=True
             )
 
         assert github.clients_opened == github.clients_closed == 1

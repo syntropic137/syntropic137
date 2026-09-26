@@ -271,9 +271,8 @@ class ManagedWorkspace:
         self._credential_source = CredentialSource(
             repositories=tuple(secrets.repositories), can_open_pr=secrets.can_open_pr
         )
-        # Recorded before the run for the same reason a renewal records before
-        # installing: the tokens exist whether or not the script succeeds.
-        self._ledger.record(secrets.issued)
+        # `secrets.issued` is already in the ledger: `SetupPhaseSecrets.create`
+        # recorded each token as it was minted (#725).
         result = await _run_setup_phase(self, secrets, setup_script)
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
@@ -288,6 +287,15 @@ class ManagedWorkspace:
     def issued_tokens(self) -> tuple[IssuedToken, ...]:
         """Every GitHub token minted for this workspace so far, oldest first."""
         return self._ledger.issued
+
+    @property
+    def issuance_ledger(self) -> IssuanceLedger:
+        """Where a token minted for this workspace is recorded the moment it exists.
+
+        Handed to `SetupPhaseSecrets.create` so no failure between minting and
+        installing can strand a live token outside teardown's reach (#725).
+        """
+        return self._ledger
 
     def keep_git_credential_fresh(
         self, *, on_lapse: Callable[[CredentialLapse], Awaitable[None]]
