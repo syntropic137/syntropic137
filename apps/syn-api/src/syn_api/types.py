@@ -37,6 +37,7 @@ from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC0
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 from syn_shared.agents import AliasResolutionBasis  # noqa: TC001
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.observed_model import format_observed_model
@@ -455,6 +456,14 @@ class PhaseDefinitionResponse(BaseModel):
     # security-relevant -- it stages both agent auths -- so a caller must be
     # able to see it.
     allow_delegation: bool = False
+    # #1429. A phase that cannot publish rendered identically to one that can,
+    # so `syn workflow show`, the dashboard and the API all agreed while the
+    # run failed at `gh pr create`. can_open_pr decides the GitHub token's
+    # permission level, so it has to be visible.
+    clone_repos: bool = True
+    can_open_pr: bool = False
+    delivers_repo_changes: bool = True
+    sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
     execution_type: str = "sequential"

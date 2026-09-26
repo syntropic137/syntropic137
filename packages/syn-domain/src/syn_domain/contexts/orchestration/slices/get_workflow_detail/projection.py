@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import
     PhaseRefDetail,
     WorkflowDetail,
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] | None:
@@ -130,6 +131,13 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                # #1429. The sibling site in read_models/workflow_detail.py
+                # reads these too; a reader reaches the API through either,
+                # so patching one is patching half.
+                clone_repos=bool(p.get("clone_repos", True)),
+                can_open_pr=bool(p.get("can_open_pr", False)),
+                delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),

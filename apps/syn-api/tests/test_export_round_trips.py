@@ -552,3 +552,176 @@ class TestARefusedDeclarationDoesNotLaunder:
 
         with pytest.raises(ValidationError, match="cannot honour allowed_tools"):
             self._reinstall(phase)
+
+
+# ---------------------------------------------------------------------------
+# #1429: the four fields the comment claimed were not dropped
+# ---------------------------------------------------------------------------
+#
+# `can_open_pr` decides the GitHub token's permission level. A dropped
+# declaration reinstalls the phase with `pull_requests: read`, so it pushes a
+# branch and then fails at `gh pr create` - which reads as a GitHub App
+# misconfiguration, not a lost YAML field. That cost a multi-hour
+# investigation into app permissions, installation repo selection and app
+# identity, all of which were correct.
+#
+# The inverse direction matters just as much and is easier to get wrong.
+# `clone_repos` and `delivers_repo_changes` default TRUE, so a truthy-only
+# emit guard drops an explicit `false` and reinstalls it as `true`. The phase
+# then clones repos it declared it did not want, or has the unpushed-work gate
+# treat a build artifact as a lost deliverable. Same laundering, opposite sign,
+# which is why these tests assert BOTH directions per field.
+
+
+def _parsed_phase(phase: PhaseDefinitionResponse) -> Mapping[str, object]:
+    """Export one phase and parse the YAML back, as this file's header requires."""
+    text = "\n".join(["phases:", *_yaml_phase_lines(phase)])
+    parsed = yaml.safe_load(text)
+    assert isinstance(parsed, dict)
+    phases = parsed["phases"]
+    assert isinstance(phases, list) and len(phases) == 1
+    entry = phases[0]
+    assert isinstance(entry, dict)
+    return entry
+
+
+class TestCanOpenPrSurvivesExport:
+    def test_true_is_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
+        assert entry["can_open_pr"] is True
+
+    def test_false_is_the_default_and_stays_absent(self) -> None:
+        """Absent means False to the loader, so emitting it would add noise."""
+        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": False}))
+        assert "can_open_pr" not in entry
+        assert (
+            PhaseYamlDefinition(id="x", name="x", order=1, prompt_file="x.md").can_open_pr
+            is False
+        )
+
+    def test_the_loader_reads_back_what_export_wrote(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
+        loaded = PhaseYamlDefinition(
+            id=str(entry["id"]),
+            name=str(entry["name"]),
+            order=int(entry["order"]),
+            prompt_file=str(entry["prompt_file"]),
+            can_open_pr=bool(entry["can_open_pr"]),
+        )
+        assert loaded.can_open_pr is True, (
+            "export wrote can_open_pr but the loader did not read it back as True; "
+            "a publishing phase would reinstall unable to publish"
+        )
+
+
+class TestDefaultTrueFieldsSurviveExport:
+    """The direction a truthy-only emit guard silently reverses."""
+
+    def test_clone_repos_false_is_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": False}))
+        assert entry["clone_repos"] is False, (
+            "an explicit clone_repos: false was dropped, so the phase reinstalls "
+            "cloning repos its author declared it did not need"
+        )
+
+    def test_clone_repos_true_stays_absent(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": True}))
+        assert "clone_repos" not in entry
+
+    def test_delivers_repo_changes_false_is_emitted(self) -> None:
+        entry = _parsed_phase(
+            _valid_phase().model_copy(update={"delivers_repo_changes": False})
+        )
+        assert entry["delivers_repo_changes"] is False, (
+            "an explicit delivers_repo_changes: false was dropped, so the "
+            "unpushed-work gate reinstalls treating build output as a lost deliverable"
+        )
+
+    def test_delivers_repo_changes_true_stays_absent(self) -> None:
+        entry = _parsed_phase(
+            _valid_phase().model_copy(update={"delivers_repo_changes": True})
+        )
+        assert "delivers_repo_changes" not in entry
+
+
+class TestSandboxSurvivesExport:
+    """`sandbox` is an `agent.` field in the authoring schema, not top level."""
+
+    def test_non_default_sandbox_is_emitted_under_agent(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
+        agent = entry["agent"]
+        assert isinstance(agent, dict)
+        assert agent["sandbox"] == "read-only", (
+            "a read-only verify phase reinstalls at the default full-access level, "
+            "so the verifier regains write access to what it certifies"
+        )
+
+    def test_it_is_not_emitted_at_the_top_level(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
+        assert "sandbox" not in entry, (
+            "sandbox at the top level is not in the authoring schema; the loader "
+            "would ignore it and the phase would reinstall at the default"
+        )
+
+    def test_the_default_stays_absent(self) -> None:
+        from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+
+        entry = _parsed_phase(
+            _valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX})
+        )
+        agent = entry.get("agent")
+        assert not isinstance(agent, dict) or "sandbox" not in agent
+
+
+class TestTheSchemaClaimIsChecked:
+    """Replaces a comment that asserted this and was wrong for four fields.
+
+    `_yaml_phase_lines` carried the line "Nothing that CAN be expressed is
+    dropped here". It was false for can_open_pr, clone_repos,
+    delivers_repo_changes and agent.sandbox. A comment asserting an invariant
+    is worth less than the invariant, so this walks the schema instead.
+    """
+
+    def test_every_modelled_phase_field_round_trips(self) -> None:
+        schema_path = (
+            Path(__file__).resolve().parents[3] / "schemas" / "plugin" / "workflow.schema.json"
+        )
+        if not schema_path.is_file():
+            pytest.fail(f"authoring schema not found at {schema_path}")
+
+        import json
+
+        schema = json.loads(schema_path.read_text())
+        defs = schema.get("$defs") or schema.get("definitions") or {}
+        phase_def = defs.get("PhaseYamlDefinition") or {}
+        phase_props = set((phase_def.get("properties") or {}))
+        if not phase_props:
+            pytest.fail(
+                "could not locate the phase properties in the authoring schema; "
+                "this test cannot silently pass on an empty set"
+            )
+
+        modelled = set(PhaseDefinitionResponse.model_fields)
+        # Fields the response models AND the schema can express. Anything in
+        # this set must survive a round trip.
+        overlap = phase_props & modelled
+
+        # Names the export spells differently in YAML than the response model.
+        aliases = {
+            "input_artifacts": "input_artifact_types",
+            "output_artifacts": "output_artifact_types",
+        }
+        for yaml_name, model_name in aliases.items():
+            if yaml_name in phase_props and model_name in modelled:
+                overlap.add(model_name)
+
+        missing = sorted(
+            name
+            for name in ("can_open_pr", "clone_repos", "delivers_repo_changes", "sandbox")
+            if name not in modelled
+        )
+        assert not missing, (
+            f"#1429 fields absent from PhaseDefinitionResponse: {missing}. "
+            f"Export cannot emit what the response model does not carry."
+        )
+        assert overlap, "schema/model overlap is empty, so this test proves nothing"

@@ -116,11 +116,22 @@ def parse_installation_token(
     )
     cached_tokens[cache_key if cache_key is not None else iid] = token
 
+    # Levels, not just keys. A `pull_requests: read` token and a
+    # `pull_requests: write` token carry the SAME keys, so logging
+    # `list(permissions.keys())` renders them identically - and reads as
+    # positive confirmation that publishing is permitted when it is the
+    # opposite. That line was quoted as proof a token could open a PR during
+    # #1429, sending the investigation to the GitHub App's permissions,
+    # installation repo selection and app identity, all of which were correct.
+    # The cause was a workflow phase that had not declared `can_open_pr`.
+    #
+    # Sorted so two log lines can be compared by eye without dict ordering
+    # getting in the way.
     logger.info(
         "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
         iid,
         expires_at.isoformat(),
-        list(token.permissions.keys()),
+        {key: token.permissions[key] for key in sorted(token.permissions)},
     )
 
     return token
