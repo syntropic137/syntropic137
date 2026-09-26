@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
     from datetime import datetime
 
+    from syn_shared.settings.github import GitHubAppSettings
+
 logger = logging.getLogger(__name__)
 
 
@@ -246,6 +248,8 @@ class _GitHubClientProtocol(Protocol):
         can_open_pr: bool,
         repositories: Collection[str] | None = None,
     ) -> _MintedToken: ...
+    async def revoke_installation_token(self, token: str) -> None: ...
+    async def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -280,6 +284,24 @@ async def _resolve_github_auth(
         return _GitHubAuth()
 
     client: _GitHubClientProtocol = GitHubAppClient(github_settings)  # type: ignore[assignment]
+    # Closed on every path: a renewal builds one of these every 40 minutes for
+    # as long as a phase runs, and each owns an httpx connection pool (#725).
+    try:
+        return await _resolve_with_client(
+            client, github_settings, repos, require_github, can_open_pr
+        )
+    finally:
+        await client.close()
+
+
+async def _resolve_with_client(
+    client: _GitHubClientProtocol,
+    github_settings: GitHubAppSettings,
+    repos: list[str],
+    require_github: bool,
+    can_open_pr: bool,
+) -> _GitHubAuth:
+    """`_resolve_github_auth` once the client exists; the caller owns closing it."""
     if not repos:
         gh_token, issued = await _mint_repo_less_gh_token(client, can_open_pr)
         return _GitHubAuth(
@@ -421,6 +443,47 @@ async def _mint_tokens_per_installation(
 
     tokens_by_installation: dict[str, str] = {}
     issued: list[IssuedToken] = []
+    try:
+        await _mint_each_installation(
+            client, installation_to_urls, can_open_pr, tokens_by_installation, issued
+        )
+    except BaseException:
+        # A mint that fails part-way raises out of `SetupPhaseSecrets.create`,
+        # so the tokens already minted never reach a container OR a ledger -
+        # and each stays live for its full hour. Nobody else can revoke them,
+        # so this does, before the failure propagates (#725).
+        await _revoke_orphans(client, issued)
+        raise
+
+    repo_tokens = {
+        url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()
+    }
+    return repo_tokens, tuple(issued)
+
+
+async def _revoke_orphans(client: _GitHubClientProtocol, issued: list[IssuedToken]) -> None:
+    """Best-effort revocation of tokens minted by a batch that then failed."""
+    for orphan in issued:
+        try:
+            await client.revoke_installation_token(orphan.token)
+        except Exception as exc:
+            logger.warning(
+                "Could not revoke a token minted for installation %s before a later "
+                "mint failed; it stays live until %s (%s)",
+                orphan.installation_id,
+                orphan.expires_at.isoformat(),
+                type(exc).__name__,
+            )
+
+
+async def _mint_each_installation(
+    client: _GitHubClientProtocol,
+    installation_to_urls: dict[str, list[str]],
+    can_open_pr: bool,
+    tokens_by_installation: dict[str, str],
+    issued: list[IssuedToken],
+) -> None:
+    """Mint one token per installation, appending to ``issued`` as each succeeds."""
     for inst_id, urls in installation_to_urls.items():
         minted = await client.mint_agent_token(
             inst_id,
@@ -443,11 +506,6 @@ async def _mint_tokens_per_installation(
             can_open_pr,
             minted.expires_at.isoformat(),
         )
-
-    repo_tokens = {
-        url: tokens_by_installation[inst_id] for url, inst_id in url_to_installation.items()
-    }
-    return repo_tokens, tuple(issued)
 
 
 @dataclass

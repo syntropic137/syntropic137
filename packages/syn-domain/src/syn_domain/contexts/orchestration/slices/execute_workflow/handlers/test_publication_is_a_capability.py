@@ -111,6 +111,12 @@ class _FakeGitHubClient:
         type(self).mints.append((installation_id, can_open_pr))
         return _Minted(_PUBLISHING_TOKEN if can_open_pr else _SCOPED_TOKEN)
 
+    async def revoke_installation_token(self, token: str) -> None:
+        del token
+
+    async def close(self) -> None:
+        return None
+
 
 @dataclass(frozen=True)
 class _Minted:

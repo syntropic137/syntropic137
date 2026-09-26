@@ -337,6 +337,27 @@ class TestDirectTokenInjectionAdapter:
         # Should not raise
         await adapter.revoke("exec-direct-revoke")
 
+    @pytest.mark.asyncio
+    async def test_a_github_token_is_refused(
+        self,
+        token_service: TokenVendingService,
+        isolation_handle: IsolationHandle,
+    ) -> None:
+        """An env var cannot be renewed, and would outrank gh's hosts.yml (#725)."""
+        from syn_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
+        from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
+            DirectTokenInjectionAdapter,
+        )
+
+        adapter = DirectTokenInjectionAdapter(TokenVendingServiceAdapter(token_service))
+
+        with pytest.raises(ValueError, match="#725"):
+            await adapter.inject(
+                isolation_handle,
+                execution_id="exec-direct-github",
+                token_types=[TokenType.ANTHROPIC, TokenType.GITHUB],
+            )
+
 
 # =============================================================================
 # INTEGRATION: Full Token Flow

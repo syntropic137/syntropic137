@@ -84,6 +84,10 @@ class _GitHub:
         self.token_requests: list[tuple[str, TokenRequest | None]] = []
         self.revoked: list[str] = []
         self.refuse_to_revoke: set[str] = set()
+        #: Installations whose token request GitHub answers 500.
+        self.refuse_to_mint: set[str] = set()
+        self.clients_opened = 0
+        self.clients_closed = 0
         self._reach: dict[str, frozenset[str]] = {}
 
     def reaches(self, token: str | None, full_name: str) -> bool:
@@ -109,6 +113,8 @@ class _GitHub:
         installation = path.split("/")[3]
         request = None if json is None else TokenRequest.model_validate(json)
         self.token_requests.append((installation, request))
+        if installation in self.refuse_to_mint:
+            return httpx.Response(500, request=httpx.Request("POST", path))
         covered = {name for name, owner in _OWNERS.items() if owner == installation}
         if request is not None and request.repositories is not None:
             covered = {name for name in covered if name.split("/")[1] in request.repositories}
@@ -140,6 +146,7 @@ class _AppClient:
     def __init__(self, github: _GitHub) -> None:
         self._http = github
         self._cached_tokens: dict[str, InstallationToken] = {}
+        github.clients_opened += 1
 
     def _generate_jwt(self) -> str:
         return "jwt-for-tests"
@@ -170,6 +177,9 @@ class _AppClient:
 
     async def revoke_installation_token(self, token: str) -> None:
         await revoke_installation_token(cast("GitHubAppClient", self), token)
+
+    async def close(self) -> None:
+        self._http.clients_closed += 1
 
 
 @dataclass(frozen=True)
@@ -503,3 +513,71 @@ class TestTeardownRevokesWhatIsStillLive:
 
         assert revoked_inside == []
         assert github.revoked == github.minted
+
+
+class TestAFailedBatchLeavesNothingLive:
+    """A mint that fails part-way must not strand the tokens it already minted.
+
+    `SetupPhaseSecrets.create` raises, so its tokens never reach a container
+    or a workspace ledger; if it does not revoke them, nothing ever will, and
+    each stays live for its full hour (codex review of #1448).
+    """
+
+    async def test_a_partial_mint_revokes_what_it_already_minted(self, github: _GitHub) -> None:
+        github.refuse_to_mint = {"inst-2"}
+
+        with pytest.raises(GitHubAppError):
+            await SetupPhaseSecrets.create(
+                repositories=[_A, _X], clone_repos=False, require_github=True
+            )
+
+        (orphan,) = github.minted
+        assert orphan.startswith("ghs_inst-1_")
+        assert orphan in github.revoked
+
+    async def test_a_failed_revocation_still_raises_the_mint_failure(self, github: _GitHub) -> None:
+        github.refuse_to_mint = {"inst-2"}
+        github.refuse_to_revoke = {"ghs_inst-1_1"}
+
+        with pytest.raises(GitHubAppError):
+            await SetupPhaseSecrets.create(
+                repositories=[_A, _X], clone_repos=False, require_github=True
+            )
+
+        assert github.revoked == []
+
+    async def test_a_complete_batch_revokes_nothing(self, github: _GitHub) -> None:
+        await SetupPhaseSecrets.create(
+            repositories=[_A, _X], clone_repos=False, require_github=True
+        )
+
+        assert len(github.minted) == 2
+        assert github.revoked == []
+
+
+class TestEveryClientIsClosed:
+    """A renewal builds a client every 40 minutes; each owns a connection pool."""
+
+    async def test_after_a_successful_mint(self, github: _GitHub) -> None:
+        await SetupPhaseSecrets.create(repositories=[_A], clone_repos=False, require_github=True)
+
+        assert github.clients_opened == 1
+        assert github.clients_closed == 1
+
+    async def test_after_a_failed_mint(self, github: _GitHub) -> None:
+        github.refuse_to_mint = {"inst-1"}
+
+        with pytest.raises(GitHubAppError):
+            await SetupPhaseSecrets.create(
+                repositories=[_A], clone_repos=False, require_github=True
+            )
+
+        assert github.clients_opened == github.clients_closed == 1
+
+    async def test_across_repeated_renewals(self, github: _GitHub, tmp_path: Path) -> None:
+        workspace, _ = await _provisioned(tmp_path, [_A])
+
+        for _ in range(3):
+            await workspace.renew_git_credential()
+
+        assert github.clients_opened == github.clients_closed == 4
