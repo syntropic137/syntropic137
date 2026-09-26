@@ -38,6 +38,7 @@ from syn_api.routes import (
 )
 from syn_api.strict_query import reject_unknown_query_params
 from syn_api.types import Err, FeatureDisabledResponse, HealthResponse, Ok, RootResponse
+from syn_shared.logging.redaction import install_credential_redaction
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -45,6 +46,8 @@ if TYPE_CHECKING:
 # Initialize structured logging from agentic-primitives
 # Configure via env vars: LOG_LEVEL, LOG_FORMAT (json/human), LOG_LEVEL_<COMPONENT>
 setup_logging()
+# Mask URL passwords (redis://:secret@...) in every record from here on.
+install_credential_redaction()
 logger = get_logger(__name__)
 
 
