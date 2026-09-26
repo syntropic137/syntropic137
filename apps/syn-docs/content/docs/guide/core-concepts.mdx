@@ -56,7 +56,6 @@ phases:
     agent:
       provider: codex
       model: gpt-sol
-      sandbox: read-only
 ```
 
 Phases execute sequentially. Each phase can reference the output of previous phases using `{{phase-id}}` substitution. The `$ARGUMENTS` variable passes user input into the prompt.
@@ -72,7 +71,7 @@ Syntropic137 is not tied to a single agent vendor. Each phase declares which har
 - `provider: claude` runs the phase on Claude Code (`claude -p`). This is the default when no `agent` block is present.
 - `provider: codex` runs the phase on OpenAI Codex (`codex exec`).
 
-Both harnesses use the same workspace image, the same isolation model, the same token accounting, and the same tool-call timeline. They differ in what they can enforce and what telemetry they emit. Claude phases produce hook events, subagent tracking, and todo data. Codex phases produce none of those, and they are the only phases whose `sandbox` level is actually enforced.
+Both harnesses use the same workspace image, the same isolation model, the same token accounting, and the same tool-call timeline. They differ in what they can enforce and what telemetry they emit. Claude phases produce hook events, subagent tracking, and todo data. Codex phases produce none of those.
 
 See [Choosing an Agent Harness](/docs/guide/workflows#choosing-an-agent-harness) for the full field reference and the caveats.
 
