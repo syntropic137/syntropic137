@@ -228,9 +228,18 @@ endpoint ships.** Both are pre-existing and independent of forking:
 
 1. The resume controller decides from the execution detail PROJECTION and never
    loads the aggregate. Against a rehydrated `CANCELLED` execution the aggregate
-   rejects all twelve of its commands; the controller, handed a projection row
-   saying `paused`, returns success and queues a resume signal. A guard on a
-   terminal state is worthless if the route bypasses the aggregate.
+   rejects all twelve of its commands; the controller, reading a projection row
+   that still says `paused`, returns success and queues a resume signal.
+
+   SCOPE THIS PRECISELY. The control state is not an independent mutable store:
+   `ProjectionControlStateAdapter.save_state` is a deliberate no-op and
+   `get_state` reads the event-derived detail projection. So the divergence is
+   not arbitrary injection - the experiment hand-set the row, which production
+   cannot do. The reachable window is PROJECTION LAG: the aggregate records the
+   cancel, the projection has not caught up, and a resume is admitted against an
+   execution the aggregate would refuse. Narrow, but real, and it is the window
+   a terminal-state guard exists to close. A guard is worth only as much as the
+   staleness of what it reads.
 2. `stream_exists` returns `False` when the event store is UNREACHABLE, which is
    indistinguishable from "no such stream". A pre-dispatch existence check built
    on it passes when it cannot see, so it must fail closed.
