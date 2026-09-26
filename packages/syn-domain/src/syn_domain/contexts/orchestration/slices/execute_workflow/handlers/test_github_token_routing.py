@@ -4,7 +4,7 @@ These names are what `GH_REPO` is built from. The routing that picks WHICH
 installation's token `gh` gets used to live beside them, in the handler that
 injected it as GITHUB_TOKEN; since #725 it lives in `setup_phase_secrets`,
 which writes it to hosts.yml, and is tested there
-(`test_gh_credential_lifecycle.py`).
+(`test_725_gh_credential_and_ledger.py` in syn-adapters).
 """
 
 from __future__ import annotations
