@@ -17,9 +17,11 @@ SKILL_INSTALL_TIMEOUT_SECONDS: Final = 120
 
 #: Waits BETWEEN attempts of one `skills add`, so there is one more attempt
 #: than there are entries. Only a local signal death is retried (#1046): a
-#: negative status means the API's own spawned child was killed by a signal,
-#: so the install very likely never ran, and `skills add -y` is idempotent if
-#: it did. The root cause (grpc fork handlers under uvloop's fork()) is fixed
+#: negative status means the API's own spawned child was killed by a signal.
+#: That is ambiguous about whether the install ran, so the retry relies on
+#: `skills add -y` being idempotent: verified against skills 1.5.14 in the
+#: workspace image (two runs exit 0, one identical SKILL.md). Re-verify on a
+#: skills pin bump. The root cause (grpc fork handlers under uvloop's fork()) is fixed
 #: by GRPC_ENABLE_FORK_SUPPORT=false in the syn-api image; this is the backstop.
 #: A positive exit is the installer refusing, and still fails fast.
 _SKILL_INSTALL_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
