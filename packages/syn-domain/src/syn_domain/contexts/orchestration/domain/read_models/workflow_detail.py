@@ -345,6 +345,18 @@ class WorkflowDetail:
                 # and served -- drops it. Adding the field above without this
                 # line changes nothing a caller can see.
                 "allow_delegation": p.allow_delegation,
+                # #1429, and the SAME seam this comment describes. The first
+                # attempt added these to the dataclass and to both constructor
+                # sites and stopped there, so the projection built a phase
+                # carrying them, stored `to_dict()` without them, and
+                # `get_by_id` reloaded the defaults. The API then reported a
+                # publishing phase as `can_open_pr: false` and a read-only
+                # phase as `full-access` - a security field reading LESS
+                # restricted than the phase actually runs.
+                "clone_repos": p.clone_repos,
+                "can_open_pr": p.can_open_pr,
+                "delivers_repo_changes": p.delivers_repo_changes,
+                "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],
                 "execution_type": p.execution_type,

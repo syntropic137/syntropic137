@@ -467,7 +467,15 @@ def _yaml_agent_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # top-level one, so it round-trips here. Emitted only when it differs from
     # the loader default: writing the default back would turn "inherits" into
     # "explicitly declares", which is the distinction the guards above keep.
-    if phase.sandbox and phase.sandbox != DEFAULT_PHASE_SANDBOX:
+    # Every value that is not the default, INCLUDING an invalid one. The
+    # first version guarded on `if phase.sandbox`, which omitted `""`: the
+    # untyped JSON create path can store that, execution preserves it for
+    # rejection, and export was quietly turning it into the default
+    # full-access. Laundering an invalid declaration into a valid, MORE
+    # permissive one is the worst outcome available here - an uninstallable
+    # package names the problem instead of hiding it (the same reasoning the
+    # block above applies to a refused execution_type).
+    if phase.sandbox != DEFAULT_PHASE_SANDBOX:
         entries.append(f"      sandbox: {_yaml_quote(phase.sandbox)}")
     return ["    agent:", *entries] if entries else []
 

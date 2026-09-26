@@ -678,50 +678,173 @@ class TestTheSchemaClaimIsChecked:
 
     `_yaml_phase_lines` carried the line "Nothing that CAN be expressed is
     dropped here". It was false for can_open_pr, clone_repos,
-    delivers_repo_changes and agent.sandbox. A comment asserting an invariant
-    is worth less than the invariant, so this walks the schema instead.
+    delivers_repo_changes and agent.sandbox.
+
+    THE FIRST VERSION OF THIS TEST WAS A DECOY, and a codex review said so.
+    It asserted the schema had phase properties, that the response model had
+    fields, and that the two sets overlapped. All three can hold while the
+    export drops every field, because none of them looks at the export. It
+    replaced a false comment with a check that could not fail for the reason
+    the comment was false.
+
+    This version round-trips each field through the emitter and the loader.
     """
 
-    def test_every_modelled_phase_field_round_trips(self) -> None:
+    @staticmethod
+    def _schema_phase_properties() -> Mapping[str, object]:
         schema_path = (
             Path(__file__).resolve().parents[3] / "schemas" / "plugin" / "workflow.schema.json"
         )
         if not schema_path.is_file():
             pytest.fail(f"authoring schema not found at {schema_path}")
-
         import json
 
         schema = json.loads(schema_path.read_text())
         defs = schema.get("$defs") or schema.get("definitions") or {}
         phase_def = defs.get("PhaseYamlDefinition") or {}
-        phase_props = set((phase_def.get("properties") or {}))
-        if not phase_props:
+        props = phase_def.get("properties") or {}
+        if not props:
             pytest.fail(
-                "could not locate the phase properties in the authoring schema; "
-                "this test cannot silently pass on an empty set"
+                "could not locate PhaseYamlDefinition properties in the authoring "
+                "schema; this test must not pass on an empty set"
             )
+        return props
 
-        modelled = set(PhaseDefinitionResponse.model_fields)
-        # Fields the response models AND the schema can express. Anything in
-        # this set must survive a round trip.
-        overlap = phase_props & modelled
+    def test_the_four_fields_are_expressible_in_the_schema(self) -> None:
+        """Where each field lives. `sandbox` is under `agent`, not top level."""
+        props = self._schema_phase_properties()
+        for name in ("can_open_pr", "clone_repos", "delivers_repo_changes"):
+            assert name in props, f"{name} is not a top-level phase property in the schema"
+        assert "sandbox" not in props, (
+            "sandbox became a top-level phase property; the export emits it under "
+            "`agent:` and would now be writing it to the wrong place"
+        )
 
-        # Names the export spells differently in YAML than the response model.
-        aliases = {
-            "input_artifacts": "input_artifact_types",
-            "output_artifacts": "output_artifact_types",
+    def test_each_field_round_trips_through_the_loader(self) -> None:
+        """The assertion the decoy version was missing.
+
+        Export a phase carrying a NON-DEFAULT value for each field, parse the
+        YAML, load it through PhaseYamlDefinition, and compare against what
+        was exported. This is what "nothing expressible is dropped" means.
+        """
+        nondefault: dict[str, object] = {
+            "can_open_pr": True,
+            "clone_repos": False,
+            "delivers_repo_changes": False,
+            "sandbox": "read-only",
         }
-        for yaml_name, model_name in aliases.items():
-            if yaml_name in phase_props and model_name in modelled:
-                overlap.add(model_name)
+        phase = _valid_phase().model_copy(update=nondefault)
+        entry = _parsed_phase(phase)
 
-        missing = sorted(
-            name
-            for name in ("can_open_pr", "clone_repos", "delivers_repo_changes", "sandbox")
-            if name not in modelled
+        agent = entry.get("agent")
+        assert isinstance(agent, dict), "the agent block vanished, so sandbox cannot survive"
+
+        loaded = PhaseYamlDefinition(
+            id=str(entry["id"]),
+            name=str(entry["name"]),
+            order=int(entry["order"]),
+            prompt_file=str(entry["prompt_file"]),
+            can_open_pr=bool(entry["can_open_pr"]),
+            clone_repos=bool(entry["clone_repos"]),
+            delivers_repo_changes=bool(entry["delivers_repo_changes"]),
         )
-        assert not missing, (
-            f"#1429 fields absent from PhaseDefinitionResponse: {missing}. "
-            f"Export cannot emit what the response model does not carry."
+        assert loaded.can_open_pr is True
+        assert loaded.clone_repos is False
+        assert loaded.delivers_repo_changes is False
+        assert agent["sandbox"] == "read-only"
+
+    def test_the_read_model_stores_them(self) -> None:
+        """The third seam: to_dict is what is actually stored and served.
+
+        Found by codex review. The projection built a phase carrying these,
+        stored `to_dict()` without them, and `get_by_id` reloaded the defaults
+        - so the API reported a publishing phase as can_open_pr: false and a
+        read-only phase as full-access. Export then wrote the wrong phase from
+        correct-looking in-memory state.
+        """
+        from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+            PhaseDefinitionDetail,
+            WorkflowDetail,
         )
-        assert overlap, "schema/model overlap is empty, so this test proves nothing"
+
+        detail = WorkflowDetail(
+            id="wf",
+            name="wf",
+            workflow_type="research",
+            classification="simple",
+            description="round-trip probe",
+            phases=[
+                PhaseDefinitionDetail(
+                    id="review",
+                    name="Review",
+                    order=1,
+                    can_open_pr=True,
+                    clone_repos=False,
+                    delivers_repo_changes=False,
+                    sandbox="read-only",
+                )
+            ],
+        )
+        stored = detail.to_dict()
+        phase = stored["phases"][0]
+        for key, want in (
+            ("can_open_pr", True),
+            ("clone_repos", False),
+            ("delivers_repo_changes", False),
+            ("sandbox", "read-only"),
+        ):
+            assert key in phase, (
+                f"to_dict dropped {key}; the read model carries it but the STORED shape "
+                f"does not, so every reader gets the default"
+            )
+            assert phase[key] == want
+
+        reloaded = WorkflowDetail.from_dict(stored).phases[0]
+        assert reloaded.can_open_pr is True
+        assert reloaded.clone_repos is False
+        assert reloaded.delivers_repo_changes is False
+        assert reloaded.sandbox == "read-only", (
+            "a read-only phase reloaded at a different sandbox level; a security field "
+            "must never read back LESS restricted than it was stored"
+        )
+
+
+@pytest.mark.unit
+class TestAnInvalidSandboxIsNotLaundered:
+    """An invalid stored value must not export as a valid, MORE permissive one.
+
+    Found by codex review. The guard was `if phase.sandbox`, so `""` was
+    omitted and the phase reinstalled at the default full-access. The API
+    create path can store that value and execution preserves it in order to
+    reject it; export was the one step that made it look fine.
+
+    Same reasoning this file already applies to a refused `execution_type`:
+    an uninstallable package names the problem, a silently corrected one does
+    not.
+    """
+
+    def test_an_empty_sandbox_is_still_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": ""}))
+        agent = entry["agent"]
+        assert isinstance(agent, dict)
+        assert "sandbox" in agent, (
+            "an invalid empty sandbox was dropped, so the phase reinstalls at "
+            "full-access - export upgraded its privileges"
+        )
+        assert agent["sandbox"] == ""
+
+    def test_a_bogus_sandbox_is_still_emitted(self) -> None:
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "not-a-level"}))
+        agent = entry["agent"]
+        assert isinstance(agent, dict)
+        assert agent["sandbox"] == "not-a-level"
+
+    def test_the_default_is_still_omitted(self) -> None:
+        """Widening the guard must not start writing the default back."""
+        from syn_shared.agents import DEFAULT_PHASE_SANDBOX
+
+        entry = _parsed_phase(
+            _valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX})
+        )
+        agent = entry.get("agent")
+        assert not isinstance(agent, dict) or "sandbox" not in agent
