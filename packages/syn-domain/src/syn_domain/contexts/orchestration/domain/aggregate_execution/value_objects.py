@@ -593,6 +593,23 @@ class BranchObservation(BaseModel):
         return self.remote_moved or self.unpushed_commits > 0
 
 
+class InheritedPhase(BaseModel):
+    """One completed phase a fork takes over from its parent (ADR-014 s7).
+
+    The phase is not re-run and its artifacts are not copied: the fork names
+    them. A Pydantic model rather than a dataclass because it travels on
+    ``ExecutionForkedEvent`` and must serialise as event data.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    artifact_ids: list[str]
+    """Every artifact the parent collected for this phase, in collection
+    order. Empty is a real answer - a phase can complete having stored
+    nothing - and not "unknown"."""
+
+
 @dataclass(frozen=True)
 class ExecutionMetrics:
     """Aggregated metrics for workflow execution.

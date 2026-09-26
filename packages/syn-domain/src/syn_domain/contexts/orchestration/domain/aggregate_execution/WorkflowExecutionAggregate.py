@@ -24,6 +24,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
+    ForkExecutionCommand,
     InterruptExecutionCommand,
     PauseExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
@@ -36,6 +37,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutionStatus,
     FailureClassification,
     FinishedAgentRun,
+    InheritedPhase,
     PhaseDefinition,
     ReportedFailureReason,
     StrandedDeliverable,
@@ -50,6 +52,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+        ExecutionForkedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
         ExecutionPausedEvent,
@@ -125,6 +130,20 @@ def _parse_phase_definitions(raw_defs: list[dict[str, Any]]) -> list[PhaseDefini
 #: unbounded one bills until the phase timeout does the refusing instead.
 MAX_PHASE_ATTEMPTS: Final[int] = 2
 
+#: Terminal states a fork may be taken from on the request alone (ADR-014 s7).
+#:
+#: FAILED and INTERRUPTED ended without anyone deciding the work should stop,
+#: so running the rest of it again is what the operator wanted all along.
+#: CANCELLED is deliberately absent: a cancel IS that decision - it may have
+#: been issued because the run targeted the wrong repository or its task held
+#: a secret - so it is forkable only on `override_cancellation`, never merely
+#: because it is terminal. COMPLETED has nothing left to run; RUNNING and
+#: PAUSED are still live, and forking them would put two runs on one piece of
+#: work; an execution that never started has nothing to inherit.
+_FORKABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
+    {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}
+)
+
 
 @aggregate("WorkflowExecution")
 class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"]):
@@ -195,6 +214,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: same restart hazard as the message above, and here for the same
         #: reason rather than because the value is expensive to recompute.
         self._recovered_phases: set[str] = set()
+        #: Phases that completed, and what each one's collection stored. The
+        #: inputs to a fork's inherited prefix (ADR-014 s7), which is decided
+        #: here from the stream and never from the artifact projection: a
+        #: projection that is merely lagging would read as missing artifacts,
+        #: and a parent may be forked only once.
+        self._completed_phase_ids: set[str] = set()
+        self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: The fork this execution admitted, if any. Its presence is the
+        #: "forked at most once" rule.
+        self._fork_execution_id: str | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -712,6 +741,90 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("ForkExecutionCommand")
+    def fork_execution(self, command: ForkExecutionCommand) -> None:
+        """Handle ForkExecutionCommand - admit, or refuse, one fork of this run.
+
+        Decided on the PARENT, which records `ExecutionForked` on its own
+        stream and is otherwise untouched: it stays terminal, and nothing it
+        already recorded is rewritten (ADR-014 s7). Creating and starting the
+        fork is not done here - this is the admission, and every fact the fork
+        needs from its parent is fixed on the event.
+        """
+        from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+            ExecutionForkedEvent,
+        )
+
+        if self.id is None:
+            msg = "Cannot fork an execution that has not been started"
+            raise ValueError(msg)
+        if self._status is ExecutionStatus.CANCELLED:
+            if not command.override_cancellation:
+                msg = (
+                    f"Cannot fork execution {self.id}: it was cancelled, and "
+                    "forking a cancelled execution needs an explicit override"
+                )
+                raise ValueError(msg)
+        elif self._status not in _FORKABLE_STATUSES:
+            msg = f"Cannot fork execution in status {self._status}"
+            raise ValueError(msg)
+        if self._fork_execution_id is not None:
+            msg = f"Execution {self.id} has already been forked as {self._fork_execution_id}"
+            raise ValueError(msg)
+        if not command.fork_execution_id or command.fork_execution_id == self.id:
+            msg = f"A fork needs an execution id of its own, got {command.fork_execution_id!r}"
+            raise ValueError(msg)
+
+        inherited, resume_phase_id = self._completed_prefix()
+        if resume_phase_id is None:
+            msg = f"Cannot fork execution {self.id}: it has no unfinished phase to resume at"
+            raise ValueError(msg)
+        # Started means an agent may have acted. Nothing on this stream can
+        # show that it did not: branch observations cover git refs only, and
+        # the evidence the in-phase retry rests on (#1303) never reaches the
+        # event store. So any started phase is re-run only on acknowledgement.
+        may_repeat_effects = resume_phase_id in self._phase_attempts
+        if may_repeat_effects and not command.acknowledge_external_effects:
+            msg = (
+                f"Cannot fork execution {self.id}: phase {resume_phase_id} started "
+                "and may have pushed or published something re-running it would "
+                "repeat; the fork must acknowledge external effects"
+            )
+            raise ValueError(msg)
+
+        event = ExecutionForkedEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            fork_execution_id=command.fork_execution_id,
+            inherited_phases=inherited,
+            resume_phase_id=resume_phase_id,
+            forked_at=datetime.now(UTC),
+            cancellation_overridden=self._status is ExecutionStatus.CANCELLED,
+            external_effects_acknowledged=may_repeat_effects,
+        )
+        self._apply(event)
+
+    def _completed_prefix(self) -> tuple[list[InheritedPhase], str | None]:
+        """The phases a fork inherits, and the phase it resumes at.
+
+        The CONTIGUOUS prefix, in phase order, stopping at the first phase that
+        did not complete. A phase completed after that gap is not inherited:
+        its output was built on a predecessor the fork will produce afresh.
+        The resume phase is None when there is nothing left to run - every
+        phase completed, or the execution recorded no phases to walk.
+        """
+        inherited: list[InheritedPhase] = []
+        for phase in self._phase_definitions:
+            if phase.phase_id not in self._completed_phase_ids:
+                return inherited, phase.phase_id
+            inherited.append(
+                InheritedPhase(
+                    phase_id=phase.phase_id,
+                    artifact_ids=list(self._phase_artifact_ids.get(phase.phase_id, [])),
+                )
+            )
+        return inherited, None
+
     @event_sourcing_handler("WorkflowExecutionStarted")
     def on_execution_started(self, event: WorkflowExecutionStartedEvent) -> None:
         """Apply WorkflowExecutionStartedEvent."""
@@ -771,13 +884,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_attempts[phase_id] = self._phase_attempts.get(phase_id, 0) + 1
 
     @event_sourcing_handler("PhaseCompleted")
-    def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
+    def on_phase_completed(self, event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
         self._running_phase_id = None
+        phase_id: str = _evt(event, "phase_id")
+        self._completed_phase_ids.add(phase_id)
+        # Collection normally names every artifact already; the completion's
+        # own id is kept too, for streams where it is the only record.
+        artifact_id: str | None = _evt(event, "artifact_id")
+        collected = self._phase_artifact_ids.setdefault(phase_id, [])
+        if artifact_id and artifact_id not in collected:
+            collected.append(artifact_id)
 
     @event_sourcing_handler("PhaseRetryScheduled")
-    def on_phase_retry_scheduled(self, _event: PhaseRetryScheduledEvent) -> None:
+    def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:
         """Apply PhaseRetryScheduledEvent — the attempt is over, the phase is not.
 
         `_running_phase_id` is cleared because no attempt is running until the
@@ -785,8 +906,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         no phase rather than naming the abandoned attempt.
 
         `_completed_phases` is deliberately untouched: nothing completed.
+        Anything the abandoned attempt collected goes with it, so a fork never
+        inherits an artifact from an attempt that was given up.
         """
         self._running_phase_id = None
+        self._phase_artifact_ids.pop(_evt(event, "phase_id"), None)
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
@@ -814,6 +938,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply ArtifactsCollectedForPhaseEvent."""
         self._artifact_ids.extend(_evt(event, "artifact_ids", []))
         phase_id = _evt(event, "phase_id")
+        self._phase_artifact_ids.setdefault(phase_id, []).extend(_evt(event, "artifact_ids", []))
         if _evt(event, "deliverable_recovered", False):
             self._recovered_phases.add(phase_id)
         # The salvage input has done its job for this phase and stops being
@@ -849,3 +974,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply WorkflowInterruptedEvent."""
         self._completed_at = _evt(event, "interrupted_at")
         self._status = ExecutionStatus.INTERRUPTED
+
+    @event_sourcing_handler("ExecutionForked")
+    def on_execution_forked(self, event: ExecutionForkedEvent) -> None:
+        """Apply ExecutionForkedEvent - the parent's one fork is spent.
+
+        Status is deliberately untouched: the parent stays the terminal run it
+        was, and only this fact about it is new.
+        """
+        self._fork_execution_id = _evt(event, "fork_execution_id")
