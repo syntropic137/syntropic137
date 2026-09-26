@@ -88,7 +88,21 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # bump would buy nothing and cost a full replay through the coordinator's
     # non-atomic clear-then-delete-checkpoint sequence, which loses the whole
     # read model if the process dies between the two steps.
-    VERSION = 8  # v8: surface allow_delegation, claude_plugins, skills (#1013)
+    # v9 IS bumped, and the distinction above is why. That paragraph declines a
+    # bump for a field REMOVAL, where a stale row stays readable and the field
+    # simply stops surfacing. This is the other case, and the same one #1013
+    # bumped v8 for: rows written before this change carry none of the four new
+    # keys, so `from_dict` supplies defaults - reporting `can_open_pr=False` for
+    # a phase that may publish, and `sandbox=full-access` for a phase stored as
+    # read-only. A stale row here does not omit the field, it ASSERTS a wrong
+    # value, which is the failure #1429 is about.
+    #
+    # The replay cost named above is real and unchanged: the coordinator's
+    # clear-then-delete-checkpoint sequence is not atomic, so a process death
+    # between the two steps loses this read model and it rebuilds from the
+    # stream. That is the price of the rebuild, not a reason to serve wrong
+    # values.
+    VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""

@@ -248,6 +248,22 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
       // model_display is the API's rendering (e.g. "gpt-sol → gpt-6-sol"): verbatim.
       const model = phase.model_display ? `  ${style(phase.model_display, DIM)}` : "";
       print(`    - ${phase.name ?? "unnamed"}${model}`);
+
+      // #1429: a phase that CANNOT publish rendered identically to one that
+      // can, so a missing `can_open_pr` looked like a GitHub App
+      // misconfiguration rather than a one-line omission. Only non-default
+      // values are shown: printing every default would bury the one line that
+      // matters. `sandbox` is shown whenever it is not the default, because a
+      // phase running at a level other than the default is exactly what a
+      // reader needs to see.
+      const notes: string[] = [];
+      if (phase.can_open_pr) notes.push(style("can open PR", GREEN));
+      if (phase.clone_repos === false) notes.push(style("no repo checkout", DIM));
+      if (phase.delivers_repo_changes === false) notes.push(style("no repo deliverable", DIM));
+      if (phase.sandbox && phase.sandbox !== "full-access") {
+        notes.push(style(`sandbox: ${phase.sandbox}`, YELLOW));
+      }
+      if (notes.length > 0) print(`        ${notes.join(style(" · ", DIM))}`);
     }
   } else {
     printDim("  No phases defined");

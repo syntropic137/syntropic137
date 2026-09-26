@@ -597,8 +597,18 @@ class _ExportedPhase:
     has_agent_block: bool
 
     def declares(self, key: str) -> bool:
-        """Whether the exported YAML carries `key` at the phase's top level."""
+        """Whether the exported YAML carries `key` at the phase's top level.
+
+        PRESENCE, not truthiness and not non-null. An emitted `can_open_pr:
+        null` is present and would satisfy an `is None` check written to mean
+        "absent", while the loader reads it as a declared null rather than an
+        inherited default. A test that means absence must ask this.
+        """
         return key in self.top_level_keys
+
+    def declares_agent(self, key: str) -> bool:
+        """Whether the exported `agent:` block carries `key`. Presence again."""
+        return key in self.agent_keys
 
 
 def _parsed_phase(phase: PhaseDefinitionResponse) -> _ExportedPhase:
@@ -877,3 +887,64 @@ class TestAnInvalidSandboxIsNotLaundered:
 
         entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX}))
         assert entry.agent_sandbox is None
+
+
+@pytest.mark.unit
+class TestPresentNullIsNotAbsent:
+    """A pass-2 review found the typed view could conflate the two.
+
+    `_parsed_phase` reads with `.get()`, so an emitted `can_open_pr: null` and
+    an omitted key both arrive as `None`. Those mean different things to the
+    loader: omitted inherits the default, null is a declared null. Any test
+    that means "absent" has to assert on the KEY, and these pin that the view
+    can still tell them apart.
+    """
+
+    @staticmethod
+    def _parse(text: str) -> _ExportedPhase:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(text)
+        entry = parsed["phases"][0]
+        agent = entry.get("agent")
+        agent_map = agent if isinstance(agent, dict) else {}
+        sandbox = agent_map.get("sandbox")
+        return _ExportedPhase(
+            phase_id=str(entry["id"]),
+            name=str(entry["name"]),
+            order=int(entry["order"]),
+            prompt_file=str(entry.get("prompt_file", "")),
+            top_level_keys=frozenset(str(k) for k in entry),
+            agent_keys=frozenset(str(k) for k in agent_map),
+            can_open_pr=entry.get("can_open_pr"),
+            clone_repos=entry.get("clone_repos"),
+            delivers_repo_changes=entry.get("delivers_repo_changes"),
+            agent_sandbox=None if sandbox is None else str(sandbox),
+            has_agent_block=isinstance(agent, dict),
+        )
+
+    def test_an_explicit_null_reads_as_declared(self) -> None:
+        entry = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    can_open_pr: null\n"
+        )
+        assert entry.can_open_pr is None
+        assert entry.declares("can_open_pr"), (
+            "a present null read as absent; a test meaning 'inherited the default' "
+            "would pass against YAML that declares a null"
+        )
+
+    def test_an_omitted_key_reads_as_absent(self) -> None:
+        entry = self._parse("phases:\n  - id: p\n    name: P\n    order: 1\n")
+        assert entry.can_open_pr is None
+        assert not entry.declares("can_open_pr")
+
+    def test_the_same_holds_inside_the_agent_block(self) -> None:
+        declared = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    agent:\n      sandbox: null\n"
+        )
+        omitted = self._parse(
+            "phases:\n  - id: p\n    name: P\n    order: 1\n    agent:\n      model: sonnet\n"
+        )
+        assert declared.agent_sandbox is None and omitted.agent_sandbox is None
+        assert declared.declares_agent("sandbox")
+        assert not omitted.declares_agent("sandbox")

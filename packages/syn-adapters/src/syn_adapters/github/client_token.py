@@ -7,6 +7,7 @@ Handles token response validation, parsing, caching, and retrieval.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -131,10 +132,54 @@ def parse_installation_token(
         "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
         iid,
         expires_at.isoformat(),
-        {key: token.permissions[key] for key in sorted(token.permissions)},
+        _loggable_permissions(token.permissions),
     )
 
     return token
+
+
+#: The levels GitHub documents for an installation permission. Anything else is
+#: not a level, and this module will not print it.
+_PERMISSION_LEVELS = frozenset({"read", "write", "admin"})
+
+#: A permission NAME is a lowercase identifier. GitHub spells them
+#: `pull_requests`, `contents`, `metadata`. Anything else did not come from the
+#: permissions map as this code understands it.
+_PERMISSION_NAME = re.compile(r"\A[a-z][a-z0-9_]{0,63}\Z")
+
+
+def _loggable_permissions(permissions: Mapping[str, str]) -> dict[str, str]:
+    """The permission map, reduced to pairs that are safe to print.
+
+    Logging LEVELS rather than keys is what makes this line useful: a
+    `pull_requests: read` token and a `pull_requests: write` one are otherwise
+    indistinguishable in the log, and that ambiguity cost a multi-hour
+    investigation (#1429).
+
+    Printing the values means the log now renders whatever the API returned.
+    `parse_installation_token` copies `data["permissions"]` verbatim into the
+    dataclass without enforcing a shape, so an unexpected payload could carry a
+    credential in either position. A log line is exactly where that must not
+    surface, so both halves are validated against what a permission actually
+    looks like, and anything else is counted rather than shown.
+
+    Sorted, so two lines can be compared by eye without dict ordering getting
+    in the way.
+    """
+    safe: dict[str, str] = {}
+    rejected = 0
+    for name in sorted(permissions):
+        level = permissions[name]
+        if _PERMISSION_NAME.fullmatch(name) and level in _PERMISSION_LEVELS:
+            safe[name] = level
+        else:
+            rejected += 1
+    if rejected:
+        # Named, not silently dropped: a permissions map that does not look
+        # like one is worth knowing about, and the COUNT carries that without
+        # printing the thing that failed the check.
+        safe["<unprintable>"] = str(rejected)
+    return safe
 
 
 def _cache_key(iid: str, permissions: Mapping[str, str] | None) -> str:
