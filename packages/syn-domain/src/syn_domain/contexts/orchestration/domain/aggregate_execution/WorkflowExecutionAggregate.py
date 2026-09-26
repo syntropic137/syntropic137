@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReportedFailureReason,
     StrandedDeliverable,
 )
+from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
@@ -229,6 +230,27 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         to handle.
         """
         return self._phase_attempts.get(phase_id, 0) < MAX_PHASE_ATTEMPTS
+
+    def accepts_control(self, signal: ControlSignalType) -> bool:
+        """Whether an operator may ask this execution to do `signal` now.
+
+        The one place the rule lives (ADR-014 section 7). The pause, resume and
+        cancel handlers guard on it, and the control plane asks it before it
+        queues a signal, so the answer an operator gets is the answer the
+        command will get. That only holds when this is asked of the aggregate
+        rehydrated from its stream: a read model that has not yet caught up
+        with a cancel still says `running`, and a guard is worth only as much
+        as the staleness of what it reads.
+        """
+        if self.id is None:
+            return False
+        match signal:
+            case ControlSignalType.PAUSE:
+                return self._status is ExecutionStatus.RUNNING
+            case ControlSignalType.RESUME:
+                return self._status is ExecutionStatus.PAUSED
+            case ControlSignalType.CANCEL | ControlSignalType.INJECT:
+                return self._status in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED)
 
     def attempts_for(self, phase_id: str) -> int:
         """How many times this phase has been attempted, 0 if never started."""
@@ -633,7 +655,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             ExecutionPausedEvent,
         )
 
-        if self._status != ExecutionStatus.RUNNING:
+        if not self.accepts_control(ControlSignalType.PAUSE):
             msg = f"Cannot pause execution in status {self._status}"
             raise ValueError(msg)
 
@@ -653,7 +675,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             ExecutionResumedEvent,
         )
 
-        if self._status != ExecutionStatus.PAUSED:
+        if not self.accepts_control(ControlSignalType.RESUME):
             msg = f"Cannot resume execution in status {self._status}"
             raise ValueError(msg)
 
@@ -672,7 +694,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             ExecutionCancelledEvent,
         )
 
-        if self._status not in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED):
+        if not self.accepts_control(ControlSignalType.CANCEL):
             msg = f"Cannot cancel execution in status {self._status}"
             raise ValueError(msg)
 
