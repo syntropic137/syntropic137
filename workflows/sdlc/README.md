@@ -41,8 +41,10 @@ money?" an answerable question rather than a guess.
 
 ## Which implementation workflow: `implement` or `quickfix`?
 
-Two workflows produce a PR. `sdlc-implement-v2` runs four phases with an
-independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
+Two workflows produce a PR. `sdlc-implement-v3` runs six phases with an
+independent cross-model verify, and opens a DRAFT PR on the implement phase's
+first push so a run that dies later never strands its work; only its last
+phase marks the PR ready, and only on CERTIFIED. `sdlc-quickfix-v1` runs one phase and has no
 verification behind it at all.
 
 **The test is not size. It is: is there anything to prove?**
@@ -155,7 +157,7 @@ lands - but do not expect it to prevent the failure today, and do not "fix" the
 gate by dropping the mount check, which would reopen the hole above.
 
 **Declare `false` on any phase whose output artifact is the deliverable** - a
-premise check, a review, a verify, a plan, an `open_pr` phase that
+premise check, a review, a verify, a plan, a `finalize_pr` phase that
 only reads a ref. Across the workflows here that is every phase except
 `implement` and `quickfix`, which are the two that commit and push.
 

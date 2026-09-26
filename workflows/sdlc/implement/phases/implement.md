@@ -127,16 +127,47 @@ Opening a second branch for the same change splits the discussion, leaves the
 original PR looking untouched, and gives the reviewer two heads to choose
 between. Only start a new branch when the task asks for new work.
 
-## Commit AND push the branch
-
-Commit, then **push that branch to origin**. Do not open a PR - that is the last
-phase's job (and for a rework there is already one).
+## Commit, push, and open a DRAFT PR on your FIRST push
 
 Pushing is not optional. **Every phase runs in its own fresh workspace with its
 own clone**, so nothing on this filesystem survives into the next phase; only
-your artifact does. A branch left local is destroyed when this phase ends, the
-verify phase would check the default branch while believing it checked your work,
-and the final phase would have nothing to open a PR from.
+your artifact and what reached GitHub do. A branch left local is destroyed when
+this phase ends, and a pushed branch with no PR is invisible to everyone.
+
+1. **Make your first commit early** - as soon as there is any coherent piece of
+   the change - and push it:
+
+   ```
+   git push -u origin <branch>
+   ```
+
+2. **Immediately open a DRAFT PR** from that branch, before doing the rest of
+   the work. Skip this only when reworking an existing PR (it already exists):
+
+   ```
+   gh pr create --draft --base main --head <branch> \
+     --title "<conventional-commit style title>" \
+     --body-file <file>
+   ```
+
+   The body must say it is a draft pending independent verification, what the
+   task is, and a `## Release notes` section (user-facing, a few lines; you will
+   refine it). Reference the issue the task names (`Closes #N` / `Refs #N`).
+
+   Do NOT mark it ready and do NOT merge. Only the final phase marks it ready,
+   and only if re-verification certifies it (#1197).
+
+3. **Keep committing and pushing after every meaningful step.** Assume this
+   workspace can die at any moment, including from an expired GitHub token
+   (#725): anything not pushed is lost.
+
+4. At the end, update the PR description (`gh pr edit <n> --body-file <file>`)
+   so it reflects what you actually did, including the release notes.
+
+If `gh pr create` fails, say so verbatim in your artifact and keep pushing; the
+final phase will create the PR from the branch as a fallback.
+
+**Record the PR number and URL in your artifact** alongside the branch and SHA.
 
 **Record in your artifact, exactly:** the branch name and the full commit SHA you
 pushed. The next phase checks out that SHA by name. If it is missing or wrong,
@@ -150,6 +181,6 @@ work is lost with the workspace.** Write the file before you finish, even
 if the outcome was a refusal: a refusal is a deliverable and is often the
 most valuable one.
 
-What you changed and why, the full diff, which hops you touched, what you deliberately did not do, and THE BRANCH NAME AND FULL COMMIT SHA you pushed.
+What you changed and why, the full diff, which hops you touched, what you deliberately did not do, THE BRANCH NAME AND FULL COMMIT SHA you pushed, and THE DRAFT PR NUMBER AND URL.
 What you changed and why, the full diff, which hops you touched, and what you
 deliberately did not do.

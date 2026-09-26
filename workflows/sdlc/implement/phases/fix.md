@@ -104,8 +104,15 @@ and goes green over nothing.
 
 ## Commit AND push
 
-Push to the same branch the earlier phase used. A commit that never reaches the
-remote is quarantined and the phase fails - this has cost real work already.
+Push to the same branch the earlier phase used - the one the draft PR tracks. A
+commit that never reaches the remote is quarantined and the phase fails - this
+has cost real work already. Push after each finding you close, not only at the
+end: this workspace can die at any moment (#725).
+
+After your final push, post one comment on the draft PR (`gh pr comment <n>`)
+listing each finding and what you did about it, with the new head SHA. Do not
+mark the PR ready; that is `finalize_pr`'s decision alone. If no PR exists,
+say so in `fix.md`; `finalize_pr` will create it.
 
 Before pushing, run:
 

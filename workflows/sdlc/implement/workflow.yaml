@@ -1,9 +1,10 @@
-id: sdlc-implement-v2
-name: "SDLC: Check the premise, implement, verify, fix, re-verify, open a PR (v2)"
+id: sdlc-implement-v3
+name: "SDLC: Premise, implement + draft PR, verify, fix, re-verify, mark ready (v3)"
 description: >
   Take a well-specified issue to a reviewed pull request. Six phases: check the
-  premise, make the change, verify it independently, fix what verification
-  found, confirm the fix, open the PR. Verification is separate from
+  premise, make the change and open a DRAFT PR on the first push, verify it
+  independently, fix what verification found, confirm the fix, then mark the
+  PR ready only if the re-verification certifies it. Verification is separate from
   implementation on purpose, and a defect it finds is repaired rather than
   ending the run.
 type: implementation
@@ -39,6 +40,19 @@ requires_repos: true
 # means verification starts from a finished diff and has its own budget, and a
 # run that fails is attributable to the job that ran out of room.
 
+# WHY THE PR OPENS IN THE IMPLEMENT PHASE (v3).
+#
+# v2 opened the PR in the LAST phase. Every phase is ephemeral, so any run that
+# died before phase 6 (timeout, expired GitHub token #725, crash) left pushed
+# work with no PR: nothing on GitHub pointed at it and nobody saw it. The owner
+# asked repeatedly for the PR on the first phase that produces code.
+#
+# #1197 moved `gh pr create` to the end because an early phase opened a PR
+# before the verifier had ruled (exec-0bac0e1ed2b2). v3 keeps that gate by
+# meaning, not by delay: implement opens the PR as a DRAFT, and only the last
+# phase may mark it ready, and only on CERTIFIED. A draft says "unverified" to
+# every reviewer, so an early PR no longer claims anything it has not earned.
+
 phases:
   # Phase ids are load-bearing: a later phase reads the previous one's output at
   # artifacts/input/<phase-id>.md, so renaming a phase breaks the one after it.
@@ -61,10 +75,15 @@ phases:
       - Glob
       - Bash
       - Write
+      - Skill
     agent:
       provider: claude
       model: sonnet
     prompt_file: phases/premise.md
+    skills:
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
 
   - id: implement
     name: Make the change
@@ -82,10 +101,19 @@ phases:
       - Bash
       - Edit
       - Write
+      - Skill
     agent:
       provider: claude
       model: opus
     prompt_file: phases/implement.md
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    # Opens the draft PR / pushes to and comments on it (v3). Both need
+    # `pull_requests: write`; marking it ready stays with finalize_pr.
+    can_open_pr: true
 
   - id: verify
     name: Verify the change independently
@@ -113,6 +141,11 @@ phases:
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
     prompt_file: phases/verify.md
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
 
   - id: fix
     name: Address what verification found
@@ -130,10 +163,19 @@ phases:
       - Bash
       - Edit
       - Write
+      - Skill
     agent:
       provider: claude
       model: opus
     prompt_file: phases/fix.md
+    skills:
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+    # Opens the draft PR / pushes to and comments on it (v3). Both need
+    # `pull_requests: write`; marking it ready stays with finalize_pr.
+    can_open_pr: true
 
   - id: reverify
     name: Confirm the fix closed what verification found
@@ -163,9 +205,14 @@ phases:
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
     prompt_file: phases/reverify.md
+    skills:
+      - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
 
-  - id: open_pr
-    name: Open the pull request
+  - id: finalize_pr
+    name: Mark the PR ready, or leave it draft with the blocker
     order: 6
     execution_type: sequential
     input_artifacts:
@@ -202,17 +249,19 @@ phases:
     # `gh` still works: the repo is still resolved to its installation, still
     # gets a token, and still gets a hosts.yml entry. Only the clone is gone.
     clone_repos: false
-    # THE ONLY PHASE HERE ALLOWED TO PUBLISH (#1197). Every other phase in
-    # this workflow gets a token whose `pull_requests` permission is read, so
-    # the gate cannot be routed around by an earlier phase calling
-    # `gh pr create` before the verifier has rendered a verdict - which is
-    # exactly what happened on exec-0bac0e1ed2b2.
+    # THE ONLY PHASE ALLOWED TO MARK THE PR READY (#1197, v3). implement and
+    # fix may open and update a DRAFT; `gh pr ready` happens here, only on
+    # CERTIFIED, so the verifier's verdict still gates what a reviewer sees.
     can_open_pr: true
     allowed_tools:
       - Read
       - Bash
       - Write
+      - Skill
     agent:
       provider: claude
       model: sonnet
-    prompt_file: phases/open_pr.md
+    prompt_file: phases/finalize_pr.md
+    skills:
+      - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
+      - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454

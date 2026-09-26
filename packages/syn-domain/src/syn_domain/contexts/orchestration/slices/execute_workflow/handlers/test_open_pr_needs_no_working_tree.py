@@ -194,7 +194,7 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
         "verify",
         "fix",
         "reverify",
-        "open_pr",
+        "finalize_pr",
     ], "the workflow's phase list changed; these assertions name phases by id"
     return {p.phase_id: p for p in processor.phases}
 
@@ -298,7 +298,7 @@ class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
 
     async def test_open_pr_setup_script_never_clones(self) -> None:
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
 
         assert "git clone" not in provisioned.setup_script
         assert "submodule update" not in provisioned.setup_script
@@ -326,7 +326,7 @@ class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
         times out sometimes into one that cannot work at all.
         """
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
 
         assert "~/.config/gh/hosts.yml" in provisioned.setup_script
         assert "oauth_token: tok-a" in provisioned.setup_script
@@ -342,7 +342,7 @@ class TestTheCheckoutIsGoneForOpenPrAndOnlyForOpenPr:
         about.
         """
         phases = await _executable_phases()
-        open_pr = await _provision(phases["open_pr"], completed={})
+        open_pr = await _provision(phases["finalize_pr"], completed={})
         implement = await _provision(phases["implement"], completed={})
 
         assert "AGENTS.md" not in open_pr.injected
@@ -364,7 +364,7 @@ class TestTheRefusalSurvivesTheChange:
     async def test_the_blocking_reverify_report_is_in_the_workspace(self) -> None:
         phases = await _executable_phases()
         provisioned = await _provision(
-            phases["open_pr"],
+            phases["finalize_pr"],
             completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
@@ -382,17 +382,19 @@ class TestTheRefusalSurvivesTheChange:
         """Asserted on the ARGV, not on the prompt file.
 
         The prompt is read from disk, substituted, and passed to the command
-        builder. Reading `open_pr.md` here would test the file; reading the
+        builder. Reading `finalize_pr.md` here would test the file; reading the
         command tests what the agent is actually launched with, which is one
         hop further along and the only one that matters.
         """
         phases = await _executable_phases()
         provisioned = await _provision(
-            phases["open_pr"],
+            phases["finalize_pr"],
             completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
-        assert "If it says BLOCKED, do not open a PR." in provisioned.prompt
+        # v3: the PR already exists as a draft; refusing means it STAYS a draft.
+        assert "## If BLOCKED" in provisioned.prompt
+        assert "Keep it a **draft**." in provisioned.prompt
 
     async def test_the_happy_path_opens_a_pr_from_the_remote_branch_without_pushing(
         self,
@@ -407,13 +409,13 @@ class TestTheRefusalSurvivesTheChange:
         """
         phases = await _executable_phases()
         provisioned = await _provision(
-            phases["open_pr"],
+            phases["finalize_pr"],
             completed={"reverify": "CERTIFIED\n\nThe final head is safe to publish.\n"},
         )
 
         assert "existing remote branch" in provisioned.prompt
-        assert "you do not need to push anything" in provisioned.prompt
-        assert "Never force push, never rebase." in provisioned.prompt
+        assert "gh pr ready" in provisioned.prompt
+        assert "Never push, never force push, never rebase." in provisioned.prompt
         # Comma-joined into a single `--tools` value, not one argv element per
         # tool - so this reads the grant the CLI actually parses.
         assert "Bash" in provisioned.argv[provisioned.argv.index("--tools") + 1].split(",")
@@ -941,7 +943,7 @@ class TestThePromptTellsTheTruthAboutCloning:
         """
         phases = await _executable_phases()
         provisioned = await _provision(
-            phases["open_pr"],
+            phases["finalize_pr"],
             completed={"reverify": _BLOCKING_REVERIFY_REPORT},
         )
 
@@ -968,7 +970,7 @@ class TestThePromptTellsTheTruthAboutCloning:
         defect this pins.
         """
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
 
         tree = _the_workspace_tree(provisioned.prompt)
         assert "repos/" in tree, f"the no-checkout tree does not show `repos/`:\n{tree}"
@@ -987,7 +989,7 @@ class TestThePromptTellsTheTruthAboutCloning:
         for a working tree instead, and there is not one.
         """
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
 
         assert "no checkout" in provisioned.prompt
         assert "GH_REPO" in provisioned.prompt
@@ -1018,7 +1020,7 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
         self, tmp_path: Path
     ) -> None:
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
         home, workspace = _the_workspace_the_setup_script_leaves_behind(
             provisioned.setup_script, tmp_path
         )
@@ -1061,7 +1063,7 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
         `gh` that never needed a credential at all.
         """
         phases = await _executable_phases()
-        provisioned = await _provision(phases["open_pr"], completed={})
+        provisioned = await _provision(phases["finalize_pr"], completed={})
         home, workspace = _the_workspace_the_setup_script_leaves_behind(
             provisioned.setup_script, tmp_path
         )

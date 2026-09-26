@@ -8,7 +8,7 @@ hand-maintained response model that simply did not list them.
 
 Why that specific shape of bug is worth its own file: `p.get("output_artifact_types")`
 returns `None` for a missing key exactly as it does for a null value, so reading
-the endpoint led to the conclusion that no phase in `sdlc-implement-v2` declares
+the endpoint led to the conclusion that no phase in `sdlc-implement-v3` declares
 outputs -- and therefore that #1173's "a phase must produce what it declares"
 enforcement was inert on our main workflow. The declarations are there. The
 endpoint could not express the difference between "declares nothing" and "we
@@ -278,7 +278,7 @@ async def _install_sdlc_implement() -> None:
 class TestTheEndpointMatchesTheFileOnDisk:
     """The regression guard named in #1176.
 
-    Reading `sdlc-implement-v2` off this endpoint is how someone checks what a
+    Reading `sdlc-implement-v3` off this endpoint is how someone checks what a
     phase is wired to consume and produce. If the file and the response can
     disagree, that check is worthless, and it disagreed completely.
     """
@@ -307,7 +307,7 @@ class TestTheEndpointMatchesTheFileOnDisk:
         declared = _declared_in_yaml()
         await _install_sdlc_implement()
 
-        phases = _phases_by_id(await _get_workflow_json("sdlc-implement-v2"))
+        phases = _phases_by_id(await _get_workflow_json("sdlc-implement-v3"))
 
         assert set(phases) == set(declared)
         actual = {
@@ -327,7 +327,7 @@ class TestTheEndpointMatchesTheFileOnDisk:
         """
         await _install_sdlc_implement()
 
-        premise = _phases_by_id(await _get_workflow_json("sdlc-implement-v2"))["premise"]
+        premise = _phases_by_id(await _get_workflow_json("sdlc-implement-v3"))["premise"]
 
         assert "input_artifact_types" in premise
         assert premise["input_artifact_types"] == []

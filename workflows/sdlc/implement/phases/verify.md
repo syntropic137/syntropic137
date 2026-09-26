@@ -329,5 +329,6 @@ exact branch and SHA cannot be fetched or checked out, or no verification
 artifact can be written. Do not use `success=false` merely because the
 candidate failed or because one requested check could not run.
 
-Do not open or attempt to open a pull request. Only the `open_pr` phase may do
-that.
+A draft PR for this branch already exists (the implement phase opened it). Do
+not create, edit, comment on, or mark ready any pull request: your verdict
+reaches it through `finalize_pr`, the only phase allowed to change its state.
