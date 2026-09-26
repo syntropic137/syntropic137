@@ -360,3 +360,30 @@ class ArtifactsCollectedCommand:
         #: not complete until a later to-do item, so the fact has to be told
         #: to the aggregate here or be lost (#1195, #1300).
         self.deliverable_recovered = deliverable_recovered
+
+
+class ForkExecutionCommand:
+    """Command to fork a terminal execution into a new one (ADR-014 s7).
+
+    Addressed to the PARENT: `execution_id` is the execution being forked and
+    `fork_execution_id` the id the new run will have. The parent decides.
+
+    Both flags are separate, explicit operator decisions and default to the
+    refusal. `override_cancellation` is the only way to fork a CANCELLED
+    parent: a cancel is an instruction to stop, and a fork must not defeat it
+    without a fresh decision. `acknowledge_external_effects` accepts that the
+    phase the fork re-runs may have pushed or published something in the
+    parent that re-running repeats. Neither implies the other.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        fork_execution_id: str,
+        override_cancellation: bool = False,
+        acknowledge_external_effects: bool = False,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.fork_execution_id = fork_execution_id
+        self.override_cancellation = override_cancellation
+        self.acknowledge_external_effects = acknowledge_external_effects

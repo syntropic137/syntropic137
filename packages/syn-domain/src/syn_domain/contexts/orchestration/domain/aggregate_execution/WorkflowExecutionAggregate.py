@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Final
 
 from event_sourcing import (
     AggregateRoot,
-    DomainEvent,
     aggregate,
     command_handler,
     event_sourcing_handler,
@@ -24,6 +23,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
+    ForkExecutionCommand,
     InterruptExecutionCommand,
     PauseExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
@@ -31,6 +31,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     RetryPhaseCommand,
     StartExecutionCommand,
     StartPhaseCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_rules import (
+    ForkRefused,
+    decide_fork,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
+    evt,
+    parse_phase_definitions,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
@@ -51,6 +59,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
+        ExecutionForkedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import (
         ExecutionPausedEvent,
@@ -84,33 +95,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
         WorkspaceProvisionedForPhaseEvent,
-    )
-
-
-def _evt(event: DomainEvent, field: str, default: Any = None) -> Any:  # noqa: ANN401
-    """Get field from event, handling both typed and GenericDomainEvent formats.
-
-    Returns Any because the caller knows the concrete type based on the field name.
-    """
-    if hasattr(event, field):
-        return getattr(event, field)
-    data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-    return data.get(field, default)
-
-
-def _parse_phase_definitions(raw_defs: list[dict[str, Any]]) -> list[PhaseDefinition]:
-    """Parse raw phase definition dicts into sorted PhaseDefinition objects."""
-    return sorted(
-        [
-            PhaseDefinition(
-                phase_id=d["phase_id"],
-                name=d["name"],
-                order=d["order"],
-                timeout_seconds=d.get("timeout_seconds", 300),
-            )
-            for d in raw_defs
-        ],
-        key=lambda p: p.order,
     )
 
 
@@ -196,6 +180,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: same restart hazard as the message above, and here for the same
         #: reason rather than because the value is expensive to recompute.
         self._recovered_phases: set[str] = set()
+        #: Phases that completed, and what each one's collection stored. The
+        #: inputs to a fork's inherited prefix (ADR-014 s7), which is decided
+        #: here from the stream and never from the artifact projection: a
+        #: projection that is merely lagging would read as missing artifacts,
+        #: and a parent may be forked only once.
+        self._completed_phase_ids: set[str] = set()
+        self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: Whether this execution has admitted a fork. THIS is the
+        #: "forked at most once" rule, deliberately separate from the child's
+        #: id below, which under ADR-023 can replay as None and would make the
+        #: rule fail OPEN - see `fork_rules.refuse_fork`.
+        self._forked: bool = False
+
+        #: The child's id, for the refusal message only.
+        self._fork_execution_id: str | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -459,6 +458,24 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    def _refuse_if_completed(self, phase_id: str, verb: str) -> None:
+        """A completed phase's record is closed (#1453).
+
+        Three commands could each reopen it - start, complete, collect - and
+        each corrupts it differently: a second start lets a retry drop the
+        artifacts of the attempt that did complete, a second completion inflates
+        the completed count and can append another attempt's artifact, and a
+        late collection injects artifacts into a phase that finished. A fork
+        inherits the completed prefix, so all three end up handing a child work
+        whose inputs are not what the record says (ADR-014 s7).
+
+        One guard rather than three copies: the doors are different, the rule is
+        the same, and a rule spelled once cannot be closed on two of them.
+        """
+        if phase_id in self._completed_phase_ids:
+            msg = f"Cannot {verb} phase {phase_id}: it has already completed"
+            raise ValueError(msg)
+
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
         """Handle StartPhaseCommand."""
@@ -469,6 +486,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot start phase in status {self._status}"
             raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "start")
 
         event = PhaseStartedEvent(
             workflow_id=command.workflow_id,
@@ -531,6 +549,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete phase in status {self._status}"
             raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "complete")
 
         event = PhaseCompletedEvent(
             workflow_id=command.workflow_id,
@@ -613,6 +632,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot collect artifacts in status {self._status}"
             raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "collect artifacts for")
 
         event = ArtifactsCollectedForPhaseEvent(
             workflow_id=self._workflow_id or "",
@@ -734,33 +754,62 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("ForkExecutionCommand")
+    def fork_execution(self, command: ForkExecutionCommand) -> None:
+        """Handle ForkExecutionCommand - admit, or refuse, one fork of this run.
+
+        Decided on the PARENT, which records `ExecutionForked` on its own
+        stream and is otherwise untouched: it stays terminal, and nothing it
+        already recorded is rewritten (ADR-014 s7). Creating and starting the
+        fork is not done here - this is the admission, and every fact the fork
+        needs from its parent is fixed on the event.
+
+        The rules themselves are in `fork_rules`, where they are pure functions
+        of this replayed state and testable without an aggregate.
+        """
+        decision = decide_fork(
+            execution_id=self.id,
+            workflow_id=self._workflow_id or "",
+            status=self._status,
+            forked=self._forked,
+            fork_execution_id=self._fork_execution_id,
+            phase_definitions=self._phase_definitions,
+            completed_phase_ids=self._completed_phase_ids,
+            phase_artifact_ids=self._phase_artifact_ids,
+            started_phase_ids=self._phase_attempts,
+            command=command,
+        )
+        if isinstance(decision, ForkRefused):
+            raise ValueError(decision.reason)
+        self._apply(decision.event)
+
     @event_sourcing_handler("WorkflowExecutionStarted")
     def on_execution_started(self, event: WorkflowExecutionStartedEvent) -> None:
         """Apply WorkflowExecutionStartedEvent."""
-        self._workflow_id = _evt(event, "workflow_id")
-        self._workflow_name = _evt(event, "workflow_name")
-        self._started_at = _evt(event, "started_at")
-        self._total_phases = _evt(event, "total_phases", 0)
-        self._expected_completion_at = _evt(event, "expected_completion_at")
-        raw_defs: list[dict[str, Any]] = _evt(event, "phase_definitions") or []
-        self._phase_definitions = _parse_phase_definitions(raw_defs)
+        self._workflow_id = evt(event, "workflow_id")
+        self._workflow_name = evt(event, "workflow_name")
+        self._started_at = evt(event, "started_at")
+        self._total_phases = evt(event, "total_phases", 0)
+        self._expected_completion_at = evt(event, "expected_completion_at")
+        raw_defs: list[dict[str, Any]] = evt(event, "phase_definitions") or []
+        self._phase_definitions = parse_phase_definitions(raw_defs)
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
         """Apply WorkflowCompletedEvent."""
-        self._completed_at = _evt(event, "completed_at")
-        self._completed_phases = _evt(event, "completed_phases", 0)
-        self._total_tokens = _evt(event, "total_tokens", 0)
-        self._artifact_ids = list(_evt(event, "artifact_ids", []))
+        self._completed_at = evt(event, "completed_at")
+        self._completed_phases = evt(event, "completed_phases", 0)
+        self._total_tokens = evt(event, "total_tokens", 0)
+        self._artifact_ids = list(evt(event, "artifact_ids", []))
         self._status = ExecutionStatus.COMPLETED
 
     @event_sourcing_handler("WorkflowFailed")
     def on_execution_failed(self, event: WorkflowFailedEvent) -> None:
         """Apply WorkflowFailedEvent."""
-        self._completed_at = _evt(event, "failed_at")
-        self._error = _evt(event, "error_message")
+        self._completed_at = evt(event, "failed_at")
+        self._error = evt(event, "error_message")
         self._status = ExecutionStatus.FAILED
         # Coerced rather than read, because this applier replays events older
         # than the field: `from_stored` turns a missing key - and a member some
@@ -768,23 +817,23 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # instead of a `ValueError` that would stop the whole stream rehydrating
         # (#1357).
         self._failure_classification = FailureClassification.from_stored(
-            _evt(event, "failure_classification")
+            evt(event, "failure_classification")
         )
         # Same coercion, same reason, one field over: a reason written by a
         # newer version is a word this reader does not know, and reads as "no
         # reason given" rather than stopping the stream (#1372).
         self._reported_failure_reason = ReportedFailureReason.from_stored(
-            _evt(event, "reported_failure_reason")
+            evt(event, "reported_failure_reason")
         )
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
         """Apply PhaseStartedEvent."""
-        self._current_phase_order = _evt(event, "phase_order", 0)
-        phase_id = _evt(event, "phase_id")
+        self._current_phase_order = evt(event, "phase_order", 0)
+        phase_id = evt(event, "phase_id")
         self._running_phase_id = phase_id
         if phase_id:
-            self._phase_names[phase_id] = _evt(event, "phase_name") or phase_id
+            self._phase_names[phase_id] = evt(event, "phase_name") or phase_id
             # Counted HERE, on the event that says an attempt began, rather
             # than on PhaseRetryScheduled which only says one was asked for.
             # A retry that is scheduled and then never starts - the process
@@ -793,13 +842,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_attempts[phase_id] = self._phase_attempts.get(phase_id, 0) + 1
 
     @event_sourcing_handler("PhaseCompleted")
-    def on_phase_completed(self, _event: PhaseCompletedEvent) -> None:
+    def on_phase_completed(self, event: PhaseCompletedEvent) -> None:
         """Apply PhaseCompletedEvent."""
         self._completed_phases += 1
         self._running_phase_id = None
+        phase_id: str = evt(event, "phase_id")
+        self._completed_phase_ids.add(phase_id)
+        # Collection normally names every artifact already; the completion's
+        # own id is kept too, for streams where it is the only record.
+        artifact_id: str | None = evt(event, "artifact_id")
+        collected = self._phase_artifact_ids.setdefault(phase_id, [])
+        if artifact_id and artifact_id not in collected:
+            collected.append(artifact_id)
 
     @event_sourcing_handler("PhaseRetryScheduled")
-    def on_phase_retry_scheduled(self, _event: PhaseRetryScheduledEvent) -> None:
+    def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:
         """Apply PhaseRetryScheduledEvent — the attempt is over, the phase is not.
 
         `_running_phase_id` is cleared because no attempt is running until the
@@ -807,36 +864,40 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         no phase rather than naming the abandoned attempt.
 
         `_completed_phases` is deliberately untouched: nothing completed.
+        Anything the abandoned attempt collected goes with it, so a fork never
+        inherits an artifact from an attempt that was given up.
         """
         self._running_phase_id = None
+        self._phase_artifact_ids.pop(evt(event, "phase_id"), None)
 
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
-        self._current_phase_workspace_id = _evt(event, "workspace_id")
+        self._current_phase_workspace_id = evt(event, "workspace_id")
 
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
         """Apply AgentExecutionCompletedEvent — keep what the agent left behind."""
-        said = _evt(event, "last_agent_message")
+        said = evt(event, "last_agent_message")
         if not said:
             return
-        phase_id: str = _evt(event, "phase_id") or ""
+        phase_id: str = evt(event, "phase_id") or ""
         if not phase_id:
             return
         self._finished_agent_runs[phase_id] = FinishedAgentRun(
             phase_id=phase_id,
             phase_name=self._phase_names.get(phase_id, phase_id),
-            session_id=_evt(event, "session_id") or "",
+            session_id=evt(event, "session_id") or "",
             last_agent_message=said,
         )
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
     def on_artifacts_collected_for_phase(self, event: ArtifactsCollectedForPhaseEvent) -> None:
         """Apply ArtifactsCollectedForPhaseEvent."""
-        self._artifact_ids.extend(_evt(event, "artifact_ids", []))
-        phase_id = _evt(event, "phase_id")
-        if _evt(event, "deliverable_recovered", False):
+        self._artifact_ids.extend(evt(event, "artifact_ids", []))
+        phase_id = evt(event, "phase_id")
+        self._phase_artifact_ids.setdefault(phase_id, []).extend(evt(event, "artifact_ids", []))
+        if evt(event, "deliverable_recovered", False):
             self._recovered_phases.add(phase_id)
         # The salvage input has done its job for this phase and stops being
         # replayed state: a later to-do item for the same phase must re-read
@@ -862,12 +923,22 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @event_sourcing_handler("ExecutionCancelled")
     def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:
         """Apply ExecutionCancelledEvent."""
-        self._completed_at = _evt(event, "cancelled_at")
+        self._completed_at = evt(event, "cancelled_at")
         self._status = ExecutionStatus.CANCELLED
         self._cancel_reason = event.reason
 
     @event_sourcing_handler("WorkflowInterrupted")
     def on_execution_interrupted(self, event: WorkflowInterruptedEvent) -> None:
         """Apply WorkflowInterruptedEvent."""
-        self._completed_at = _evt(event, "interrupted_at")
+        self._completed_at = evt(event, "interrupted_at")
         self._status = ExecutionStatus.INTERRUPTED
+
+    @event_sourcing_handler("ExecutionForked")
+    def on_execution_forked(self, event: ExecutionForkedEvent) -> None:
+        """Apply ExecutionForkedEvent - the parent's one fork is spent.
+
+        Status is deliberately untouched: the parent stays the terminal run it
+        was, and only this fact about it is new.
+        """
+        self._forked = True
+        self._fork_execution_id = evt(event, "fork_execution_id")
