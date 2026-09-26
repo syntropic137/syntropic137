@@ -37,8 +37,11 @@ from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC0
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import FailureClassification, ReportedFailureReason
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX
-from syn_shared.agents import AliasResolutionBasis  # noqa: TC001
+
+# One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
+# so `syn_shared.agents` is needed at RUNTIME, which makes a type-checking-only
+# guard on AliasResolutionBasis both unused and misleading.
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.observed_model import format_observed_model
 

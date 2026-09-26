@@ -20,6 +20,7 @@ enough here.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -573,7 +574,34 @@ class TestARefusedDeclarationDoesNotLaunder:
 # which is why these tests assert BOTH directions per field.
 
 
-def _parsed_phase(phase: PhaseDefinitionResponse) -> Mapping[str, object]:
+@dataclass(frozen=True)
+class _ExportedPhase:
+    """What one exported phase says, read back off the parsed YAML.
+
+    A typed view rather than the raw mapping. `None` means the key was ABSENT,
+    which is the distinction every test here turns on: absent means "inherits
+    the loader default", present means "explicitly declares". A bare dict makes
+    those two look the same at the call site.
+    """
+
+    phase_id: str
+    name: str
+    order: int
+    prompt_file: str
+    top_level_keys: frozenset[str]
+    agent_keys: frozenset[str]
+    can_open_pr: bool | None
+    clone_repos: bool | None
+    delivers_repo_changes: bool | None
+    agent_sandbox: str | None
+    has_agent_block: bool
+
+    def declares(self, key: str) -> bool:
+        """Whether the exported YAML carries `key` at the phase's top level."""
+        return key in self.top_level_keys
+
+
+def _parsed_phase(phase: PhaseDefinitionResponse) -> _ExportedPhase:
     """Export one phase and parse the YAML back, as this file's header requires."""
     text = "\n".join(["phases:", *_yaml_phase_lines(phase)])
     parsed = yaml.safe_load(text)
@@ -582,31 +610,45 @@ def _parsed_phase(phase: PhaseDefinitionResponse) -> Mapping[str, object]:
     assert isinstance(phases, list) and len(phases) == 1
     entry = phases[0]
     assert isinstance(entry, dict)
-    return entry
+    agent = entry.get("agent")
+    agent_map = agent if isinstance(agent, dict) else {}
+    sandbox = agent_map.get("sandbox")
+    return _ExportedPhase(
+        phase_id=str(entry["id"]),
+        name=str(entry["name"]),
+        order=int(entry["order"]),
+        prompt_file=str(entry["prompt_file"]),
+        top_level_keys=frozenset(str(k) for k in entry),
+        agent_keys=frozenset(str(k) for k in agent_map),
+        can_open_pr=entry.get("can_open_pr"),
+        clone_repos=entry.get("clone_repos"),
+        delivers_repo_changes=entry.get("delivers_repo_changes"),
+        agent_sandbox=None if sandbox is None else str(sandbox),
+        has_agent_block=isinstance(agent, dict),
+    )
 
 
 class TestCanOpenPrSurvivesExport:
     def test_true_is_emitted(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
-        assert entry["can_open_pr"] is True
+        assert entry.can_open_pr is True
 
     def test_false_is_the_default_and_stays_absent(self) -> None:
         """Absent means False to the loader, so emitting it would add noise."""
         entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": False}))
-        assert "can_open_pr" not in entry
+        assert not entry.declares("can_open_pr")
         assert (
-            PhaseYamlDefinition(id="x", name="x", order=1, prompt_file="x.md").can_open_pr
-            is False
+            PhaseYamlDefinition(id="x", name="x", order=1, prompt_file="x.md").can_open_pr is False
         )
 
     def test_the_loader_reads_back_what_export_wrote(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"can_open_pr": True}))
         loaded = PhaseYamlDefinition(
-            id=str(entry["id"]),
-            name=str(entry["name"]),
-            order=int(entry["order"]),
-            prompt_file=str(entry["prompt_file"]),
-            can_open_pr=bool(entry["can_open_pr"]),
+            id=entry.phase_id,
+            name=entry.name,
+            order=entry.order,
+            prompt_file=entry.prompt_file,
+            can_open_pr=bool(entry.can_open_pr),
         )
         assert loaded.can_open_pr is True, (
             "export wrote can_open_pr but the loader did not read it back as True; "
@@ -619,29 +661,25 @@ class TestDefaultTrueFieldsSurviveExport:
 
     def test_clone_repos_false_is_emitted(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": False}))
-        assert entry["clone_repos"] is False, (
+        assert entry.clone_repos is False, (
             "an explicit clone_repos: false was dropped, so the phase reinstalls "
             "cloning repos its author declared it did not need"
         )
 
     def test_clone_repos_true_stays_absent(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"clone_repos": True}))
-        assert "clone_repos" not in entry
+        assert not entry.declares("clone_repos")
 
     def test_delivers_repo_changes_false_is_emitted(self) -> None:
-        entry = _parsed_phase(
-            _valid_phase().model_copy(update={"delivers_repo_changes": False})
-        )
-        assert entry["delivers_repo_changes"] is False, (
+        entry = _parsed_phase(_valid_phase().model_copy(update={"delivers_repo_changes": False}))
+        assert entry.delivers_repo_changes is False, (
             "an explicit delivers_repo_changes: false was dropped, so the "
             "unpushed-work gate reinstalls treating build output as a lost deliverable"
         )
 
     def test_delivers_repo_changes_true_stays_absent(self) -> None:
-        entry = _parsed_phase(
-            _valid_phase().model_copy(update={"delivers_repo_changes": True})
-        )
-        assert "delivers_repo_changes" not in entry
+        entry = _parsed_phase(_valid_phase().model_copy(update={"delivers_repo_changes": True}))
+        assert not entry.declares("delivers_repo_changes")
 
 
 class TestSandboxSurvivesExport:
@@ -649,16 +687,15 @@ class TestSandboxSurvivesExport:
 
     def test_non_default_sandbox_is_emitted_under_agent(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
-        agent = entry["agent"]
-        assert isinstance(agent, dict)
-        assert agent["sandbox"] == "read-only", (
+        assert entry.has_agent_block
+        assert entry.agent_sandbox == "read-only", (
             "a read-only verify phase reinstalls at the default full-access level, "
             "so the verifier regains write access to what it certifies"
         )
 
     def test_it_is_not_emitted_at_the_top_level(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "read-only"}))
-        assert "sandbox" not in entry, (
+        assert not entry.declares("sandbox"), (
             "sandbox at the top level is not in the authoring schema; the loader "
             "would ignore it and the phase would reinstall at the default"
         )
@@ -666,11 +703,8 @@ class TestSandboxSurvivesExport:
     def test_the_default_stays_absent(self) -> None:
         from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
-        entry = _parsed_phase(
-            _valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX})
-        )
-        agent = entry.get("agent")
-        assert not isinstance(agent, dict) or "sandbox" not in agent
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX}))
+        assert entry.agent_sandbox is None
 
 
 class TestTheSchemaClaimIsChecked:
@@ -691,7 +725,7 @@ class TestTheSchemaClaimIsChecked:
     """
 
     @staticmethod
-    def _schema_phase_properties() -> Mapping[str, object]:
+    def _schema_phase_properties() -> frozenset[str]:
         schema_path = (
             Path(__file__).resolve().parents[3] / "schemas" / "plugin" / "workflow.schema.json"
         )
@@ -708,7 +742,7 @@ class TestTheSchemaClaimIsChecked:
                 "could not locate PhaseYamlDefinition properties in the authoring "
                 "schema; this test must not pass on an empty set"
             )
-        return props
+        return frozenset(str(name) for name in props)
 
     def test_the_four_fields_are_expressible_in_the_schema(self) -> None:
         """Where each field lives. `sandbox` is under `agent`, not top level."""
@@ -727,31 +761,31 @@ class TestTheSchemaClaimIsChecked:
         YAML, load it through PhaseYamlDefinition, and compare against what
         was exported. This is what "nothing expressible is dropped" means.
         """
-        nondefault: dict[str, object] = {
-            "can_open_pr": True,
-            "clone_repos": False,
-            "delivers_repo_changes": False,
-            "sandbox": "read-only",
-        }
-        phase = _valid_phase().model_copy(update=nondefault)
+        phase = _valid_phase().model_copy(
+            update={
+                "can_open_pr": True,
+                "clone_repos": False,
+                "delivers_repo_changes": False,
+                "sandbox": "read-only",
+            }
+        )
         entry = _parsed_phase(phase)
 
-        agent = entry.get("agent")
-        assert isinstance(agent, dict), "the agent block vanished, so sandbox cannot survive"
+        assert entry.has_agent_block, "the agent block vanished, so sandbox cannot survive"
 
         loaded = PhaseYamlDefinition(
-            id=str(entry["id"]),
-            name=str(entry["name"]),
-            order=int(entry["order"]),
-            prompt_file=str(entry["prompt_file"]),
-            can_open_pr=bool(entry["can_open_pr"]),
-            clone_repos=bool(entry["clone_repos"]),
-            delivers_repo_changes=bool(entry["delivers_repo_changes"]),
+            id=entry.phase_id,
+            name=entry.name,
+            order=entry.order,
+            prompt_file=entry.prompt_file,
+            can_open_pr=bool(entry.can_open_pr),
+            clone_repos=bool(entry.clone_repos),
+            delivers_repo_changes=bool(entry.delivers_repo_changes),
         )
         assert loaded.can_open_pr is True
         assert loaded.clone_repos is False
         assert loaded.delivers_repo_changes is False
-        assert agent["sandbox"] == "read-only"
+        assert entry.agent_sandbox == "read-only"
 
     def test_the_read_model_stores_them(self) -> None:
         """The third seam: to_dict is what is actually stored and served.
@@ -825,26 +859,21 @@ class TestAnInvalidSandboxIsNotLaundered:
 
     def test_an_empty_sandbox_is_still_emitted(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": ""}))
-        agent = entry["agent"]
-        assert isinstance(agent, dict)
-        assert "sandbox" in agent, (
+        assert entry.has_agent_block
+        assert entry.agent_sandbox is not None, (
             "an invalid empty sandbox was dropped, so the phase reinstalls at "
             "full-access - export upgraded its privileges"
         )
-        assert agent["sandbox"] == ""
+        assert entry.agent_sandbox == ""
 
     def test_a_bogus_sandbox_is_still_emitted(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": "not-a-level"}))
-        agent = entry["agent"]
-        assert isinstance(agent, dict)
-        assert agent["sandbox"] == "not-a-level"
+        assert entry.has_agent_block
+        assert entry.agent_sandbox == "not-a-level"
 
     def test_the_default_is_still_omitted(self) -> None:
         """Widening the guard must not start writing the default back."""
         from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
-        entry = _parsed_phase(
-            _valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX})
-        )
-        agent = entry.get("agent")
-        assert not isinstance(agent, dict) or "sandbox" not in agent
+        entry = _parsed_phase(_valid_phase().model_copy(update={"sandbox": DEFAULT_PHASE_SANDBOX}))
+        assert entry.agent_sandbox is None
