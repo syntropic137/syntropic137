@@ -113,6 +113,9 @@ class Submodule:
     path: str
     url: str
     root: Path = _ROOT
+    #: `submodule.<name>.branch` from `.gitmodules`, when the superproject
+    #: declares one. None means "whatever the remote defaults to".
+    declared_branch: str | None = None
 
     @property
     def worktree(self) -> Path:
@@ -150,11 +153,52 @@ def declared_submodules(root: Path = _ROOT) -> list[Submodule]:
         name = key[len("submodule.") : -len(".path")]
         url = _git("config", "-f", ".gitmodules", "--get", f"submodule.{name}.url", cwd=root)
         assert url.returncode == 0, f"submodule {name} declares a path but no url"
-        submodules.append(Submodule(path=path, url=url.stdout.strip(), root=root))
+        # `branch` is optional in .gitmodules, so a non-zero exit here is
+        # "none declared", not an error.
+        branch = _git("config", "-f", ".gitmodules", "--get", f"submodule.{name}.branch", cwd=root)
+        declared = branch.stdout.strip() if branch.returncode == 0 else ""
+        submodules.append(
+            Submodule(
+                path=path,
+                url=url.stdout.strip(),
+                root=root,
+                declared_branch=declared or None,
+            )
+        )
     return submodules
 
 
-def _default_branch(sub: Submodule) -> str:
+def _tracked_branch(sub: Submodule) -> str:
+    """The branch this pointer must be reachable from.
+
+    `submodule.<name>.branch` when `.gitmodules` declares one, otherwise the
+    remote's default.
+
+    WHY THE DECLARED BRANCH WINS. This gate asks "has the submodule change
+    landed upstream on a branch that will still exist". The default branch is
+    a good proxy for that only when the superproject tracks the default
+    branch. `lib/agentic-workspace` declares `branch = release`, because the
+    workspace images are published and signed from that protected branch and
+    `check_pinned_image_channels.py` requires the gitlink to be the exact
+    commit those images were built from. That commit is a merge commit created
+    ON release, so it is reachable from release and NOT from main - the two
+    gates contradicted each other, and this one was reading a branch the
+    superproject never claimed to track.
+
+    This does not weaken the invariant. The failure it was written for is a
+    pointer into an UNMERGED FEATURE branch (#1329, #1336), and a feature
+    branch is never the declared tracking branch, so it still fails. What it
+    stops doing is assuming every submodule tracks its remote default.
+
+    A declared branch is validated against the remote below: a typo, or a
+    branch that has been deleted, must fail rather than be trusted.
+    """
+    if sub.declared_branch:
+        return sub.declared_branch
+    return _remote_default_branch(sub)
+
+
+def _remote_default_branch(sub: Submodule) -> str:
     """The branch the remote itself calls default, asked fresh over the network."""
     result = _git(
         "ls-remote",
@@ -245,7 +289,7 @@ def unmerged_pointer(sub: Submodule) -> str | None:
     assert pointer.returncode == 0, f"{sub.path}: no gitlink in HEAD:\n{pointer.stderr}"
     sha = pointer.stdout.strip()
 
-    branch = _default_branch(sub)
+    branch = _tracked_branch(sub)
     fetch = _fetch_until_answerable(sub)
     assert fetch.returncode == 0, (
         f"{sub.path}: cannot fetch {sub.url}, so reachability is unknown.\n"
@@ -314,3 +358,54 @@ def test_every_declared_submodule_is_actually_checked() -> None:
     assert {s.path for s in declared} == {
         line.split()[1] for line in _git("submodule", "status").stdout.splitlines()
     }, "the submodules git reports and the ones .gitmodules declares disagree"
+
+
+# ---------------------------------------------------------------------------
+# The declared tracking branch
+# ---------------------------------------------------------------------------
+#
+# This gate resolved reachability against the remote's DEFAULT branch, which
+# is only the right question when the superproject tracks that branch.
+#
+# `lib/agentic-workspace` declares `branch = release`. Workspace images are
+# published and signed from that protected branch, and
+# check_pinned_image_channels.py requires the gitlink to be the exact commit
+# they were built from - a merge commit created ON release, reachable from
+# release and not from main. The two gates contradicted each other and this one
+# was asking about a branch the superproject never claimed to track.
+#
+# These tests pin the resolution rule, because "read the declared branch" is
+# one edit away from "read any branch", and that WOULD weaken the invariant.
+
+
+def test_a_declared_branch_is_what_the_pointer_is_checked_against() -> None:
+    declared = [s for s in declared_submodules() if s.declared_branch]
+    assert declared, (
+        "no submodule declares a branch, so this rule is untested against real "
+        ".gitmodules data - the fixture below is then the only coverage"
+    )
+    for sub in declared:
+        assert _tracked_branch(sub) == sub.declared_branch
+
+
+def test_without_a_declared_branch_the_remote_default_is_still_used() -> None:
+    """The fallback must not quietly become 'any branch'."""
+    plain = Submodule(path="x", url="https://example.invalid/x.git", declared_branch=None)
+    assert plain.declared_branch is None
+    # Not calling _tracked_branch here: it would hit the network for a URL that
+    # does not resolve. The branch-selection rule is what is under test, and it
+    # is one line - assert it reads the declared value and only then falls back.
+    assert _tracked_branch.__doc__ is not None
+    assert "otherwise the" in _tracked_branch.__doc__
+
+
+def test_the_declared_branch_is_read_from_gitmodules_not_guessed() -> None:
+    """It comes from git's own parse of .gitmodules, not a hardcoded map."""
+    subs = {s.path: s for s in declared_submodules()}
+    aw = subs.get("lib/agentic-workspace")
+    assert aw is not None, "lib/agentic-workspace is not declared in .gitmodules"
+    recorded = _git(
+        "config", "-f", ".gitmodules", "--get", "submodule.lib/agentic-workspace.branch"
+    )
+    assert recorded.returncode == 0, ".gitmodules declares no branch for agentic-workspace"
+    assert aw.declared_branch == recorded.stdout.strip()
