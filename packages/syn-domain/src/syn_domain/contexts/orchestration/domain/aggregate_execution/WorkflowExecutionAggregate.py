@@ -457,6 +457,24 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    def _refuse_if_completed(self, phase_id: str, verb: str) -> None:
+        """A completed phase's record is closed (#1453).
+
+        Three commands could each reopen it - start, complete, collect - and
+        each corrupts it differently: a second start lets a retry drop the
+        artifacts of the attempt that did complete, a second completion inflates
+        the completed count and can append another attempt's artifact, and a
+        late collection injects artifacts into a phase that finished. A fork
+        inherits the completed prefix, so all three end up handing a child work
+        whose inputs are not what the record says (ADR-014 s7).
+
+        One guard rather than three copies: the doors are different, the rule is
+        the same, and a rule spelled once cannot be closed on two of them.
+        """
+        if phase_id in self._completed_phase_ids:
+            msg = f"Cannot {verb} phase {phase_id}: it has already completed"
+            raise ValueError(msg)
+
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
         """Handle StartPhaseCommand."""
@@ -467,13 +485,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot start phase in status {self._status}"
             raise ValueError(msg)
-        if command.phase_id in self._completed_phase_ids:
-            # A completed phase is finished. Re-entering one corrupted the
-            # record two ways - see `TestACompletedPhaseCannotBeReentered` in
-            # test_fork.py for both sequences and why this door is the only
-            # way to reach them (#1453).
-            msg = f"Cannot start phase {command.phase_id}: it has already completed"
-            raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "start")
 
         event = PhaseStartedEvent(
             workflow_id=command.workflow_id,
@@ -536,6 +548,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete phase in status {self._status}"
             raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "complete")
 
         event = PhaseCompletedEvent(
             workflow_id=command.workflow_id,
@@ -618,6 +631,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot collect artifacts in status {self._status}"
             raise ValueError(msg)
+        self._refuse_if_completed(command.phase_id, "collect artifacts for")
 
         event = ArtifactsCollectedForPhaseEvent(
             workflow_id=self._workflow_id or "",

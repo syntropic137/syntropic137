@@ -9,6 +9,7 @@ it, or the one-fork rule is one fork per restart.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -36,6 +37,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
     ExecutionForkedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
+    PhaseStartedEvent,
 )
 
 if TYPE_CHECKING:
@@ -542,6 +546,88 @@ class TestACompletedPhaseCannotBeReentered:
 
         with pytest.raises(ValueError, match="already completed"):
             _run_phase(history, "research", "art-second")
+
+    def test_a_completed_phase_cannot_be_completed_again_while_another_runs(self) -> None:
+        """Second review of #1453: `start_phase` was NOT the only door.
+
+        No second `PhaseStarted` is needed. A stale or duplicated
+        `CompletePhaseCommand` for a phase that already finished used to be
+        admitted while a LATER phase was running, inflating the completed count
+        and letting a second artifact land under the finished phase.
+        """
+        history = _started()
+        _run_phase(history, "research", "art-research")
+        _start_phase(history, "plan")
+
+        with pytest.raises(ValueError, match="already completed"):
+            _complete_phase(history, "research")
+
+    def test_artifacts_cannot_be_collected_onto_a_completed_phase(self) -> None:
+        """The third door, and the one a fork notices.
+
+        A late `ArtifactsCollectedCommand` for a finished phase appended to that
+        phase's artifact list, so the fork inherited an artifact the phase never
+        produced during the attempt that completed it.
+        """
+        history = _started()
+        _run_phase(history, "research", "art-research")
+        _start_phase(history, "plan")
+
+        with pytest.raises(ValueError, match="already completed"):
+            _collect(history, "research", "art-injected")
+
+    def test_the_in_phase_flow_is_untouched(self) -> None:
+        """The guards must only close COMPLETED phases, not running ones.
+
+        Collecting then completing the phase that is actually running is the
+        normal path and stays admitted, for every phase in turn.
+        """
+        history = _started()
+        for phase_id in PHASES:
+            _start_phase(history, phase_id)
+            _collect(history, phase_id, f"art-{phase_id}")
+            _complete_phase(history, phase_id)
+
+        assert history.status is ExecutionStatus.RUNNING
+        assert history._completed_phases == len(PHASES)
+
+    def test_a_stream_that_already_re_entered_a_completed_phase_still_loads(self) -> None:
+        """The guard is on the COMMAND path, never on replay.
+
+        Refusing during replay would be the worse bug: any production stream
+        that already contains a second `PhaseStarted` for a completed phase
+        would become unloadable, taking the execution with it. So the events
+        are applied as recorded and only new commands are refused. This test
+        builds that stream directly, because `start_phase` can no longer
+        produce it.
+        """
+        history = _started()
+        _run_phase(history, "research", "art-research")
+        store = _Store(history)
+
+        replayed_second_start = EventEnvelope(
+            event=PhaseStartedEvent(
+                workflow_id="wf-1",
+                execution_id=PARENT,
+                phase_id="research",
+                phase_name="Research",
+                phase_order=1,
+                started_at=datetime.now(UTC),
+                session_id=None,
+            ),
+            metadata=store._events[0].metadata,
+        )
+        store._events.append(replayed_second_start)
+
+        reloaded = store.load()
+        assert reloaded.status is ExecutionStatus.RUNNING
+        # The re-entry was APPLIED, not skipped - otherwise this test would
+        # pass without the stream ever containing the thing it is about.
+        assert reloaded._phase_attempts["research"] == 2
+        assert reloaded._running_phase_id == "research"
+        # And the command that would have written it is still refused.
+        with pytest.raises(ValueError, match="already completed"):
+            _start_phase(reloaded, "research")
 
     def test_a_retry_before_completion_is_still_allowed(self) -> None:
         """The guard must not close the legitimate retry path.
