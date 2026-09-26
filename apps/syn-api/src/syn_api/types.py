@@ -196,6 +196,14 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so existence is UNKNOWN.
+
+    Distinct from WORKFLOW_NOT_FOUND on purpose. `exists()` used to answer
+    False when the store was unreachable, so an outage rendered as "that
+    workflow does not exist" - a confident wrong answer a caller would act on.
+    The store now raises instead, and this code carries the difference through
+    to the caller rather than collapsing it back into not-found."""
 
 
 class OrganizationError(StrEnum):
