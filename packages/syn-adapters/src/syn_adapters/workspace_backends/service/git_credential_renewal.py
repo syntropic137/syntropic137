@@ -15,6 +15,16 @@ guard's quarantine push runs at teardown, by construction the last moment of
 the longest phases. On `exec-db6f687e991a` the ordinary push landed and the
 quarantine push, minutes later, was answered "Invalid username or token".
 
+IT IS RENEWED AT FOUR MOMENTS, all through this one function: at phase start
+by the quarantine rehearsal, every forty minutes while the agent runs by
+`credential_keeper` (#725), and at teardown before the quarantine push. The
+setup phase is the fifth mint and the first. Every token any of them mints is
+recorded in the workspace's `IssuanceLedger` the moment it exists - before it
+is installed, because a token that failed to install is still live - so
+teardown can revoke it. None of them revokes the token it replaces: an agent
+push already in flight is authenticating with it, and a revocation would fail
+that push for the sake of a token that expires on its own within the hour.
+
 SO THE CREDENTIAL IS RE-MINTED RATHER THAN THE PUSH BEING RETRIED. A retry
 that parsed git's stderr for the word "authentication" would be guessing at a
 message git is free to reword, and would still be holding the expired token
@@ -33,6 +43,10 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration import CredentialRenewalFailedError
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.issued_tokens import (
+        IssuanceLedger,
+        IssuedToken,
+    )
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -71,8 +85,15 @@ class CredentialSource:
     can_open_pr: bool
 
 
-async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSource) -> None:
+async def renew_git_credential(
+    workspace: ManagedWorkspace, source: CredentialSource, ledger: IssuanceLedger
+) -> tuple[IssuedToken, ...]:
     """Mint this workspace a fresh git credential and install it, or raise.
+
+    Returns:
+        The tokens now installed - empty when the workspace has no GitHub
+        credential at all. Each was also recorded in ``ledger`` as soon as it
+        was minted, which on failure is the only place it is recorded.
 
     Raises:
         CredentialRenewalFailedError: the credential in this container is not
@@ -104,12 +125,17 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
             f"a fresh GitHub installation token could not be minted ({unmintable})"
         ) from unmintable
 
-    if not secrets.repo_tokens:
-        # No repository is credentialed, so there is no credential to renew and
-        # nothing downstream depends on one. Distinct from a renewal that was
-        # attempted and failed, and must not be reported as one.
+    if not secrets.issued:
+        # Nothing is credentialed - no repository token and no gh token - so
+        # there is no credential to renew and nothing downstream depends on
+        # one. Distinct from a renewal that was attempted and failed, and must
+        # not be reported as one.
         logger.debug("No git credential to renew for workspace %s", workspace.workspace_id)
-        return
+        return ()
+    # Before the install, not after it: a token whose installation fails is
+    # every bit as live as one that succeeds, and teardown can only revoke
+    # what it was told about.
+    ledger.record(secrets.issued)
 
     try:
         result = await _install(workspace, secrets.build_credential_script())
@@ -124,7 +150,13 @@ async def renew_git_credential(workspace: ManagedWorkspace, source: CredentialSo
             f"the credential script exited {result.exit_code}: "
             f"{result.stderr.strip() or '(no stderr output)'}"
         )
-    logger.info("Renewed the git credential in workspace %s", workspace.workspace_id)
+    ledger.installed(secrets.issued)
+    logger.info(
+        "Renewed the git credential in workspace %s (expires_at=%s)",
+        workspace.workspace_id,
+        min(token.expires_at for token in secrets.issued).isoformat(),
+    )
+    return secrets.issued
 
 
 async def _install(workspace: ManagedWorkspace, script: str) -> ExecutionResult:
