@@ -31,7 +31,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
-from syn_shared.agents import AgentProvider, require_executable_provider
+from syn_shared.agents import (
+    AgentProvider,
+    require_executable_provider,
+    require_runnable_sandbox,
+)
 from syn_shared.tools import require_supported_tools
 
 if TYPE_CHECKING:
@@ -194,6 +198,9 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
             getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
             phase_id=phase_id,
         )
+        # Before provisioning, so a stored template declaring a level the
+        # workspace cannot run is refused with a 422, not mid-run (#1434).
+        require_runnable_sandbox(getattr(phase, "sandbox", None), phase_id=phase_id)
         tools = require_supported_tools(
             tuple(getattr(phase, "allowed_tools", ()) or ()),
             phase_id=phase_id,
@@ -499,6 +506,12 @@ class ExecuteWorkflowHandler:
             require_supported_execution_type(
                 getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
                 phase_id=getattr(phase, "phase_id", None),
+            )
+            # Same reasoning, for a direct handler caller that skipped
+            # validate_phase_declarations: never hand codex a level the
+            # workspace cannot run (#1434).
+            require_runnable_sandbox(
+                getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
             )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(

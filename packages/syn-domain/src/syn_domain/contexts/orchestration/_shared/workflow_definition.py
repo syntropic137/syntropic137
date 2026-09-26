@@ -41,7 +41,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
     require_supported_execution_type,
 )
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, REMOVED_INTERACTIVE_PROVIDER, AgentProvider
+from syn_shared.agents import (
+    DEFAULT_PHASE_SANDBOX,
+    REMOVED_INTERACTIVE_PROVIDER,
+    AgentProvider,
+    require_runnable_sandbox,
+)
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
@@ -243,22 +248,18 @@ class AgentYamlDefinition(BaseModel):
     """Per-phase model override (e.g. ``sonnet``, ``opus``)."""
 
     sandbox: Literal["read-only", "workspace-write", "full-access"] | None = None
-    """How much authority this phase's agent gets. Provider-neutral.
+    """How much authority this phase's agent gets. Omit it.
 
-    Omitted means ``full-access`` (``DEFAULT_PHASE_SANDBOX``) - today's
-    behaviour, kept deliberately as a stopgap. Both lower levels are unusable
-    until a phase can publish its deliverable without a filesystem write
-    (#1167): ``workspace-write`` was tried in v0.28.0-beta.5 and the write
-    under ``artifacts/output/`` was denied, and ``read-only`` cannot publish
-    at all.
+    Only ``full-access`` (the default when omitted) runs in the workspace
+    container; ``read-only`` and ``workspace-write`` are REFUSED here and at
+    execution (``require_runnable_sandbox``, #1434). Codex enforces them with
+    bubblewrap, which cannot create a namespace in the container, so the
+    phase could not read the repository or write ``artifacts/output/``. Claude
+    ignores the field. The lower levels stay in the type only so a stored
+    template is refused with a reason rather than "unknown value".
 
-    A review or verify phase must therefore declare ``read-only``
-    EXPLICITLY - leaving it out grants write access. That declaration is what
-    makes "the verifier does not modify what it certifies" enforced rather
-    than merely instructed (#1157, #1161).
-
-    Steers codex phases only. Claude phases scope authority through
-    ``allowed_tools`` and ignore this field."""
+    Do NOT use ``read-only`` for a review phase: it cannot run, and a phase
+    publishes its verdict by writing under ``artifacts/output/``."""
 
     allow_delegation: bool = False
     """When true, stage BOTH agent auths in this phase's workspace so the
@@ -484,6 +485,17 @@ class PhaseYamlDefinition(BaseModel):
         for entry in value:
             expanded.extend(expand_skill_entry(entry))
         return expanded
+
+    @model_validator(mode="after")
+    def validate_sandbox_is_runnable(self) -> PhaseYamlDefinition:
+        """Refuse a sandbox level the workspace cannot run, at authoring (#1434).
+
+        The level is well-formed and the host cannot honour it, so without
+        this it installed cleanly and killed the phase mid-run, after earlier
+        phases were paid for.
+        """
+        require_runnable_sandbox(self.agent.sandbox if self.agent else None, phase_id=self.id)
+        return self
 
     @model_validator(mode="after")
     def validate_tool_policy_is_supported_by_provider(self) -> PhaseYamlDefinition:

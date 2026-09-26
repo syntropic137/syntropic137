@@ -42,6 +42,7 @@ from syn_domain.contexts.orchestration import (
 )
 from syn_shared.agents import (
     AgentProvider,
+    UnrunnablePhaseSandboxError,
     UnsupportedAgentProviderError,
     require_executable_provider,
 )
@@ -520,6 +521,7 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         UnsupportedExecutionTypeError,
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
+        UnrunnablePhaseSandboxError,
     ) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
