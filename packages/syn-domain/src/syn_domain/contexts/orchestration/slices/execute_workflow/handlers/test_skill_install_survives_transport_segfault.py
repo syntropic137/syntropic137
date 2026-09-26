@@ -20,7 +20,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 
 module = importlib.import_module(
-    "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler"
+    "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install"
 )
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -49,9 +49,7 @@ async def test_five_skills_each_segfaulting_once_all_install() -> None:
     workspace = _workspace(*[r for _ in SKILLS for r in (SEGFAULT, OK)])
 
     for name in SKILLS:
-        await module._install_skill(
-            workspace, name, f"/workspace/.syn-skills/{name}", "claude-code"
-        )
+        await module.install_skill(workspace, name, f"/workspace/.syn-skills/{name}", "claude-code")
 
     assert workspace.execute.await_count == 2 * len(SKILLS)
     installed = [c.args[0][2] for c in workspace.execute.await_args_list]
@@ -63,7 +61,7 @@ async def test_persistent_segfault_still_fails_bounded() -> None:
     workspace = _workspace(*[SEGFAULT] * attempts)
 
     with pytest.raises(SkillInstallFailed, match="purpose-and-scope"):
-        await module._install_skill(workspace, "purpose-and-scope", "/src", "claude-code")
+        await module.install_skill(workspace, "purpose-and-scope", "/src", "claude-code")
 
     assert workspace.execute.await_count == attempts
 
@@ -73,6 +71,6 @@ async def test_non_signal_failures_fail_fast(result: ExecutionResult) -> None:
     workspace = _workspace(result, OK)
 
     with pytest.raises(SkillInstallFailed):
-        await module._install_skill(workspace, "review", "/src", "claude-code")
+        await module.install_skill(workspace, "review", "/src", "claude-code")
 
     assert workspace.execute.await_count == 1
