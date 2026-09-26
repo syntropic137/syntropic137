@@ -11494,6 +11494,26 @@
             "title": "Allow Delegation",
             "default": false
           },
+          "clone_repos": {
+            "type": "boolean",
+            "title": "Clone Repos",
+            "default": true
+          },
+          "can_open_pr": {
+            "type": "boolean",
+            "title": "Can Open Pr",
+            "default": false
+          },
+          "delivers_repo_changes": {
+            "type": "boolean",
+            "title": "Delivers Repo Changes",
+            "default": true
+          },
+          "sandbox": {
+            "type": "string",
+            "title": "Sandbox",
+            "default": "full-access"
+          },
           "claude_plugins": {
             "items": {
               "$ref": "#/components/schemas/PhaseRefResponse"
