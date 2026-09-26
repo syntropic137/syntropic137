@@ -507,6 +507,12 @@ class ExecuteWorkflowHandler:
                 getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
                 phase_id=getattr(phase, "phase_id", None),
             )
+            # Same reasoning, for a direct handler caller that skipped
+            # validate_phase_declarations: never hand codex a level the
+            # workspace cannot run (#1434).
+            require_runnable_sandbox(
+                getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
+            )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,

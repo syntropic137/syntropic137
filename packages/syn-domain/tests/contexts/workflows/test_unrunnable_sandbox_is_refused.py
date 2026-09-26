@@ -78,3 +78,31 @@ def test_a_stored_template_is_refused_at_the_execution_boundary(sandbox: str) ->
     stored = _StoredTemplate(phases=[_StoredPhase(phase_id="review", sandbox=sandbox)])
     with pytest.raises(UnrunnablePhaseSandboxError, match="review"):
         validate_phase_declarations(cast("object", stored))  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class _RehydratedTemplate:
+    """What `_get_executable_phases` reads: real `PhaseDefinition`s, as replay builds them."""
+
+    phases: list[object]
+    claude_plugins: tuple[object, ...] = ()
+    skills: tuple[object, ...] = ()
+
+
+@pytest.mark.parametrize("sandbox", UNRUNNABLE)
+async def test_a_direct_handler_caller_is_refused_before_provisioning(sandbox: str) -> None:
+    """`handle()` does not call validate_phase_declarations; its own loop must refuse."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    # Replay constructs PhaseDefinition with no YAML validator in the way.
+    phase = PhaseDefinition(phase_id="review", name="Review", order=1, sandbox=sandbox)
+    handler = ExecuteWorkflowHandler.__new__(ExecuteWorkflowHandler)
+    with pytest.raises(UnrunnablePhaseSandboxError, match="review"):
+        await handler._get_executable_phases(
+            cast("object", _RehydratedTemplate(phases=[phase]))  # type: ignore[arg-type]
+        )

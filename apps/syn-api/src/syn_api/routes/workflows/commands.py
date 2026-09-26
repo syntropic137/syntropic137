@@ -28,7 +28,7 @@ from syn_api.types import (
     WorkflowValidation,
 )
 from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
-from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AgentProvider, require_runnable_sandbox
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -138,6 +138,16 @@ def _agent_field(phase: Mapping[str, Any], name: str, default: Any = None) -> An
     return default
 
 
+def _runnable_sandbox(declared: object, phase_id: object) -> str:
+    """The phase's sandbox, refused here if the workspace cannot run it (#1434).
+
+    Checked before the template is persisted, not only at execution: a level
+    the container cannot run should never be stored with a 201.
+    """
+    require_runnable_sandbox(declared, phase_id=None if phase_id is None else str(phase_id))
+    return str(declared) if declared else DEFAULT_PHASE_SANDBOX
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
 
@@ -191,7 +201,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # authority to the default, which for a review phase means it
                 # can write the code it certifies (#1161). Caught by the
                 # roundtrip assertion in test_phase_create_carries_every_field.
-                sandbox=_agent_field(p, "sandbox", DEFAULT_PHASE_SANDBOX),
+                sandbox=_runnable_sandbox(_agent_field(p, "sandbox"), p.get("phase_id")),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
             )

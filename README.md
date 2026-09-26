@@ -173,7 +173,6 @@ phases:
     agent:
       provider: codex           # a different model reviews the work
       model: gpt-sol            # platform alias for gpt-6-sol, see note below
-      sandbox: read-only        # codex honours this, claude does not yet
 ```
 
 Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
