@@ -338,8 +338,7 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
 
         assert github.reaches(container.gh_token(), "other/repo-x")
         assert not github.reaches(container.gh_token(), "org/repo-a"), (
-            "cross-installation gh is out of scope (#725): one credential, "
-            "the primary repo's"
+            "cross-installation gh is out of scope (#725): one credential, the primary repo's"
         )
 
     async def test_a_repo_less_workflow_gets_the_first_installations_gh(
@@ -447,9 +446,7 @@ async def _one_scheduled_renewal(workspace: ManagedWorkspace) -> None:
 
 
 class TestTeardownRevokesWhatIsStillLive:
-    async def test_every_unexpired_token_is_revoked(
-        self, github: _GitHub, tmp_path: Path
-    ) -> None:
+    async def test_every_unexpired_token_is_revoked(self, github: _GitHub, tmp_path: Path) -> None:
         workspace, _ = await _provisioned(tmp_path, [_A, _X])
         await workspace.renew_git_credential()
 
