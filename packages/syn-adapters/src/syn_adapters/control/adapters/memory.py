@@ -13,35 +13,6 @@ from syn_adapters.in_memory import InMemoryAdapter
 
 if TYPE_CHECKING:
     from syn_adapters.control.commands import ControlSignal
-    from syn_adapters.control.state_machine import ExecutionState
-
-
-class InMemoryControlStateAdapter(InMemoryAdapter):
-    """In-memory state storage for testing.
-
-    WARNING: This adapter is for TESTING ONLY. State is not persisted.
-    Use ProjectionControlStateAdapter for production.
-
-    Implements ControlStatePort protocol.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._states: dict[str, ExecutionState] = {}
-        self._lock = asyncio.Lock()
-
-    async def save_state(self, execution_id: str, state: ExecutionState) -> None:
-        """Save execution state."""
-        async with self._lock:
-            self._states[execution_id] = state
-
-    async def get_state(self, execution_id: str) -> ExecutionState | None:
-        """Get current execution state, or None if not found."""
-        return self._states.get(execution_id)
-
-    def clear(self) -> None:
-        """Clear all states (for testing)."""
-        self._states.clear()
 
 
 class InMemorySignalQueueAdapter(InMemoryAdapter):

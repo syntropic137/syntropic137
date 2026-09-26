@@ -56,9 +56,23 @@ Terminal states (CANCELLED, COMPLETED, FAILED) have no outgoing transitions.
 
 ### 2. Adapters
 
-**Storage Adapters** (`ControlStatePort`):
-- `InMemoryControlStateAdapter` - Development/testing
-- Future: Redis adapter for distributed deployments
+**Storage Adapters** (`ControlStatePort`) - **REMOVED 2026-09-26.**
+
+There is no control-state port. Admission is decided by
+`WorkflowExecutionAggregate.accepts_control`, on the aggregate rehydrated per
+request, which is the same method the aggregate's own pause/resume/cancel
+handlers guard with.
+
+The port existed so the controller could answer from stored state, and the
+production adapter read the execution detail projection. A projection lags the
+stream, so an execution the aggregate had already cancelled could still read
+`running` and a request the aggregate would refuse was admitted, reported as
+success, and queued (ADR-014 section 7, fail-open 1).
+
+Two rules over one concept is the defect, not the lag. The controller no
+longer receives a projection at all, so there is nothing left to be stale
+about. `ControlStatePort`, `InMemoryControlStateAdapter`,
+`ProjectionControlStateAdapter` and the duplicate state machine are deleted.
 
 **Signal Queue Adapters** (`SignalQueuePort`):
 - `InMemorySignalQueueAdapter` - Development/testing

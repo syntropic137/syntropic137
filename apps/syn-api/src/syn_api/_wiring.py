@@ -822,17 +822,20 @@ def get_controller() -> ExecutionController:
     redis://localhost:6379/0). Falls back to _NullSignalQueueAdapter only
     if Redis is explicitly unavailable (no URL and no connection possible).
 
-    Wraps: ExecutionController(ProjectionControlStateAdapter, signal_adapter)
+    Wraps: ExecutionController(WorkflowExecutionRepositoryPort, signal_adapter)
     """
     global _controller_singleton
     if _controller_singleton is not None:
         return _controller_singleton
 
     from syn_adapters.control import ExecutionController
-    from syn_adapters.control.adapters.projection import ProjectionControlStateAdapter
-    from syn_adapters.projection_stores import get_projection_store
 
-    state_adapter = ProjectionControlStateAdapter(get_projection_store())
+    # The aggregate, not a projection. Admission used to be decided from the
+    # execution detail projection through ProjectionControlStateAdapter, which
+    # lags the stream - so a request the aggregate would refuse could be
+    # admitted and queued (ADR-014 s7). That adapter and its port are gone; the
+    # controller rehydrates the aggregate per request instead.
+    executions = get_workflow_execution_repository()
 
     from syn_shared.logging.redaction import redact_url_credentials
     from syn_shared.settings import get_settings
@@ -856,7 +859,7 @@ def get_controller() -> ExecutionController:
         signal_adapter = _NullSignalQueueAdapter()
 
     _controller_singleton = ExecutionController(
-        state_port=state_adapter,
+        executions=executions,
         signal_port=signal_adapter,
     )
     return _controller_singleton

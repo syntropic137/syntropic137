@@ -94,6 +94,14 @@ class ExecutionError(StrEnum):
     INVALID_STATE = "invalid_state"
     EXECUTION_FAILED = "execution_failed"
     SIGNAL_FAILED = "signal_failed"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so the state is UNKNOWN.
+
+    Distinct from NOT_FOUND. `get_state` used to map every load exception to
+    NOT_FOUND, and the endpoint then returned 200 with `state="unknown"` - so a
+    store outage rendered as a successful answer. "I looked and there is
+    nothing" and "I could not look" are different facts and must not share a
+    code."""
 
 
 class MetricsError(StrEnum):
@@ -196,6 +204,14 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so existence is UNKNOWN.
+
+    Distinct from WORKFLOW_NOT_FOUND on purpose. `exists()` used to answer
+    False when the store was unreachable, so an outage rendered as "that
+    workflow does not exist" - a confident wrong answer a caller would act on.
+    The store now raises instead, and this code carries the difference through
+    to the caller rather than collapsing it back into not-found."""
 
 
 class OrganizationError(StrEnum):
