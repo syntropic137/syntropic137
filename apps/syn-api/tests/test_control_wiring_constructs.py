@@ -65,3 +65,49 @@ def test_it_is_a_singleton() -> None:
     from syn_api._wiring import get_controller
 
     assert get_controller() is get_controller()
+
+
+class TestTheWiredControllerRefusesAnAbsentExecution:
+    """What the WIRED controller does with an execution the store never saw.
+
+    HONEST SCOPE, because the first version of this class overclaimed. It was
+    written to prove "admission consults the aggregate", and it does not: a
+    missing execution is refused before `accepts_control` is reached, so
+    disabling that guard leaves this passing. I only found that by mutating,
+    after a review pointed out the tests above prove shape rather than
+    behaviour.
+
+    The behavioural coverage lives in
+    packages/syn-adapters/tests/test_control.py, where disabling
+    `accepts_control` DOES fail two tests. That suite records real events, so
+    it can put an aggregate in a state the rule refuses; this file cannot,
+    because it exercises the production factory and has no store to record
+    into.
+
+    What this does prove, and what nothing else covers: the controller built
+    by the real wiring refuses an execution with no stream instead of reading
+    it as PENDING and queueing a cancel, which is what the old projection path
+    did.
+    """
+
+    async def test_cancel_is_refused_for_an_execution_with_no_stream(self) -> None:
+        from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
+        from syn_adapters.control.commands import CancelExecution
+        from syn_api._wiring import get_controller
+
+        controller = get_controller()
+        signals = InMemorySignalQueueAdapter()
+        # Swapping the singleton's queue rather than reading the real one:
+        # the assertion is about what was queued, and the production Redis or
+        # null adapter is not something a unit test should reach into.
+        controller._signal_port = signals
+
+        result = await controller.handle_command(
+            CancelExecution(execution_id="exec-no-such-stream", reason="probe")
+        )
+
+        assert result.success is False, (
+            "cancel was admitted against an execution with no stream; the old "
+            "projection path read a missing row as PENDING and allowed this"
+        )
+        assert await signals.get_signal("exec-no-such-stream") is None

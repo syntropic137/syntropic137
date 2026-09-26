@@ -94,6 +94,14 @@ class ExecutionError(StrEnum):
     INVALID_STATE = "invalid_state"
     EXECUTION_FAILED = "execution_failed"
     SIGNAL_FAILED = "signal_failed"
+    STORE_UNAVAILABLE = "store_unavailable"
+    """The event store could not be read, so the state is UNKNOWN.
+
+    Distinct from NOT_FOUND. `get_state` used to map every load exception to
+    NOT_FOUND, and the endpoint then returned 200 with `state="unknown"` - so a
+    store outage rendered as a successful answer. "I looked and there is
+    nothing" and "I could not look" are different facts and must not share a
+    code."""
 
 
 class MetricsError(StrEnum):

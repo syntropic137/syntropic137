@@ -186,7 +186,23 @@ async def get_state(
     """Get the current control state of an execution."""
     try:
         controller = get_controller()
-        state = await controller.get_state(execution_id)
+        try:
+            state = await controller.get_state(execution_id)
+        except Exception as exc:
+            # A failed READ is not an absent execution. The controller loads
+            # the aggregate from the event store now, so an outage raises here
+            # where it previously could not. Mapping it to NOT_FOUND made the
+            # endpoint answer 200 with state="unknown" - a successful-looking
+            # reply to a question nothing could answer.
+            logger.warning("could not read control state for %s", execution_id, exc_info=True)
+            return Err(
+                ExecutionError.STORE_UNAVAILABLE,
+                message=(
+                    f"Could not read the state of execution {execution_id}: the event "
+                    f"store could not be read ({type(exc).__name__}). This is not a "
+                    "statement that the execution is absent."
+                ),
+            )
         if state is None:
             return Err(
                 ExecutionError.NOT_FOUND,
@@ -199,7 +215,11 @@ async def get_state(
             }
         )
     except Exception as e:
-        return Err(ExecutionError.NOT_FOUND, message=str(e))
+        # Anything else reaching here is also a failure to answer, not an
+        # absence. NOT_FOUND was the old catch-all and it is what made an
+        # outage indistinguishable from a missing execution.
+        logger.warning("control state lookup failed for %s", execution_id, exc_info=True)
+        return Err(ExecutionError.STORE_UNAVAILABLE, message=str(e))
 
 
 # =============================================================================
@@ -279,8 +299,15 @@ async def get_execution_state_endpoint(execution_id: str) -> StateResponse:
     )
     result = await get_state(execution_id)
 
-    state_val = "unknown"
-    if not isinstance(result, Err):
-        state_val = result.value.get("state", "unknown")
+    if isinstance(result, Err):
+        # A store failure must NOT render as a 200 carrying state="unknown".
+        # That is a successful-looking answer to a question nothing could
+        # answer, and a caller polling this endpoint would read it as fact.
+        if result.error == ExecutionError.STORE_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=result.message)
+        # NOT_FOUND keeps its previous shape: the resolver above already
+        # established the execution exists, so this is the narrower case of an
+        # execution with no control state yet.
+        return StateResponse(execution_id=execution_id, state="unknown")
 
-    return StateResponse(execution_id=execution_id, state=state_val)
+    return StateResponse(execution_id=execution_id, state=result.value.get("state", "unknown"))
