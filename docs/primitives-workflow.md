@@ -1,20 +1,29 @@
 # Primitives Workflow
 
+> **Repointed 2026-09-26.** These primitives come from
+> `lib/agentic-workspace` (under `plugins/`), not the removed
+> `lib/agentic-primitives` submodule.
+>
+> One caveat kept honest: nothing in this repo's code or justfile
+> references `.agentic-manifest.yaml` today, so the sync steps below are
+> a manual convention rather than automation. Verify a command before
+> relying on it.
+
 This document describes how to work with Claude commands, tools, and hooks (primitives) in Syn137.
 
 ## Overview
 
-Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-primitives/`). The workflow supports:
+Syn137 uses primitives from the `agentic-workspace` library (submodule at `lib/agentic-workspace/`). The workflow supports:
 
-1. **Syncing shared primitives** from `agentic-primitives` → Syn137
+1. **Syncing shared primitives** from `agentic-workspace` → Syn137
 2. **Creating repo-specific commands** that stay only in Syn137
-3. **Contributing new primitives** back to `agentic-primitives`
+3. **Contributing new primitives** back to `agentic-workspace`
 
 ## Directory Structure
 
 ```
 .claude/
-├── .agentic-manifest.yaml    # Tracks what's managed by agentic-primitives
+├── .agentic-manifest.yaml    # Tracks what's managed by agentic-workspace
 ├── commands/
 │   ├── devops/               # Category: devops (from AP)
 │   │   └── manage-security-patches.md
@@ -40,12 +49,12 @@ Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/
 
 ### Managed vs Local Files
 
-The `.agentic-manifest.yaml` file tracks which files are **managed** (from `agentic-primitives`).
+The `.agentic-manifest.yaml` file tracks which files are **managed** (from `agentic-workspace`).
 
 - **Managed files**: Listed in the manifest, updated during sync
 - **Local files**: NOT in the manifest, preserved during sync
 
-### Syncing from agentic-primitives
+### Syncing from agentic-workspace
 
 ```bash
 # Full sync: build + install (preserves local commands)
@@ -60,7 +69,7 @@ just primitives-local
 
 The sync will:
 - ✅ Update all managed primitives to latest versions
-- ✅ Add new primitives from `agentic-primitives`
+- ✅ Add new primitives from `agentic-workspace`
 - ✅ **Preserve all local files** (not in manifest)
 - ✅ Remove primitives that were deleted upstream (only managed ones)
 
@@ -82,7 +91,7 @@ echo "Your command content" > .claude/commands/syn137/my-command.md
 - Or create a `syn137/` category for Syn137-specific commands
 - They will be automatically preserved during sync
 
-## Contributing Back to agentic-primitives
+## Contributing Back to agentic-workspace
 
 If you create a command in Syn137 that should be shared:
 
@@ -91,10 +100,10 @@ If you create a command in Syn137 that should be shared:
 just primitives-local
 ```
 
-### 2. Create the Primitive in agentic-primitives
+### 2. Create the Primitive in agentic-workspace
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 
 # Create the primitive structure
 mkdir -p primitives/v1/prompts/commands/{category}/{command-name}
@@ -130,10 +139,10 @@ EOF
 ./cli/target/debug/agentic-p validate
 ```
 
-### 3. Submit PR to agentic-primitives
+### 3. Submit PR to agentic-workspace
 
 ```bash
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 git checkout -b feat/add-new-command
 git add primitives/
 git commit -m "feat(commands): add new-command primitive"
@@ -145,7 +154,7 @@ git push origin feat/add-new-command
 
 ```bash
 cd ../..  # Back to Syn137 root
-git submodule update --remote lib/agentic-primitives
+git submodule update --remote lib/agentic-workspace
 just primitives-sync
 ```
 
@@ -155,8 +164,8 @@ Your command will now be managed, and you can delete the local copy if desired.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        agentic-primitives                           │
-│  (lib/agentic-primitives/)                                         │
+│                        agentic-workspace                           │
+│  (lib/agentic-workspace/)                                         │
 │                                                                     │
 │  primitives/v1/prompts/commands/                                   │
 │  ├── devops/manage-security-patches/                               │
@@ -182,7 +191,7 @@ Your command will now be managed, and you can delete the local copy if desired.
                               ▼
                     ┌─────────────────┐
                     │  GitHub PR to   │
-                    │ agentic-primitives│
+                    │ agentic-workspace│
                     └─────────────────┘
 ```
 
@@ -219,6 +228,6 @@ cat .claude/.agentic-manifest.yaml | grep your-command
 
 ### "Want to stop syncing a managed command"
 You can't exclude specific managed commands. Options:
-1. Fork `agentic-primitives` and remove it
+1. Fork `agentic-workspace` and remove it
 2. Delete the command after each sync (not recommended)
 3. File an issue requesting a feature for exclusion rules

@@ -168,6 +168,24 @@ def declared_submodules(root: Path = _ROOT) -> list[Submodule]:
     return submodules
 
 
+#: The only branch names this gate will resolve a pointer against.
+#:
+#: A codex review found the hole this closes: the gate reads
+#: `submodule.<name>.branch` from `.gitmodules`, and BOTH that file and a remote
+#: branch are writable by whoever opens a pull request. Declaring a feature
+#: branch that contains the pointer would make an unmerged pointer "reachable
+#: from its declared branch" and pass. The docstring below used to argue that a
+#: feature branch is never the declared branch, which was an assumption about
+#: intent rather than a rule anything enforced.
+#:
+#: These two names are the project's protected branches. `release` is here
+#: because agentic-workspace publishes and signs the workspace images from it,
+#: so the pinned-image gate requires the gitlink to be a commit that lives
+#: there. Adding a name to this set is a deliberate act; inheriting one from a
+#: file in the diff under review is not.
+_TRACKABLE_BRANCHES = frozenset({"main", "release"})
+
+
 def _tracked_branch(sub: Submodule) -> str:
     """The branch this pointer must be reachable from.
 
@@ -185,15 +203,26 @@ def _tracked_branch(sub: Submodule) -> str:
     gates contradicted each other, and this one was reading a branch the
     superproject never claimed to track.
 
-    This does not weaken the invariant. The failure it was written for is a
-    pointer into an UNMERGED FEATURE branch (#1329, #1336), and a feature
-    branch is never the declared tracking branch, so it still fails. What it
-    stops doing is assuming every submodule tracks its remote default.
+    This does not weaken the invariant, and the reason is now ENFORCED rather
+    than assumed. An earlier version of this docstring argued that a feature
+    branch is never the declared tracking branch - true of intent, but nothing
+    stopped a pull request from declaring one, since `.gitmodules` is part of
+    the diff. The declared name is therefore checked against
+    `_TRACKABLE_BRANCHES`. The failure this gate exists for (#1329, #1336), a
+    pointer into an unmerged feature branch, still fails.
 
     A declared branch is validated against the remote below: a typo, or a
     branch that has been deleted, must fail rather than be trusted.
     """
     if sub.declared_branch:
+        if sub.declared_branch not in _TRACKABLE_BRANCHES:
+            pytest.fail(
+                f"{sub.path} declares branch {sub.declared_branch!r}, which is not one "
+                f"this gate will resolve against. Allowed: {sorted(_TRACKABLE_BRANCHES)}.\n"
+                "The declared branch decides what 'has landed upstream' means, so it has "
+                "to be a branch the project protects - otherwise declaring a feature "
+                "branch makes an unmerged pointer pass."
+            )
         return sub.declared_branch
     return _remote_default_branch(sub)
 

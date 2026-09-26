@@ -228,7 +228,26 @@ def evaluate(results: list[ImageChannel], gitlink: str) -> tuple[int, list[str]]
     # This is the gap that made the IMAGE_NAME_OVERRIDES inversion dangerous
     # rather than merely fiddly, and it is checked here because this is the
     # only gate that sees the reference a pin actually resolves to.
-    wrong_repo = [r for r in results if r.repository and r.repository != r.expected_repository]
+    # An UNPARSED repository is not "fine", it is "this check could not run".
+    # The first version guarded on `if r.repository`, so an empty string skipped
+    # the comparison entirely and a release-channel pin with a matching revision
+    # passed. Nothing in main() produces an empty one today - inspect_channel
+    # always parses a string out of the ref - but a gate whose whole purpose is
+    # catching a silent pass must not contain one, and a future caller building
+    # ImageChannel by hand would inherit it.
+    unreadable = [r for r in results if not r.repository or not r.expected_repository]
+    if unreadable:
+        lines.append("")
+        lines.append("Could not determine the repository for pinned image(s), so the")
+        lines.append("publisher check could not run. Failing closed:")
+        for r in unreadable:
+            lines.append(
+                f"  {r.provider}: repository={r.repository or '<unreadable>'} "
+                f"expected={r.expected_repository or '<unknown>'} ref={r.ref}"
+            )
+        return 1, lines
+
+    wrong_repo = [r for r in results if r.repository != r.expected_repository]
     if wrong_repo:
         lines.append("")
         lines.append("Pinned image(s) point at a repository this publisher does not push to:")
