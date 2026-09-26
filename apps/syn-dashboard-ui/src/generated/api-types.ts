@@ -4358,6 +4358,26 @@ export interface components {
              * @default false
              */
             allow_delegation: boolean;
+            /**
+             * Clone Repos
+             * @default true
+             */
+            clone_repos: boolean;
+            /**
+             * Can Open Pr
+             * @default false
+             */
+            can_open_pr: boolean;
+            /**
+             * Delivers Repo Changes
+             * @default true
+             */
+            delivers_repo_changes: boolean;
+            /**
+             * Sandbox
+             * @default full-access
+             */
+            sandbox: string;
             /** Claude Plugins */
             claude_plugins?: components["schemas"]["PhaseRefResponse"][];
             /** Skills */

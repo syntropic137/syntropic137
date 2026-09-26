@@ -13,6 +13,7 @@ from syn_domain.contexts.orchestration.domain.constants import (
     PhaseFields,
     WorkflowFields,
 )
+from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,28 @@ class PhaseDefinitionDetail:
     Security-relevant: it stages BOTH agent auths in the workspace, so a
     reader has to be able to see it. It was stored and unreadable."""
 
+    clone_repos: bool = True
+    """Whether the workflow's repos are checked out for this phase (#1187)."""
+
+    can_open_pr: bool = False
+    """Whether this phase may create a pull request (#1197).
+
+    Enforced by the permissions of the GitHub token the phase's workspace
+    receives: False mints ``pull_requests: read``. A phase that cannot publish
+    rendered IDENTICALLY to one that can until #1429, so a missing declaration
+    looked like a GitHub App misconfiguration."""
+
+    delivers_repo_changes: bool = True
+    """Whether repository changes are part of this phase's deliverable (#1308)."""
+
+    sandbox: str = DEFAULT_PHASE_SANDBOX
+    """The agent sandbox level this phase declares (``agent.sandbox``).
+
+    Defaults to ``DEFAULT_PHASE_SANDBOX`` (full-access), NOT workspace-write.
+    Guessing workspace-write here would have reported a phase as more
+    restricted than it runs, which is the worst direction for a security
+    field to be wrong in."""
+
     claude_plugins: tuple[PhaseRefDetail, ...] = ()
     """Plugin refs the phase declares, carried STRUCTURALLY.
 
@@ -246,6 +269,13 @@ class WorkflowDetail:
                 # CLI -- goes through here, so the previous version fixed
                 # exactly half the path while five tests passed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                # #1429. Read at BOTH construction sites on purpose: the
+                # comment above this one records that fixing only one left
+                # half the path broken while the tests passed.
+                clone_repos=bool(p.get("clone_repos", True)),
+                can_open_pr=bool(p.get("can_open_pr", False)),
+                delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
                 execution_type=p.get("execution_type", "sequential"),
@@ -315,6 +345,18 @@ class WorkflowDetail:
                 # and served -- drops it. Adding the field above without this
                 # line changes nothing a caller can see.
                 "allow_delegation": p.allow_delegation,
+                # #1429, and the SAME seam this comment describes. The first
+                # attempt added these to the dataclass and to both constructor
+                # sites and stopped there, so the projection built a phase
+                # carrying them, stored `to_dict()` without them, and
+                # `get_by_id` reloaded the defaults. The API then reported a
+                # publishing phase as `can_open_pr: false` and a read-only
+                # phase as `full-access` - a security field reading LESS
+                # restricted than the phase actually runs.
+                "clone_repos": p.clone_repos,
+                "can_open_pr": p.can_open_pr,
+                "delivers_repo_changes": p.delivers_repo_changes,
+                "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],
                 "execution_type": p.execution_type,
