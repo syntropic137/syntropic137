@@ -21,9 +21,9 @@ COPY pyproject.toml uv.lock ./
 COPY packages/syn-shared/ ./packages/syn-shared/
 
 # 2. Agentic primitives packages
-COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
-COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
+COPY lib/agentic-workspace/lib/python/agentic_logging/ ./lib/agentic-workspace/lib/python/agentic_logging/
+COPY lib/agentic-workspace/lib/python/agentic_events/ ./lib/agentic-workspace/lib/python/agentic_events/
+COPY lib/agentic-workspace/lib/python/agentic_isolation/ ./lib/agentic-workspace/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
