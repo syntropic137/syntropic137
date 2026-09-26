@@ -834,6 +834,7 @@ def get_controller() -> ExecutionController:
 
     state_adapter = ProjectionControlStateAdapter(get_projection_store())
 
+    from syn_shared.logging.redaction import redact_url_credentials
     from syn_shared.settings import get_settings
 
     redis_url = get_settings().redis_url
@@ -843,11 +844,13 @@ def get_controller() -> ExecutionController:
 
         redis_client = resilient_redis_client(redis_url)
         signal_adapter: SignalQueuePort = RedisSignalQueueAdapter(redis_client)
-        logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
+        logger.info(
+            "ExecutionController using Redis signal queue (%s)", redact_url_credentials(redis_url)
+        )
     except Exception:
         logger.warning(
             "Redis unavailable (%s); control signals (pause/cancel/resume) will not work",
-            redis_url,
+            redact_url_credentials(redis_url),
             exc_info=True,
         )
         signal_adapter = _NullSignalQueueAdapter()
