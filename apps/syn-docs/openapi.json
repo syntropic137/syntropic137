@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.30.0b7"
+    "version": "0.30.0"
   },
   "paths": {
     "/workflows": {
