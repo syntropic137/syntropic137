@@ -33,7 +33,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.fork_rules import (
-    admit_fork,
+    ForkRefused,
+    decide_fork,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
     evt,
@@ -766,20 +767,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         The rules themselves are in `fork_rules`, where they are pure functions
         of this replayed state and testable without an aggregate.
         """
-        self._apply(
-            admit_fork(
-                execution_id=self.id,
-                workflow_id=self._workflow_id or "",
-                status=self._status,
-                forked=self._forked,
-                fork_execution_id=self._fork_execution_id,
-                phase_definitions=self._phase_definitions,
-                completed_phase_ids=self._completed_phase_ids,
-                phase_artifact_ids=self._phase_artifact_ids,
-                started_phase_ids=self._phase_attempts,
-                command=command,
-            )
+        decision = decide_fork(
+            execution_id=self.id,
+            workflow_id=self._workflow_id or "",
+            status=self._status,
+            forked=self._forked,
+            fork_execution_id=self._fork_execution_id,
+            phase_definitions=self._phase_definitions,
+            completed_phase_ids=self._completed_phase_ids,
+            phase_artifact_ids=self._phase_artifact_ids,
+            started_phase_ids=self._phase_attempts,
+            command=command,
         )
+        if isinstance(decision, ForkRefused):
+            raise ValueError(decision.reason)
+        self._apply(decision.event)
 
     @event_sourcing_handler("WorkflowExecutionStarted")
     def on_execution_started(self, event: WorkflowExecutionStartedEvent) -> None:

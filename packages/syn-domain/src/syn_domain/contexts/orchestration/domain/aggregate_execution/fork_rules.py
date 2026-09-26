@@ -12,6 +12,7 @@ Nothing here mutates anything or emits an event. The caller raises.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
@@ -145,7 +146,31 @@ def refuse_resume_point(
     return None
 
 
-def admit_fork(
+@dataclass(frozen=True)
+class ForkRefused:
+    """The parent may not be forked, and why."""
+
+    reason: str
+
+
+@dataclass(frozen=True)
+class ForkAdmitted:
+    """The parent may be forked, and the event that records it."""
+
+    event: ExecutionForkedEvent
+
+
+#: The whole outcome of asking to fork, as one value the caller matches on.
+#:
+#: Two types rather than a message plus an optional event, so "refused" and
+#: "admitted" are not both representable at once and the caller cannot forget to
+#: check. The caller RAISES - the decision is made here, the refusal is signalled
+#: there, and the aggregate's handler keeps the precondition guard that every
+#: command handler is required to have.
+ForkDecision = ForkRefused | ForkAdmitted
+
+
+def decide_fork(
     *,
     execution_id: str | None,
     workflow_id: str,
@@ -157,13 +182,12 @@ def admit_fork(
     phase_artifact_ids: Mapping[str, list[str]],
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
     command: ForkExecutionCommand,
-) -> ExecutionForkedEvent:
-    """The whole fork decision: the event to record, or `ValueError`.
+) -> ForkDecision:
+    """Every rule above, applied in order.
 
-    Every rule above applied in order, so the aggregate's handler is the
-    dispatch and this is the decision. The ORDER matters: the prefix is only
-    computed once the parent is forkable at all, and the resume point is judged
-    only once there is a prefix to judge it against.
+    The ORDER matters: the prefix is only computed once the parent is forkable at
+    all, and the resume point is judged only once there is a prefix to judge it
+    against.
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionForkedEvent import (
         ExecutionForkedEvent,
@@ -178,7 +202,7 @@ def admit_fork(
         override_cancellation=command.override_cancellation,
     )
     if refusal is not None:
-        raise ValueError(refusal)
+        return ForkRefused(refusal)
 
     inherited, resume_phase_id = completed_prefix(
         phase_definitions, completed_phase_ids, phase_artifact_ids
@@ -195,15 +219,17 @@ def admit_fork(
         acknowledge_external_effects=command.acknowledge_external_effects,
     )
     if refusal is not None:
-        raise ValueError(refusal)
+        return ForkRefused(refusal)
 
-    return ExecutionForkedEvent(
-        workflow_id=workflow_id,
-        execution_id=command.aggregate_id,
-        fork_execution_id=command.fork_execution_id,
-        inherited_phases=inherited,
-        resume_phase_id=resume_phase_id or "",
-        forked_at=datetime.now(UTC),
-        cancellation_overridden=status is ExecutionStatus.CANCELLED,
-        external_effects_acknowledged=may_repeat_effects,
+    return ForkAdmitted(
+        ExecutionForkedEvent(
+            workflow_id=workflow_id,
+            execution_id=command.aggregate_id,
+            fork_execution_id=command.fork_execution_id,
+            inherited_phases=inherited,
+            resume_phase_id=resume_phase_id or "",
+            forked_at=datetime.now(UTC),
+            cancellation_overridden=status is ExecutionStatus.CANCELLED,
+            external_effects_acknowledged=may_repeat_effects,
+        )
     )
