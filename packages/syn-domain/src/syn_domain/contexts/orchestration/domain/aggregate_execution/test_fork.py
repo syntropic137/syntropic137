@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope
+from event_sourcing import DomainEvent, EventEnvelope, GenericDomainEvent
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
@@ -230,6 +230,19 @@ def _fork(
     store.save(parent)
 
 
+def _without_fork_id(event: ExecutionForkedEvent) -> GenericDomainEvent:
+    """The stored fork event as a stream that lost `fork_execution_id` replays it.
+
+    This is the ADR-023 fallback, built the way the store builds it: typed
+    validation fails, so the event comes back as `GenericDomainEvent` carrying
+    whatever fields the payload had. Dropping the one field is what makes the
+    hazard real - a stand-in that still carried it would exercise nothing.
+    """
+    payload = event.model_dump()
+    payload.pop("fork_execution_id", None)
+    return GenericDomainEvent(event_type="ExecutionForked", **payload)
+
+
 def _forked_event(store: _Store) -> ExecutionForkedEvent:
     forked = store.forked()
     assert len(forked) == 1, forked
@@ -242,11 +255,18 @@ def _forked_event(store: _Store) -> ExecutionForkedEvent:
 @pytest.mark.unit
 class TestForkedAtMostOnce:
     def test_a_second_fork_is_refused_by_the_reloaded_parent(self) -> None:
-        """The hazard: two operators, or a retried request, each forking the parent.
+        """A retried request cannot fork the parent twice.
 
         Each attempt loads the parent from the store, as a separate request
-        would, so the refusal has to come from the stream and not from an
-        object that remembers the first fork.
+        would, so the refusal comes from the stream and not from an object that
+        remembers the first fork.
+
+        What this does NOT prove: safety under two SIMULTANEOUS requests. This
+        store appends without optimistic concurrency, so both would read a
+        parent that had not yet been forked and both would pass this guard.
+        Genuinely concurrent forks are refused one layer out, by the
+        repository's expected-version check on append, and that belongs to the
+        slice that wires one up - not to a fake store that cannot conflict.
         """
         store = _Store(_failed_between_phases())
         _fork(store, "exec-fork-a")
@@ -464,3 +484,139 @@ class TestExternalEffects:
         forked = _forked_event(store)
         assert forked.cancellation_overridden is True
         assert forked.external_effects_acknowledged is True
+
+
+@pytest.mark.unit
+class TestACompletedPhaseCannotBeReentered:
+    """Codex review of #1453, finding 1.
+
+    `start_phase` used to accept a phase that had already completed, and that
+    door was the only way to reach either corruption:
+
+    - a SECOND completion appends another attempt's artifacts to the same
+      phase, mixing two attempts' output under one phase id;
+    - a retry scheduled against it DROPS the artifacts of the attempt that did
+      complete (`on_phase_retry_scheduled` pops them) while leaving the phase
+      counted as completed.
+
+    Both need the phase to be running again, and `retry_phase` demands exactly
+    that while completion clears the running phase - so nothing else could get
+    there. A fork is what made it expensive rather than merely untidy: it
+    inherits the completed prefix, so an artifact-less "completed" phase hands
+    the child work built on a predecessor whose output no longer exists
+    (ADR-014 s7).
+    """
+
+    def test_starting_a_completed_phase_is_refused(self) -> None:
+        history = _started()
+        _run_phase(history, "research", "art-research")
+
+        with pytest.raises(ValueError, match="already completed"):
+            _start_phase(history, "research")
+
+    def test_a_retry_cannot_discard_the_artifacts_of_a_completed_phase(self) -> None:
+        """The reachable sequence the guard closes.
+
+        Complete `research`, start it again, retry it: the retry pops the
+        artifacts of the attempt that DID complete, while `research` stays in
+        the completed set. The fork then inherits `research` with nothing in it
+        and resumes at `plan`, handing the child work whose input is gone.
+        """
+        history = _started()
+        _run_phase(history, "research", "art-research")
+
+        with pytest.raises(ValueError, match="already completed"):
+            _start_phase(history, "research")
+
+        # The record is intact BECAUSE the re-entry was refused.
+        _fail(history)
+        store = _Store(history)
+        _fork(store)
+        assert _forked_event(store).inherited_phases == [
+            InheritedPhase(phase_id="research", artifact_ids=["art-research"])
+        ]
+
+    def test_a_second_completion_cannot_mix_two_attempts_artifacts(self) -> None:
+        history = _started()
+        _run_phase(history, "research", "art-first")
+
+        with pytest.raises(ValueError, match="already completed"):
+            _run_phase(history, "research", "art-second")
+
+    def test_a_retry_before_completion_is_still_allowed(self) -> None:
+        """The guard must not close the legitimate retry path.
+
+        A phase being retried has NOT completed, so it is not in the completed
+        set and its retry's `PhaseStarted` is admitted.
+        """
+        history = _started()
+        _start_phase(history, "research")
+        _collect(history, "research", "art-abandoned")
+        history.retry_phase(
+            RetryPhaseCommand(execution_id=PARENT, phase_id="research", reason="stream cut")
+        )
+        _run_phase(history, "research", "art-kept")
+
+        _fail(history)
+        store = _Store(history)
+        _fork(store)
+        assert _forked_event(store).inherited_phases == [
+            InheritedPhase(phase_id="research", artifact_ids=["art-kept"])
+        ]
+
+
+@pytest.mark.unit
+class TestTheForkGuardFailsClosed:
+    """Codex review of #1453, finding 4.
+
+    Under ADR-023 the store falls back to `GenericDomainEvent` when a stored
+    event fails typed validation. The at-most-once rule therefore cannot be
+    keyed on a FIELD of the fork event: `_evt` returns None for a field it
+    cannot find, and the parent would replay with no evidence it had been
+    forked.
+    """
+
+    def test_a_fork_event_that_lost_its_child_id_still_refuses_a_second_fork(self) -> None:
+        store = _Store(_failed_between_phases())
+        _fork(store, "exec-fork-a")
+
+        # The stored fork event as a stream that lost the field would replay it.
+        stripped = WorkflowExecutionAggregate()
+        stripped.rehydrate(
+            [
+                EventEnvelope(
+                    event=_without_fork_id(e.event)
+                    if isinstance(e.event, ExecutionForkedEvent)
+                    else e.event,
+                    metadata=e.metadata,
+                )
+                for e in store._events
+            ]
+        )
+
+        assert stripped._forked is True
+        with pytest.raises(ValueError, match="has already been forked"):
+            stripped.fork_execution(
+                ForkExecutionCommand(execution_id=PARENT, fork_execution_id="exec-fork-b")
+            )
+
+    def test_the_refusal_names_what_it_can(self) -> None:
+        """No child id to name, so the message says so rather than 'None'."""
+        store = _Store(_failed_between_phases())
+        _fork(store, "exec-fork-a")
+        stripped = WorkflowExecutionAggregate()
+        stripped.rehydrate(
+            [
+                EventEnvelope(
+                    event=_without_fork_id(e.event)
+                    if isinstance(e.event, ExecutionForkedEvent)
+                    else e.event,
+                    metadata=e.metadata,
+                )
+                for e in store._events
+            ]
+        )
+        with pytest.raises(ValueError, match="does not name"):
+            stripped.fork_execution(
+                ForkExecutionCommand(execution_id=PARENT, fork_execution_id="exec-fork-b")
+            )
