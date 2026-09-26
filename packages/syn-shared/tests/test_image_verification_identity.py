@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 
 import pytest
+
 from syn_shared.settings.image_verification import (
     AGENTIC_PRIMITIVES_IDENTITY_REGEXP,
     AGENTIC_WORKSPACE_IDENTITY_REGEXP,
@@ -35,8 +36,7 @@ _PRIMITIVES_WORKFLOW = (
     "/.github/workflows/build-workspace-images.yml"
 )
 _WORKSPACE_WORKFLOW = (
-    "https://github.com/AgentParadise/agentic-workspace"
-    "/.github/workflows/release-images.yml"
+    "https://github.com/AgentParadise/agentic-workspace/.github/workflows/release-images.yml"
 )
 
 ADMITTED = [
