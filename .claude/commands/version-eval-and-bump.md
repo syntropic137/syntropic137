@@ -13,7 +13,7 @@ Analyze changes since the last version, automatically determine the appropriate 
 ## Variables
 
 CHANNEL: beta      # beta | stable (stable requires explicit confirmation)
-REPO: syn137          # syn137 | agentic-primitives | both
+REPO: syn137          # syn137 | agentic-workspace | both
 MESSAGE: ""        # Optional version message
 
 ## Agent Instructions
@@ -89,11 +89,11 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
    CURRENT_SYN137=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
    echo "Syn137: $CURRENT_SYN137"
 
-   # For agentic-primitives (if both)
+   # For agentic-workspace (if both)
    if [ "$REPO" = "both" ]; then
-     cd lib/agentic-primitives
+     cd lib/agentic-workspace
      CURRENT_PRIM=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-     echo "agentic-primitives: $CURRENT_PRIM"
+     echo "agentic-workspace: $CURRENT_PRIM"
      cd ../..
    fi
    ```
@@ -341,14 +341,14 @@ $(if [ -n "$MESSAGE" ]; then echo "$MESSAGE"; fi)"
     ```bash
     if [ "$REPO" = "both" ]; then
       echo ""
-      echo "⚠️  Remember to update agentic-primitives submodule pointer in Syn137!"
+      echo "⚠️  Remember to update agentic-workspace submodule pointer in Syn137!"
       echo ""
       echo "Commands:"
-      echo "  cd lib/agentic-primitives"
+      echo "  cd lib/agentic-workspace"
       echo "  git checkout v{version}"
       echo "  cd ../.."
-      echo "  git add lib/agentic-primitives"
-      echo "  git commit -m 'chore: update agentic-primitives to {version}'"
+      echo "  git add lib/agentic-workspace"
+      echo "  git commit -m 'chore: update agentic-workspace to {version}'"
     fi
     ```
 

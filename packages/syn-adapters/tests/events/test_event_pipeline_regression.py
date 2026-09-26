@@ -23,14 +23,15 @@ from syn_adapters.events.models import AgentEvent
 
 # Path to recordings - relative to workspace root
 # __file__ is packages/syn-adapters/tests/events/test_event_pipeline_regression.py
-# We need to go up to workspace root then down to lib/agentic-primitives
+# We need to go up to workspace root then down to lib/agentic-workspace
 _SYN_ROOT = Path(__file__).parent.parent.parent.parent.parent
 RECORDINGS_DIR = (
     _SYN_ROOT
     / "lib"
-    / "agentic-primitives"
-    / "providers"
-    / "workspaces"
+    / "agentic-workspace"
+    / "implementations"
+    / "docker"
+    / "images"
     / "claude-cli"
     / "fixtures"
     / "recordings"

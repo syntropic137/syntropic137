@@ -5,18 +5,18 @@ description: "How to configure workspace images: custom images, environment vari
 
 ## Choosing a Workspace Image
 
-The default workspace image is `omni-agent-workspace`, pinned by digest in `syn-shared`. It hosts both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change.
+The default workspace image is `agentic-workspace-omni-agent`, pinned by digest in `syn-shared`. It hosts both the claude and the codex harness, so switching a phase's `agent.provider` needs no image change.
 
 ```bash
 # Override via environment variable
-SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/omni-agent-workspace@sha256:<digest>
+SYN_WORKSPACE_DOCKER_IMAGE=ghcr.io/agentparadise/agentic-workspace-omni-agent@sha256:<digest>
 ```
 
 To use a custom or locally-built image:
 
 ```bash
 # Build locally
-cd lib/agentic-primitives
+cd lib/agentic-workspace
 uv run scripts/build-provider.py omni-agent --tag my-workspace:latest
 
 # Point syn137 at it
