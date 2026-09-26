@@ -136,7 +136,9 @@ class TestALapseIsNeverSilent:
 
         lapses = await _run(clock, workspace)
 
-        assert lapses == [CredentialLapse(expired_at=expires, attempts=7, last_error="GitHub said no")]
+        assert lapses == [
+            CredentialLapse(expired_at=expires, attempts=7, last_error="GitHub said no")
+        ]
         assert clock.slept == [FIRST_RENEWAL, *[RETRY_INTERVAL] * 6, 2 * _MIN, RENEWAL_INTERVAL]
         assert "EXPIRED" in caplog.text
 
