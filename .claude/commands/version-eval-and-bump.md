@@ -43,7 +43,7 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 
 1. **Verify Clean State**
    ```bash
-   cd /Users/neural/Code/syntropic137/syntropic137
+   cd "$(git rev-parse --show-toplevel)"
 
    # Check for uncommitted changes
    if [ -n "$(git status --porcelain)" ]; then
